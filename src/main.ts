@@ -14,14 +14,19 @@ import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
 import './game.css'
 
+const baseUrl = import.meta.env.BASE_URL.endsWith('/')
+  ? import.meta.env.BASE_URL
+  : `${import.meta.env.BASE_URL}/`
+
 const ASSETS: Asset[] = [
-  { name: 'character', type: 'gltfModel', path: '/character.glb' },
+  { name: 'character', type: 'gltfModel', path: `${baseUrl}character.glb` },
 ]
 
 const { seed, label: seedLabel } = resolveSeed()
 
 // Initialize MavonEngine without physics world (grid-based game)
 const game = new Game(ASSETS)
+game.resources.loaders.gltfLoader.dracoLoader?.setDecoderPath(`${baseUrl}draco/`)
 
 game.on('documentReady', () => {
   const ui = game.uiRoot

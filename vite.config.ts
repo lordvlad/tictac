@@ -4,23 +4,28 @@ import { defineConfig } from 'vite'
 // files directly.
 import engineConfig from '@mavonengine/core/vite.config'
 
-export default defineConfig(({ mode }) => ({
-  ...engineConfig,
-  base: './',
-  plugins: [...(engineConfig.plugins ?? [])],
-  resolve: {
-    ...engineConfig.resolve,
-    // Duplicate three copies break every `instanceof` check inside the engine.
-    dedupe: ['three', '@mavonengine/core', '@dimforge/rapier3d-compat'],
-  },
-  define: {
-    ...engineConfig.define,
-    // BaseGame.js / Game.js read `process.env.NODE_ENV` in *browser* code.
-    // Vite does not reliably polyfill `process` for linked source deps.
-    'process.env.NODE_ENV': JSON.stringify(mode),
-  },
-  server: {
-    ...engineConfig.server,
-    port: 5173,
-  },
-}))
+export default defineConfig(({ mode }) => {
+  const repoName = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/')[1] : null
+  const base = repoName ? `/${repoName}/` : './'
+
+  return {
+    ...engineConfig,
+    base,
+    plugins: [...(engineConfig.plugins ?? [])],
+    resolve: {
+      ...engineConfig.resolve,
+      // Duplicate three copies break every `instanceof` check inside the engine.
+      dedupe: ['three', '@mavonengine/core', '@dimforge/rapier3d-compat'],
+    },
+    define: {
+      ...engineConfig.define,
+      // BaseGame.js / Game.js read `process.env.NODE_ENV` in *browser* code.
+      // Vite does not reliably polyfill `process` for linked source deps.
+      'process.env.NODE_ENV': JSON.stringify(mode),
+    },
+    server: {
+      ...engineConfig.server,
+      port: 5173,
+    },
+  }
+})
