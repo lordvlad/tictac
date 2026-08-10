@@ -6,6 +6,7 @@ import engineConfig from '@mavonengine/core/vite.config'
 
 export default defineConfig(({ mode }) => ({
   ...engineConfig,
+  base: './',
   plugins: [...(engineConfig.plugins ?? [])],
   resolve: {
     ...engineConfig.resolve,

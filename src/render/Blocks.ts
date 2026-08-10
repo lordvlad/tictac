@@ -16,7 +16,7 @@ const FULL_COLOR = new Color(0x8b8f96)
 
 /** Fog brightness multipliers matching the ground shader. */
 const LIT_UNKNOWN = 0.0
-const LIT_EXPLORED = 0.42
+const LIT_EXPLORED = 0.22
 const LIT_VISIBLE = 1.0
 
 interface BlockInstance {
@@ -72,6 +72,22 @@ export class Blocks {
       roughness: 0.85,
       metalness: 0.02,
     })
+
+    // Multiply final lit output by instance color so unexplored blocks (black)
+    // fade completely to pure pitch black without leaving specular or ambient 3D silhouettes.
+    material.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        /* glsl */ `
+        #include <dithering_fragment>
+        #ifdef USE_INSTANCING_COLOR
+          gl_FragColor.rgb *= vColor.rgb;
+        #endif
+        `,
+      )
+    }
+    material.customProgramCacheKey = () => 'tictac-block'
+
     const mesh = new InstancedMesh(geometry, material, capacity)
     mesh.instanceMatrix.setUsage(DynamicDrawUsage)
     mesh.castShadow = true
@@ -117,26 +133,13 @@ export class Blocks {
   private applyTo(mesh: InstancedMesh, tiles: BlockInstance[], values: Uint8Array): void {
     const base = mesh.userData.baseColor as Color
     for (const tile of tiles) {
-      const state = this.neighbourhoodState(tile.x, tile.y, values)
+      // Use exact tile visibility state (do not bleed visibility to neighboring unexplored wall tiles)
+      const state = values[this.grid.index(tile.x, tile.y)] ?? 0
       const lit = state === 2 ? LIT_VISIBLE : state === 1 ? LIT_EXPLORED : LIT_UNKNOWN
       this.scratch.copy(base).multiplyScalar(lit)
       mesh.setColorAt(tile.index, this.scratch)
     }
     if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true
-  }
-
-  private neighbourhoodState(x: number, y: number, values: Uint8Array): number {
-    let best = values[this.grid.index(x, y)] ?? 0
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx
-        const ny = y + dy
-        if (!this.grid.inBounds(nx, ny)) continue
-        const v = values[this.grid.index(nx, ny)] ?? 0
-        if (v > best) best = v
-      }
-    }
-    return best
   }
 
   /** Fully lit — used before the first visibility pass. */

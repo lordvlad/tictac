@@ -123,12 +123,22 @@ export class Ground {
           // --- tile overlay (paths / LOS / selection) ---------------------
           vec4 overlay = texture2D(uOverlay, tileUv);
           diffuseColor.rgb = mix(diffuseColor.rgb, overlay.rgb, overlay.a);
+          `,
+        )
+        .replace(
+          '#include <dithering_fragment>',
+          /* glsl */ `
+          #include <dithering_fragment>
 
           // --- fog of war -------------------------------------------------
-          float fogValue = texture2D(uFog, tileUv).r;
-          // 0 -> nearly black, ~0.46 -> dim memory, 1 -> fully lit
-          float lit = mix(0.07, 1.0, fogValue);
-          diffuseColor.rgb *= lit;
+          // fogValue: 0.0 = Unknown (unexplored), ~0.35 = Explored (memory), 1.0 = Visible
+          vec2 tileCoordFog = (vWorldXZ + uHalfExtent) / ${TILE.toFixed(1)};
+          vec2 tileUvFog = tileCoordFog / uGridSize;
+          float fogValue = texture2D(uFog, tileUvFog).r;
+
+          // Unexplored (0.0) is strictly 0.0 (pure pitch black shroud). Explored (0.35) -> 0.38, Visible (1.0) -> 1.0
+          float fogLit = fogValue > 0.0 ? mix(0.22, 1.0, fogValue) : 0.0;
+          gl_FragColor.rgb *= fogLit;
           `,
         )
     }
@@ -149,7 +159,7 @@ export class Ground {
   setFogFromVisibility(values: Uint8Array): void {
     for (let i = 0; i < this.fogData.length; i++) {
       const v = values[i]!
-      this.fogData[i] = v === 2 ? 255 : v === 1 ? 118 : 0
+      this.fogData[i] = v === 2 ? 255 : v === 1 ? 90 : 0
     }
     this.fogDirty = true
   }

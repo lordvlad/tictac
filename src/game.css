@@ -1,11 +1,12 @@
 :root {
-  --hud-bg: rgba(14, 18, 24, 0.86);
-  --hud-border: rgba(255, 255, 255, 0.14);
+  --hud-bg: rgba(14, 18, 24, 0.88);
+  --hud-border: rgba(255, 255, 255, 0.16);
   --hud-text: #d7dee8;
   --hud-dim: #8b96a5;
   --hud-accent: #79d98b;
   --hud-danger: #e05c4f;
-  --hud-warn: #e0b64f;
+  --hud-blue: #5b95ef;
+  --hud-red: #e05c4f;
   color-scheme: dark;
 }
 
@@ -36,8 +37,6 @@ canvas {
   cursor: default;
 }
 
-/* The engine creates and owns #ui. It must never swallow camera drags: only
-   actual widgets opt back into pointer events. */
 #ui {
   position: fixed;
   inset: 0;
@@ -50,12 +49,6 @@ canvas {
   pointer-events: auto;
 }
 
-/* ---------------------------------------------------------------------------
-   Loading bar — REQUIRED by the engine. LoadingScreen does
-   `document.getElementById('loadingBar')` and dereferences it unconditionally
-   on the first `progress` event, so this element must exist before loading
-   finishes or the whole boot throws.
-   --------------------------------------------------------------------------- */
 #loadingBar {
   position: fixed;
   top: 50%;
@@ -89,4 +82,384 @@ canvas {
 
 #bootLabel.ended {
   opacity: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   HUD Top Right
+   --------------------------------------------------------------------------- */
+.hud-top-right {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.hud-info-card {
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.hud-faction-badge {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+.hud-faction-badge.blue {
+  background: rgba(91, 149, 239, 0.22);
+  color: var(--hud-blue);
+  border: 1px solid var(--hud-blue);
+}
+
+.hud-faction-badge.red {
+  background: rgba(224, 92, 79, 0.22);
+  color: var(--hud-red);
+  border: 1px solid var(--hud-red);
+}
+
+.hud-turn-label {
+  font-size: 12px;
+  color: var(--hud-dim);
+  letter-spacing: 0.05em;
+}
+
+.hud-btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.hud-btn {
+  background: rgba(30, 38, 50, 0.85);
+  border: 1px solid var(--hud-border);
+  color: var(--hud-text);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  backdrop-filter: blur(8px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.hud-btn:hover {
+  background: rgba(50, 62, 80, 0.95);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.hud-btn:active {
+  transform: translateY(0);
+}
+
+.hud-btn.active {
+  background: rgba(121, 217, 139, 0.25);
+  border-color: var(--hud-accent);
+  color: var(--hud-accent);
+}
+
+.hud-btn-danger {
+  background: rgba(224, 92, 79, 0.2);
+  border-color: var(--hud-danger);
+  color: #ff9e95;
+}
+
+.hud-btn-danger:hover {
+  background: rgba(224, 92, 79, 0.35);
+  border-color: #ff8577;
+}
+
+/* ---------------------------------------------------------------------------
+   HUD Bottom Squad Bar
+   --------------------------------------------------------------------------- */
+.hud-squad-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+}
+
+.squad-card {
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  padding: 10px;
+  width: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.squad-card:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateY(-2px);
+}
+
+.squad-card.selected {
+  border-color: var(--hud-accent);
+  box-shadow: 0 0 16px rgba(121, 217, 139, 0.3);
+  background: rgba(20, 28, 36, 0.94);
+}
+
+.squad-card.dead {
+  opacity: 0.45;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+
+.squad-portrait {
+  width: 60px;
+  height: 60px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  object-fit: cover;
+}
+
+.squad-name {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--hud-text);
+  white-space: nowrap;
+}
+
+.squad-bars {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bar-container {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.bar-fill.hp {
+  background: var(--hud-accent);
+}
+
+.bar-fill.ap {
+  background: var(--hud-blue);
+}
+
+.bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--hud-dim);
+  margin-top: 1px;
+}
+
+/* ---------------------------------------------------------------------------
+   HUD Action Panel (Right Side)
+   --------------------------------------------------------------------------- */
+.hud-action-panel {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 180px;
+}
+
+.action-header {
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+  text-align: center;
+  backdrop-filter: blur(8px);
+}
+
+.action-btn {
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: var(--hud-text);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.action-btn:hover:not(:disabled) {
+  background: rgba(40, 52, 68, 0.95);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateX(-2px);
+}
+
+.action-btn.active {
+  border-color: var(--hud-accent);
+  background: rgba(121, 217, 139, 0.2);
+  color: var(--hud-accent);
+}
+
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.action-tag {
+  font-size: 10px;
+  color: var(--hud-dim);
+  font-weight: 400;
+}
+
+/* ---------------------------------------------------------------------------
+   Turn Switch Overlay
+   --------------------------------------------------------------------------- */
+.turn-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 11, 16, 0.92);
+  backdrop-filter: blur(16px);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.turn-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.turn-title {
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.turn-title.blue {
+  color: var(--hud-blue);
+  text-shadow: 0 0 24px rgba(91, 149, 239, 0.5);
+}
+
+.turn-title.red {
+  color: var(--hud-red);
+  text-shadow: 0 0 24px rgba(224, 92, 79, 0.5);
+}
+
+.turn-subtitle {
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: var(--hud-dim);
+}
+
+.turn-continue-btn {
+  padding: 12px 32px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--hud-text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.turn-continue-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: #ffffff;
+  transform: scale(1.05);
+}
+
+/* ---------------------------------------------------------------------------
+   Context Menu
+   --------------------------------------------------------------------------- */
+.hud-context-menu {
+  position: absolute;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 80;
+  width: 180px;
+}
+
+.hud-context-item {
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hud-text);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+
+.hud-context-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.hud-context-item.danger {
+  color: var(--hud-danger);
 }

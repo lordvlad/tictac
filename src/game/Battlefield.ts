@@ -30,9 +30,9 @@ export class Battlefield {
     scene.add(this.ground.mesh)
     scene.add(this.blocks.group)
 
-    const sky = new Color(0x0e131a)
+    const sky = new Color(0x05070a)
     scene.background = sky
-    scene.fog = new Fog(sky.getHex(), 60, 130)
+    scene.fog = new Fog(sky.getHex(), 50, 110)
 
     scene.add(new AmbientLight(0xffffff, 0.5))
     scene.add(new HemisphereLight(0x9fc4ff, 0x30281f, 0.55))

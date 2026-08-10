@@ -1,5 +1,5 @@
 import { Euler, Matrix4, PerspectiveCamera, Vector2, Vector3 } from 'three'
-import { CAM } from '../config'
+import { CAM, EYE_HEIGHT } from '../config'
 
 const MOUSE_LEFT = 0
 const MOUSE_MIDDLE = 1
@@ -48,16 +48,28 @@ export class OrbitRig {
   private azimuthTarget: number = CAM.azimuthStart
   private azimuthCurrent: number = CAM.azimuthStart
 
-  // --- additive free-look offset -------------------------------------------
+  // --- additive free-look offset & mode ------------------------------------
   private freeYawTarget = 0
   private freeYawCurrent = 0
   private freePitchTarget = 0
   private freePitchCurrent = 0
+  private freeLookToggleActive = false
 
-  // --- drag bookkeeping -----------------------------------------------------
-  private dragMode: DragMode = 'none'
+  // --- character eye-level view mode ----------------------------------------
+  private isCharacterView = false
+  private readonly eyePositionTarget = new Vector3()
+  private readonly eyePositionCurrent = new Vector3()
+
+  // --- drag & touch bookkeeping ---------------------------------------------
+  private dragMode: DragMode | 'touch2' = 'none'
   private dragPointerId = -1
   private readonly lastPointer = new Vector2()
+
+  /** Map of active pointers for multi-touch gesture support. */
+  private readonly activePointers = new Map<number, { x: number; y: number; type: string }>()
+  private touchStartDist = 0
+  private touchStartAngle = 0
+  private touchStartCenter = new Vector2()
 
   /** Camera state frozen at pan start, so panning cannot feed back on itself. */
   private readonly panStartFocus = new Vector3()
@@ -156,6 +168,87 @@ export class OrbitRig {
     this.canvas.removeEventListener('auxclick', this.preventDefault)
   }
 
+  /**
+   * Enter first-person / eye-level view for a selected character.
+   * Camera moves to character's eye position looking outward in character's facing direction.
+   */
+  enterCharacterView(position: Vector3, yaw: number): void {
+    this.isCharacterView = true
+    this.freeLookToggleActive = true
+
+    const camYaw = yaw + Math.PI
+    const forwardX = Math.sin(yaw) * 0.15
+    const forwardZ = Math.cos(yaw) * 0.15
+
+    this.eyePositionTarget.set(
+      position.x + forwardX,
+      position.y + EYE_HEIGHT,
+      position.z + forwardZ,
+    )
+    this.eyePositionCurrent.copy(this.camera.position) // Smooth transition from current camera location
+    this.azimuthTarget = camYaw
+    this.azimuthCurrent = camYaw
+    this.freeYawTarget = 0
+    this.freeYawCurrent = 0
+    this.freePitchTarget = 0
+    this.freePitchCurrent = 0
+  }
+
+  /**
+   * Exit character view and return camera to tactical orbit view.
+   * Resets free yaw/pitch, azimuth rotation, zoom distance, and tilt back to arc defaults.
+   */
+  exitCharacterView(): void {
+    this.isCharacterView = false
+    this.freeLookToggleActive = false
+    this.resetFreeLook()
+    this.azimuthTarget = CAM.azimuthStart
+    this.distTarget = CAM.distStart
+    this.focusTarget.set(this.eyePositionTarget.x, 0, this.eyePositionTarget.z)
+    this.clampFocus(this.focusTarget)
+  }
+
+  updateCharacterView(position: Vector3, yaw: number): void {
+    if (!this.isCharacterView) return
+    const camYaw = yaw + Math.PI
+    const forwardX = Math.sin(yaw) * 0.15
+    const forwardZ = Math.cos(yaw) * 0.15
+    this.eyePositionTarget.set(
+      position.x + forwardX,
+      position.y + EYE_HEIGHT,
+      position.z + forwardZ,
+    )
+    this.azimuthTarget = camYaw
+  }
+
+  get isCharacterViewActive(): boolean {
+    return this.isCharacterView
+  }
+
+  /** Toggle or set explicit freelook mode (for mobile / laptops without 3rd mouse button). */
+  setFreeLookMode(active: boolean): void {
+    if (!active && this.isCharacterView) {
+      this.exitCharacterView()
+      return
+    }
+    this.freeLookToggleActive = active
+    if (!active) {
+      // Disabling freelook resets free yaw/pitch, azimuth rotation, zoom distance, and tilt back to arc defaults
+      this.resetFreeLook()
+      this.azimuthTarget = CAM.azimuthStart
+      this.distTarget = CAM.distStart
+    }
+  }
+
+  toggleFreeLookMode(): boolean {
+    this.setFreeLookMode(!this.freeLookToggleActive)
+    return this.freeLookToggleActive
+  }
+
+  get isFreeLookActive(): boolean {
+    return this.freeLookToggleActive || this.isCharacterView
+  }
+
   // ===========================================================================
   // Tilt arc
   // ===========================================================================
@@ -183,27 +276,58 @@ export class OrbitRig {
 
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (!this.enabled) return
+
+    this.activePointers.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+      type: event.pointerType,
+    })
+
+    try {
+      this.canvas.setPointerCapture(event.pointerId)
+    } catch {
+      /* ignore synthetic/test events */
+    }
+
+    // --- Multi-touch gestures (touchscreen) -----------------------------------
+    if (this.activePointers.size === 2) {
+      const [p1, p2] = Array.from(this.activePointers.values())
+      if (p1 && p2) {
+        this.dragMode = 'touch2'
+        this.touchStartDist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+        this.touchStartAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x)
+        this.touchStartCenter.set((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
+
+        // Initialize 2-finger pan grab point from center of touch
+        this.beginPanAtPoint(this.touchStartCenter)
+        this.resetFreeLook()
+        event.preventDefault()
+        return
+      }
+    }
+
     if (this.dragMode !== 'none') return
+
     if (event.pointerType === 'mouse' && event.button === MOUSE_LEFT && event.shiftKey) {
       // Shift+left is reserved for waypoint placement.
       return
     }
 
-    if (event.button === MOUSE_LEFT) this.dragMode = 'pan'
-    else if (event.button === MOUSE_RIGHT) this.dragMode = 'orbit'
-    else if (event.button === MOUSE_MIDDLE) this.dragMode = 'freelook'
-    else return
+    if (event.pointerType === 'touch') {
+      // Single finger touch drag = freelook or pan depending on toggle
+      this.dragMode = this.freeLookToggleActive ? 'freelook' : 'pan'
+    } else if (event.button === MOUSE_LEFT) {
+      this.dragMode = this.freeLookToggleActive ? 'freelook' : 'pan'
+    } else if (event.button === MOUSE_RIGHT) {
+      this.dragMode = 'orbit'
+    } else if (event.button === MOUSE_MIDDLE) {
+      this.dragMode = 'freelook'
+    } else {
+      return
+    }
 
     event.preventDefault()
     this.dragPointerId = event.pointerId
-    // Throws for pointer ids the browser does not consider active (e.g.
-    // synthetic events from tests). Capture is an optimisation, not a
-    // requirement, so failing to get it must not break the drag.
-    try {
-      this.canvas.setPointerCapture(event.pointerId)
-    } catch {
-      /* ignore */
-    }
     this.lastPointer.set(event.clientX, event.clientY)
 
     if (this.dragMode === 'pan') this.beginPan(event)
@@ -213,6 +337,45 @@ export class OrbitRig {
   }
 
   private readonly onPointerMove = (event: PointerEvent): void => {
+    if (!this.activePointers.has(event.pointerId)) return
+
+    // Update active pointer position
+    this.activePointers.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+      type: event.pointerType,
+    })
+
+    // --- 2-Finger Touch Gestures (Pinch zoom, turn rotate, 2-finger pan) ------
+    if (this.dragMode === 'touch2' && this.activePointers.size === 2) {
+      const [p1, p2] = Array.from(this.activePointers.values())
+      if (p1 && p2) {
+        // 1. Pinch to zoom
+        const currDist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+        if (this.touchStartDist > 0 && currDist > 0) {
+          const factor = this.touchStartDist / currDist
+          this.distTarget = clamp(this.distTarget * factor, CAM.distMin, CAM.distMax)
+          this.touchStartDist = currDist
+        }
+
+        // 2. Two-finger turn to rotate azimuth
+        const currAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x)
+        let deltaAngle = currAngle - this.touchStartAngle
+        while (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2
+        while (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2
+        this.azimuthTarget -= deltaAngle
+        this.touchStartAngle = currAngle
+
+        // 3. Two-finger pan
+        const currCenter = new Vector2((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
+        this.updatePanAtPoint(currCenter)
+
+        this.resetFreeLook()
+        event.preventDefault()
+        return
+      }
+    }
+
     if (this.dragMode === 'none' || event.pointerId !== this.dragPointerId) return
 
     const dx = event.clientX - this.lastPointer.x
@@ -223,22 +386,26 @@ export class OrbitRig {
       this.updatePan(event)
     } else if (this.dragMode === 'orbit') {
       this.azimuthTarget -= dx * CAM.rotateSpeed
-    } else {
+    } else if (this.dragMode === 'freelook') {
+      const yawLimit = this.isCharacterView ? Math.PI : CAM.freeYawLimit
+      const pitchLimit = this.isCharacterView ? (82 * Math.PI) / 180 : CAM.freePitchLimit
+
       this.freeYawTarget = clamp(
         this.freeYawTarget - dx * CAM.freeLookSpeed,
-        -CAM.freeYawLimit,
-        CAM.freeYawLimit,
+        -yawLimit,
+        yawLimit,
       )
       this.freePitchTarget = clamp(
         this.freePitchTarget - dy * CAM.freeLookSpeed,
-        -CAM.freePitchLimit,
-        CAM.freePitchLimit,
+        -pitchLimit,
+        pitchLimit,
       )
     }
   }
 
   private readonly onPointerUp = (event: PointerEvent): void => {
-    if (event.pointerId !== this.dragPointerId) return
+    this.activePointers.delete(event.pointerId)
+
     try {
       if (this.canvas.hasPointerCapture(event.pointerId)) {
         this.canvas.releasePointerCapture(event.pointerId)
@@ -246,6 +413,16 @@ export class OrbitRig {
     } catch {
       /* ignore */
     }
+
+    if (this.dragMode === 'touch2') {
+      if (this.activePointers.size < 2) {
+        this.dragMode = 'none'
+        this.panValid = false
+      }
+      return
+    }
+
+    if (event.pointerId !== this.dragPointerId) return
     this.dragMode = 'none'
     this.dragPointerId = -1
     this.panValid = false
@@ -279,6 +456,10 @@ export class OrbitRig {
    * camera creates a feedback loop and the map slides away from the cursor.
    */
   private beginPan(event: PointerEvent): void {
+    this.beginPanAtPoint(new Vector2(event.clientX, event.clientY))
+  }
+
+  private beginPanAtPoint(clientPos: Vector2): void {
     this.camera.updateMatrixWorld()
     this.panStartFocus.copy(this.focusTarget)
     this.panStartCamPos.copy(this.camera.position)
@@ -287,7 +468,7 @@ export class OrbitRig {
       this.camera.projectionMatrixInverse,
     )
 
-    const ndc = this.toNdc(event)
+    const ndc = this.toNdcFromClient(clientPos.x, clientPos.y)
     const hit = this.rayToGround(
       ndc,
       this.panStartCamPos,
@@ -298,8 +479,12 @@ export class OrbitRig {
   }
 
   private updatePan(event: PointerEvent): void {
+    this.updatePanAtPoint(new Vector2(event.clientX, event.clientY))
+  }
+
+  private updatePanAtPoint(clientPos: Vector2): void {
     if (!this.panValid) return
-    const ndc = this.toNdc(event)
+    const ndc = this.toNdcFromClient(clientPos.x, clientPos.y)
     const hit = this.rayToGround(
       ndc,
       this.panStartCamPos,
@@ -317,10 +502,14 @@ export class OrbitRig {
   }
 
   private toNdc(event: PointerEvent, target = new Vector2()): Vector2 {
+    return this.toNdcFromClient(event.clientX, event.clientY, target)
+  }
+
+  private toNdcFromClient(clientX: number, clientY: number, target = new Vector2()): Vector2 {
     const rect = this.canvas.getBoundingClientRect()
     return target.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -(((clientY - rect.top) / rect.height) * 2 - 1),
     )
   }
 
@@ -362,11 +551,19 @@ export class OrbitRig {
     const k = 1 - Math.exp(-CAM.smoothing * delta)
     const kReset = 1 - Math.exp(-CAM.resetSmoothing * delta)
 
-    this.focusCurrent.lerp(this.focusTarget, k)
-    this.distCurrent += (this.distTarget - this.distCurrent) * k
-    this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k
-    this.freeYawCurrent += (this.freeYawTarget - this.freeYawCurrent) * kReset
-    this.freePitchCurrent += (this.freePitchTarget - this.freePitchCurrent) * kReset
+    if (this.isCharacterView) {
+      this.eyePositionCurrent.lerp(this.eyePositionTarget, k)
+      this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k
+      this.freeYawCurrent += (this.freeYawTarget - this.freeYawCurrent) * k
+      this.freePitchCurrent += (this.freePitchTarget - this.freePitchCurrent) * k
+      this.focusCurrent.set(this.eyePositionCurrent.x, 0, this.eyePositionCurrent.z)
+    } else {
+      this.focusCurrent.lerp(this.focusTarget, k)
+      this.distCurrent += (this.distTarget - this.distCurrent) * k
+      this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k
+      this.freeYawCurrent += (this.freeYawTarget - this.freeYawCurrent) * kReset
+      this.freePitchCurrent += (this.freePitchTarget - this.freePitchCurrent) * kReset
+    }
 
     this.applyTransform()
   }
@@ -381,6 +578,16 @@ export class OrbitRig {
   }
 
   private applyTransform(): void {
+    if (this.isCharacterView) {
+      this.camera.position.copy(this.eyePositionCurrent)
+      const az = this.azimuthCurrent
+      const pitch = 0 // Horizontal level look
+      this.euler.set(-pitch + this.freePitchCurrent, az + this.freeYawCurrent, 0, 'YXZ')
+      this.camera.quaternion.setFromEuler(this.euler)
+      this.camera.updateMatrixWorld()
+      return
+    }
+
     const pitch = this.pitchForDistance(this.distCurrent)
     const az = this.azimuthCurrent
     const cosP = Math.cos(pitch)
