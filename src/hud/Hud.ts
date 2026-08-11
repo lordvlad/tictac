@@ -25,6 +25,7 @@ export class Hud {
   onTurnSwitched?: () => void
 
   isShootModeActive = false
+  private turnOverlayVisible = false
 
   // DOM elements
   private readonly topRightEl: HTMLElement
@@ -298,6 +299,9 @@ export class Hud {
 
     const continueBtn = this.turnOverlayEl.querySelector('#turnContinueBtn') as HTMLButtonElement
     continueBtn.onclick = () => {
+      // Guard against activating a hidden overlay: swapping factions by
+      // accident silently ruins a turn and is very hard to notice.
+      if (!this.turnOverlayVisible) return
       this.hideTurnOverlay()
       this.turnManager.startNextTurn()
       this.onTurnSwitched?.()
@@ -315,10 +319,12 @@ export class Hud {
       titleEl.className = `turn-title ${nextFaction === Faction.Blue ? 'blue' : 'red'}`
     }
 
+    this.turnOverlayVisible = true
     this.turnOverlayEl.classList.add('visible')
   }
 
   hideTurnOverlay(): void {
+    this.turnOverlayVisible = false
     this.turnOverlayEl.classList.remove('visible')
   }
 

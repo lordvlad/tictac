@@ -74,6 +74,13 @@ export function executeShot(
   const shooterWorld = grid.tileToWorld(shooter.tile)
   const targetWorld = grid.tileToWorld(target.tile)
 
+  // Face the target. Same yaw convention as movement: forward = (sin y, cos y).
+  const dx = targetWorld.x - shooterWorld.x
+  const dz = targetWorld.z - shooterWorld.z
+  if (Math.hypot(dx, dz) > 0.01) {
+    shooter.targetYaw = Math.atan2(dx, dz)
+  }
+
   tracers.spawnTracer(shooterWorld, targetWorld, hit)
 
   let damage = 0

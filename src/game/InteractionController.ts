@@ -32,6 +32,8 @@ export class InteractionController {
   private waypoints: Tile[] = []
   private currentGoal: Tile | null = null
   private activePath: Tile[] = []
+  /** Whether `activePath` is actually affordable/reachable. Never move when false. */
+  private activePathValid = false
 
   // Hover state
   private hoveredTile: Tile | null = null
@@ -112,6 +114,7 @@ export class InteractionController {
     this.waypoints = []
     this.currentGoal = null
     this.activePath = []
+    this.activePathValid = false
     this.battlefield.ground.clearOverlay()
   }
 
@@ -272,8 +275,10 @@ export class InteractionController {
 
     // A target tile was already selected
     if (tileEquals(this.currentGoal, this.hoveredTile)) {
-      // Second click on SAME tile -> confirm path and move
-      if (this.activePath.length > 1) {
+      // Second click on SAME tile -> confirm, but ONLY if the path is actually
+      // reachable within the unit's remaining AP. An unreachable (red) target
+      // must never be walkable just because it was clicked twice.
+      if (this.activePathValid && this.activePath.length > 1) {
         const path = [...this.activePath]
         this.clearPlannerState()
         selected.startMovement(path)
@@ -414,6 +419,7 @@ export class InteractionController {
       )
 
       this.activePath = result.path
+      this.activePathValid = result.valid
 
       const color = result.valid ? 0x79d98b : 0xe05c4f
 

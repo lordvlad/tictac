@@ -370,12 +370,19 @@ canvas {
   justify-content: center;
   gap: 20px;
   opacity: 0;
+  /* `pointer-events: none` alone is NOT enough: `#ui button` sets
+     `pointer-events: auto`, and a descendant can re-enable pointer events that
+     an ancestor disabled. `visibility: hidden` is inherited and cannot be
+     re-enabled implicitly, so it genuinely takes the button out of hit
+     testing while still allowing the fade transition. */
+  visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 
 .turn-overlay.visible {
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
 }
 

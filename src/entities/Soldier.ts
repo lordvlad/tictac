@@ -103,19 +103,34 @@ export class Soldier extends Entity3D {
     }
   }
 
+  /** Halt on the current tile and fall back to the idle clip. */
+  stopMovement(): void {
+    if (!this.isMoving) return
+    this.isMoving = false
+    this.movingPath = []
+    this.movePathIndex = 0
+    const idleAction = this.animationsMap.get('idle')
+    if (idleAction) this.fadeToAction(idleAction, 0.15)
+  }
+
   updateMovement(delta: number, grid: Grid, onStep?: (tile: Tile) => void): boolean {
     if (!this.isMoving || this.movePathIndex >= this.movingPath.length) {
-      if (this.isMoving) {
-        this.isMoving = false
-        const idleAction = this.animationsMap.get('idle')
-        if (idleAction) {
-          this.fadeToAction(idleAction, 0.15)
-        }
-      }
+      this.stopMovement()
       return false
     }
 
     const nextTile = this.movingPath[this.movePathIndex]!
+
+    // Safety net: never enter a tile the unit cannot pay for. Movement always
+    // halts on a tile boundary, so stopping here leaves a valid grid position.
+    const prev = this.movingPath[this.movePathIndex - 1]!
+    const stepCost =
+      prev.x !== nextTile.x && prev.y !== nextTile.y ? STEP_DIAGONAL : STEP_ORTHOGONAL
+    if (this.ap < stepCost) {
+      this.stopMovement()
+      return false
+    }
+
     const targetWorld = grid.tileToWorld(nextTile)
 
     const dx = targetWorld.x - this.position.x
@@ -132,22 +147,14 @@ export class Soldier extends Entity3D {
       this.position.copy(targetWorld)
       this.targetPos.copy(targetWorld)
 
-      const prevTile = this.movingPath[this.movePathIndex - 1]!
-      const isDiagonal = prevTile.x !== nextTile.x && prevTile.y !== nextTile.y
-      const apCost = isDiagonal ? STEP_DIAGONAL : STEP_ORTHOGONAL
-
       this.tile = { ...nextTile }
-      this.ap = Math.max(0, this.ap - apCost)
+      this.ap = Math.max(0, this.ap - stepCost)
 
       onStep?.(nextTile)
 
       this.movePathIndex++
       if (this.movePathIndex >= this.movingPath.length) {
-        this.isMoving = false
-        const idleAction = this.animationsMap.get('idle')
-        if (idleAction) {
-          this.fadeToAction(idleAction, 0.15)
-        }
+        this.stopMovement()
         return false
       }
     } else {
