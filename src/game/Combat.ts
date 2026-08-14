@@ -86,15 +86,17 @@ export function executeShot(
   let damage = 0
   let killed = false
 
+  shooter.playShoot()
+
   if (hit) {
     damage = BULLET_DAMAGE
     target.hp = Math.max(0, target.hp - damage)
     killed = target.isDead
 
-    if (killed && target.instance) {
-      // Flatten / prone posture on death
-      target.instance.rotation.x = -Math.PI / 2
-      target.instance.position.y = 0.1
+    if (killed) {
+      target.playDeath()
+    } else {
+      target.playHit()
     }
   }
 

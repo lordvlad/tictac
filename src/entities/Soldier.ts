@@ -1,6 +1,6 @@
 import Entity3D from '@mavonengine/core/World/Entity3D'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { Box3, Mesh, MeshStandardMaterial, Vector3 } from 'three'
+import { LoopOnce, LoopRepeat, Mesh, MeshStandardMaterial, Vector3 } from 'three'
 import Game from '@mavonengine/core/Game'
 import { Faction, FACTION_INFO, MAX_AP, MAX_HP, MOVE_SPEED, SOLDIER_HEIGHT, STEP_DIAGONAL, STEP_ORTHOGONAL } from '../config'
 import type { Grid, Tile } from '../core/Grid'
@@ -56,7 +56,7 @@ export class Soldier extends Entity3D {
     this.initModel(gltf)
 
     if (this.instance) {
-      // character.glb is authored at 1.8 m tall in default scale (1,1,1).
+      // character.glb is authored at 1.829 m tall in default scale (1,1,1).
       // Note: Entity3D.initModel inflates geometry.boundingBox by 400x for
       // frustum culling, so Box3.setFromObject must not be used for height.
       this.instance.scale.set(1, 1, 1)
@@ -80,11 +80,60 @@ export class Soldier extends Entity3D {
       this.instance.rotation.y = this.currentYaw
     }
 
-    // 4. Play idle animation
-    const idleAction = this.animationsMap.get('idle')
-    if (idleAction) {
-      idleAction.play()
-    }
+    // 4. Play idle animation.
+    // Must go through fadeToAction so that activeAction is set. Calling
+    // action.play() directly leaves activeAction undefined, and fadeToAction
+    // only fades out `previousAction = activeAction` -- so idle would keep
+    // running at full weight and blend into every later clip.
+    this.playLoop('idle')
+
+    // One-shot clips (shoot / hit) hand control back to the appropriate loop.
+    // The death clip is excluded so the corpse holds its final frame.
+    this.animationMixer?.addEventListener('finished', () => {
+      if (this.isDead) return
+      this.playLoop(this.isMoving ? 'walk' : 'idle')
+    })
+  }
+
+  /** Play a looping clip, restoring the loop mode a one-shot may have changed. */
+  private playLoop(key: string): void {
+    const action = this.animationsMap.get(key)
+    if (!action) return
+    action.setLoop(LoopRepeat, Infinity)
+    action.clampWhenFinished = false
+    this.fadeToAction(action, 0.15)
+  }
+
+  /** Play a clip once and hold its final frame. */
+  private playOnce(key: string): void {
+    const action = this.animationsMap.get(key)
+    if (!action) return
+    action.setLoop(LoopOnce, 1)
+    action.clampWhenFinished = true
+    this.fadeToAction(action, 0.1)
+  }
+
+  /** Fire pose. Returns to idle/walk via the mixer's 'finished' event. */
+  playShoot(): void {
+    if (this.isDead) return
+    this.playOnce('shoot')
+  }
+
+  /** Flinch on taking non-fatal damage. */
+  playHit(): void {
+    if (this.isDead) return
+    this.playOnce('hit')
+  }
+
+  /**
+   * Collapse and stay down. Halts movement without the idle fade that
+   * stopMovement() would apply, so the death clip is not immediately replaced.
+   */
+  playDeath(): void {
+    this.isMoving = false
+    this.movingPath = []
+    this.movePathIndex = 0
+    this.playOnce('death')
   }
 
   get isDead(): boolean {

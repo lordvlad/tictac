@@ -144,16 +144,18 @@ export class InteractionController {
     this.battlefield.ground.setFogFromVisibility(visMap)
     this.battlefield.blocks.applyVisibility(visMap)
 
-    // Hide/show enemies based on whether their tile is visible
+    // Hide/show enemies based on whether their tile is visible. Corpses stay
+    // rendered so the death clip's final frame reads as a body on the ground;
+    // enemy corpses are still subject to fog of war.
     for (const soldier of this.squads.soldiers) {
       if (soldier.faction !== activeFaction) {
         const tileVis = visMap[this.battlefield.grid.index(soldier.tile.x, soldier.tile.y)] ?? 0
         if (soldier.instance) {
-          soldier.instance.visible = !soldier.isDead && tileVis === 2
+          soldier.instance.visible = tileVis === 2
         }
       } else {
         if (soldier.instance) {
-          soldier.instance.visible = !soldier.isDead
+          soldier.instance.visible = true
         }
       }
     }

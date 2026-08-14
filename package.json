@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "build:character": "node scripts/build-character.mjs",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
@@ -17,6 +18,8 @@
     "tweakpane": "^4.0.5"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.4.2",
+    "@gltf-transform/functions": "^4.4.2",
     "@types/bun": "latest",
     "@types/three": "~0.184.0",
     "typescript": "^5.9.0",
