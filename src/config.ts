@@ -60,8 +60,9 @@ export const SHOOT_AP_COST = 4
 /** Tiles a soldier can see. */
 export const SIGHT_RANGE = 14
 
-/** Metres per second while walking. */
-export const MOVE_SPEED = 2.6
+/** Metres per second while moving. Tuned to sit close to the natural pace of
+ *  the `run` (Jog_Fwd_Loop) clip so the feet do not visibly slide. */
+export const MOVE_SPEED = 3.4
 
 export const AIM = {
   base: 85,

@@ -5,6 +5,20 @@ import Game from '@mavonengine/core/Game'
 import { Faction, FACTION_INFO, MAX_AP, MAX_HP, MOVE_SPEED, SOLDIER_HEIGHT, STEP_DIAGONAL, STEP_ORTHOGONAL } from '../config'
 import type { Grid, Tile } from '../core/Grid'
 
+/**
+ * Ground speed in m/s that each locomotion clip is authored at, measured from
+ * the root-motion variant of the source pack (UAL1_Standard_RM.glb) by taking
+ * the `root` node's total translation over the clip duration.
+ *
+ * The shipped clips are in-place, so playback rate is scaled by
+ * MOVE_SPEED / <clip speed> to keep the stride matched to actual travel.
+ */
+const CLIP_GROUND_SPEED = {
+  walk: 0.97,
+  run: 5.36,
+  crouchWalk: 0.75,
+} as const
+
 export class Soldier extends Entity3D {
   readonly faction: Faction
   readonly squadIndex: number // 0..3
@@ -91,17 +105,26 @@ export class Soldier extends Entity3D {
     // The death clip is excluded so the corpse holds its final frame.
     this.animationMixer?.addEventListener('finished', () => {
       if (this.isDead) return
-      this.playLoop(this.isMoving ? 'walk' : 'idle')
+      if (this.isMoving) this.playLocomotion('run')
+      else this.playLoop('idle')
     })
   }
 
   /** Play a looping clip, restoring the loop mode a one-shot may have changed. */
-  private playLoop(key: string): void {
+  private playLoop(key: string, timeScale = 1): void {
     const action = this.animationsMap.get(key)
     if (!action) return
     action.setLoop(LoopRepeat, Infinity)
     action.clampWhenFinished = false
     this.fadeToAction(action, 0.15)
+    // fadeToAction() calls setEffectiveTimeScale(1), so any rate adjustment
+    // has to be applied after it, not before.
+    action.setEffectiveTimeScale(timeScale)
+  }
+
+  /** Locomotion clip synced so its stride matches MOVE_SPEED (no foot sliding). */
+  private playLocomotion(key: 'walk' | 'run' | 'crouchWalk'): void {
+    this.playLoop(key, MOVE_SPEED / CLIP_GROUND_SPEED[key])
   }
 
   /** Play a clip once and hold its final frame. */
@@ -146,10 +169,7 @@ export class Soldier extends Entity3D {
     this.movePathIndex = 1
     this.isMoving = true
 
-    const walkAction = this.animationsMap.get('walk')
-    if (walkAction) {
-      this.fadeToAction(walkAction, 0.15)
-    }
+    this.playLocomotion('run')
   }
 
   /** Halt on the current tile and fall back to the idle clip. */
@@ -168,33 +188,51 @@ export class Soldier extends Entity3D {
       return false
     }
 
-    const nextTile = this.movingPath[this.movePathIndex]!
+    // Distance budget for this tick. Leftover carries across tile boundaries,
+    // otherwise the remainder is discarded on every arrival and the unit
+    // travels measurably slower than MOVE_SPEED.
+    let budget = MOVE_SPEED * delta
 
-    // Safety net: never enter a tile the unit cannot pay for. Movement always
-    // halts on a tile boundary, so stopping here leaves a valid grid position.
-    const prev = this.movingPath[this.movePathIndex - 1]!
-    const stepCost =
-      prev.x !== nextTile.x && prev.y !== nextTile.y ? STEP_DIAGONAL : STEP_ORTHOGONAL
-    if (this.ap < stepCost) {
-      this.stopMovement()
-      return false
-    }
+    while (budget > 0) {
+      if (this.movePathIndex >= this.movingPath.length) {
+        this.stopMovement()
+        return false
+      }
 
-    const targetWorld = grid.tileToWorld(nextTile)
+      const nextTile = this.movingPath[this.movePathIndex]!
 
-    const dx = targetWorld.x - this.position.x
-    const dz = targetWorld.z - this.position.z
-    const dist = Math.hypot(dx, dz)
+      // Safety net: never enter a tile the unit cannot pay for. Movement always
+      // halts on a tile boundary, so stopping here leaves a valid grid position.
+      const prev = this.movingPath[this.movePathIndex - 1]!
+      const stepCost =
+        prev.x !== nextTile.x && prev.y !== nextTile.y ? STEP_DIAGONAL : STEP_ORTHOGONAL
+      if (this.ap < stepCost) {
+        this.stopMovement()
+        return false
+      }
 
-    if (dist > 0.001) {
-      this.targetYaw = Math.atan2(dx, dz)
-    }
+      const targetWorld = grid.tileToWorld(nextTile)
 
-    const stepDist = MOVE_SPEED * delta
+      // Measured against targetPos (the logical position), not position, which
+      // renderUpdate lags behind by design for smoothing. Testing arrival
+      // against the lagging value made every tile cost an extra ~50 ms.
+      const dx = targetWorld.x - this.targetPos.x
+      const dz = targetWorld.z - this.targetPos.z
+      const dist = Math.hypot(dx, dz)
 
-    if (dist <= stepDist) {
-      this.position.copy(targetWorld)
+      if (dist > 0.001) {
+        this.targetYaw = Math.atan2(dx, dz)
+      }
+
+      if (dist > budget) {
+        this.targetPos.x += (dx / dist) * budget
+        this.targetPos.z += (dz / dist) * budget
+        break
+      }
+
+      // Arrived. Only the logical position snaps; the mesh keeps lerping.
       this.targetPos.copy(targetWorld)
+      budget -= dist
 
       this.tile = { ...nextTile }
       this.ap = Math.max(0, this.ap - stepCost)
@@ -206,9 +244,6 @@ export class Soldier extends Entity3D {
         this.stopMovement()
         return false
       }
-    } else {
-      this.targetPos.x += (dx / dist) * stepDist
-      this.targetPos.z += (dz / dist) * stepDist
     }
 
     return true
