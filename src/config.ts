@@ -82,6 +82,27 @@ export const STEP_ORTHOGONAL = 1
 export const STEP_DIAGONAL = 1.5
 
 // ---------------------------------------------------------------------------
+// Movement path overlay (planner visualisation)
+// ---------------------------------------------------------------------------
+
+export const PATH = {
+  /** Height of the floating path line and marker circles above the floor, in metres (~25 cm). */
+  hover: 0.25,
+  /** Goal beacon rises to roughly eye height (~185 cm). */
+  goalHeight: 1.85,
+  /** Waypoint beacon is a bit shorter. */
+  waypointHeight: 1.0,
+  /** Radii of the two concentric goal circles. */
+  goalInnerRadius: 0.28,
+  goalOuterRadius: 0.42,
+  /** Radius of the single waypoint circle. */
+  waypointRadius: 0.35,
+  colorValid: 0x66ff99,
+  colorInvalid: 0xff5a4a,
+  colorWaypoint: 0xe0b64f,
+} as const
+
+// ---------------------------------------------------------------------------
 // Factions
 // ---------------------------------------------------------------------------
 

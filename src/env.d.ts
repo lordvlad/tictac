@@ -1,11 +1,3 @@
-/// <reference types="vite/client" />
-
-/**
- * The engine ships a Vite config that we must spread (it registers the GLSL
- * plugin that `@mavonengine/core` relies on) but it has no type declaration.
- */
-declare module '@mavonengine/core/vite.config' {
-  import type { UserConfig } from 'vite'
-  const config: UserConfig
-  export default config
-}
+// Side-effect CSS imports (e.g. `import './game.css'`) are bundled by Bun but
+// need an ambient module declaration to satisfy `tsc --noEmit`.
+declare module '*.css'

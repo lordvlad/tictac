@@ -12,6 +12,7 @@ import { calculateHitChance, executeShot } from './Combat'
 import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
+import { PathMarker } from '../render/PathMarker'
 
 export const enum ControllerMode {
   Move = 0,
@@ -27,6 +28,7 @@ export class InteractionController {
   private readonly rig: OrbitRig
   private readonly hud: Hud
   private readonly tracers: Tracers
+  private readonly pathMarker = new PathMarker()
 
   // Path planning state
   private waypoints: Tile[] = []
@@ -116,6 +118,7 @@ export class InteractionController {
     this.activePath = []
     this.activePathValid = false
     this.battlefield.ground.clearOverlay()
+    this.pathMarker.clear()
   }
 
   onTurnSwitched(): void {
@@ -386,6 +389,7 @@ export class InteractionController {
   private renderOverlay(): void {
     const ground = this.battlefield.ground
     ground.clearOverlay()
+    this.pathMarker.clear()
 
     const selected = this.turnManager.selectedSoldier
     if (!selected || selected.isDead) return
@@ -423,20 +427,11 @@ export class InteractionController {
       this.activePath = result.path
       this.activePathValid = result.valid
 
-      const color = result.valid ? 0x79d98b : 0xe05c4f
-
-      // Paint path
-      for (const tile of result.path) {
-        ground.paintTile(tile.x, tile.y, color, 0.5)
-      }
-
-      // Paint waypoints
-      for (const wp of this.waypoints) {
-        ground.paintTile(wp.x, wp.y, 0xe0b64f, 0.7)
-      }
-
-      // Paint goal tile
-      ground.paintTile(this.currentGoal.x, this.currentGoal.y, color, 0.8)
+      const grid = this.battlefield.grid
+      const pathPoints = result.path.map((t) => grid.tileToWorld(t))
+      const waypointPoints = this.waypoints.map((t) => grid.tileToWorld(t))
+      const goalPoint = grid.tileToWorld(this.currentGoal)
+      this.pathMarker.show(pathPoints, waypointPoints, goalPoint, result.valid)
     }
   }
 
@@ -468,6 +463,7 @@ export class InteractionController {
   // ---------------------------------------------------------------------------
 
   update(delta: number): void {
+    this.pathMarker.update(delta)
     const selected = this.turnManager.selectedSoldier
 
     if (this.rig.isCharacterViewActive) {

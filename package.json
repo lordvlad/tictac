@@ -3,11 +3,11 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "vite",
-    "build:character": "node scripts/build-character.mjs",
-    "build": "tsc --noEmit && vite build",
+    "dev": "bun --hot src/index.ts",
+    "build:character": "bun scripts/build-character.mjs",
+    "build": "tsc --noEmit && bun build ./src/index.html --outdir=dist --sourcemap --target=browser --minify --public-path=./ --define:process.env.NODE_ENV='\"production\"' && bun scripts/copy-public.mjs",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "NODE_ENV=production bun src/index.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.18.2",
@@ -22,8 +22,6 @@
     "@gltf-transform/functions": "^4.4.2",
     "@types/bun": "latest",
     "@types/three": "~0.184.0",
-    "typescript": "^5.9.0",
-    "vite": "^6.3.5",
-    "vite-plugin-glsl": "^1.6.1"
+    "typescript": "^5.9.0"
   }
 }

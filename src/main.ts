@@ -14,9 +14,10 @@ import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
 import './game.css'
 
-const baseUrl = import.meta.env.BASE_URL.endsWith('/')
-  ? import.meta.env.BASE_URL
-  : `${import.meta.env.BASE_URL}/`
+// Vite exposed the deploy base via `import.meta.env.BASE_URL`; under Bun we
+// resolve runtime-loaded assets against the document's own base URL instead,
+// which works both at the dev-server root and under a GitHub Pages subpath.
+const baseUrl = new URL('./', document.baseURI).href
 
 const ASSETS: Asset[] = [
   { name: 'character', type: 'gltfModel', path: `${baseUrl}character.glb` },

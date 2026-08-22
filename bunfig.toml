@@ -1,0 +1,4 @@
+# @mavonengine/core imports raw `.glsl` shader source as a string. Bun's built-in
+# `text` loader replaces the Vite `vite-plugin-glsl` plugin (no bundler plugin needed).
+[loader]
+".glsl" = "text"
