@@ -16,7 +16,7 @@ const CIRCLE_SEGMENTS = 48
 /**
  * 3D visualisation of the movement planner. Replaces per-tile ground painting:
  *
- *  - the path is a single glowing green polyline floating ~25 cm above the floor;
+ *  - the path is a single glowing green polyline floating ~5 cm above the floor;
  *  - each waypoint is a floating circle on a short beacon pole;
  *  - the goal is two concentric floating circles on a pole rising to eye height.
  *
@@ -45,7 +45,7 @@ export class PathMarker {
     const beaconColor = valid ? PATH.colorValid : PATH.colorInvalid
 
     if (path.length >= 2) {
-      const points = path.map((p) => new Vector3(p.x, PATH.lineHover, p.z))
+      const points = path.map((p) => new Vector3(p.x, PATH.hover, p.z))
       this.group.add(this.line(points, beaconColor, 0.9))
     }
 

@@ -90,10 +90,8 @@ export const STEP_DIAGONAL = 1.5
 // ---------------------------------------------------------------------------
 
 export const PATH = {
-  /** Height of the floating marker circles (waypoints, goal, selection) above the floor (~5 cm). */
+  /** Height of the floating path line and marker circles above the floor (~5 cm). */
   hover: 0.05,
-  /** Height of the floating path polyline above the floor (~25 cm). */
-  lineHover: 0.25,
   /** Goal beacon rises to roughly eye height (~185 cm). */
   goalHeight: 1.85,
   /** Waypoint beacon is a bit shorter. */
