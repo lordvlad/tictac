@@ -46,6 +46,10 @@ export const CAM = {
   smoothing: 14,
   /** Smoothing used when snapping free-look back onto the zoom-tilt path. */
   resetSmoothing: 9,
+  /** Cursor band (px) at the viewport border that triggers edge panning. */
+  edgePanMargin: 24,
+  /** Edge-pan speed as a fraction of the zoom distance travelled per second at full push. */
+  edgePanSpeed: 0.5,
 } as const
 
 // ---------------------------------------------------------------------------
@@ -86,8 +90,10 @@ export const STEP_DIAGONAL = 1.5
 // ---------------------------------------------------------------------------
 
 export const PATH = {
-  /** Height of the floating path line and marker circles above the floor, in metres (~25 cm). */
-  hover: 0.25,
+  /** Height of the floating marker circles (waypoints, goal, selection) above the floor (~5 cm). */
+  hover: 0.05,
+  /** Height of the floating path polyline above the floor (~25 cm). */
+  lineHover: 0.25,
   /** Goal beacon rises to roughly eye height (~185 cm). */
   goalHeight: 1.85,
   /** Waypoint beacon is a bit shorter. */
@@ -97,6 +103,8 @@ export const PATH = {
   goalOuterRadius: 0.42,
   /** Radius of the single waypoint circle. */
   waypointRadius: 0.35,
+  /** Radius of the selected-unit foot circle. */
+  selectionRadius: 0.42,
   colorValid: 0x66ff99,
   colorInvalid: 0xff5a4a,
   colorWaypoint: 0xe0b64f,

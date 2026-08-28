@@ -78,6 +78,12 @@ export class OrbitRig {
   private readonly panGrabPoint = new Vector3()
   private panValid = false
 
+  // --- edge panning (cursor at the viewport border) -------------------------
+  private edgeClientX = 0
+  private edgeClientY = 0
+  private edgePointerIsMouse = false
+  private edgePresent = false
+
   // --- scratch --------------------------------------------------------------
   private readonly euler = new Euler(0, 0, 0, 'YXZ')
   private readonly scratchVec = new Vector3()
@@ -107,6 +113,11 @@ export class OrbitRig {
     canvas.addEventListener('wheel', this.onWheel, { passive: false })
     // Middle-click otherwise triggers autoscroll in Chrome.
     canvas.addEventListener('auxclick', this.preventDefault)
+    // Edge panning tracks the cursor across the whole viewport (window level, so
+    // it keeps working while the cursor hovers HUD panels at the screen border).
+    window.addEventListener('pointermove', this.onEdgeTrack)
+    window.addEventListener('blur', this.onEdgeLeave)
+    document.addEventListener('mouseleave', this.onEdgeLeave)
 
     this.applyImmediate()
     this.lastFrameTime = performance.now()
@@ -166,6 +177,9 @@ export class OrbitRig {
     this.canvas.removeEventListener('pointercancel', this.onPointerUp)
     this.canvas.removeEventListener('wheel', this.onWheel)
     this.canvas.removeEventListener('auxclick', this.preventDefault)
+    window.removeEventListener('pointermove', this.onEdgeTrack)
+    window.removeEventListener('blur', this.onEdgeLeave)
+    document.removeEventListener('mouseleave', this.onEdgeLeave)
   }
 
   /**
@@ -446,6 +460,66 @@ export class OrbitRig {
   }
 
   // ===========================================================================
+  // Edge panning (cursor at the viewport border)
+  // ===========================================================================
+
+  private readonly onEdgeTrack = (event: PointerEvent): void => {
+    this.edgeClientX = event.clientX
+    this.edgeClientY = event.clientY
+    this.edgePointerIsMouse = event.pointerType === 'mouse'
+    this.edgePresent = true
+  }
+
+  private readonly onEdgeLeave = (): void => {
+    this.edgePresent = false
+  }
+
+  /**
+   * Scroll the focus point when the cursor sits inside the border band, RTS
+   * style. Direction is taken from the current azimuth so screen-up maps to the
+   * camera's ground-forward and screen-right to its ground-right; speed scales
+   * with zoom distance and ramps up the deeper into the band the cursor is.
+   */
+  private applyEdgePan(delta: number): void {
+    if (!this.enabled || this.dragMode !== 'none' || this.isFreeLookActive) return
+    if (!this.edgePresent || !this.edgePointerIsMouse) return
+
+    const margin = CAM.edgePanMargin
+    if (margin <= 0) return
+
+    const rect = this.canvas.getBoundingClientRect()
+    const x = this.edgeClientX - rect.left
+    const y = this.edgeClientY - rect.top
+    // Cursor fully off the canvas: nothing to do.
+    if (x < -margin || y < -margin || x > rect.width + margin || y > rect.height + margin) return
+
+    let hx = 0
+    let vy = 0
+    if (x < margin) hx = -(margin - x) / margin
+    else if (x > rect.width - margin) hx = (x - (rect.width - margin)) / margin
+    // Screen top scrolls the view forward (into the distance); bottom pulls back.
+    if (y < margin) vy = (margin - y) / margin
+    else if (y > rect.height - margin) vy = -(y - (rect.height - margin)) / margin
+
+    if (hx === 0 && vy === 0) return
+    hx = clamp(hx, -1, 1)
+    vy = clamp(vy, -1, 1)
+
+    const az = this.azimuthCurrent
+    const forwardX = -Math.sin(az)
+    const forwardZ = -Math.cos(az)
+    const rightX = Math.cos(az)
+    const rightZ = -Math.sin(az)
+
+    const step = CAM.edgePanSpeed * this.distCurrent * delta
+    this.focusTarget.x += (rightX * hx + forwardX * vy) * step
+    this.focusTarget.z += (rightZ * hx + forwardZ * vy) * step
+    this.clampFocus(this.focusTarget)
+    // Panning re-seats the camera on the zoom-tilt arc, like drag-pan does.
+    this.resetFreeLook()
+  }
+
+  // ===========================================================================
   // Panning ("grab the ground")
   // ===========================================================================
 
@@ -558,6 +632,7 @@ export class OrbitRig {
       this.freePitchCurrent += (this.freePitchTarget - this.freePitchCurrent) * k
       this.focusCurrent.set(this.eyePositionCurrent.x, 0, this.eyePositionCurrent.z)
     } else {
+      this.applyEdgePan(delta)
       this.focusCurrent.lerp(this.focusTarget, k)
       this.distCurrent += (this.distTarget - this.distCurrent) * k
       this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k

@@ -13,6 +13,7 @@ import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
 import { PathMarker } from '../render/PathMarker'
+import { DamageIndicators } from '../render/DamageIndicators'
 
 export const enum ControllerMode {
   Move = 0,
@@ -29,6 +30,7 @@ export class InteractionController {
   private readonly hud: Hud
   private readonly tracers: Tracers
   private readonly pathMarker = new PathMarker()
+  private readonly damageIndicators = new DamageIndicators()
 
   // Path planning state
   private waypoints: Tile[] = []
@@ -315,7 +317,8 @@ export class InteractionController {
           detail: '4 AP',
           danger: true,
           action: () => {
-            executeShot(this.battlefield.grid, selected, enemy, this.tracers)
+            const result = executeShot(this.battlefield.grid, selected, enemy, this.tracers)
+            this.damageIndicators.spawn(enemy.position, result.hit, result.damage)
             this.hud.update()
             this.recomputeVisibility()
             this.exitShootMode()
@@ -402,11 +405,11 @@ export class InteractionController {
   }
 
   private renderMoveOverlay(): void {
-    const ground = this.battlefield.ground
     const selected = this.turnManager.selectedSoldier!
+    const grid = this.battlefield.grid
 
-    // Paint selected soldier tile
-    ground.paintTile(selected.tile.x, selected.tile.y, 0x79d98b, 0.4)
+    // Green foot circle marking the selected unit.
+    this.pathMarker.showSelection(grid.tileToWorld(selected.tile))
 
     // Only render path if a target goal tile has been clicked (no path on hover)
     if (this.currentGoal && !tileEquals(selected.tile, this.currentGoal)) {
@@ -427,7 +430,6 @@ export class InteractionController {
       this.activePath = result.path
       this.activePathValid = result.valid
 
-      const grid = this.battlefield.grid
       const pathPoints = result.path.map((t) => grid.tileToWorld(t))
       const waypointPoints = this.waypoints.map((t) => grid.tileToWorld(t))
       const goalPoint = grid.tileToWorld(this.currentGoal)

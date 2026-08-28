@@ -42,11 +42,10 @@ export class PathMarker {
    * centres (y = 0); the hover height is applied here.
    */
   show(path: Vector3[], waypoints: Vector3[], goal: Vector3, valid: boolean): void {
-    this.clear()
     const beaconColor = valid ? PATH.colorValid : PATH.colorInvalid
 
     if (path.length >= 2) {
-      const points = path.map((p) => new Vector3(p.x, PATH.hover, p.z))
+      const points = path.map((p) => new Vector3(p.x, PATH.lineHover, p.z))
       this.group.add(this.line(points, beaconColor, 0.9))
     }
 
@@ -57,21 +56,28 @@ export class PathMarker {
     this.beacon(goal, PATH.goalHeight, [PATH.goalInnerRadius, PATH.goalOuterRadius], beaconColor)
   }
 
+  /** Green foot circle marking the selected unit, at marker hover height. */
+  showSelection(base: Vector3): void {
+    this.group.add(this.ring(base, PATH.selectionRadius, PATH.colorValid))
+  }
+
   /** A floating circle (or circles) at hover height plus a vertical beacon pole. */
   private beacon(base: Vector3, height: number, radii: number[], color: number): void {
-    for (const radius of radii) {
-      const points: Vector3[] = []
-      for (let i = 0; i < CIRCLE_SEGMENTS; i++) {
-        const a = (i / CIRCLE_SEGMENTS) * Math.PI * 2
-        points.push(new Vector3(base.x + Math.cos(a) * radius, PATH.hover, base.z + Math.sin(a) * radius))
-      }
-      const geometry = new BufferGeometry().setFromPoints(points)
-      this.geometries.push(geometry)
-      this.group.add(new LineLoop(geometry, this.material(color, 0.95)))
-    }
-
+    for (const radius of radii) this.group.add(this.ring(base, radius, color))
     const pole = [new Vector3(base.x, PATH.hover, base.z), new Vector3(base.x, height, base.z)]
     this.group.add(this.line(pole, color, 0.75))
+  }
+
+  /** A single horizontal circle at marker hover height, centred on `base`. */
+  private ring(base: Vector3, radius: number, color: number): LineLoop {
+    const points: Vector3[] = []
+    for (let i = 0; i < CIRCLE_SEGMENTS; i++) {
+      const a = (i / CIRCLE_SEGMENTS) * Math.PI * 2
+      points.push(new Vector3(base.x + Math.cos(a) * radius, PATH.hover, base.z + Math.sin(a) * radius))
+    }
+    const geometry = new BufferGeometry().setFromPoints(points)
+    this.geometries.push(geometry)
+    return new LineLoop(geometry, this.material(color, 0.95))
   }
 
   private line(points: Vector3[], color: number, peak: number): Line {
