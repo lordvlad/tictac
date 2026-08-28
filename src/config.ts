@@ -74,12 +74,26 @@ export const AIM = {
   base: 85,
   /** Accuracy lost per metre of range. */
   perMetre: 3,
-  halfCoverPenalty: 20,
-  fullCoverPenalty: 40,
-  /** Accuracy the shooter loses against a hunkered-down (crouching) target. */
-  crouchPenalty: 25,
   min: 5,
   max: 95,
+} as const
+
+/**
+ * Accuracy the shooter loses against a target, by the cover the bullet crosses
+ * and the target's stance. Crouching ("taking cover") always beats standing,
+ * and hunkering behind real cover beats crouching in the open.
+ */
+export const COVER = {
+  /** Crouching with no cover on the shot's side. */
+  openCrouch: 25,
+  /** Standing behind a low crate. */
+  lowStand: 20,
+  /** Crouching behind a low crate (> openCrouch and > lowStand). */
+  lowCrouch: 40,
+  /** Standing behind a wall/edge — strong, but a peek can still be hit. */
+  tallStand: 45,
+  /** Crouching behind a wall/edge. */
+  tallCrouch: 60,
 } as const
 
 // ---------------------------------------------------------------------------

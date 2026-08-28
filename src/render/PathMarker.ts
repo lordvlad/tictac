@@ -1,15 +1,20 @@
 import {
   AdditiveBlending,
   BufferGeometry,
+  CanvasTexture,
   Group,
   Line,
   LineBasicMaterial,
   LineLoop,
   type Material,
+  Sprite,
+  SpriteMaterial,
+  type Texture,
   Vector3,
 } from 'three'
 import Game from '@mavonengine/core/Game'
 import { PATH } from '../config'
+import { CoverLevel, COVER_DIRS } from '../core/Cover'
 
 const CIRCLE_SEGMENTS = 48
 
@@ -28,6 +33,7 @@ export class PathMarker {
   private readonly group = new Group()
   private readonly geometries: BufferGeometry[] = []
   private readonly materials: Material[] = []
+  private readonly textures: Texture[] = []
   /** Materials whose opacity pulses, paired with their peak opacity. */
   private readonly pulses: { material: LineBasicMaterial; peak: number }[] = []
   private clock = 0
@@ -39,9 +45,17 @@ export class PathMarker {
 
   /**
    * Rebuild the overlay. `path`, `waypoints` and `goal` are floor-level tile
-   * centres (y = 0); the hover height is applied here.
+   * centres (y = 0); the hover height is applied here. `coverLevels`, aligned to
+   * {@link COVER_DIRS}, adds a directional cover shield on each protected side
+   * of the goal tile.
    */
-  show(path: Vector3[], waypoints: Vector3[], goal: Vector3, valid: boolean): void {
+  show(
+    path: Vector3[],
+    waypoints: Vector3[],
+    goal: Vector3,
+    valid: boolean,
+    coverLevels?: readonly CoverLevel[],
+  ): void {
     const beaconColor = valid ? PATH.colorValid : PATH.colorInvalid
 
     if (path.length >= 2) {
@@ -54,6 +68,13 @@ export class PathMarker {
     }
 
     this.beacon(goal, PATH.goalHeight, [PATH.goalInnerRadius, PATH.goalOuterRadius], beaconColor)
+
+    if (coverLevels) {
+      COVER_DIRS.forEach(([dx, dy], i) => {
+        const level = coverLevels[i]
+        if (level) this.shield(goal, dx, dy, level === CoverLevel.Tall)
+      })
+    }
   }
 
   /** Green foot circle marking the selected unit, at marker hover height. */
@@ -100,6 +121,25 @@ export class PathMarker {
     return material
   }
 
+  /** Camera-facing cover shield sprite on one side of the goal tile. */
+  private shield(goal: Vector3, dx: number, dy: number, filled: boolean): void {
+    const texture = shieldTexture(filled)
+    this.textures.push(texture)
+    const mat = new SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    })
+    this.materials.push(mat)
+    const sprite = new Sprite(mat)
+    sprite.position.set(goal.x + dx * 0.5, 0.55, goal.z + dy * 0.5)
+    sprite.scale.set(0.5, 0.5, 1)
+    sprite.renderOrder = 11
+    this.group.add(sprite)
+  }
+
   /** Gentle radiating pulse. Call once per frame. */
   update(delta: number): void {
     if (this.pulses.length === 0) return
@@ -112,8 +152,10 @@ export class PathMarker {
     this.group.clear()
     for (const geometry of this.geometries) geometry.dispose()
     for (const material of this.materials) material.dispose()
+    for (const texture of this.textures) texture.dispose()
     this.geometries.length = 0
     this.materials.length = 0
+    this.textures.length = 0
     this.pulses.length = 0
     this.clock = 0
   }
@@ -122,4 +164,44 @@ export class PathMarker {
     this.clear()
     Game.instance().scene.remove(this.group)
   }
+}
+
+/**
+ * Draw a shield glyph to a canvas texture: outlined and fully filled for tall
+ * cover, outlined with only the lower half filled for low cover.
+ */
+function shieldTexture(filled: boolean): CanvasTexture {
+  const size = 64
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  const green = '#66ff99'
+
+  const shield = new Path2D()
+  shield.moveTo(10, 12)
+  shield.lineTo(54, 12)
+  shield.lineTo(54, 34)
+  shield.quadraticCurveTo(54, 50, 32, 58)
+  shield.quadraticCurveTo(10, 50, 10, 34)
+  shield.closePath()
+
+  ctx.fillStyle = 'rgba(102, 255, 153, 0.85)'
+  if (filled) {
+    ctx.fill(shield)
+  } else {
+    // Low cover: fill only the bottom half of the shield.
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, size / 2, size, size / 2)
+    ctx.clip()
+    ctx.fill(shield)
+    ctx.restore()
+  }
+  ctx.strokeStyle = green
+  ctx.lineWidth = 5
+  ctx.lineJoin = 'round'
+  ctx.stroke(shield)
+
+  return new CanvasTexture(canvas)
 }

@@ -3,6 +3,7 @@ import Game from '@mavonengine/core/Game'
 import { COVER_AP_COST, Faction, SHOOT_AP_COST } from '../config'
 import { findChainedPath } from '../core/Pathfinding'
 import { computeFactionVisibility, hasLineOfSight } from '../core/Visibility'
+import { directionalCover } from '../core/Cover'
 import { type Tile, tileEquals, tileKey } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import type { OrbitRig } from '../camera/OrbitRig'
@@ -449,7 +450,8 @@ export class InteractionController {
       const pathPoints = result.path.map((t) => grid.tileToWorld(t))
       const waypointPoints = this.waypoints.map((t) => grid.tileToWorld(t))
       const goalPoint = grid.tileToWorld(this.currentGoal)
-      this.pathMarker.show(pathPoints, waypointPoints, goalPoint, result.valid)
+      const coverLevels = directionalCover(this.battlefield.grid, this.currentGoal)
+      this.pathMarker.show(pathPoints, waypointPoints, goalPoint, result.valid, coverLevels)
     }
   }
 

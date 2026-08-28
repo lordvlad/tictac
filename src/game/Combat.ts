@@ -1,5 +1,6 @@
-import { AIM, BULLET_DAMAGE, SHOOT_AP_COST } from '../config'
-import { Block, type Grid, type Tile } from '../core/Grid'
+import { AIM, BULLET_DAMAGE, COVER, SHOOT_AP_COST } from '../config'
+import type { Grid } from '../core/Grid'
+import { CoverLevel, shotCoverLevel } from '../core/Cover'
 import type { Soldier } from '../entities/Soldier'
 import type { Tracers } from '../render/Tracers'
 
@@ -10,46 +11,23 @@ export interface ShotResult {
   hitChance: number
 }
 
-/**
- * Determine cover penalty for a target relative to a shooter.
- */
-export function getCoverPenalty(grid: Grid, shooterTile: Tile, targetTile: Tile): { penalty: number; coverType: 'none' | 'half' | 'full' } {
-  const dx = Math.sign(shooterTile.x - targetTile.x)
-  const dy = Math.sign(shooterTile.y - targetTile.y)
-
-  // Check adjacent tiles to target in shooter direction
-  const adjX = targetTile.x + dx
-  const adjY = targetTile.y + dy
-
-  let bestCover: Block = Block.None
-  if (grid.inBounds(adjX, targetTile.y)) {
-    const b = grid.blockAt(adjX, targetTile.y)
-    if (b > bestCover) bestCover = b
-  }
-  if (grid.inBounds(targetTile.x, adjY)) {
-    const b = grid.blockAt(targetTile.x, adjY)
-    if (b > bestCover) bestCover = b
-  }
-
-  if (bestCover === Block.Full) {
-    return { penalty: AIM.fullCoverPenalty, coverType: 'full' }
-  } else if (bestCover === Block.Half) {
-    return { penalty: AIM.halfCoverPenalty, coverType: 'half' }
-  }
-
-  return { penalty: 0, coverType: 'none' }
+/** Accuracy the shooter loses, given the cover crossed and the target's stance. */
+export function coverPenalty(level: CoverLevel, crouching: boolean): number {
+  if (level === CoverLevel.Tall) return crouching ? COVER.tallCrouch : COVER.tallStand
+  if (level === CoverLevel.Low) return crouching ? COVER.lowCrouch : COVER.lowStand
+  return crouching ? COVER.openCrouch : 0
 }
 
 /**
- * Calculate hit percentage (5% - 95%).
+ * Calculate hit percentage (5% - 95%). Cover is taken from the side of the
+ * target the bullet actually crosses (see {@link shotCoverLevel}).
  */
 export function calculateHitChance(grid: Grid, shooter: Soldier, target: Soldier): number {
   const dist = grid.distance(shooter.tile, target.tile)
   const rangePenalty = dist * AIM.perMetre
-  const cover = getCoverPenalty(grid, shooter.tile, target.tile)
+  const level = shotCoverLevel(grid, shooter.tile, target.tile)
 
-  const crouchPenalty = target.isCrouching ? AIM.crouchPenalty : 0
-  const rawChance = AIM.base - rangePenalty - cover.penalty - crouchPenalty
+  const rawChance = AIM.base - rangePenalty - coverPenalty(level, target.isCrouching)
   return Math.max(AIM.min, Math.min(AIM.max, Math.round(rawChance)))
 }
 
