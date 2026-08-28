@@ -60,6 +60,8 @@ export const MAX_HP = 100
 export const BULLET_DAMAGE = 55 // 2 bullets kill
 export const MAX_AP = 12
 export const SHOOT_AP_COST = 4
+/** AP to hunker down into cover (crouch stance). */
+export const COVER_AP_COST = 2
 
 /** Tiles a soldier can see. */
 export const SIGHT_RANGE = 14
@@ -74,6 +76,8 @@ export const AIM = {
   perMetre: 3,
   halfCoverPenalty: 20,
   fullCoverPenalty: 40,
+  /** Accuracy the shooter loses against a hunkered-down (crouching) target. */
+  crouchPenalty: 25,
   min: 5,
   max: 95,
 } as const

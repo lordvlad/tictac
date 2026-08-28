@@ -38,6 +38,9 @@ export class Soldier extends Entity3D {
   movePathIndex = 0
   isMoving = false
 
+  /** Hunkered-down cover stance. Persists across turns until the unit moves or stands. */
+  isCrouching = false
+
   constructor(
     faction: Faction,
     squadIndex: number,
@@ -106,6 +109,7 @@ export class Soldier extends Entity3D {
     this.animationMixer?.addEventListener('finished', () => {
       if (this.isDead) return
       if (this.isMoving) this.playLocomotion('run')
+      else if (this.isCrouching) this.playLoop('crouch')
       else this.playLoop('idle')
     })
   }
@@ -148,6 +152,20 @@ export class Soldier extends Entity3D {
     this.playOnce('hit')
   }
 
+  /** Hunker down into a crouch cover stance. */
+  enterCover(): void {
+    if (this.isDead || this.isMoving) return
+    this.isCrouching = true
+    this.playLoop('crouch')
+  }
+
+  /** Stand back up out of cover. */
+  exitCover(): void {
+    if (!this.isCrouching) return
+    this.isCrouching = false
+    if (!this.isDead && !this.isMoving) this.playLoop('idle')
+  }
+
   /**
    * Collapse and stay down. Halts movement without the idle fade that
    * stopMovement() would apply, so the death clip is not immediately replaced.
@@ -167,6 +185,8 @@ export class Soldier extends Entity3D {
     if (path.length <= 1) return
     this.movingPath = path
     this.movePathIndex = 1
+    // Moving breaks cover — stand up to run.
+    this.isCrouching = false
     this.isMoving = true
 
     this.playLocomotion('run')

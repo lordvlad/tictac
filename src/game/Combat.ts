@@ -48,7 +48,8 @@ export function calculateHitChance(grid: Grid, shooter: Soldier, target: Soldier
   const rangePenalty = dist * AIM.perMetre
   const cover = getCoverPenalty(grid, shooter.tile, target.tile)
 
-  const rawChance = AIM.base - rangePenalty - cover.penalty
+  const crouchPenalty = target.isCrouching ? AIM.crouchPenalty : 0
+  const rawChance = AIM.base - rangePenalty - cover.penalty - crouchPenalty
   return Math.max(AIM.min, Math.min(AIM.max, Math.round(rawChance)))
 }
 

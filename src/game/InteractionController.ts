@@ -1,6 +1,6 @@
 import { Raycaster, Vector2, Vector3 } from 'three'
 import Game from '@mavonengine/core/Game'
-import { Faction, SHOOT_AP_COST } from '../config'
+import { COVER_AP_COST, Faction, SHOOT_AP_COST } from '../config'
 import { findChainedPath } from '../core/Pathfinding'
 import { computeFactionVisibility, hasLineOfSight } from '../core/Visibility'
 import { type Tile, tileEquals, tileKey } from '../core/Grid'
@@ -80,6 +80,7 @@ export class InteractionController {
     hud.onShootRequested = () => this.enterShootMode()
     hud.onCancelShootRequested = () => this.exitShootMode()
     hud.onTurnSwitched = () => this.onTurnSwitched()
+    hud.onToggleCoverRequested = () => this.toggleCover()
 
     turnManager.onSelectionChanged = () => {
       this.clearPlannerState()
@@ -112,6 +113,21 @@ export class InteractionController {
     this.hud.update()
     this.hud.hideContextMenu()
     this.clearPlannerState()
+  }
+
+  /** Hunker into / out of a crouch cover stance. Entering costs AP; standing is free. */
+  toggleCover(): void {
+    const soldier = this.turnManager.selectedSoldier
+    if (!soldier || soldier.isDead || soldier.isMoving) return
+
+    if (soldier.isCrouching) {
+      soldier.exitCover()
+    } else {
+      if (soldier.ap < COVER_AP_COST) return
+      soldier.ap -= COVER_AP_COST
+      soldier.enterCover()
+    }
+    this.hud.update()
   }
 
   private clearPlannerState(): void {

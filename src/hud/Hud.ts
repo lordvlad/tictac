@@ -1,4 +1,4 @@
-import { Faction, FACTION_INFO, MAX_AP, MAX_HP } from '../config'
+import { COVER_AP_COST, Faction, FACTION_INFO, MAX_AP, MAX_HP } from '../config'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
 import type { Squads } from '../game/Squads'
@@ -23,6 +23,7 @@ export class Hud {
   onShootRequested?: () => void
   onCancelShootRequested?: () => void
   onTurnSwitched?: () => void
+  onToggleCoverRequested?: () => void
 
   isShootModeActive = false
   private turnOverlayVisible = false
@@ -239,6 +240,9 @@ export class Hud {
     }
 
     const shootBtnText = this.isShootModeActive ? 'Cancel Shoot ✕' : 'Shoot'
+    const coverBtnText = selected.isCrouching ? 'Stand Up' : 'Take Cover'
+    const coverTag = selected.isCrouching ? 'Free' : `${COVER_AP_COST} AP`
+    const coverDisabled = !selected.isCrouching && selected.ap < COVER_AP_COST
 
     this.actionPanelEl.innerHTML = `
       <div class="action-header">${selected.name} Actions</div>
@@ -246,9 +250,9 @@ export class Hud {
         <span>${shootBtnText}</span>
         <span class="action-tag">4 AP</span>
       </button>
-      <button class="action-btn interactive" disabled>
-        <span>Take Cover</span>
-        <span class="action-tag">Placeholder</span>
+      <button id="actionCover" class="action-btn interactive ${selected.isCrouching ? 'active' : ''}" ${coverDisabled ? 'disabled' : ''}>
+        <span>${coverBtnText}</span>
+        <span class="action-tag">${coverTag}</span>
       </button>
       <button class="action-btn interactive" disabled>
         <span>Overwatch</span>
@@ -274,6 +278,9 @@ export class Hud {
         }
       }
     }
+
+    const coverBtn = this.actionPanelEl.querySelector('#actionCover') as HTMLButtonElement | null
+    if (coverBtn) coverBtn.onclick = () => this.onToggleCoverRequested?.()
 
     const finishBtn = this.actionPanelEl.querySelector('#actionFinishTurn') as HTMLButtonElement
     if (finishBtn) {
