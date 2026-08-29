@@ -53,6 +53,19 @@ export const CAM = {
 } as const
 
 // ---------------------------------------------------------------------------
+// Wall x-ray (occluding walls vs. selected character)
+// ---------------------------------------------------------------------------
+
+export const WALL_XRAY = {
+  /** Camera tilt at or above which occluding walls stay fully opaque. */
+  fadeStart: (45 * Math.PI) / 180,
+  /** Camera tilt at or below which occluding walls reach `minOpacity`. */
+  fadeEnd: (30 * Math.PI) / 180,
+  /** Wall opacity at `fadeEnd` — "very translucent". */
+  minOpacity: 0.15,
+} as const
+
+// ---------------------------------------------------------------------------
 // Combat
 // ---------------------------------------------------------------------------
 

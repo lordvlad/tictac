@@ -263,6 +263,16 @@ export class OrbitRig {
     return this.freeLookToggleActive || this.isCharacterView
   }
 
+  /**
+   * Current downward tilt of the camera below the horizon, in radians.
+   * Combines the zoom-tilt arc with the additive free-look pitch offset;
+   * character view sits at ~0 (horizontal). Used by the wall x-ray fade.
+   */
+  get tilt(): number {
+    const base = this.isCharacterView ? 0 : this.pitchForDistance(this.distCurrent)
+    return base - this.freePitchCurrent
+  }
+
   // ===========================================================================
   // Tilt arc
   // ===========================================================================

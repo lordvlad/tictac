@@ -1,6 +1,6 @@
 import { Raycaster, Vector2, Vector3 } from 'three'
 import Game from '@mavonengine/core/Game'
-import { COVER_AP_COST, Faction, SHOOT_AP_COST } from '../config'
+import { COVER_AP_COST, Faction, SHOOT_AP_COST, WALL_XRAY } from '../config'
 import { findChainedPath } from '../core/Pathfinding'
 import { computeFactionVisibility, hasLineOfSight } from '../core/Visibility'
 import { directionalCover } from '../core/Cover'
@@ -49,6 +49,9 @@ export class InteractionController {
 
   private readonly raycaster = new Raycaster()
   private readonly ndc = new Vector2()
+
+  /** Scratch target for the wall x-ray ray (selected character's feet). */
+  private readonly xrayTarget = new Vector3()
 
   // Right-click turn tracking
   private rightDownPos = new Vector2()
@@ -522,5 +525,47 @@ export class InteractionController {
         this.hud.update()
       }
     }
+
+    this.updateWallFade()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Wall x-ray fade
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fade walls between the camera and the selected character once the camera
+   * tilts below `WALL_XRAY.fadeStart`. Opacity eases from 1 at `fadeStart`
+   * down to `minOpacity` at `fadeEnd`, so zooming reads as a smooth dissolve
+   * rather than a snap.
+   */
+  private updateWallFade(): void {
+    const selected = this.turnManager.selectedSoldier
+    if (!selected || selected.isDead) {
+      this.battlefield.blocks.clearOcclusionFade()
+      return
+    }
+
+    const tilt = this.rig.tilt
+    const t = Math.min(
+      1,
+      Math.max(0, (tilt - WALL_XRAY.fadeEnd) / (WALL_XRAY.fadeStart - WALL_XRAY.fadeEnd)),
+    )
+    const eased = t * t * (3 - 2 * t)
+    const opacity = WALL_XRAY.minOpacity + (1 - WALL_XRAY.minOpacity) * eased
+
+    if (opacity >= 1) {
+      this.battlefield.blocks.clearOcclusionFade()
+      return
+    }
+
+    // Target the character's feet: a wall fades as soon as it hides ANY part
+    // of the body, not just the head.
+    this.xrayTarget.copy(selected.position)
+    this.battlefield.blocks.setOcclusionFade(
+      Game.instance().camera.instance.position,
+      this.xrayTarget,
+      opacity,
+    )
   }
 }
