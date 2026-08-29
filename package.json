@@ -13,6 +13,7 @@
     "@dimforge/rapier3d-compat": "0.18.2",
     "@mavonengine/core": "^0.0.20",
     "@tweakpane/plugin-essentials": "^0.2.1",
+    "@use-gesture/vanilla": "^10.3.1",
     "three": "0.184.0",
     "three-perf": "^1.0.11",
     "tweakpane": "^4.0.5"

@@ -1,3 +1,4 @@
+import { PinchGesture } from '@use-gesture/vanilla'
 import { Euler, Matrix4, PerspectiveCamera, Vector2, Vector3 } from 'three'
 import { CAM, EYE_HEIGHT } from '../config'
 
@@ -24,6 +25,14 @@ export interface OrbitRigOptions {
  *   right drag   orbit the azimuth about the focus point
  *   wheel        zoom, which also drives tilt along the arc
  *   middle drag  free-look: rotate in place without moving the camera
+ *   one finger   pan, or free-look while that mode is toggled on
+ *   two fingers  pinch to zoom, twist to orbit, drag to pan — all at once
+ *
+ * Two-finger input is recognised by `@use-gesture`'s PinchGesture rather than
+ * hand-rolled touch bookkeeping: it owns the pointer pairing, distance/angle
+ * math, rotation wrap-around and pointer-capture cleanup. Its state is applied
+ * as absolute deltas from the values frozen at gesture start, so zoom, twist
+ * and pan compose without accumulating drift.
  *
  * Free-look is stored as an additive offset on top of the orbit orientation.
  * Any pan / orbit / zoom drives that offset back to zero, which is what
@@ -61,15 +70,20 @@ export class OrbitRig {
   private readonly eyePositionCurrent = new Vector3()
 
   // --- drag & touch bookkeeping ---------------------------------------------
-  private dragMode: DragMode | 'touch2' = 'none'
+  private dragMode: DragMode = 'none'
   private dragPointerId = -1
   private readonly lastPointer = new Vector2()
 
-  /** Map of active pointers for multi-touch gesture support. */
-  private readonly activePointers = new Map<number, { x: number; y: number; type: string }>()
-  private touchStartDist = 0
-  private touchStartAngle = 0
-  private touchStartCenter = new Vector2()
+  /** Live pointer ids, so a second finger can hand the gesture to the pinch recogniser. */
+  private readonly activePointers = new Set<number>()
+
+  // --- two-finger gesture (pinch zoom / twist orbit / drag pan) -------------
+  private readonly pinchGesture: PinchGesture
+  private readonly pinchOrigin = new Vector2()
+  private pinchStartDist = 0
+  private pinchStartAzimuth = 0
+  private pinching = false
+  private pinchEndTime = 0
 
   /** Camera state frozen at pan start, so panning cannot feed back on itself. */
   private readonly panStartFocus = new Vector3()
@@ -119,6 +133,16 @@ export class OrbitRig {
     window.addEventListener('blur', this.onEdgeLeave)
     document.addEventListener('mouseleave', this.onEdgeLeave)
 
+    // Two-finger zoom / twist / pan. `pinchOnWheel: false` keeps trackpad and
+    // wheel zoom entirely in `onWheel`, which would otherwise double-apply.
+    this.pinchGesture = new PinchGesture(
+      canvas,
+      ({ first, last, movement: [scale, angleDeg], origin: [originX, originY] }) => {
+        this.applyPinch(first, last, scale, angleDeg, originX, originY)
+      },
+      { pinchOnWheel: false, eventOptions: { passive: false } },
+    )
+
     this.applyImmediate()
     this.lastFrameTime = performance.now()
     this.loop()
@@ -149,9 +173,14 @@ export class OrbitRig {
     return this.distCurrent
   }
 
-  /** True while the user is actively dragging — used to suppress click actions. */
+  /**
+   * True while the user is actively dragging — used to suppress click actions.
+   * A finished pinch keeps suppressing for `gestureClickGrace`: lifting two
+   * fingers can still synthesise a tap, which would otherwise order a move.
+   */
   get isDragging(): boolean {
-    return this.dragMode !== 'none'
+    if (this.dragMode !== 'none' || this.pinching) return true
+    return performance.now() - this.pinchEndTime < CAM.gestureClickGrace
   }
 
   /**
@@ -180,6 +209,7 @@ export class OrbitRig {
     window.removeEventListener('pointermove', this.onEdgeTrack)
     window.removeEventListener('blur', this.onEdgeLeave)
     document.removeEventListener('mouseleave', this.onEdgeLeave)
+    this.pinchGesture.destroy()
   }
 
   /**
@@ -301,11 +331,7 @@ export class OrbitRig {
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (!this.enabled) return
 
-    this.activePointers.set(event.pointerId, {
-      x: event.clientX,
-      y: event.clientY,
-      type: event.pointerType,
-    })
+    this.activePointers.add(event.pointerId)
 
     try {
       this.canvas.setPointerCapture(event.pointerId)
@@ -313,21 +339,12 @@ export class OrbitRig {
       /* ignore synthetic/test events */
     }
 
-    // --- Multi-touch gestures (touchscreen) -----------------------------------
-    if (this.activePointers.size === 2) {
-      const [p1, p2] = Array.from(this.activePointers.values())
-      if (p1 && p2) {
-        this.dragMode = 'touch2'
-        this.touchStartDist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
-        this.touchStartAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x)
-        this.touchStartCenter.set((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
-
-        // Initialize 2-finger pan grab point from center of touch
-        this.beginPanAtPoint(this.touchStartCenter)
-        this.resetFreeLook()
-        event.preventDefault()
-        return
-      }
+    // A second finger turns this into a pinch: PinchGesture drives zoom, twist
+    // and pan from here on, so any single-finger drag must let go.
+    if (this.activePointers.size > 1) {
+      this.dragMode = 'none'
+      this.dragPointerId = -1
+      return
     }
 
     if (this.dragMode !== 'none') return
@@ -362,44 +379,6 @@ export class OrbitRig {
 
   private readonly onPointerMove = (event: PointerEvent): void => {
     if (!this.activePointers.has(event.pointerId)) return
-
-    // Update active pointer position
-    this.activePointers.set(event.pointerId, {
-      x: event.clientX,
-      y: event.clientY,
-      type: event.pointerType,
-    })
-
-    // --- 2-Finger Touch Gestures (Pinch zoom, turn rotate, 2-finger pan) ------
-    if (this.dragMode === 'touch2' && this.activePointers.size === 2) {
-      const [p1, p2] = Array.from(this.activePointers.values())
-      if (p1 && p2) {
-        // 1. Pinch to zoom
-        const currDist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
-        if (this.touchStartDist > 0 && currDist > 0) {
-          const factor = this.touchStartDist / currDist
-          this.distTarget = clamp(this.distTarget * factor, CAM.distMin, CAM.distMax)
-          this.touchStartDist = currDist
-        }
-
-        // 2. Two-finger turn to rotate azimuth
-        const currAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x)
-        let deltaAngle = currAngle - this.touchStartAngle
-        while (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2
-        while (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2
-        this.azimuthTarget -= deltaAngle
-        this.touchStartAngle = currAngle
-
-        // 3. Two-finger pan
-        const currCenter = new Vector2((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
-        this.updatePanAtPoint(currCenter)
-
-        this.resetFreeLook()
-        event.preventDefault()
-        return
-      }
-    }
-
     if (this.dragMode === 'none' || event.pointerId !== this.dragPointerId) return
 
     const dx = event.clientX - this.lastPointer.x
@@ -438,18 +417,61 @@ export class OrbitRig {
       /* ignore */
     }
 
-    if (this.dragMode === 'touch2') {
-      if (this.activePointers.size < 2) {
-        this.dragMode = 'none'
-        this.panValid = false
-      }
-      return
-    }
-
     if (event.pointerId !== this.dragPointerId) return
     this.dragMode = 'none'
     this.dragPointerId = -1
     this.panValid = false
+  }
+
+  /**
+   * Two-finger gesture, applied as absolute deltas from the state frozen at
+   * gesture start: `scale` is the finger-distance ratio, `angleDeg` the twist
+   * since start, and (`originX`, `originY`) the live midpoint between fingers.
+   */
+  private applyPinch(
+    first: boolean,
+    last: boolean,
+    scale: number,
+    angleDeg: number,
+    originX: number,
+    originY: number,
+  ): void {
+    if (!this.enabled) return
+
+    this.pinchOrigin.set(originX, originY)
+
+    if (first) {
+      this.pinching = true
+      this.pinchStartDist = this.distTarget
+      this.pinchStartAzimuth = this.azimuthTarget
+      // Grab the ground under the midpoint, exactly like a left-drag pan.
+      this.beginPanAtPoint(this.pinchOrigin)
+    }
+
+    // Zoom: spreading the fingers (ratio > 1) pulls the camera in. The ratio is
+    // amplified, otherwise a phone-sized pinch barely moves through the range.
+    if (scale > 0) {
+      this.distTarget = clamp(
+        this.pinchStartDist / scale ** CAM.pinchZoomPower,
+        CAM.distMin,
+        CAM.distMax,
+      )
+    }
+
+    // Twist: same direction as a right-drag orbit.
+    this.azimuthTarget =
+      this.pinchStartAzimuth - ((angleDeg * Math.PI) / 180) * CAM.pinchRotateSpeed
+
+    // Drag: the midpoint keeps holding the same ground point.
+    this.updatePanAtPoint(this.pinchOrigin)
+
+    this.resetFreeLook()
+
+    if (last) {
+      this.pinching = false
+      this.pinchEndTime = performance.now()
+      this.panValid = false
+    }
   }
 
   private readonly onWheel = (event: WheelEvent): void => {

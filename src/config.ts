@@ -34,6 +34,16 @@ export const CAM = {
   azimuthStart: (35 * Math.PI) / 180,
   /** Wheel sensitivity (exponential). */
   zoomSpeed: 0.0012,
+  /**
+   * Pinch-to-zoom amplification: the finger-distance ratio is raised to this
+   * power before it drives distance. 1 is a literal 1:1 pinch, which barely
+   * crosses the distMin..distMax range in a single gesture on a phone.
+   */
+  pinchZoomPower: 2,
+  /** Two-finger twist amplification (1 = camera turns exactly with the fingers). */
+  pinchRotateSpeed: 2.5,
+  /** Suppress taps for this long (ms) after a two-finger gesture ends. */
+  gestureClickGrace: 200,
   /** Radians per pixel for right-drag orbit. */
   rotateSpeed: 0.006,
   /** Radians per pixel for middle-drag free look. */

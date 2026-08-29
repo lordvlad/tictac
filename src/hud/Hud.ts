@@ -355,6 +355,15 @@ export class Hud {
     this.contextMenuEl.style.top = `${y}px`
     this.contextMenuEl.style.display = 'flex'
 
+    // Keep the menu fully on screen: a tap near the right or bottom edge of a
+    // phone would otherwise open it mostly outside the viewport.
+    const margin = 8
+    const rect = this.contextMenuEl.getBoundingClientRect()
+    const maxLeft = window.innerWidth - rect.width - margin
+    const maxTop = window.innerHeight - rect.height - margin
+    this.contextMenuEl.style.left = `${Math.max(margin, Math.min(x, maxLeft))}px`
+    this.contextMenuEl.style.top = `${Math.max(margin, Math.min(y, maxTop))}px`
+
     const btns = this.contextMenuEl.querySelectorAll('.hud-context-item')
     btns.forEach((btn) => {
       const idx = Number((btn as HTMLElement).dataset.idx)
