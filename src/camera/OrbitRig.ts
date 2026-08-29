@@ -458,9 +458,11 @@ export class OrbitRig {
       )
     }
 
-    // Twist: same direction as a right-drag orbit.
+    // Twist: the ground turns with the fingers. `angleDeg` grows clockwise, and
+    // orbiting the camera counter-clockwise (rising azimuth) is what makes the
+    // map appear to follow a clockwise twist.
     this.azimuthTarget =
-      this.pinchStartAzimuth - ((angleDeg * Math.PI) / 180) * CAM.pinchRotateSpeed
+      this.pinchStartAzimuth + ((angleDeg * Math.PI) / 180) * CAM.pinchRotateSpeed
 
     // Drag: the midpoint keeps holding the same ground point.
     this.updatePanAtPoint(this.pinchOrigin)
