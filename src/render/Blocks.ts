@@ -11,15 +11,11 @@ import {
 } from 'three'
 import { FULL_BLOCK_HEIGHT, HALF_BLOCK_HEIGHT, TILE } from '../config'
 import { Block, blockHeight, type Grid } from '../core/Grid'
+import { VIS_BRIGHTNESS, VisState } from '../core/Visibility'
 
 /** Base colours before fog dimming. */
 const HALF_COLOR = new Color(0x9a7c4f)
 const FULL_COLOR = new Color(0x8b8f96)
-
-/** Fog brightness multipliers matching the ground shader. */
-const LIT_UNKNOWN = 0.0
-const LIT_EXPLORED = 0.22
-const LIT_VISIBLE = 1.0
 
 /** Per-instance opacity attribute name (the wall x-ray fade). */
 const FADE_ATTRIBUTE = 'aFade'
@@ -170,9 +166,8 @@ export class Blocks {
     const base = mesh.userData.baseColor as Color
     for (const tile of tiles) {
       // Use exact tile visibility state (do not bleed visibility to neighboring unexplored wall tiles)
-      const state = values[this.grid.index(tile.x, tile.y)] ?? 0
-      const lit = state === 2 ? LIT_VISIBLE : state === 1 ? LIT_EXPLORED : LIT_UNKNOWN
-      this.scratch.copy(base).multiplyScalar(lit)
+      const state = (values[this.grid.index(tile.x, tile.y)] ?? VisState.Unknown) as VisState
+      this.scratch.copy(base).multiplyScalar(VIS_BRIGHTNESS[state])
       mesh.setColorAt(tile.index, this.scratch)
     }
     if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true

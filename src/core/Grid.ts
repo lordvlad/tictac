@@ -28,10 +28,6 @@ export function tileEquals(a: Tile | null, b: Tile | null): boolean {
   return a.x === b.x && a.y === b.y
 }
 
-export function tileKey(t: Tile): number {
-  return t.y * GRID_SIZE + t.x
-}
-
 /** 8-connected neighbour offsets, orthogonals first. */
 export const NEIGHBOURS: readonly (readonly [number, number])[] = [
   [1, 0],

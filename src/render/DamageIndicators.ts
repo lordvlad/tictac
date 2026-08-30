@@ -1,5 +1,6 @@
 import { Vector3 } from 'three'
 import Game from '@mavonengine/core/Game'
+import { smoothstep } from '../core/math'
 
 /**
  * Floating hit / miss combat text. Each indicator is a DOM label anchored to a
@@ -109,7 +110,7 @@ export class DamageIndicators {
       let scale: number
       if (f.age < T_IN) {
         const t = f.age / T_IN
-        const eased = t * t * (3 - 2 * t)
+        const eased = smoothstep(t)
         y = CHEST_Y + (HEAD_Y - CHEST_Y) * eased
         opacity = t
         scale = 0.5 + 0.5 * eased

@@ -1,5 +1,6 @@
 import { Faction, GRID_SIZE, SQUAD_SIZE } from '../config'
 import { Block, Grid, ORTHOGONAL, type Tile } from './Grid'
+import { clamp } from './math'
 import { Rng } from './rng'
 
 export interface GeneratedMap {
@@ -54,8 +55,13 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   const zoneH = 3
   const blueX = Math.round(size / 2 - zoneW / 2 + rng.range(-3, 3))
   const redX = Math.round(size / 2 - zoneW / 2 + rng.range(-3, 3))
-  const blueZone: Rect = { x: clampRect(blueX, zoneW, size), y: 2, w: zoneW, h: zoneH }
-  const redZone: Rect = { x: clampRect(redX, zoneW, size), y: size - 2 - zoneH, w: zoneW, h: zoneH }
+  const blueZone: Rect = { x: clamp(blueX, 2, size - 2 - zoneW), y: 2, w: zoneW, h: zoneH }
+  const redZone: Rect = {
+    x: clamp(redX, 2, size - 2 - zoneW),
+    y: size - 2 - zoneH,
+    w: zoneW,
+    h: zoneH,
+  }
   const zones = [blueZone, redZone]
 
   // --- Buildings ------------------------------------------------------------
@@ -131,10 +137,6 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   }
 
   return { grid, spawns }
-}
-
-function clampRect(x: number, w: number, size: number): number {
-  return Math.max(2, Math.min(size - 2 - w, x))
 }
 
 /** Walls on the perimeter of `rect`, hollow interior, 1–2 doorways. */

@@ -2,15 +2,31 @@ import { SIGHT_RANGE } from '../config'
 import type { Grid, Tile } from './Grid'
 
 /**
- * Visibility states:
- * 0 = Unknown (black)
- * 1 = Explored (dimmed remembered terrain)
- * 2 = Visible (currently lit by a soldier)
+ * Visibility states, and the one brightness ramp every renderer must use.
+ *
+ * Plain object rather than a `const enum`: the bundler transpiles each file on
+ * its own, so a cross-module `const enum` has no runtime value to read.
  */
-export const enum VisState {
-  Unknown = 0,
-  Explored = 1,
-  Visible = 2,
+export const VisState = {
+  /** Never seen — pitch black shroud. */
+  Unknown: 0,
+  /** Seen earlier, remembered terrain. */
+  Explored: 1,
+  /** Currently in a soldier's line of sight. */
+  Visible: 2,
+} as const
+export type VisState = (typeof VisState)[keyof typeof VisState]
+
+/**
+ * Brightness multiplier per state. Owning it here is what keeps the floor and
+ * the blocks standing on it dimming by the same amount — they previously
+ * disagreed by more than 2x (walls 0.22 against a floor that resolved to
+ * ~0.495 through the ground shader's `mix`).
+ */
+export const VIS_BRIGHTNESS: Record<VisState, number> = {
+  [VisState.Unknown]: 0,
+  [VisState.Explored]: 0.35,
+  [VisState.Visible]: 1,
 }
 
 export function createVisibilityMap(size: number): Uint8Array {

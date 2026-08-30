@@ -1,6 +1,8 @@
 import { PinchGesture } from '@use-gesture/vanilla'
 import { Euler, Matrix4, PerspectiveCamera, Vector2, Vector3 } from 'three'
 import { CAM, EYE_HEIGHT } from '../config'
+import { clamp, smoothstep } from '../core/math'
+import { clientToNdc } from '../core/screen'
 
 const MOUSE_LEFT = 0
 const MOUSE_MIDDLE = 1
@@ -317,11 +319,7 @@ export class OrbitRig {
    * than a linear ramp, so the camera "swings" up as you pull back.
    */
   private pitchForDistance(dist: number): number {
-    const t = Math.min(
-      1,
-      Math.max(0, (dist - CAM.distMin) / (CAM.distMax - CAM.distMin)),
-    )
-    const eased = t * t * (3 - 2 * t)
+    const eased = smoothstep((dist - CAM.distMin) / (CAM.distMax - CAM.distMin))
     return CAM.pitchMin + (CAM.pitchMax - CAM.pitchMin) * eased
   }
 
@@ -591,7 +589,7 @@ export class OrbitRig {
       this.camera.projectionMatrixInverse,
     )
 
-    const ndc = this.toNdcFromClient(clientPos.x, clientPos.y)
+    const ndc = clientToNdc(this.canvas, clientPos.x, clientPos.y)
     const hit = this.rayToGround(
       ndc,
       this.panStartCamPos,
@@ -607,7 +605,7 @@ export class OrbitRig {
 
   private updatePanAtPoint(clientPos: Vector2): void {
     if (!this.panValid) return
-    const ndc = this.toNdcFromClient(clientPos.x, clientPos.y)
+    const ndc = clientToNdc(this.canvas, clientPos.x, clientPos.y)
     const hit = this.rayToGround(
       ndc,
       this.panStartCamPos,
@@ -622,18 +620,6 @@ export class OrbitRig {
       .add(this.panGrabPoint)
     this.focusTarget.y = 0
     this.clampFocus(this.focusTarget)
-  }
-
-  private toNdc(event: PointerEvent, target = new Vector2()): Vector2 {
-    return this.toNdcFromClient(event.clientX, event.clientY, target)
-  }
-
-  private toNdcFromClient(clientX: number, clientY: number, target = new Vector2()): Vector2 {
-    const rect = this.canvas.getBoundingClientRect()
-    return target.set(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -(((clientY - rect.top) / rect.height) * 2 - 1),
-    )
   }
 
   /** Intersect the ray through `ndc` with the y = 0 plane. */
@@ -730,8 +716,4 @@ export class OrbitRig {
     this.camera.quaternion.setFromEuler(this.euler)
     this.camera.updateMatrixWorld()
   }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return value < min ? min : value > max ? max : value
 }

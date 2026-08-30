@@ -1,4 +1,12 @@
-import { COVER_AP_COST, Faction, FACTION_INFO, MAX_AP, MAX_HP } from '../config'
+import {
+  COVER_AP_COST,
+  Faction,
+  FACTION_INFO,
+  MAX_AP,
+  MAX_HP,
+  SHOOT_AP_COST,
+  SQUAD_SIZE,
+} from '../config'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
 import type { Squads } from '../game/Squads'
@@ -176,7 +184,7 @@ export class Hud {
     const selected = this.turnManager.selectedSoldier
 
     let html = ''
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < SQUAD_SIZE; index++) {
       const portraitSrc = this.portraits.getPortrait(activeFaction, index)
       // Find soldier for this index
       const soldier = this.findSoldier(activeFaction, index)
@@ -248,9 +256,9 @@ export class Hud {
 
     this.actionPanelEl.innerHTML = `
       <div class="action-header">${selected.name} Actions</div>
-      <button id="actionShoot" class="action-btn interactive ${this.isShootModeActive ? 'active' : ''}" ${selected.ap < 4 ? 'disabled' : ''}>
+      <button id="actionShoot" class="action-btn interactive ${this.isShootModeActive ? 'active' : ''}" ${selected.ap < SHOOT_AP_COST ? 'disabled' : ''}>
         <span>${shootBtnText}</span>
-        <span class="action-tag">4 AP</span>
+        <span class="action-tag">${SHOOT_AP_COST} AP</span>
       </button>
       <button id="actionCover" class="action-btn interactive ${selected.isCrouching ? 'active' : ''}" ${coverDisabled ? 'disabled' : ''}>
         <span>${coverBtnText}</span>

@@ -2,9 +2,11 @@ import { Raycaster, Vector2, Vector3 } from 'three'
 import Game from '@mavonengine/core/Game'
 import { COVER_AP_COST, Faction, SHOOT_AP_COST, WALL_XRAY } from '../config'
 import { findChainedPath } from '../core/Pathfinding'
-import { computeFactionVisibility, hasLineOfSight } from '../core/Visibility'
+import { computeFactionVisibility, hasLineOfSight, VisState } from '../core/Visibility'
 import { directionalCover } from '../core/Cover'
-import { type Tile, tileEquals, tileKey } from '../core/Grid'
+import { smoothstep } from '../core/math'
+import { clientToNdc } from '../core/screen'
+import { type Tile, tileEquals } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Hud } from '../hud/Hud'
@@ -198,7 +200,7 @@ export class InteractionController {
       if (soldier.faction !== activeFaction) {
         const tileVis = visMap[this.battlefield.grid.index(soldier.tile.x, soldier.tile.y)] ?? 0
         if (soldier.instance) {
-          soldier.instance.visible = tileVis === 2
+          soldier.instance.visible = tileVis === VisState.Visible
         }
       } else {
         if (soldier.instance) {
@@ -225,11 +227,7 @@ export class InteractionController {
       if (dist < 6) {
         const selected = this.turnManager.selectedSoldier
         if (selected && !selected.isMoving && !selected.isDead) {
-          const rect = Game.instance().canvas.getBoundingClientRect()
-          this.ndc.set(
-            ((event.clientX - rect.left) / rect.width) * 2 - 1,
-            -(((event.clientY - rect.top) / rect.height) * 2 - 1),
-          )
+          clientToNdc(Game.instance().canvas, event.clientX, event.clientY, this.ndc)
           const pt = this.rig.screenToGround(this.ndc)
           if (pt) {
             const dx = pt.x - selected.position.x
@@ -253,11 +251,7 @@ export class InteractionController {
   private readonly onPointerMove = (event: PointerEvent): void => {
     if (this.rig.isDragging) return
 
-    const rect = Game.instance().canvas.getBoundingClientRect()
-    this.ndc.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
-    )
+    clientToNdc(Game.instance().canvas, event.clientX, event.clientY, this.ndc)
 
     const groundPt = this.rig.screenToGround(this.ndc)
     if (groundPt) {
@@ -310,11 +304,7 @@ export class InteractionController {
    * tap must project its own coordinates or it hits nothing.
    */
   private tileFromEvent(event: MouseEvent | PointerEvent): Tile | null {
-    const rect = Game.instance().canvas.getBoundingClientRect()
-    this.ndc.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
-    )
+    clientToNdc(Game.instance().canvas, event.clientX, event.clientY, this.ndc)
     const groundPt = this.rig.screenToGround(this.ndc)
     if (!groundPt) return null
     const tile = this.battlefield.grid.worldToTile(groundPt.x, groundPt.z)
@@ -457,11 +447,7 @@ export class InteractionController {
   }
 
   private pickSoldierUnderCursor(event: MouseEvent | PointerEvent, faction: Faction): Soldier | null {
-    const rect = Game.instance().canvas.getBoundingClientRect()
-    this.ndc.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
-    )
+    clientToNdc(Game.instance().canvas, event.clientX, event.clientY, this.ndc)
 
     this.raycaster.setFromCamera(this.ndc, Game.instance().camera.instance)
     const hits = this.raycaster.intersectObjects(Game.instance().scene.children, true)
@@ -632,11 +618,9 @@ export class InteractionController {
     const blocks = this.battlefield.blocks
 
     const tilt = this.rig.tilt
-    const t = Math.min(
-      1,
-      Math.max(0, (tilt - WALL_XRAY.fadeEnd) / (WALL_XRAY.fadeStart - WALL_XRAY.fadeEnd)),
+    const eased = smoothstep(
+      (tilt - WALL_XRAY.fadeEnd) / (WALL_XRAY.fadeStart - WALL_XRAY.fadeEnd),
     )
-    const eased = t * t * (3 - 2 * t)
     const opacity = WALL_XRAY.minOpacity + (1 - WALL_XRAY.minOpacity) * eased
 
     if (opacity >= 1) {

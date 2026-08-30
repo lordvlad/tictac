@@ -12,6 +12,7 @@ import {
 } from 'three'
 import { TILE } from '../config'
 import type { Grid } from '../core/Grid'
+import { VIS_BRIGHTNESS, VisState } from '../core/Visibility'
 
 /**
  * The battlefield floor.
@@ -131,14 +132,11 @@ export class Ground {
           #include <dithering_fragment>
 
           // --- fog of war -------------------------------------------------
-          // fogValue: 0.0 = Unknown (unexplored), ~0.35 = Explored (memory), 1.0 = Visible
+          // uFog stores the brightness itself (see VIS_BRIGHTNESS), not a
+          // state code, so the floor and the blocks on it cannot drift apart.
           vec2 tileCoordFog = (vWorldXZ + uHalfExtent) / ${TILE.toFixed(1)};
           vec2 tileUvFog = tileCoordFog / uGridSize;
-          float fogValue = texture2D(uFog, tileUvFog).r;
-
-          // Unexplored (0.0) is strictly 0.0 (pure pitch black shroud). Explored (0.35) -> 0.38, Visible (1.0) -> 1.0
-          float fogLit = fogValue > 0.0 ? mix(0.22, 1.0, fogValue) : 0.0;
-          gl_FragColor.rgb *= fogLit;
+          gl_FragColor.rgb *= texture2D(uFog, tileUvFog).r;
           `,
         )
     }
@@ -155,11 +153,14 @@ export class Ground {
   // Fog
   // ---------------------------------------------------------------------------
 
-  /** `values` is one byte per tile: 0 unknown, 1 explored, 2 visible. */
+  /**
+   * `values` is one {@link VisState} byte per tile. Stored as the brightness
+   * that state maps to, so the shader needs no state table of its own.
+   */
   setFogFromVisibility(values: Uint8Array): void {
     for (let i = 0; i < this.fogData.length; i++) {
-      const v = values[i]!
-      this.fogData[i] = v === 2 ? 255 : v === 1 ? 90 : 0
+      const state = (values[i] ?? VisState.Unknown) as VisState
+      this.fogData[i] = Math.round(VIS_BRIGHTNESS[state] * 255)
     }
     this.fogDirty = true
   }

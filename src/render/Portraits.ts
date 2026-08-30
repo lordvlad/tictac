@@ -14,7 +14,7 @@ import {
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import Game from '@mavonengine/core/Game'
-import { Faction, FACTION_INFO, SOLDIER_HEIGHT } from '../config'
+import { Faction, FACTION_INFO, SOLDIER_HEIGHT, SQUAD_SIZE } from '../config'
 
 export class OffscreenPortraits {
   private readonly portraits = new Map<string, string>()
@@ -57,7 +57,7 @@ export class OffscreenPortraits {
     for (const faction of [Faction.Blue, Faction.Red]) {
       const color = FACTION_INFO[faction].color
 
-      for (let index = 0; index < 4; index++) {
+      for (let index = 0; index < SQUAD_SIZE; index++) {
         const model = clone(gltf.scene) as Group
         model.position.set(0, 0, 0)
         model.rotation.y = Math.PI // Face camera

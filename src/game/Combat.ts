@@ -1,6 +1,7 @@
 import { AIM, BULLET_DAMAGE, COVER, SHOOT_AP_COST } from '../config'
 import type { Grid } from '../core/Grid'
 import { CoverLevel, shotCoverLevel } from '../core/Cover'
+import { clamp } from '../core/math'
 import type { Soldier } from '../entities/Soldier'
 import type { Tracers } from '../render/Tracers'
 
@@ -28,7 +29,7 @@ export function calculateHitChance(grid: Grid, shooter: Soldier, target: Soldier
   const level = shotCoverLevel(grid, shooter.tile, target.tile)
 
   const rawChance = AIM.base - rangePenalty - coverPenalty(level, target.isCrouching)
-  return Math.max(AIM.min, Math.min(AIM.max, Math.round(rawChance)))
+  return clamp(Math.round(rawChance), AIM.min, AIM.max)
 }
 
 /**
