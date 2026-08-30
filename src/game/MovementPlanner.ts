@@ -4,6 +4,7 @@ import { findChainedPath } from '../core/Pathfinding'
 import type { Soldier } from '../entities/Soldier'
 import { PathMarker } from '../render/PathMarker'
 import type { Squads } from './Squads'
+import type { EngineContext } from '../engine'
 
 /**
  * The movement planner: where the selected unit has been told to go, the route
@@ -15,7 +16,7 @@ import type { Squads } from './Squads'
  * confirmed move.
  */
 export class MovementPlanner {
-  private readonly marker = new PathMarker()
+  private readonly marker: PathMarker
   private readonly occupied = new Set<number>()
 
   private waypoints: Tile[] = []
@@ -28,7 +29,10 @@ export class MovementPlanner {
   constructor(
     private readonly grid: Grid,
     private readonly squads: Squads,
-  ) {}
+    engine: EngineContext,
+  ) {
+    this.marker = new PathMarker(engine)
+  }
 
   get waypointMode(): boolean {
     return this.waypointModeOn

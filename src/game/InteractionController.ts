@@ -1,5 +1,5 @@
 import { Raycaster, Vector2 } from 'three'
-import Game from '@mavonengine/core/Game'
+import type { EngineContext } from '../engine'
 import { COVER_AP_COST, Faction } from '../config'
 import { clientToNdc } from '../core/screen'
 import type { Tile } from '../core/Grid'
@@ -50,9 +50,10 @@ export class InteractionController {
     private readonly portraits: OffscreenPortraits,
     private readonly seedLabel: string,
     tracers: Tracers,
+    private readonly engine: EngineContext,
   ) {
-    this.planner = new MovementPlanner(battlefield.grid, squads)
-    this.shoot = new ShootPlanner(battlefield.grid, hud, tracers)
+    this.planner = new MovementPlanner(battlefield.grid, squads, engine)
+    this.shoot = new ShootPlanner(battlefield.grid, hud, tracers, engine)
     this.fog = new FogOfWar(battlefield.grid, battlefield.ground, battlefield.blocks)
     this.xray = new WallXray(rig, squads, battlefield.blocks)
 
@@ -62,7 +63,7 @@ export class InteractionController {
       this.refreshHud()
     }
 
-    const canvas = Game.instance().canvas
+    const canvas = this.engine.canvas
     canvas.addEventListener('pointerdown', this.onPointerDown)
     canvas.addEventListener('pointerup', this.onPointerUp)
     canvas.addEventListener('pointermove', this.onPointerMove)
@@ -153,7 +154,7 @@ export class InteractionController {
   }
 
   dispose(): void {
-    const canvas = Game.instance().canvas
+    const canvas = this.engine.canvas
     canvas.removeEventListener('pointerdown', this.onPointerDown)
     canvas.removeEventListener('pointerup', this.onPointerUp)
     canvas.removeEventListener('pointermove', this.onPointerMove)
@@ -232,7 +233,7 @@ export class InteractionController {
     const selected = this.turnManager.selectedSoldier
     if (!selected || selected.isMoving || selected.isDead) return
 
-    clientToNdc(Game.instance().canvas, event.clientX, event.clientY, this.ndc)
+    clientToNdc(this.engine.canvas, event.clientX, event.clientY, this.ndc)
     const pt = this.rig.screenToGround(this.ndc)
     if (!pt) return
 
@@ -298,7 +299,7 @@ export class InteractionController {
    * coordinates or it hits nothing.
    */
   private tileFromEvent(event: MouseEvent | PointerEvent): Tile | null {
-    clientToNdc(Game.instance().canvas, event.clientX, event.clientY, this.ndc)
+    clientToNdc(this.engine.canvas, event.clientX, event.clientY, this.ndc)
     const groundPt = this.rig.screenToGround(this.ndc)
     if (!groundPt) return null
     const tile = this.battlefield.grid.worldToTile(groundPt.x, groundPt.z)
@@ -309,9 +310,9 @@ export class InteractionController {
     event: MouseEvent | PointerEvent,
     faction: Faction,
   ): Soldier | null {
-    clientToNdc(Game.instance().canvas, event.clientX, event.clientY, this.ndc)
-    this.raycaster.setFromCamera(this.ndc, Game.instance().camera.instance)
-    const hits = this.raycaster.intersectObjects(Game.instance().scene.children, true)
+    clientToNdc(this.engine.canvas, event.clientX, event.clientY, this.ndc)
+    this.raycaster.setFromCamera(this.ndc, this.engine.camera)
+    const hits = this.raycaster.intersectObjects(this.engine.scene.children, true)
 
     for (const hit of hits) {
       let obj: typeof hit.object | null = hit.object
@@ -380,6 +381,6 @@ export class InteractionController {
       }
     }
 
-    this.xray.update(Game.instance().camera.instance.position)
+    this.xray.update(this.engine.camera.position)
   }
 }

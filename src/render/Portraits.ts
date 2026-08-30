@@ -13,13 +13,13 @@ import {
 } from 'three'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import Game from '@mavonengine/core/Game'
+import type { EngineContext } from '../engine'
 import { Faction, FACTION_INFO, SOLDIER_HEIGHT, SQUAD_SIZE } from '../config'
 
 export class OffscreenPortraits {
   private readonly portraits = new Map<string, string>()
 
-  constructor() {
+  constructor(private readonly engine: EngineContext) {
     this.generateAll()
   }
 
@@ -29,7 +29,7 @@ export class OffscreenPortraits {
   }
 
   private generateAll(): void {
-    const gltf = Game.instance().resources.items['character'] as GLTF | undefined
+    const gltf = this.engine.assets['character'] as GLTF | undefined
     if (!gltf) return
 
     const canvas = document.createElement('canvas')

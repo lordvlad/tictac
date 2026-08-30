@@ -12,7 +12,7 @@ import {
   type Texture,
   Vector3,
 } from 'three'
-import Game from '@mavonengine/core/Game'
+import type { EngineContext } from '../engine'
 import { PATH } from '../config'
 import { CoverLevel, COVER_DIRS } from '../core/Cover'
 
@@ -38,9 +38,9 @@ export class PathMarker {
   private readonly pulses: { material: LineBasicMaterial; peak: number }[] = []
   private clock = 0
 
-  constructor() {
+  constructor(private readonly engine: EngineContext) {
     this.group.renderOrder = 10
-    Game.instance().scene.add(this.group)
+    engine.scene.add(this.group)
   }
 
   /**
@@ -162,7 +162,7 @@ export class PathMarker {
 
   dispose(): void {
     this.clear()
-    Game.instance().scene.remove(this.group)
+    this.engine.scene.remove(this.group)
   }
 }
 

@@ -1,7 +1,7 @@
 import Entity3D from '@mavonengine/core/World/Entity3D'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { LoopOnce, LoopRepeat, Mesh, MeshStandardMaterial, Vector3 } from 'three'
-import Game from '@mavonengine/core/Game'
+import type { EngineContext } from '../engine'
 import { Faction, FACTION_INFO, MAX_AP, MAX_HP, MOVE_SPEED, SOLDIER_HEIGHT, STEP_DIAGONAL, STEP_ORTHOGONAL } from '../config'
 import type { Grid, Tile } from '../core/Grid'
 
@@ -47,6 +47,7 @@ export class Soldier extends Entity3D {
     name: string,
     initialTile: Tile,
     grid: Grid,
+    private readonly engine: EngineContext,
   ) {
     super()
     this.faction = faction
@@ -66,7 +67,7 @@ export class Soldier extends Entity3D {
   }
 
   private initGraphics(): void {
-    const gltf = Game.instance().resources.items['character'] as GLTF | undefined
+    const gltf = this.engine.assets['character'] as GLTF | undefined
     if (!gltf) return
 
     // Entity3D.initModel clones gltf.scene via SkeletonUtils.clone

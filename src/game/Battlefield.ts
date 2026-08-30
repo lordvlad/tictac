@@ -1,5 +1,5 @@
 import { AmbientLight, Color, DirectionalLight, Fog, HemisphereLight } from 'three'
-import Game from '@mavonengine/core/Game'
+import type { EngineContext } from '../engine'
 import type { Faction } from '../config'
 import type { Grid, Tile } from '../core/Grid'
 import { generateMap } from '../core/MapGenerator'
@@ -18,7 +18,10 @@ export class Battlefield {
 
   private readonly sun: DirectionalLight
 
-  constructor(seed: number) {
+  constructor(
+    seed: number,
+    private readonly engine: EngineContext,
+  ) {
     const generated = generateMap(seed)
     this.grid = generated.grid
     this.spawns = generated.spawns
@@ -26,7 +29,7 @@ export class Battlefield {
     this.ground = new Ground(this.grid)
     this.blocks = new Blocks(this.grid)
 
-    const scene = Game.instance().scene
+    const scene = this.engine.scene
     scene.add(this.ground.mesh)
     scene.add(this.blocks.group)
 
@@ -65,7 +68,7 @@ export class Battlefield {
   }
 
   dispose(): void {
-    const scene = Game.instance().scene
+    const scene = this.engine.scene
     scene.remove(this.ground.mesh)
     scene.remove(this.blocks.group)
     scene.remove(this.sun)

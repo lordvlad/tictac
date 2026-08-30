@@ -1,5 +1,5 @@
 import { Vector3 } from 'three'
-import Game from '@mavonengine/core/Game'
+import type { EngineContext } from '../engine'
 import { smoothstep } from '../core/math'
 
 /**
@@ -42,7 +42,7 @@ export class DamageIndicators {
   private lastTime = 0
   private disposed = false
 
-  constructor() {
+  constructor(private readonly engine: EngineContext) {
     this.container = document.createElement('div')
     Object.assign(this.container.style, {
       position: 'fixed',
@@ -90,9 +90,9 @@ export class DamageIndicators {
   private update(delta: number): void {
     if (this.floaties.length === 0) return
 
-    const camera = Game.instance().camera.instance
+    const camera = this.engine.camera
     camera.updateMatrixWorld()
-    const canvas = Game.instance().canvas
+    const canvas = this.engine.canvas
     const width = canvas.clientWidth
     const height = canvas.clientHeight
 

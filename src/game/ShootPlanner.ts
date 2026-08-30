@@ -6,6 +6,7 @@ import type { Ground } from '../render/Ground'
 import type { Tracers } from '../render/Tracers'
 import { hasLineOfSight } from '../core/Visibility'
 import { calculateHitChance, executeShot } from './Combat'
+import type { EngineContext } from '../engine'
 
 /** What the shoot planner needs from the HUD — nothing more than a menu. */
 export interface ContextMenuHost {
@@ -31,14 +32,17 @@ export class ShootPlanner {
   /** Called after a shot has been resolved. */
   onShotResolved?: () => void
 
-  private readonly damageIndicators = new DamageIndicators()
+  private readonly damageIndicators: DamageIndicators
   private activeOn = false
 
   constructor(
     private readonly grid: Grid,
     private readonly menu: ContextMenuHost,
     private readonly tracers: Tracers,
-  ) {}
+    engine: EngineContext,
+  ) {
+    this.damageIndicators = new DamageIndicators(engine)
+  }
 
   get active(): boolean {
     return this.activeOn

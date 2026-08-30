@@ -6,14 +6,16 @@ import {
   PointLight,
   Vector3,
 } from 'three'
-import Game from '@mavonengine/core/Game'
+import type { EngineContext } from '../engine'
 import { EYE_HEIGHT } from '../config'
 
 export class Tracers {
+  constructor(private readonly engine: EngineContext) {}
+
   private activeTracers: { line: Line; light: PointLight; age: number; duration: number }[] = []
 
   spawnTracer(fromWorld: Vector3, toWorld: Vector3, hit: boolean): void {
-    const scene = Game.instance().scene
+    const scene = this.engine.scene
 
     const origin = fromWorld.clone().add(new Vector3(0, EYE_HEIGHT, 0))
     const target = toWorld.clone().add(new Vector3(0, EYE_HEIGHT, 0))
@@ -41,7 +43,7 @@ export class Tracers {
   }
 
   update(delta: number): void {
-    const scene = Game.instance().scene
+    const scene = this.engine.scene
 
     for (let i = this.activeTracers.length - 1; i >= 0; i--) {
       const tracer = this.activeTracers[i]!
@@ -62,7 +64,7 @@ export class Tracers {
   }
 
   dispose(): void {
-    const scene = Game.instance().scene
+    const scene = this.engine.scene
     for (const tracer of this.activeTracers) {
       scene.remove(tracer.line)
       scene.remove(tracer.light)

@@ -2,6 +2,7 @@ import Game from '@mavonengine/core/Game'
 import type { Asset } from '@mavonengine/core/Types/Asset'
 import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
+import { createEngineContext } from './engine'
 import { resolveSeed } from './core/rng'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
@@ -42,19 +43,21 @@ game.resources.on('loaded', () => {
 })
 
 function start(): void {
-  const battlefield = new Battlefield(seed)
-  const squads = new Squads(battlefield.grid, battlefield.spawns)
+  const engine = createEngineContext(Game.instance())
 
-  const rig = new OrbitRig(Game.instance().camera.instance, Game.instance().canvas, {
+  const battlefield = new Battlefield(seed, engine)
+  const squads = new Squads(battlefield.grid, battlefield.spawns, engine)
+
+  const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,
   })
 
-  const portraits = new OffscreenPortraits()
-  const tracers = new Tracers()
+  const portraits = new OffscreenPortraits(engine)
+  const tracers = new Tracers(engine)
   const turnManager = new TurnManager(squads, rig)
 
   // The HUD is a pure view: it emits intents, the controller carries them out.
-  // `controller` is assigned on the next line, so the handler defers the lookup.
+  // `controller` is assigned just below, so the handler defers the lookup.
   const hud = new Hud((intent) => controller.handleIntent(intent))
 
   const controller = new InteractionController(
@@ -66,6 +69,7 @@ function start(): void {
     portraits,
     seedLabel,
     tracers,
+    engine,
   )
 
   // Initial camera focus on map center (no character selected on start)
