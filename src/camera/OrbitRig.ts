@@ -73,6 +73,9 @@ export class OrbitRig {
   private dragMode: DragMode = 'none'
   private dragPointerId = -1
   private readonly lastPointer = new Vector2()
+  /** Press origin and furthest travel from it, to tell a tap from a drag. */
+  private readonly pressOrigin = new Vector2()
+  private pressTravel = 0
 
   /** Live pointer ids, so a second finger can hand the gesture to the pinch recogniser. */
   private readonly activePointers = new Set<number>()
@@ -83,7 +86,8 @@ export class OrbitRig {
   private pinchStartDist = 0
   private pinchStartAzimuth = 0
   private pinching = false
-  private pinchEndTime = 0
+  /** When the last camera gesture (drag or pinch) ended, for tap suppression. */
+  private gestureEndTime = 0
 
   /** Camera state frozen at pan start, so panning cannot feed back on itself. */
   private readonly panStartFocus = new Vector3()
@@ -175,12 +179,13 @@ export class OrbitRig {
 
   /**
    * True while the user is actively dragging — used to suppress click actions.
-   * A finished pinch keeps suppressing for `gestureClickGrace`: lifting two
-   * fingers can still synthesise a tap, which would otherwise order a move.
+   * A finished gesture keeps suppressing for `gestureClickGrace`: both a
+   * drag-pan and a two-finger gesture still emit a trailing `click`, which
+   * would otherwise order a move at whatever tile the finger happened to lift.
    */
   get isDragging(): boolean {
     if (this.dragMode !== 'none' || this.pinching) return true
-    return performance.now() - this.pinchEndTime < CAM.gestureClickGrace
+    return performance.now() - this.gestureEndTime < CAM.gestureClickGrace
   }
 
   /**
@@ -370,6 +375,8 @@ export class OrbitRig {
     event.preventDefault()
     this.dragPointerId = event.pointerId
     this.lastPointer.set(event.clientX, event.clientY)
+    this.pressOrigin.set(event.clientX, event.clientY)
+    this.pressTravel = 0
 
     if (this.dragMode === 'pan') this.beginPan(event)
 
@@ -384,6 +391,10 @@ export class OrbitRig {
     const dx = event.clientX - this.lastPointer.x
     const dy = event.clientY - this.lastPointer.y
     this.lastPointer.set(event.clientX, event.clientY)
+    this.pressTravel = Math.max(
+      this.pressTravel,
+      Math.hypot(event.clientX - this.pressOrigin.x, event.clientY - this.pressOrigin.y),
+    )
 
     if (this.dragMode === 'pan') {
       this.updatePan(event)
@@ -418,8 +429,12 @@ export class OrbitRig {
     }
 
     if (event.pointerId !== this.dragPointerId) return
+    // A press that travelled counts as a camera drag, not a tap: keep the
+    // trailing `click` suppressed so panning never also orders a move.
+    if (this.pressTravel > CAM.tapSlop) this.gestureEndTime = performance.now()
     this.dragMode = 'none'
     this.dragPointerId = -1
+    this.pressTravel = 0
     this.panValid = false
   }
 
@@ -471,7 +486,7 @@ export class OrbitRig {
 
     if (last) {
       this.pinching = false
-      this.pinchEndTime = performance.now()
+      this.gestureEndTime = performance.now()
       this.panValid = false
     }
   }

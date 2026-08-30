@@ -35,9 +35,10 @@ interface BlockInstance {
  * Fog is applied per instance via instance colour, matching the ground shader's
  * brightness ramp so walls and floor dim together.
  *
- * Walls that block the camera's view of the selected character can be faded
- * per instance (`setOcclusionFade`): opacity rides a dedicated instanced
- * attribute, since instance colours are already taken by fog.
+ * Walls that block the camera's view of a character can be faded per instance
+ * (`beginOcclusionFade`/`addOcclusionRay`/`commitOcclusionFade`): opacity rides
+ * a dedicated instanced attribute, since instance colours are already taken by
+ * fog.
  */
 export class Blocks {
   readonly group = new Group()
@@ -182,14 +183,22 @@ export class Blocks {
   // -------------------------------------------------------------------------
 
   /**
-   * Fade every wall whose volume the camera→character segment passes through
-   * down to `opacity`; all other walls stay opaque. Call every frame while the
-   * effect is active, and `clearOcclusionFade` once it should stop.
+   * Start a fade pass. Follow with one `addOcclusionRay` per character being
+   * kept visible, then `commitOcclusionFade`. Split into three calls so any
+   * number of characters can contribute without allocating a target list.
    */
-  setOcclusionFade(from: Vector3, to: Vector3, opacity: number): void {
-    this.occlusionActive = true
+  beginOcclusionFade(): void {
     this.occlusionMask.fill(0)
+  }
+
+  /** Mark the walls the camera→character segment passes through. */
+  addOcclusionRay(from: Vector3, to: Vector3): void {
     this.markOccludedTiles(from, to, this.occlusionMask)
+  }
+
+  /** Fade every marked wall to `opacity`; all others return to fully opaque. */
+  commitOcclusionFade(opacity: number): void {
+    this.occlusionActive = true
     this.applyFade(this.halfMesh, this.halfInstances, opacity)
     this.applyFade(this.fullMesh, this.fullInstances, opacity)
   }

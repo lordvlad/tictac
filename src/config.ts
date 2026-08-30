@@ -42,8 +42,13 @@ export const CAM = {
   pinchZoomPower: 2,
   /** Two-finger twist amplification (1 = camera turns exactly with the fingers). */
   pinchRotateSpeed: 2.5,
-  /** Suppress taps for this long (ms) after a two-finger gesture ends. */
+  /** Suppress taps for this long (ms) after a camera gesture ends. */
   gestureClickGrace: 200,
+  /**
+   * Pointer travel (px) below which a press still counts as a tap/click. Above
+   * it the press was a camera drag and must not also order a move.
+   */
+  tapSlop: 8,
   /** Radians per pixel for right-drag orbit. */
   rotateSpeed: 0.006,
   /** Radians per pixel for middle-drag free look. */

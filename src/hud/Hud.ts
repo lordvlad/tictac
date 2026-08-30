@@ -24,8 +24,10 @@ export class Hud {
   onCancelShootRequested?: () => void
   onTurnSwitched?: () => void
   onToggleCoverRequested?: () => void
+  onToggleWaypointsRequested?: () => void
 
   isShootModeActive = false
+  isWaypointModeActive = false
   private turnOverlayVisible = false
 
   // DOM elements
@@ -254,6 +256,10 @@ export class Hud {
         <span>${coverBtnText}</span>
         <span class="action-tag">${coverTag}</span>
       </button>
+      <button id="actionWaypoints" class="action-btn interactive ${this.isWaypointModeActive ? 'active' : ''}">
+        <span>Waypoints</span>
+        <span class="action-tag">${this.isWaypointModeActive ? 'On' : 'Off'}</span>
+      </button>
       <button class="action-btn interactive" disabled>
         <span>Overwatch</span>
         <span class="action-tag">Placeholder</span>
@@ -281,6 +287,9 @@ export class Hud {
 
     const coverBtn = this.actionPanelEl.querySelector('#actionCover') as HTMLButtonElement | null
     if (coverBtn) coverBtn.onclick = () => this.onToggleCoverRequested?.()
+
+    const waypointBtn = this.actionPanelEl.querySelector('#actionWaypoints') as HTMLButtonElement | null
+    if (waypointBtn) waypointBtn.onclick = () => this.onToggleWaypointsRequested?.()
 
     const finishBtn = this.actionPanelEl.querySelector('#actionFinishTurn') as HTMLButtonElement
     if (finishBtn) {

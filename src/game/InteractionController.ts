@@ -39,6 +39,12 @@ export class InteractionController {
   private activePath: Tile[] = []
   /** Whether `activePath` is actually affordable/reachable. Never move when false. */
   private activePathValid = false
+  /**
+   * Waypoint planning mode. Off, a tap sets the target directly; on, each tap
+   * drops a waypoint and re-tapping walks it up to target and then to a
+   * confirmed move — the shift-click route without a keyboard.
+   */
+  private waypointMode = false
 
   // Hover state
   private hoveredTile: Tile | null = null
@@ -50,7 +56,7 @@ export class InteractionController {
   private readonly raycaster = new Raycaster()
   private readonly ndc = new Vector2()
 
-  /** Scratch target for the wall x-ray ray (selected character's feet). */
+  /** Scratch target for the wall x-ray rays (a character's feet). */
   private readonly xrayTarget = new Vector3()
 
   // Right-click turn tracking
@@ -85,6 +91,7 @@ export class InteractionController {
     hud.onCancelShootRequested = () => this.exitShootMode()
     hud.onTurnSwitched = () => this.onTurnSwitched()
     hud.onToggleCoverRequested = () => this.toggleCover()
+    hud.onToggleWaypointsRequested = () => this.toggleWaypointMode()
 
     turnManager.onSelectionChanged = () => {
       this.clearPlannerState()
@@ -131,6 +138,21 @@ export class InteractionController {
       soldier.ap -= COVER_AP_COST
       soldier.enterCover()
     }
+    this.hud.update()
+  }
+
+  /**
+   * Toggle waypoint planning. Switching it off abandons the plan outright: the
+   * half-built route belongs to that mode and silently keeping it would leave a
+   * stale target armed for the next single tap.
+   */
+  toggleWaypointMode(): void {
+    this.waypointMode = !this.waypointMode
+    if (!this.waypointMode) {
+      this.clearPlannerState()
+      this.renderOverlay()
+    }
+    this.hud.isWaypointModeActive = this.waypointMode
     this.hud.update()
   }
 
@@ -280,42 +302,97 @@ export class InteractionController {
   // Move Mode Execution
   // ---------------------------------------------------------------------------
 
+  /**
+   * Tile under a click/tap, resolved from the event itself.
+   *
+   * `hoveredTile` is mouse-only: it is filled in by `pointermove`, which touch
+   * never sends before a tap (and which is suppressed mid-drag anyway), so a
+   * tap must project its own coordinates or it hits nothing.
+   */
+  private tileFromEvent(event: MouseEvent | PointerEvent): Tile | null {
+    const rect = Game.instance().canvas.getBoundingClientRect()
+    this.ndc.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+    )
+    const groundPt = this.rig.screenToGround(this.ndc)
+    if (!groundPt) return null
+    const tile = this.battlefield.grid.worldToTile(groundPt.x, groundPt.z)
+    return this.battlefield.grid.inBounds(tile.x, tile.y) ? tile : null
+  }
+
   private handleMoveClick(event: MouseEvent): void {
     const selected = this.turnManager.selectedSoldier
-    if (!selected || selected.isMoving || selected.ap <= 0 || !this.hoveredTile) return
+    if (!selected || selected.isMoving || selected.ap <= 0) return
 
+    const tile = this.tileFromEvent(event)
+    if (!tile) return
+
+    // Shift-click stays a desktop shortcut for adding a waypoint outright.
     if (event.shiftKey) {
-      // Shift-click toggles/adds waypoint
-      if (!this.waypoints.some((w) => tileEquals(w, this.hoveredTile))) {
-        this.waypoints.push(this.hoveredTile)
-      }
-      this.renderOverlay()
+      this.addWaypoint(tile)
+      return
+    }
+
+    if (this.waypointMode) {
+      this.handleWaypointModeClick(selected, tile)
       return
     }
 
     if (this.currentGoal === null) {
       // First click on map tile -> set goal and show path to target
-      this.currentGoal = this.hoveredTile
+      this.currentGoal = tile
       this.renderOverlay()
       return
     }
 
     // A target tile was already selected
-    if (tileEquals(this.currentGoal, this.hoveredTile)) {
+    if (tileEquals(this.currentGoal, tile)) {
       // Second click on SAME tile -> confirm, but ONLY if the path is actually
       // reachable within the unit's remaining AP. An unreachable (red) target
       // must never be walkable just because it was clicked twice.
-      if (this.activePathValid && this.activePath.length > 1) {
-        const path = [...this.activePath]
-        this.clearPlannerState()
-        selected.startMovement(path)
-      } else {
-        this.clearPlannerState()
-      }
+      this.confirmPath(selected)
     } else {
       // Click on DIFFERENT tile -> reset to no path/target selected
       this.clearPlannerState()
     }
+  }
+
+  /**
+   * Waypoint mode promotes the same tile one step per tap:
+   * waypoint -> target -> confirmed move. Tapping a fresh tile appends another
+   * waypoint, so a route is chained by tapping each corner in turn.
+   */
+  private handleWaypointModeClick(selected: Soldier, tile: Tile): void {
+    if (this.currentGoal && tileEquals(this.currentGoal, tile)) {
+      this.confirmPath(selected)
+      return
+    }
+
+    const existing = this.waypoints.findIndex((w) => tileEquals(w, tile))
+    if (existing >= 0) {
+      // Second tap on a waypoint promotes it to the target.
+      this.waypoints.splice(existing, 1)
+      this.currentGoal = tile
+      this.renderOverlay()
+      return
+    }
+
+    this.addWaypoint(tile)
+  }
+
+  private addWaypoint(tile: Tile): void {
+    if (!this.waypoints.some((w) => tileEquals(w, tile))) {
+      this.waypoints.push(tile)
+    }
+    this.renderOverlay()
+  }
+
+  /** Execute the planned path, but only while it is actually affordable. */
+  private confirmPath(selected: Soldier): void {
+    const path = this.activePathValid && this.activePath.length > 1 ? [...this.activePath] : null
+    this.clearPlannerState()
+    if (path) selected.startMovement(path)
   }
 
   // ---------------------------------------------------------------------------
@@ -349,7 +426,7 @@ export class InteractionController {
           action: () => this.hud.hideContextMenu(),
         },
       ])
-    } else if (this.hoveredTile) {
+    } else if (this.tileFromEvent(event)) {
       // Environment click -> show placeholder effects menu
       this.hud.showContextMenu(event.clientX, event.clientY, [
         {
@@ -431,8 +508,13 @@ export class InteractionController {
     // Green foot circle marking the selected unit.
     this.pathMarker.showSelection(grid.tileToWorld(selected.tile))
 
-    // Only render path if a target goal tile has been clicked (no path on hover)
-    if (this.currentGoal && !tileEquals(selected.tile, this.currentGoal)) {
+    // Without a target, the newest waypoint stands in as a provisional endpoint
+    // so the route stays visible while it is still being tapped out.
+    const provisional = this.currentGoal === null
+    const endpoint = this.currentGoal ?? this.waypoints[this.waypoints.length - 1] ?? null
+    const via = provisional ? this.waypoints.slice(0, -1) : this.waypoints
+
+    if (endpoint && !tileEquals(selected.tile, endpoint)) {
       const occupied = new Set<number>()
       for (const s of this.squads.soldiers) {
         if (!s.isDead) occupied.add(this.battlefield.grid.index(s.tile.x, s.tile.y))
@@ -441,19 +523,22 @@ export class InteractionController {
       const result = findChainedPath(
         this.battlefield.grid,
         selected.tile,
-        this.currentGoal,
-        this.waypoints,
+        endpoint,
+        via,
         selected.ap,
         occupied,
       )
 
-      this.activePath = result.path
-      this.activePathValid = result.valid
+      // A provisional endpoint is not a target: no tap may confirm it.
+      this.activePath = provisional ? [] : result.path
+      this.activePathValid = provisional ? false : result.valid
 
       const pathPoints = result.path.map((t) => grid.tileToWorld(t))
-      const waypointPoints = this.waypoints.map((t) => grid.tileToWorld(t))
-      const goalPoint = grid.tileToWorld(this.currentGoal)
-      const coverLevels = directionalCover(this.battlefield.grid, this.currentGoal)
+      const waypointPoints = (provisional ? this.waypoints : via).map((t) => grid.tileToWorld(t))
+      const goalPoint = grid.tileToWorld(endpoint)
+      const coverLevels = provisional
+        ? undefined
+        : directionalCover(this.battlefield.grid, endpoint)
       this.pathMarker.show(pathPoints, waypointPoints, goalPoint, result.valid, coverLevels)
     }
   }
@@ -534,17 +619,17 @@ export class InteractionController {
   // ---------------------------------------------------------------------------
 
   /**
-   * Fade walls between the camera and the selected character once the camera
-   * tilts below `WALL_XRAY.fadeStart`. Opacity eases from 1 at `fadeStart`
-   * down to `minOpacity` at `fadeEnd`, so zooming reads as a smooth dissolve
-   * rather than a snap.
+   * Fade walls between the camera and any character — friend or foe — once the
+   * camera tilts below `WALL_XRAY.fadeStart`. Opacity eases from 1 at
+   * `fadeStart` down to `minOpacity` at `fadeEnd`, so zooming reads as a smooth
+   * dissolve rather than a snap.
+   *
+   * Only rendered characters contribute. An enemy hidden by fog of war must
+   * never fade the wall in front of it: that would betray a position the player
+   * has not spotted.
    */
   private updateWallFade(): void {
-    const selected = this.turnManager.selectedSoldier
-    if (!selected || selected.isDead) {
-      this.battlefield.blocks.clearOcclusionFade()
-      return
-    }
+    const blocks = this.battlefield.blocks
 
     const tilt = this.rig.tilt
     const t = Math.min(
@@ -555,17 +640,20 @@ export class InteractionController {
     const opacity = WALL_XRAY.minOpacity + (1 - WALL_XRAY.minOpacity) * eased
 
     if (opacity >= 1) {
-      this.battlefield.blocks.clearOcclusionFade()
+      blocks.clearOcclusionFade()
       return
     }
 
-    // Target the character's feet: a wall fades as soon as it hides ANY part
-    // of the body, not just the head.
-    this.xrayTarget.copy(selected.position)
-    this.battlefield.blocks.setOcclusionFade(
-      Game.instance().camera.instance.position,
-      this.xrayTarget,
-      opacity,
-    )
+    const cameraPos = Game.instance().camera.instance.position
+    blocks.beginOcclusionFade()
+    for (const soldier of this.squads.soldiers) {
+      if (soldier.isDead) continue
+      if (soldier.instance && !soldier.instance.visible) continue
+      // Target the character's feet: a wall fades as soon as it hides ANY part
+      // of the body, not just the head.
+      this.xrayTarget.copy(soldier.position)
+      blocks.addOcclusionRay(cameraPos, this.xrayTarget)
+    }
+    blocks.commitOcclusionFade(opacity)
   }
 }
