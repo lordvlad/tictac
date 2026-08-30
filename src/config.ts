@@ -6,6 +6,17 @@
 
 export const TILE = 1
 
+export const SIM = {
+  /** Fixed simulation step, in seconds (30 Hz). */
+  step: 1 / 30,
+  /**
+   * Most wall time one delivery may catch up on. Browsers clamp the engine's
+   * `setInterval` hard in a hidden or busy tab, so a single delivery can carry
+   * seconds; without a ceiling that becomes a visible lurch.
+   */
+  maxCatchUp: 0.5,
+} as const
+
 /** Grid is GRID_SIZE x GRID_SIZE tiles. */
 export const GRID_SIZE = 28
 

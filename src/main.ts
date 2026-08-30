@@ -3,6 +3,7 @@ import type { Asset } from '@mavonengine/core/Types/Asset'
 import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
 import { createEngineContext } from './engine'
+import { SIM } from './config'
 import { resolveSeed } from './core/rng'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
@@ -75,12 +76,21 @@ function start(): void {
   // Initial camera focus on map center (no character selected on start)
   rig.snapTo(new Vector3(0, 0, 0))
 
-  // Handle 30 Hz simulation & per-frame rAF updates
+  // The engine ticks on a setInterval, which browsers clamp hard in a hidden or
+  // busy tab — a delivery can carry seconds of wall time. Draining it in fixed
+  // steps keeps movement, animation and fog advancing at the rate they would at
+  // full frame rate, and the catch-up ceiling bounds the work instead of
+  // discarding the frame: the previous `delta > 0.5` bail froze the entire
+  // simulation for as long as the tab stayed throttled.
+  let accumulator = 0
   Game.instance().onUpdate((delta) => {
-    if (delta > 0.5) return
-    squads.renderUpdate(delta)
-    tracers.update(delta)
-    controller.update(delta)
+    accumulator = Math.min(accumulator + delta, SIM.maxCatchUp)
+    while (accumulator >= SIM.step) {
+      accumulator -= SIM.step
+      squads.renderUpdate(SIM.step)
+      tracers.update(SIM.step)
+      controller.update(SIM.step)
+    }
     battlefield.flush()
   })
 
