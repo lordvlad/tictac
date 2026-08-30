@@ -2,9 +2,7 @@ import Game from '@mavonengine/core/Game'
 import type { Asset } from '@mavonengine/core/Types/Asset'
 import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
-import { Faction } from './config'
 import { resolveSeed } from './core/rng'
-import { createVisibilityMap } from './core/Visibility'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
 import { Squads } from './game/Squads'
@@ -57,11 +55,6 @@ function start(): void {
 
   const hud = new Hud(turnManager, squads, rig, portraits, seedLabel)
 
-  const visibilityMaps: Record<Faction, Uint8Array> = {
-    [Faction.Blue]: createVisibilityMap(battlefield.grid.size),
-    [Faction.Red]: createVisibilityMap(battlefield.grid.size),
-  }
-
   const controller = new InteractionController(
     battlefield,
     squads,
@@ -69,7 +62,6 @@ function start(): void {
     rig,
     hud,
     tracers,
-    visibilityMaps,
   )
 
   // Initial camera focus on map center (no character selected on start)
