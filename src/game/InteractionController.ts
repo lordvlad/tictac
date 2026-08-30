@@ -5,6 +5,7 @@ import { clientToNdc } from '../core/screen'
 import type { Tile } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import type { OrbitRig } from '../camera/OrbitRig'
+import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
 import { buildHudModel, type HudIntent } from '../hud/HudModel'
 import type { OffscreenPortraits } from '../render/Portraits'
@@ -37,6 +38,7 @@ export class InteractionController {
   private hoveredEnemy: Soldier | null = null
 
   private readonly raycaster = new Raycaster()
+  private readonly picker: GroundPicker
   private readonly ndc = new Vector2()
   /** Where the right button went down, to tell a facing click from an orbit drag. */
   private readonly rightDownPos = new Vector2()
@@ -56,6 +58,7 @@ export class InteractionController {
     this.shoot = new ShootPlanner(battlefield.grid, hud, tracers, engine)
     this.fog = new FogOfWar(battlefield.grid, battlefield.ground, battlefield.blocks)
     this.xray = new WallXray(rig, squads, battlefield.blocks)
+    this.picker = new GroundPicker(engine.camera)
 
     this.shoot.onShotResolved = () => {
       this.recomputeVisibility()
@@ -234,7 +237,7 @@ export class InteractionController {
     if (!selected || selected.isMoving || selected.isDead) return
 
     clientToNdc(this.engine.canvas, event.clientX, event.clientY, this.ndc)
-    const pt = this.rig.screenToGround(this.ndc)
+    const pt = this.picker.fromNdc(this.ndc)
     if (!pt) return
 
     const dx = pt.x - selected.position.x
@@ -300,7 +303,7 @@ export class InteractionController {
    */
   private tileFromEvent(event: MouseEvent | PointerEvent): Tile | null {
     clientToNdc(this.engine.canvas, event.clientX, event.clientY, this.ndc)
-    const groundPt = this.rig.screenToGround(this.ndc)
+    const groundPt = this.picker.fromNdc(this.ndc)
     if (!groundPt) return null
     const tile = this.battlefield.grid.worldToTile(groundPt.x, groundPt.z)
     return this.battlefield.grid.inBounds(tile.x, tile.y) ? tile : null
