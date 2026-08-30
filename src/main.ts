@@ -53,7 +53,9 @@ function start(): void {
   const tracers = new Tracers()
   const turnManager = new TurnManager(squads, rig)
 
-  const hud = new Hud(turnManager, squads, rig, portraits, seedLabel)
+  // The HUD is a pure view: it emits intents, the controller carries them out.
+  // `controller` is assigned on the next line, so the handler defers the lookup.
+  const hud = new Hud((intent) => controller.handleIntent(intent))
 
   const controller = new InteractionController(
     battlefield,
@@ -61,6 +63,8 @@ function start(): void {
     turnManager,
     rig,
     hud,
+    portraits,
+    seedLabel,
     tracers,
   )
 

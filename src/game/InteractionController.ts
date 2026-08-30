@@ -6,6 +6,8 @@ import type { Tile } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Hud } from '../hud/Hud'
+import { buildHudModel, type HudIntent } from '../hud/HudModel'
+import type { OffscreenPortraits } from '../render/Portraits'
 import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
 import { MovementPlanner } from './MovementPlanner'
@@ -45,6 +47,8 @@ export class InteractionController {
     private readonly turnManager: TurnManager,
     private readonly rig: OrbitRig,
     private readonly hud: Hud,
+    private readonly portraits: OffscreenPortraits,
+    private readonly seedLabel: string,
     tracers: Tracers,
   ) {
     this.planner = new MovementPlanner(battlefield.grid, squads)
@@ -55,8 +59,7 @@ export class InteractionController {
     this.shoot.onShotResolved = () => {
       this.recomputeVisibility()
       this.renderOverlay()
-      this.hud.isShootModeActive = false
-      this.hud.update()
+      this.refreshHud()
     }
 
     const canvas = Game.instance().canvas
@@ -66,20 +69,87 @@ export class InteractionController {
     canvas.addEventListener('click', this.onClick)
     window.addEventListener('keydown', this.onKeyDown)
 
-    hud.onShootRequested = () => this.enterShootMode()
-    hud.onCancelShootRequested = () => this.exitShootMode()
-    hud.onTurnSwitched = () => this.onTurnSwitched()
-    hud.onToggleCoverRequested = () => this.toggleCover()
-    hud.onToggleWaypointsRequested = () => this.toggleWaypointMode()
-
     turnManager.onSelectionChanged = () => {
       this.planner.clear()
       this.renderOverlay()
       this.battlefield.flush()
-      this.hud.update()
+      this.refreshHud()
     }
 
     this.recomputeVisibility()
+    this.refreshHud()
+  }
+
+  /** Re-project game state into the HUD. The HUD reads nothing on its own. */
+  private refreshHud(): void {
+    this.hud.render(
+      buildHudModel({
+        turnManager: this.turnManager,
+        squads: this.squads,
+        rig: this.rig,
+        portraits: this.portraits,
+        seedLabel: this.seedLabel,
+        shootActive: this.shoot.active,
+        waypointActive: this.planner.waypointMode,
+      }),
+    )
+  }
+
+  /** Single place where a HUD press becomes a change to the game. */
+  handleIntent(intent: HudIntent): void {
+    switch (intent.type) {
+      case 'selectUnit': {
+        const soldier = this.squads.byFaction[this.turnManager.activeFaction][intent.index]
+        if (soldier && !soldier.isDead) {
+          this.turnManager.selectSoldier(soldier)
+          this.exitShootMode()
+        }
+        break
+      }
+      case 'shoot':
+        this.enterShootMode()
+        break
+      case 'cancelShoot':
+        this.exitShootMode()
+        break
+      case 'toggleCover':
+        this.toggleCover()
+        break
+      case 'toggleWaypoints':
+        this.toggleWaypointMode()
+        break
+      case 'endUnitTurn': {
+        const selected = this.turnManager.selectedSoldier
+        if (selected) this.turnManager.finishSoldierTurn(selected)
+        this.refreshHud()
+        break
+      }
+      case 'requestTurnSwitch':
+        this.hud.showTurnOverlay()
+        break
+      case 'confirmTurnSwitch':
+        this.hud.hideTurnOverlay()
+        this.turnManager.startNextTurn()
+        this.onTurnSwitched()
+        this.refreshHud()
+        break
+      case 'toggleFreelook':
+        if (this.rig.isCharacterViewActive) this.rig.exitCharacterView()
+        this.rig.toggleFreeLookMode()
+        this.refreshHud()
+        break
+      case 'toggleUnitView': {
+        const selected = this.turnManager.selectedSoldier
+        if (!selected) break
+        if (this.rig.isCharacterViewActive) {
+          this.rig.exitCharacterView()
+        } else {
+          this.rig.enterCharacterView(selected.position, selected.currentYaw)
+        }
+        this.refreshHud()
+        break
+      }
+    }
   }
 
   dispose(): void {
@@ -100,17 +170,15 @@ export class InteractionController {
   enterShootMode(): void {
     if (!this.shoot.enter(this.turnManager.selectedSoldier)) return
     this.planner.clear()
-    this.hud.isShootModeActive = true
-    this.hud.update()
     this.renderOverlay()
+    this.refreshHud()
   }
 
   exitShootMode(): void {
     this.shoot.exit()
     this.planner.clear()
-    this.hud.isShootModeActive = false
-    this.hud.update()
     this.renderOverlay()
+    this.refreshHud()
   }
 
   /** Hunker into / out of a crouch cover stance. Entering costs AP; standing is free. */
@@ -125,13 +193,13 @@ export class InteractionController {
       soldier.ap -= COVER_AP_COST
       soldier.enterCover()
     }
-    this.hud.update()
+    this.refreshHud()
   }
 
   toggleWaypointMode(): void {
-    this.hud.isWaypointModeActive = this.planner.toggleWaypointMode()
+    this.planner.toggleWaypointMode()
     this.renderOverlay()
-    this.hud.update()
+    this.refreshHud()
   }
 
   onTurnSwitched(): void {
@@ -195,7 +263,7 @@ export class InteractionController {
     if (friendly && friendly !== selected) {
       this.turnManager.selectSoldier(friendly)
       this.exitShootMode()
-      this.hud.update()
+      this.refreshHud()
       return
     }
 
@@ -211,7 +279,7 @@ export class InteractionController {
     if (!tile || selected.isMoving || selected.ap <= 0) return
     // Shift-click stays a desktop shortcut for adding a waypoint outright.
     const started = this.planner.handleClick(selected, tile, event.shiftKey)
-    if (started) this.hud.update()
+    if (started) this.refreshHud()
   }
 
   // ---------------------------------------------------------------------------
@@ -301,14 +369,14 @@ export class InteractionController {
     if (selected && selected.isMoving) {
       const moved = selected.updateMovement(delta, this.battlefield.grid, () => {
         this.recomputeVisibility()
-        this.hud.update()
+        this.refreshHud()
       })
 
       if (!this.rig.isCharacterViewActive) this.rig.focusOn(selected.position)
 
       if (!moved) {
         this.recomputeVisibility()
-        this.hud.update()
+        this.refreshHud()
       }
     }
 

@@ -1,17 +1,4 @@
-import {
-  COVER_AP_COST,
-  Faction,
-  FACTION_INFO,
-  MAX_AP,
-  MAX_HP,
-  SHOOT_AP_COST,
-  SQUAD_SIZE,
-} from '../config'
-import type { OrbitRig } from '../camera/OrbitRig'
-import type { Soldier } from '../entities/Soldier'
-import type { Squads } from '../game/Squads'
-import type { TurnManager } from '../game/TurnManager'
-import type { OffscreenPortraits } from '../render/Portraits'
+import type { HudAction, HudIntent, HudModel } from './HudModel'
 
 export interface ContextMenuItem {
   label: string
@@ -20,46 +7,31 @@ export interface ContextMenuItem {
   action: () => void
 }
 
+/**
+ * The DOM HUD: squad bar, unit actions, turn banner, context menu.
+ *
+ * A pure view. It renders whatever {@link HudModel} it is handed and reports
+ * presses as {@link HudIntent}s — it never touches the turn manager, a soldier
+ * or the camera, so "what a button does" is answered in exactly one place.
+ *
+ * Repeated elements (action buttons, squad cards, menu items) are rendered from
+ * data by a single template each; they used to be near-identical copies that
+ * differed only in a label.
+ */
 export class Hud {
   private readonly uiRoot: HTMLElement
-  private readonly turnManager: TurnManager
-  private readonly squads: Squads
-  private readonly rig: OrbitRig
-  private readonly portraits: OffscreenPortraits
-
-  // Callbacks
-  onShootRequested?: () => void
-  onCancelShootRequested?: () => void
-  onTurnSwitched?: () => void
-  onToggleCoverRequested?: () => void
-  onToggleWaypointsRequested?: () => void
-
-  isShootModeActive = false
-  isWaypointModeActive = false
-  private turnOverlayVisible = false
-
-  // DOM elements
   private readonly topRightEl: HTMLElement
   private readonly squadBarEl: HTMLElement
   private readonly actionPanelEl: HTMLElement
   private readonly turnOverlayEl: HTMLElement
   private readonly contextMenuEl: HTMLElement
 
-  constructor(
-    turnManager: TurnManager,
-    squads: Squads,
-    rig: OrbitRig,
-    portraits: OffscreenPortraits,
-    seedLabel: string,
-  ) {
-    this.turnManager = turnManager
-    this.squads = squads
-    this.rig = rig
-    this.portraits = portraits
+  private turnOverlayVisible = false
+  private model: HudModel | null = null
 
+  constructor(private readonly onIntent: (intent: HudIntent) => void) {
     this.uiRoot = document.getElementById('ui') ?? document.body
 
-    // Create container elements
     this.topRightEl = document.createElement('div')
     this.topRightEl.className = 'hud-top-right'
 
@@ -84,265 +56,172 @@ export class Hud {
       this.contextMenuEl,
     )
 
-    this.renderTopRight(seedLabel)
-    this.renderTurnOverlay()
-    this.update()
+    // Delegated: the panels are re-rendered wholesale, so per-element handlers
+    // would have to be re-bound on every update.
+    this.uiRoot.addEventListener('click', this.onUiClick)
   }
 
-  update(): void {
-    this.renderSquadBar()
-    this.renderActionPanel()
-    this.updateTopRight()
+  dispose(): void {
+    this.uiRoot.removeEventListener('click', this.onUiClick)
+    for (const el of [
+      this.topRightEl,
+      this.squadBarEl,
+      this.actionPanelEl,
+      this.turnOverlayEl,
+      this.contextMenuEl,
+    ]) {
+      el.remove()
+    }
+  }
+
+  /**
+   * Re-render the live panels. Deliberately excludes the turn overlay: this
+   * runs on every state change (30 Hz while a unit walks), and replacing the
+   * overlay's markup under the player's finger loses the press — the click
+   * target degrades to the container once the button is swapped mid-click.
+   */
+  render(model: HudModel): void {
+    this.model = model
+    this.renderTopRight(model)
+    this.renderSquadBar(model)
+    this.renderActionPanel(model)
   }
 
   // ---------------------------------------------------------------------------
-  // Top Right
+  // Intent plumbing
   // ---------------------------------------------------------------------------
 
-  private renderTopRight(seedLabel: string): void {
+  private readonly onUiClick = (event: MouseEvent): void => {
+    const target = (event.target as HTMLElement | null)?.closest('[data-intent]')
+    if (!(target instanceof HTMLElement)) return
+    if (target instanceof HTMLButtonElement && target.disabled) return
+
+    const intent = JSON.parse(target.dataset.intent ?? 'null') as HudIntent | null
+    if (!intent) return
+
+    // The overlay fades out rather than unmounting: a press must not switch
+    // factions while it is invisible.
+    if (intent.type === 'confirmTurnSwitch' && !this.turnOverlayVisible) return
+    this.onIntent(intent)
+  }
+
+  private static intentAttr(intent: HudIntent): string {
+    return `data-intent='${JSON.stringify(intent)}'`
+  }
+
+  // ---------------------------------------------------------------------------
+  // Panels
+  // ---------------------------------------------------------------------------
+
+  private renderTopRight(model: HudModel): void {
+    const buttons: { label: string; title: string; classes: string; disabled: boolean; intent: HudIntent }[] = [
+      {
+        label: '🎥 Freelook',
+        title: 'Toggle Orbit Freelook Mode',
+        classes: model.freelookActive ? 'active' : '',
+        disabled: false,
+        intent: { type: 'toggleFreelook' },
+      },
+      {
+        label: '👁 Unit View',
+        title: "View from Selected Unit's Eyes",
+        classes: model.unitViewActive ? 'active' : '',
+        disabled: !model.unitViewEnabled,
+        intent: { type: 'toggleUnitView' },
+      },
+      {
+        label: 'End Turn ⏭',
+        title: 'Hand over to the other faction',
+        classes: 'hud-btn-danger',
+        disabled: false,
+        intent: { type: 'requestTurnSwitch' },
+      },
+    ]
+
     this.topRightEl.innerHTML = `
       <div class="hud-info-card">
-        <span id="hudFactionBadge" class="hud-faction-badge blue">BLUE</span>
-        <span id="hudTurnLabel" class="hud-turn-label">Turn 1</span>
-        <span class="hud-turn-label" style="opacity: 0.6;">Seed ${seedLabel}</span>
+        <span class="hud-faction-badge ${model.factionIsBlue ? 'blue' : 'red'}">${model.factionName}</span>
+        <span class="hud-turn-label">Turn ${model.turnNumber}</span>
+        <span class="hud-turn-label" style="opacity: 0.6;">Seed ${model.seedLabel}</span>
       </div>
       <div class="hud-btn-row">
-        <button id="hudFreelookBtn" class="hud-btn interactive" title="Toggle Orbit Freelook Mode">
-          🎥 Freelook
-        </button>
-
-        <button id="hudUnitViewBtn" class="hud-btn interactive" disabled title="View from Selected Unit's Eyes">
-          👁 Unit View
-        </button>
-
-        <button id="hudEndTurnBtn" class="hud-btn hud-btn-danger interactive">
-          End Turn ⏭
-        </button>
+        ${buttons
+          .map(
+            (b) => `
+          <button class="hud-btn interactive ${b.classes}" title="${b.title}" ${b.disabled ? 'disabled' : ''} ${Hud.intentAttr(b.intent)}>
+            ${b.label}
+          </button>`,
+          )
+          .join('')}
       </div>
     `
-
-    const freelookBtn = this.topRightEl.querySelector('#hudFreelookBtn') as HTMLButtonElement
-    freelookBtn.onclick = () => {
-      if (this.rig.isCharacterViewActive) {
-        this.rig.exitCharacterView()
-      }
-      const active = this.rig.toggleFreeLookMode()
-      freelookBtn.classList.toggle('active', active)
-    }
-
-    const unitViewBtn = this.topRightEl.querySelector('#hudUnitViewBtn') as HTMLButtonElement
-    unitViewBtn.onclick = () => {
-      const selected = this.turnManager.selectedSoldier
-      if (!selected) return
-
-      if (this.rig.isCharacterViewActive) {
-        this.rig.exitCharacterView()
-      } else {
-        this.rig.enterCharacterView(selected.position, selected.currentYaw)
-      }
-      this.updateTopRight()
-    }
-
-    const endTurnBtn = this.topRightEl.querySelector('#hudEndTurnBtn') as HTMLButtonElement
-    endTurnBtn.onclick = () => {
-      this.showTurnOverlay()
-    }
   }
 
-  private updateTopRight(): void {
-    const badge = this.topRightEl.querySelector('#hudFactionBadge')
-    if (badge) {
-      const info = FACTION_INFO[this.turnManager.activeFaction]
-      badge.textContent = info.name
-      badge.className = `hud-faction-badge ${this.turnManager.activeFaction === Faction.Blue ? 'blue' : 'red'}`
-    }
-
-    const turnLabel = this.topRightEl.querySelector('#hudTurnLabel')
-    if (turnLabel) {
-      turnLabel.textContent = `Turn ${this.turnManager.turnNumber}`
-    }
-
-    const freelookBtn = this.topRightEl.querySelector('#hudFreelookBtn') as HTMLButtonElement
-    if (freelookBtn) {
-      freelookBtn.classList.toggle('active', this.rig.isFreeLookActive && !this.rig.isCharacterViewActive)
-    }
-
-    const unitViewBtn = this.topRightEl.querySelector('#hudUnitViewBtn') as HTMLButtonElement
-    if (unitViewBtn) {
-      const hasSelected = this.turnManager.selectedSoldier !== null
-      unitViewBtn.disabled = !hasSelected
-      unitViewBtn.classList.toggle('active', this.rig.isCharacterViewActive)
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Squad Bar
-  // ---------------------------------------------------------------------------
-
-  private renderSquadBar(): void {
-    const activeFaction = this.turnManager.activeFaction
-    const selected = this.turnManager.selectedSoldier
-
-    let html = ''
-    for (let index = 0; index < SQUAD_SIZE; index++) {
-      const portraitSrc = this.portraits.getPortrait(activeFaction, index)
-      // Find soldier for this index
-      const soldier = this.findSoldier(activeFaction, index)
-      if (!soldier) continue
-
-      const isSelected = selected === soldier
-      const isDead = soldier.isDead
-
-      const hpPercent = Math.max(0, Math.min(100, (soldier.hp / MAX_HP) * 100))
-      const apPercent = Math.max(0, Math.min(100, (soldier.ap / MAX_AP) * 100))
-
-      html += `
-        <div class="squad-card interactive ${isSelected ? 'selected' : ''} ${isDead ? 'dead' : ''}" data-index="${index}">
-          <img class="squad-portrait" src="${portraitSrc}" alt="${soldier.name}" />
-          <div class="squad-name">${soldier.name}</div>
-          <div class="squad-bars">
-            <div class="bar-container">
-              <div class="bar-fill hp" style="width: ${hpPercent}%;"></div>
-            </div>
-            <div class="bar-label">
-              <span>HP</span><span>${soldier.hp}/${MAX_HP}</span>
-            </div>
-            <div class="bar-container" style="margin-top: 3px;">
-              <div class="bar-fill ap" style="width: ${apPercent}%;"></div>
-            </div>
-            <div class="bar-label">
-              <span>AP</span><span>${soldier.ap}/${MAX_AP}</span>
-            </div>
-          </div>
+  private renderSquadBar(model: HudModel): void {
+    this.squadBarEl.innerHTML = model.squad
+      .map(
+        (card) => `
+      <div class="squad-card interactive ${card.selected ? 'selected' : ''} ${card.dead ? 'dead' : ''}"
+           ${Hud.intentAttr({ type: 'selectUnit', index: card.index })}>
+        <img class="squad-portrait" src="${card.portrait}" alt="${card.name}" />
+        <div class="squad-name">${card.name}</div>
+        <div class="squad-bars">
+          ${this.bar('hp', card.hp, model.maxHp, 'HP')}
+          ${this.bar('ap', card.ap, model.maxAp, 'AP')}
         </div>
-      `
-    }
-
-    this.squadBarEl.innerHTML = html
-
-    // Attach click listeners
-    const cards = this.squadBarEl.querySelectorAll('.squad-card')
-    cards.forEach((card) => {
-      const idx = Number((card as HTMLElement).dataset.index)
-      card.addEventListener('click', () => {
-        const soldier = this.findSoldier(activeFaction, idx)
-        if (soldier && !soldier.isDead) {
-          this.turnManager.selectSoldier(soldier)
-          this.update()
-        }
-      })
-    })
+      </div>`,
+      )
+      .join('')
   }
 
-  private findSoldier(faction: Faction, index: number): Soldier | undefined {
-    return this.squads.byFaction[faction]?.[index]
+  private bar(kind: 'hp' | 'ap', value: number, max: number, label: string): string {
+    const percent = Math.max(0, Math.min(100, (value / max) * 100))
+    return `
+      <div class="bar-container"${kind === 'ap' ? ' style="margin-top: 3px;"' : ''}>
+        <div class="bar-fill ${kind}" style="width: ${percent}%;"></div>
+      </div>
+      <div class="bar-label"><span>${label}</span><span>${value}/${max}</span></div>
+    `
   }
 
-  // ---------------------------------------------------------------------------
-  // Action Panel
-  // ---------------------------------------------------------------------------
-
-  private renderActionPanel(): void {
-    const selected = this.turnManager.selectedSoldier
-    if (!selected || selected.isDead) {
+  private renderActionPanel(model: HudModel): void {
+    if (model.selectedName === null) {
       this.actionPanelEl.innerHTML = ''
       return
     }
 
-    const shootBtnText = this.isShootModeActive ? 'Cancel Shoot ✕' : 'Shoot'
-    const coverBtnText = selected.isCrouching ? 'Stand Up' : 'Take Cover'
-    const coverTag = selected.isCrouching ? 'Free' : `${COVER_AP_COST} AP`
-    const coverDisabled = !selected.isCrouching && selected.ap < COVER_AP_COST
-
     this.actionPanelEl.innerHTML = `
-      <div class="action-header">${selected.name} Actions</div>
-      <button id="actionShoot" class="action-btn interactive ${this.isShootModeActive ? 'active' : ''}" ${selected.ap < SHOOT_AP_COST ? 'disabled' : ''}>
-        <span>${shootBtnText}</span>
-        <span class="action-tag">${SHOOT_AP_COST} AP</span>
-      </button>
-      <button id="actionCover" class="action-btn interactive ${selected.isCrouching ? 'active' : ''}" ${coverDisabled ? 'disabled' : ''}>
-        <span>${coverBtnText}</span>
-        <span class="action-tag">${coverTag}</span>
-      </button>
-      <button id="actionWaypoints" class="action-btn interactive ${this.isWaypointModeActive ? 'active' : ''}">
-        <span>Waypoints</span>
-        <span class="action-tag">${this.isWaypointModeActive ? 'On' : 'Off'}</span>
-      </button>
-      <button class="action-btn interactive" disabled>
-        <span>Overwatch</span>
-        <span class="action-tag">Placeholder</span>
-      </button>
-      <button class="action-btn interactive" disabled>
-        <span>Items</span>
-        <span class="action-tag">Placeholder</span>
-      </button>
-      <button id="actionFinishTurn" class="action-btn interactive" style="margin-top: 6px;">
-        <span>End Unit Turn</span>
-        <span class="action-tag">0 AP</span>
-      </button>
+      <div class="action-header">${model.selectedName} Actions</div>
+      ${model.actions.map((action) => this.actionButton(action)).join('')}
     `
-
-    const shootBtn = this.actionPanelEl.querySelector('#actionShoot') as HTMLButtonElement
-    if (shootBtn) {
-      shootBtn.onclick = () => {
-        if (this.isShootModeActive) {
-          this.onCancelShootRequested?.()
-        } else {
-          this.onShootRequested?.()
-        }
-      }
-    }
-
-    const coverBtn = this.actionPanelEl.querySelector('#actionCover') as HTMLButtonElement | null
-    if (coverBtn) coverBtn.onclick = () => this.onToggleCoverRequested?.()
-
-    const waypointBtn = this.actionPanelEl.querySelector('#actionWaypoints') as HTMLButtonElement | null
-    if (waypointBtn) waypointBtn.onclick = () => this.onToggleWaypointsRequested?.()
-
-    const finishBtn = this.actionPanelEl.querySelector('#actionFinishTurn') as HTMLButtonElement
-    if (finishBtn) {
-      finishBtn.onclick = () => {
-        this.turnManager.finishSoldierTurn(selected)
-        this.update()
-      }
-    }
   }
 
-  // ---------------------------------------------------------------------------
-  // Turn Switch Overlay
-  // ---------------------------------------------------------------------------
+  private actionButton(action: HudAction): string {
+    return `
+      <button class="action-btn interactive ${action.active ? 'active' : ''}"
+              ${action.disabled ? 'disabled' : ''} ${Hud.intentAttr(action.intent)}>
+        <span>${action.label}</span>
+        <span class="action-tag">${action.tag}</span>
+      </button>
+    `
+  }
 
-  private renderTurnOverlay(): void {
+  private renderTurnOverlay(model: HudModel): void {
     this.turnOverlayEl.innerHTML = `
-      <div id="turnOverlayTitle" class="turn-title blue">BLUE TEAM'S TURN</div>
+      <div class="turn-title ${model.factionIsBlue ? 'red' : 'blue'}">${model.nextFactionName} TEAM'S TURN</div>
       <div class="turn-subtitle">Pass control to the active faction</div>
-      <button id="turnContinueBtn" class="turn-continue-btn interactive">
+      <button class="turn-continue-btn interactive" ${Hud.intentAttr({ type: 'confirmTurnSwitch' })}>
         CONTINUE ➔
       </button>
     `
-
-    const continueBtn = this.turnOverlayEl.querySelector('#turnContinueBtn') as HTMLButtonElement
-    continueBtn.onclick = () => {
-      // Guard against activating a hidden overlay: swapping factions by
-      // accident silently ruins a turn and is very hard to notice.
-      if (!this.turnOverlayVisible) return
-      this.hideTurnOverlay()
-      this.turnManager.startNextTurn()
-      this.onTurnSwitched?.()
-      this.update()
-    }
   }
 
+  // ---------------------------------------------------------------------------
+  // Turn overlay & context menu
+  // ---------------------------------------------------------------------------
+
   showTurnOverlay(): void {
-    const nextFaction = this.turnManager.activeFaction === Faction.Blue ? Faction.Red : Faction.Blue
-    const info = FACTION_INFO[nextFaction]
-
-    const titleEl = this.turnOverlayEl.querySelector('#turnOverlayTitle')
-    if (titleEl) {
-      titleEl.textContent = `${info.name} TEAM'S TURN`
-      titleEl.className = `turn-title ${nextFaction === Faction.Blue ? 'blue' : 'red'}`
-    }
-
+    if (this.model) this.renderTurnOverlay(this.model)
     this.turnOverlayVisible = true
     this.turnOverlayEl.classList.add('visible')
   }
@@ -352,22 +231,16 @@ export class Hud {
     this.turnOverlayEl.classList.remove('visible')
   }
 
-  // ---------------------------------------------------------------------------
-  // Context Menu
-  // ---------------------------------------------------------------------------
-
   showContextMenu(x: number, y: number, items: ContextMenuItem[]): void {
-    let html = ''
-    items.forEach((item, idx) => {
-      html += `
-        <button class="hud-context-item interactive ${item.danger ? 'danger' : ''}" data-idx="${idx}">
-          <span>${item.label}</span>
-          ${item.detail ? `<span style="font-size: 10px; opacity: 0.6;">${item.detail}</span>` : ''}
-        </button>
-      `
-    })
-
-    this.contextMenuEl.innerHTML = html
+    this.contextMenuEl.innerHTML = items
+      .map(
+        (item, idx) => `
+      <button class="hud-context-item interactive ${item.danger ? 'danger' : ''}" data-idx="${idx}">
+        <span>${item.label}</span>
+        ${item.detail ? `<span style="font-size: 10px; opacity: 0.6;">${item.detail}</span>` : ''}
+      </button>`,
+      )
+      .join('')
     this.contextMenuEl.style.left = `${x}px`
     this.contextMenuEl.style.top = `${y}px`
     this.contextMenuEl.style.display = 'flex'
@@ -381,14 +254,12 @@ export class Hud {
     this.contextMenuEl.style.left = `${Math.max(margin, Math.min(x, maxLeft))}px`
     this.contextMenuEl.style.top = `${Math.max(margin, Math.min(y, maxTop))}px`
 
-    const btns = this.contextMenuEl.querySelectorAll('.hud-context-item')
-    btns.forEach((btn) => {
-      const idx = Number((btn as HTMLElement).dataset.idx)
+    for (const btn of this.contextMenuEl.querySelectorAll('.hud-context-item')) {
       btn.addEventListener('click', () => {
         this.hideContextMenu()
-        items[idx]?.action()
+        items[Number((btn as HTMLElement).dataset.idx)]?.action()
       })
-    })
+    }
   }
 
   hideContextMenu(): void {
