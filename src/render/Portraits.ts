@@ -14,7 +14,8 @@ import {
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { EngineContext } from '../engine'
-import { Faction, FACTION_INFO, SOLDIER_HEIGHT, SQUAD_SIZE } from '../config'
+import { Faction, SOLDIER_HEIGHT, SQUAD_SIZE } from '../config'
+import { soldierColor } from '../entities/palette'
 
 export class OffscreenPortraits {
   private readonly portraits = new Map<string, string>()
@@ -55,7 +56,6 @@ export class OffscreenPortraits {
     scene.add(dir)
 
     for (const faction of [Faction.Blue, Faction.Red]) {
-      const color = FACTION_INFO[faction].color
 
       for (let index = 0; index < SQUAD_SIZE; index++) {
         const model = clone(gltf.scene) as Group
@@ -71,7 +71,7 @@ export class OffscreenPortraits {
         model.traverse((child) => {
           if (child instanceof Mesh && child.material) {
             const mat = (child.material as MeshStandardMaterial).clone()
-            mat.color.setHex(color)
+            mat.color.copy(soldierColor(faction, index))
             child.material = mat
           }
         })

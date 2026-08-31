@@ -2,7 +2,7 @@ import Entity3D from '@mavonengine/core/World/Entity3D'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { LoopOnce, LoopRepeat, Mesh, MeshStandardMaterial, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
-import { Faction, FACTION_INFO, RULES, SOLDIER_HEIGHT } from '../config'
+import { Faction, RULES, SOLDIER_HEIGHT } from '../config'
 import {
   AMMO,
   type AmmoSpec,
@@ -16,6 +16,7 @@ import {
 } from '../core/Arsenal'
 import type { StatusState } from '../core/Ballistics'
 import type { Grid, Tile } from '../core/Grid'
+import { soldierColor } from './palette'
 
 /**
  * Ground speed in m/s that each locomotion clip is authored at, measured from
@@ -138,12 +139,13 @@ export class Soldier extends Entity3D {
       // frustum culling, so Box3.setFromObject must not be used for height.
       this.instance.scale.set(1, 1, 1)
 
-      // Tint material according to faction
-      const info = FACTION_INFO[this.faction]
+      // Tint per soldier, not per faction: squadmates get neighbouring hues so
+      // they can be told apart on the field and in their portraits.
+      const tint = soldierColor(this.faction, this.squadIndex)
       this.instance.traverse((child) => {
         if (child instanceof Mesh && child.material) {
           const mat = (child.material as MeshStandardMaterial).clone()
-          mat.color.setHex(info.color)
+          mat.color.copy(tint)
           child.material = mat
         }
       })
