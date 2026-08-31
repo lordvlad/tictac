@@ -1,14 +1,11 @@
 import { AIM, COVER } from '../config'
 import {
-  AMMO,
-  type AmmoId,
+  type AmmoSpec,
   type GrenadeSpec,
   SHOT_MODES,
   STATUSES,
   type ShotMode,
   type StatusKind,
-  WEAPONS,
-  type WeaponId,
   type WeaponSpec,
 } from './Arsenal'
 import { CoverLevel } from './Cover'
@@ -26,8 +23,10 @@ export interface CombatantStats {
   maxHp: number
   armor: number
   isCrouching: boolean
-  weaponId: WeaponId
-  ammoId: AmmoId
+  /** This unit's own weapon spec, not a reference into the shared table. */
+  weapon: WeaponSpec
+  /** This unit's own loaded round. */
+  ammo: AmmoSpec
   statuses: StatusState[]
 }
 
@@ -47,8 +46,8 @@ export interface EffectiveWeapon {
 
 /** Fold the loaded round's modifiers into its weapon. */
 export function effectiveWeapon(stats: CombatantStats, mode: ShotMode): EffectiveWeapon {
-  const weapon = WEAPONS[stats.weaponId]
-  const ammo = AMMO[stats.ammoId]
+  const weapon = stats.weapon
+  const ammo = stats.ammo
   const modeSpec = SHOT_MODES[mode]
 
   return {

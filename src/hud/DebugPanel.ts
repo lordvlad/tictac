@@ -1,5 +1,5 @@
 import { RULES, AIM, COVER } from '../config'
-import { AMMO, AmmoId, GRENADES, GrenadeId, STATUSES, WEAPONS, WeaponId } from '../core/Arsenal'
+import { AMMO, AmmoId, GrenadeId, STATUSES, WEAPONS, WeaponId } from '../core/Arsenal'
 import type { Soldier } from '../entities/Soldier'
 
 /** A group of live values the panel can edit. */
@@ -76,42 +76,47 @@ export class DebugPanel {
       groups.push({
         title: `${soldier.name} — state`,
         target: soldier as unknown as Record<string, unknown>,
-        keys: ['hp', 'maxHp', 'ap', 'maxAp', 'armor', 'maxArmor'],
+        keys: ['hp', 'maxHp', 'ap', 'maxAp', 'armor', 'maxArmor', 'peek'],
+        note: 'peek: also see from the free tiles beside the wall it hugs',
       })
       groups.push({
-        title: `${soldier.name} — grenades`,
+        title: `${soldier.name} — grenade count`,
         target: soldier.grenades as unknown as Record<string, unknown>,
       })
       groups.push({
-        title: `Weapon: ${WEAPONS[soldier.weaponId].name}`,
-        target: WEAPONS[soldier.weaponId] as unknown as Record<string, unknown>,
+        title: `${soldier.name} — weapon: ${soldier.weapon.name}`,
+        target: soldier.weapon as unknown as Record<string, unknown>,
         note: 'AP per shot, base hit chance, range falloff, armour penetration',
       })
       groups.push({
-        title: `Ammo: ${AMMO[soldier.ammoId].name}`,
-        target: AMMO[soldier.ammoId] as unknown as Record<string, unknown>,
+        title: `${soldier.name} — ammo: ${soldier.ammo.name}`,
+        target: soldier.ammo as unknown as Record<string, unknown>,
       })
+      for (const kind of Object.values(GrenadeId)) {
+        groups.push({
+          title: `${soldier.name} — ${soldier.grenadeSpecs[kind].name}`,
+          target: soldier.grenadeSpecs[kind] as unknown as Record<string, unknown>,
+          note: 'throwRange is the maximum throwing distance, in metres',
+        })
+      }
     }
 
     groups.push({
-      title: 'Rules',
+      title: 'Rules (global)',
       target: RULES as unknown as Record<string, unknown>,
       note: 'AP per tile, sight range, caps, move speed',
     })
-    groups.push({ title: 'Aim', target: AIM as unknown as Record<string, unknown> })
+    groups.push({ title: 'Aim (global)', target: AIM as unknown as Record<string, unknown> })
     groups.push({
-      title: 'Cover penalties',
+      title: 'Cover penalties (global)',
       target: COVER as unknown as Record<string, unknown>,
     })
 
-    for (const kind of Object.values(GrenadeId)) {
-      groups.push({
-        title: `Grenade: ${GRENADES[kind].name}`,
-        target: GRENADES[kind] as unknown as Record<string, unknown>,
-      })
-    }
     for (const [kind, spec] of Object.entries(STATUSES)) {
-      groups.push({ title: `Status: ${spec.name}`, target: STATUSES[kind as keyof typeof STATUSES] as unknown as Record<string, unknown> })
+      groups.push({
+        title: `Status (global): ${spec.name}`,
+        target: STATUSES[kind as keyof typeof STATUSES] as unknown as Record<string, unknown>,
+      })
     }
 
     return groups
@@ -180,9 +185,10 @@ export class DebugPanel {
   }
 
   private renderGroup(group: EditGroup): string {
-    const keys = (group.keys ?? Object.keys(group.target)).filter(
-      (key) => typeof group.target[key] === 'number',
-    )
+    const keys = (group.keys ?? Object.keys(group.target)).filter((key) => {
+      const value = group.target[key]
+      return typeof value === 'number' || typeof value === 'boolean'
+    })
     if (keys.length === 0) return ''
 
     const path = this.pathFor(group)
@@ -191,8 +197,15 @@ export class DebugPanel {
         <div class="debug-group-title">${group.title}</div>
         ${group.note ? `<div class="debug-note">${group.note}</div>` : ''}
         ${keys
-          .map(
-            (key) => `
+          .map((key) =>
+            typeof group.target[key] === 'boolean'
+              ? `
+          <label class="debug-row">
+            <span>${key}</span>
+            <input type="checkbox" ${group.target[key] ? 'checked' : ''}
+                   data-path="${path}" data-key="${key}" />
+          </label>`
+              : `
           <label class="debug-row">
             <span>${key}</span>
             <input type="number" step="any" value="${group.target[key] as number}"
@@ -211,21 +224,18 @@ export class DebugPanel {
       if (group.target === (this.soldier.grenades as unknown as Record<string, unknown>)) {
         return 'grenades'
       }
-      if (group.target === (WEAPONS[this.soldier.weaponId] as unknown as Record<string, unknown>)) {
-        return `weapon:${this.soldier.weaponId}`
+      if (group.target === (this.soldier.weapon as unknown as Record<string, unknown>)) {
+        return 'weapon'
       }
-      if (group.target === (AMMO[this.soldier.ammoId] as unknown as Record<string, unknown>)) {
-        return `ammo:${this.soldier.ammoId}`
+      if (group.target === (this.soldier.ammo as unknown as Record<string, unknown>)) return 'ammo'
+      for (const kind of Object.values(GrenadeId)) {
+        const spec = this.soldier.grenadeSpecs[kind] as unknown as Record<string, unknown>
+        if (group.target === spec) return `grenade:${kind}`
       }
     }
     if (group.target === (RULES as unknown as Record<string, unknown>)) return 'rules'
     if (group.target === (AIM as unknown as Record<string, unknown>)) return 'aim'
     if (group.target === (COVER as unknown as Record<string, unknown>)) return 'cover'
-    for (const kind of Object.values(GrenadeId)) {
-      if (group.target === (GRENADES[kind] as unknown as Record<string, unknown>)) {
-        return `grenade:${kind}`
-      }
-    }
     for (const kind of Object.keys(STATUSES)) {
       const spec = STATUSES[kind as keyof typeof STATUSES] as unknown as Record<string, unknown>
       if (group.target === spec) return `status:${kind}`
@@ -241,11 +251,14 @@ export class DebugPanel {
       case 'grenades':
         return (this.soldier?.grenades as unknown as Record<string, unknown>) ?? null
       case 'weapon':
-        return (WEAPONS[arg as WeaponId] as unknown as Record<string, unknown>) ?? null
+        return (this.soldier?.weapon as unknown as Record<string, unknown>) ?? null
       case 'ammo':
-        return (AMMO[arg as AmmoId] as unknown as Record<string, unknown>) ?? null
+        return (this.soldier?.ammo as unknown as Record<string, unknown>) ?? null
       case 'grenade':
-        return (GRENADES[arg as GrenadeId] as unknown as Record<string, unknown>) ?? null
+        return (
+          (this.soldier?.grenadeSpecs[arg as GrenadeId] as unknown as Record<string, unknown>) ??
+          null
+        )
       case 'status':
         return (STATUSES[arg as keyof typeof STATUSES] as unknown as Record<string, unknown>) ?? null
       case 'rules':
@@ -262,8 +275,13 @@ export class DebugPanel {
   private readonly onInput = (event: Event): void => {
     const el = event.target
     if (el instanceof HTMLSelectElement && el.dataset.loadout && this.soldier) {
-      if (el.dataset.loadout === 'weaponId') this.soldier.weaponId = el.value as WeaponId
-      else this.soldier.ammoId = el.value as AmmoId
+      // Switching kit re-stamps this unit's own copy from the template, so
+      // per-character tuning starts from a clean baseline.
+      if (el.dataset.loadout === 'weaponId') {
+        this.soldier.equip(el.value as WeaponId, this.soldier.ammoId)
+      } else {
+        this.soldier.equip(this.soldier.weaponId, el.value as AmmoId)
+      }
       this.onChange()
       this.render()
       return
@@ -272,6 +290,13 @@ export class DebugPanel {
     if (!(el instanceof HTMLInputElement) || !el.dataset.path || !el.dataset.key) return
     const target = this.resolve(el.dataset.path)
     if (!target) return
+
+    if (el.type === 'checkbox') {
+      target[el.dataset.key] = el.checked
+      this.onChange()
+      return
+    }
+
     const value = Number(el.value)
     if (!Number.isFinite(value)) return
     target[el.dataset.key] = value

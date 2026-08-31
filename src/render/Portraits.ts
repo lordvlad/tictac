@@ -60,7 +60,10 @@ export class OffscreenPortraits {
       for (let index = 0; index < SQUAD_SIZE; index++) {
         const model = clone(gltf.scene) as Group
         model.position.set(0, 0, 0)
-        model.rotation.y = Math.PI // Face camera
+        // The rig faces +Z at yaw 0 (same convention as in-game movement) and
+        // the portrait camera sits on +Z, so no rotation is needed. Turning it
+        // by PI here is what produced portraits of the back of everyone's head.
+        model.rotation.y = 0
         model.scale.set(1, 1, 1)
         model.updateMatrixWorld(true)
 
@@ -73,14 +76,11 @@ export class OffscreenPortraits {
           }
         })
 
-        model.position.set(0, 0, 0)
-        model.rotation.y = Math.PI // Face camera
         scene.add(model)
 
         // Head is roughly at y = 1.62
         camera.position.set(0, 1.62, 0.75)
         camera.lookAt(new Vector3(0, 1.58, 0))
-
         renderer.render(scene, camera)
         const dataUrl = canvas.toDataURL('image/png')
         this.portraits.set(`${faction}_${index}`, dataUrl)

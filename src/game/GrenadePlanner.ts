@@ -1,4 +1,4 @@
-import { GRENADES, type GrenadeId, STATUSES } from '../core/Arsenal'
+import { type GrenadeId, STATUSES } from '../core/Arsenal'
 import { blastFalloff, grenadeDamageAt } from '../core/Ballistics'
 import type { Grid, Tile } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
@@ -83,7 +83,7 @@ export class GrenadePlanner {
   /** The throw currently lined up, or null when nothing is aimed yet. */
   pending(thrower: Soldier | null): PendingThrow | null {
     if (!this.kind || !thrower || thrower.isDead || !this.aim) return null
-    const spec = GRENADES[this.kind]
+    const spec = thrower.grenadeSpecs[this.kind]
     const at = this.aim
 
     const caught: BlastPreviewEntry[] = []
@@ -135,7 +135,7 @@ export class GrenadePlanner {
   /** Paint the blast footprint, brightest at the centre. */
   renderOverlay(ground: Ground, thrower: Soldier, hovered: Tile | null): void {
     if (!this.kind) return
-    const spec = GRENADES[this.kind]
+    const spec = thrower.grenadeSpecs[this.kind]
     const at = this.aim ?? hovered
     if (!at) return
 

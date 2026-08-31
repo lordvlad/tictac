@@ -32,8 +32,10 @@ export class FogOfWar {
   }
 
   recompute(activeFaction: Faction, squads: Squads): void {
-    const tiles = squads.getLiving(activeFaction).map((s) => s.tile)
-    const visMap = computeFactionVisibility(this.grid, tiles, this.maps[activeFaction])
+    const viewers = squads
+      .getLiving(activeFaction)
+      .map((s) => ({ tile: s.tile, peek: s.peek }))
+    const visMap = computeFactionVisibility(this.grid, viewers, this.maps[activeFaction])
 
     this.ground.setFogFromVisibility(visMap)
     this.blocks.applyVisibility(visMap)

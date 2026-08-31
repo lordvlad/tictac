@@ -1,5 +1,5 @@
 import { FACTION_INFO, Faction, RULES } from '../config'
-import { AMMO, AmmoId, GRENADES, GrenadeId, ShotMode, WEAPONS, WeaponId } from '../core/Arsenal'
+import { GrenadeId, ShotMode } from '../core/Arsenal'
 import { effectiveWeapon } from '../core/Ballistics'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
@@ -199,7 +199,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       intent: { type: 'toggleWaypoints' },
     })
     for (const kind of Object.values(GrenadeId)) {
-      const spec = GRENADES[kind]
+      const spec = selected.grenadeSpecs[kind]
       const count = selected.grenades[kind] ?? 0
       actions.push({
         id: `grenade-${kind}`,
@@ -290,8 +290,8 @@ function shotPanelOf(pending: PendingShot, shooter: Soldier | null): HudShotPane
     apCost: pending.apCost,
     affordable: pending.affordable && (shooter?.ap ?? 0) >= pending.apCost,
     outOfRange: b.outOfRange,
-    weaponName: WEAPONS[shooter?.weaponId ?? WeaponId.Rifle].name,
-    ammoName: AMMO[shooter?.ammoId ?? AmmoId.Standard].name,
+    weaponName: shooter?.weapon.name ?? '—',
+    ammoName: shooter?.ammo.name ?? '—',
     modes: pending.modes.map((m) => ({ ...m, active: m.mode === pending.mode })),
     terms,
   }

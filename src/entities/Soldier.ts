@@ -3,7 +3,17 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { LoopOnce, LoopRepeat, Mesh, MeshStandardMaterial, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
 import { Faction, FACTION_INFO, RULES, SOLDIER_HEIGHT } from '../config'
-import { AmmoId, GrenadeId, WeaponId } from '../core/Arsenal'
+import {
+  AMMO,
+  type AmmoSpec,
+  AmmoId,
+  GRENADES,
+  type GrenadeSpec,
+  GrenadeId,
+  WEAPONS,
+  type WeaponSpec,
+  WeaponId,
+} from '../core/Arsenal'
 import type { StatusState } from '../core/Ballistics'
 import type { Grid, Tile } from '../core/Grid'
 
@@ -34,9 +44,22 @@ export class Soldier extends Entity3D {
   armor = RULES.maxArmor
   maxArmor = RULES.maxArmor
 
-  // --- loadout --------------------------------------------------------------
+  // --- loadout ---------------------------------------------------------------
+  /**
+   * Own copies of the specs, not references into the shared tables: stats are
+   * per character, so tuning one unit's rifle must not re-arm the whole map.
+   * The tables in {@link Arsenal} are the templates these are stamped from.
+   */
   weaponId: WeaponId = WeaponId.Rifle
+  weapon: WeaponSpec = { ...WEAPONS[WeaponId.Rifle] }
   ammoId: AmmoId = AmmoId.Standard
+  ammo: AmmoSpec = { ...AMMO[AmmoId.Standard] }
+  /** Per-unit grenade specs, so throw range and blast are tunable per soldier. */
+  grenadeSpecs: Record<GrenadeId, GrenadeSpec> = {
+    [GrenadeId.Frag]: { ...GRENADES[GrenadeId.Frag] },
+    [GrenadeId.Flash]: { ...GRENADES[GrenadeId.Flash] },
+    [GrenadeId.Smoke]: { ...GRENADES[GrenadeId.Smoke] },
+  }
   /** Grenades still in the pouch, by kind. */
   readonly grenades: Record<GrenadeId, number> = {
     [GrenadeId.Frag]: 1,
@@ -44,8 +67,23 @@ export class Soldier extends Entity3D {
     [GrenadeId.Smoke]: 1,
   }
 
+  /**
+   * Corner peeking. A unit that peeks also sees from the free tiles beside the
+   * wall it is standing against, so its view reaches around the corner instead
+   * of stopping at it.
+   */
+  peek = false
+
   /** Live status effects (flashed, smoked, shredded). */
   statuses: StatusState[] = []
+
+  /** Re-stamp the loadout from the shared templates. */
+  equip(weaponId: WeaponId, ammoId: AmmoId): void {
+    this.weaponId = weaponId
+    this.weapon = { ...WEAPONS[weaponId] }
+    this.ammoId = ammoId
+    this.ammo = { ...AMMO[ammoId] }
+  }
 
   tile: Tile
 

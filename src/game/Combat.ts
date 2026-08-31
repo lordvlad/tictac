@@ -9,7 +9,7 @@ import {
   hitChance,
   resolveDamage,
 } from '../core/Ballistics'
-import { GRENADES, type GrenadeId, ShotMode, STATUSES, type StatusKind } from '../core/Arsenal'
+import { type GrenadeId, ShotMode, STATUSES, type StatusKind } from '../core/Arsenal'
 import type { Soldier } from '../entities/Soldier'
 import type { Tracers } from '../render/Tracers'
 
@@ -168,7 +168,7 @@ export function throwGrenade(
   kind: GrenadeId,
   soldiers: readonly Soldier[],
 ): GrenadeResult {
-  const spec = GRENADES[kind]
+  const spec = thrower.grenadeSpecs[kind]
   if (thrower.isDead || thrower.ap < spec.apCost) return { thrown: false, apSpent: 0, hits: [] }
   if ((thrower.grenades[kind] ?? 0) <= 0) return { thrown: false, apSpent: 0, hits: [] }
   if (grid.distance(thrower.tile, at) > spec.throwRange) return { thrown: false, apSpent: 0, hits: [] }

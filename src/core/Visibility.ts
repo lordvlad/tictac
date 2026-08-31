@@ -1,5 +1,5 @@
 import { RULES } from '../config'
-import type { Grid, Tile } from './Grid'
+import { ORTHOGONAL, type Grid, type Tile } from './Grid'
 
 /**
  * Visibility states, and the one brightness ramp every renderer must use.
@@ -75,12 +75,49 @@ export function hasLineOfSight(grid: Grid, from: Tile, to: Tile): boolean {
   return true
 }
 
+/** A unit doing the looking. */
+export interface Viewer {
+  tile: Tile
+  /** Corner peeking: also see from the free tiles beside the wall it hugs. */
+  peek: boolean
+}
+
 /**
- * Recompute visibility map for a faction given living soldier positions.
+ * Tiles a peeking unit may also look from.
+ *
+ * Leaning only makes sense against something: the unit must be touching a
+ * sight-blocking tile, and it can then lean into any free orthogonal
+ * neighbour. Standing at the end of a wall, that neighbour is the tile past
+ * the corner — which is exactly the view the wall was denying.
+ */
+export function peekOrigins(grid: Grid, from: Tile): Tile[] {
+  let hugsWall = false
+  for (const [dx, dy] of ORTHOGONAL) {
+    if (grid.blocksSight(from.x + dx, from.y + dy)) {
+      hugsWall = true
+      break
+    }
+  }
+  if (!hugsWall) return []
+
+  const origins: Tile[] = []
+  for (const [dx, dy] of ORTHOGONAL) {
+    const x = from.x + dx
+    const y = from.y + dy
+    if (grid.isWalkable(x, y)) origins.push({ x, y })
+  }
+  return origins
+}
+
+/**
+ * Recompute visibility map for a faction from its living units.
+ *
+ * Range is always measured from the unit's own tile, including for peeked
+ * sightlines: leaning around a corner must not extend how far it can see.
  */
 export function computeFactionVisibility(
   grid: Grid,
-  soldierTiles: Tile[],
+  viewers: readonly Viewer[],
   existingVisMap: Uint8Array,
 ): Uint8Array {
   const size = grid.size
@@ -92,7 +129,10 @@ export function computeFactionVisibility(
     }
   }
 
-  for (const origin of soldierTiles) {
+  for (const viewer of viewers) {
+    const origin = viewer.tile
+    const eyes = [origin, ...(viewer.peek ? peekOrigins(grid, origin) : [])]
+
     const minX = Math.max(0, origin.x - RULES.sightRange)
     const maxX = Math.min(size - 1, origin.x + RULES.sightRange)
     const minY = Math.max(0, origin.y - RULES.sightRange)
@@ -102,10 +142,14 @@ export function computeFactionVisibility(
       for (let x = minX; x <= maxX; x++) {
         const distSq = (x - origin.x) ** 2 + (y - origin.y) ** 2
         if (distSq > RULES.sightRange ** 2) continue
+        if (existingVisMap[grid.index(x, y)] === VisState.Visible) continue
 
         const targetTile = { x, y }
-        if (hasLineOfSight(grid, origin, targetTile)) {
-          existingVisMap[grid.index(x, y)] = VisState.Visible
+        for (const eye of eyes) {
+          if (hasLineOfSight(grid, eye, targetTile)) {
+            existingVisMap[grid.index(x, y)] = VisState.Visible
+            break
+          }
         }
       }
     }
