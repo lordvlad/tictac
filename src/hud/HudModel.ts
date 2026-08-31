@@ -2,6 +2,8 @@ import { COVER_AP_COST, FACTION_INFO, Faction, MAX_AP, MAX_HP } from '../config'
 import {
   AMMO,
   AmmoId,
+  GRENADES,
+  GrenadeId,
   SHOT_MODES,
   ShotMode,
   WEAPONS,
@@ -10,6 +12,7 @@ import {
 import { effectiveWeapon } from '../core/Ballistics'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
+import type { PendingThrow } from '../game/GrenadePlanner'
 import type { PendingShot } from '../game/ShootPlanner'
 import type { Squads } from '../game/Squads'
 import type { TurnManager } from '../game/TurnManager'
@@ -25,6 +28,9 @@ export type HudIntent =
   | { type: 'selectTarget'; index: number }
   | { type: 'setShotMode'; mode: ShotMode }
   | { type: 'confirmShot' }
+  | { type: 'armGrenade'; kind: GrenadeId }
+  | { type: 'confirmThrow' }
+  | { type: 'cancelGrenade' }
   | { type: 'toggleCover' }
   | { type: 'toggleWaypoints' }
   | { type: 'endUnitTurn' }
@@ -90,6 +96,18 @@ export interface HudShotPanel {
   terms: HudShotTerm[]
 }
 
+/** The throw lined up and awaiting confirmation. */
+export interface HudThrowPanel {
+  name: string
+  apCost: number
+  radius: number
+  remaining: number
+  affordable: boolean
+  inRange: boolean
+  statusName: string | null
+  caught: { name: string; friendly: boolean; damage: number; armorShred: number; lethal: boolean }[]
+}
+
 /** Immutable snapshot of what the HUD should show right now. */
 export interface HudModel {
   factionName: string
@@ -105,6 +123,8 @@ export interface HudModel {
   targets: HudTargetIcon[]
   /** Populated when a target is lined up; replaces the action list. */
   shotPanel: HudShotPanel | null
+  /** Populated while a grenade is armed; also replaces the action list. */
+  throwPanel: HudThrowPanel | null
   freelookActive: boolean
   unitViewActive: boolean
   unitViewEnabled: boolean
@@ -121,6 +141,8 @@ export interface HudModelSources {
   waypointActive: boolean
   /** Shoot-mode state, when shoot mode is on. */
   shoot: ShootSnapshot | null
+  /** The armed grenade and its aimed blast, when one is armed. */
+  grenade: { armed: GrenadeId | null; pending: PendingThrow | null }
 }
 
 /** What the model builder needs from the shoot planner. */
@@ -180,6 +202,18 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       disabled: false,
       intent: { type: 'toggleWaypoints' },
     })
+    for (const kind of Object.values(GrenadeId)) {
+      const spec = GRENADES[kind]
+      const count = selected.grenades[kind] ?? 0
+      actions.push({
+        id: `grenade-${kind}`,
+        label: spec.name,
+        tag: count > 0 ? `${spec.apCost} AP · x${count}` : 'none left',
+        active: sources.grenade.armed === kind,
+        disabled: count <= 0 || selected.ap < spec.apCost,
+        intent: { type: 'armGrenade', kind },
+      })
+    }
     actions.push({
       id: 'endUnitTurn',
       label: 'End Unit Turn',
@@ -220,6 +254,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     actions,
     targets,
     shotPanel: shoot?.pending ? shotPanelOf(shoot.pending, selected) : null,
+    throwPanel: sources.grenade.pending ? throwPanelOf(sources.grenade.pending) : null,
     freelookActive: rig.isFreeLookActive && !rig.isCharacterViewActive,
     unitViewActive: rig.isCharacterViewActive,
     unitViewEnabled: selected !== null,
@@ -264,5 +299,19 @@ function shotPanelOf(pending: PendingShot, shooter: Soldier | null): HudShotPane
     mode: pending.mode,
     modeName: SHOT_MODES[pending.mode].name,
     terms,
+  }
+}
+
+/** Turn a pending throw into display rows, friendlies flagged. */
+function throwPanelOf(pending: PendingThrow): HudThrowPanel {
+  return {
+    name: pending.name,
+    apCost: pending.apCost,
+    radius: pending.radius,
+    remaining: pending.remaining,
+    affordable: pending.affordable,
+    inRange: pending.inRange,
+    statusName: pending.statusName,
+    caught: pending.caught,
   }
 }

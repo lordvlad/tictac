@@ -13,6 +13,7 @@ import type { OffscreenPortraits } from '../render/Portraits'
 import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
 import { MovementPlanner } from './MovementPlanner'
+import { GrenadePlanner } from './GrenadePlanner'
 import { ShootPlanner } from './ShootPlanner'
 import { WallXray } from './WallXray'
 import type { Squads } from './Squads'
@@ -31,6 +32,7 @@ import type { Tracers } from '../render/Tracers'
 export class InteractionController {
   private readonly planner: MovementPlanner
   private readonly shoot: ShootPlanner
+  private readonly grenade: GrenadePlanner
   private readonly fog: FogOfWar
   private readonly xray: WallXray
 
@@ -57,9 +59,16 @@ export class InteractionController {
   ) {
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
     this.shoot = new ShootPlanner(battlefield.grid, squads, tracers, engine)
+    this.grenade = new GrenadePlanner(battlefield.grid, squads, engine)
     this.fog = new FogOfWar(battlefield.grid, battlefield.ground, battlefield.blocks)
     this.xray = new WallXray(rig, squads, battlefield.blocks)
     this.picker = new GroundPicker(engine.camera)
+
+    this.grenade.onThrowResolved = () => {
+      this.recomputeVisibility()
+      this.renderOverlay()
+      this.refreshHud()
+    }
 
     this.shoot.onShotResolved = () => {
       this.recomputeVisibility()
@@ -112,6 +121,7 @@ export class InteractionController {
                 pending: this.shoot.pending(shooter),
               }
             : null,
+        grenade: { armed: this.grenade.armed, pending: this.grenade.pending(shooter) },
       }),
     )
   }
@@ -149,6 +159,26 @@ export class InteractionController {
         if (shooter) this.shoot.confirm(shooter)
         break
       }
+      case 'armGrenade': {
+        const thrower = this.turnManager.selectedSoldier
+        this.shoot.exit()
+        if (this.grenade.armed === intent.kind) this.grenade.exit()
+        else this.grenade.arm(intent.kind, thrower)
+        this.planner.clear()
+        this.renderOverlay()
+        this.refreshHud()
+        break
+      }
+      case 'confirmThrow': {
+        const thrower = this.turnManager.selectedSoldier
+        if (thrower) this.grenade.confirm(thrower)
+        break
+      }
+      case 'cancelGrenade':
+        this.grenade.exit()
+        this.renderOverlay()
+        this.refreshHud()
+        break
       case 'toggleCover':
         this.toggleCover()
         break
@@ -198,6 +228,7 @@ export class InteractionController {
     window.removeEventListener('keydown', this.onKeyDown)
     this.planner.dispose()
     this.shoot.dispose()
+    this.grenade.dispose()
   }
 
   // ---------------------------------------------------------------------------
@@ -213,6 +244,7 @@ export class InteractionController {
 
   exitShootMode(): void {
     this.shoot.exit()
+    this.grenade.exit()
     this.planner.clear()
     this.renderOverlay()
     this.refreshHud()
@@ -309,6 +341,16 @@ export class InteractionController {
     if (!selected || selected.isDead) return
     const tile = this.tileFromEvent(event)
 
+    // With a grenade armed, a click aims the blast; the panel throws it.
+    if (this.grenade.active) {
+      if (tile) {
+        this.grenade.aimAt(tile)
+        this.renderOverlay()
+        this.refreshHud()
+      }
+      return
+    }
+
     // In shoot mode a click on an enemy picks it as the target; confirmation
     // happens on the panel, so a stray click can never fire.
     if (this.shoot.active) {
@@ -387,7 +429,10 @@ export class InteractionController {
       return
     }
 
-    if (this.shoot.active) {
+    if (this.grenade.active) {
+      this.planner.render(null)
+      this.grenade.renderOverlay(this.battlefield.ground, selected, this.hoveredTile)
+    } else if (this.shoot.active) {
       this.planner.render(null)
       this.shoot.renderOverlay(this.battlefield.ground, selected, this.hoveredEnemy)
     } else {

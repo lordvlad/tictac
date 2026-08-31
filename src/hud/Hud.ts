@@ -1,5 +1,5 @@
 import { ShotMode } from '../core/Arsenal'
-import type { HudAction, HudIntent, HudModel, HudShotPanel } from './HudModel'
+import type { HudAction, HudIntent, HudModel, HudShotPanel, HudThrowPanel } from './HudModel'
 
 export interface ContextMenuItem {
   label: string
@@ -229,6 +229,11 @@ export class Hud {
    * should be able to reach there.
    */
   private renderActionPanel(model: HudModel): void {
+    if (model.throwPanel) {
+      this.actionPanelEl.innerHTML = this.throwCard(model.throwPanel)
+      return
+    }
+
     if (model.shotPanel) {
       this.actionPanelEl.innerHTML = this.shotCard(model.shotPanel)
       return
@@ -279,6 +284,41 @@ export class Hud {
         <span class="action-tag">${shot.apCost} AP</span>
       </button>
       <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelShoot' })}>
+        <span>Cancel</span>
+        <span class="action-tag">Esc</span>
+      </button>
+    `
+  }
+
+  /** The armed grenade: who is in the blast, and whether that includes us. */
+  private throwCard(shot: HudThrowPanel): string {
+    const blocked = !shot.affordable || !shot.inRange || shot.caught.length === 0
+    const friendlies = shot.caught.filter((c) => c.friendly).length
+    return `
+      <div class="action-header">${shot.name}</div>
+      <div class="shot-card">
+        <div class="shot-weapon">Radius ${shot.radius} · x${shot.remaining} left${shot.statusName ? ` · ${shot.statusName}` : ''}</div>
+        ${
+          shot.caught.length === 0
+            ? `<div class="shot-row"><span>${shot.inRange ? 'Nobody in blast' : 'Out of throwing range'}</span></div>`
+            : `<div class="shot-rows">${shot.caught
+                .map(
+                  (c) => `
+              <div class="shot-row ${c.friendly ? 'penalty' : ''}">
+                <span>${c.friendly ? '⚠ ' : ''}${c.name}${c.lethal ? ' ☠' : ''}</span>
+                <span>${c.damage > 0 ? `-${c.damage} HP` : ''}${c.armorShred > 0 ? ` -${c.armorShred} AR` : ''}${c.damage === 0 && c.armorShred === 0 ? 'effect only' : ''}</span>
+              </div>`,
+                )
+                .join('')}</div>`
+        }
+        ${friendlies > 0 ? `<div class="shot-row penalty"><span>Friendly fire</span><span>${friendlies} caught</span></div>` : ''}
+      </div>
+      <button class="action-btn action-fire interactive" ${blocked ? 'disabled' : ''}
+              ${Hud.intentAttr({ type: 'confirmThrow' })}>
+        <span>${shot.inRange ? 'THROW' : 'Too far'}</span>
+        <span class="action-tag">${shot.apCost} AP</span>
+      </button>
+      <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelGrenade' })}>
         <span>Cancel</span>
         <span class="action-tag">Esc</span>
       </button>
