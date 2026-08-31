@@ -52,17 +52,14 @@ export class Rifle extends Weapon {
     super()
     this.apCost = 4
     this.baseAccuracy = 85
-    this.accuracyPerMetre = 1.8 // lowered: was 3
-    this.damage = 55
-    this.armorPen = 0.25
-    this.armorShred = 0
-    this.areaRadius = 0
-    this.maxRange = 22
-    this.maxClip = 6
-    this.currentClip = 6
+    this.maxClip = 15
+    this.currentClip = 15
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Snap, ShotMode.Aimed, ShotMode.Burst]
+  }
+  override bulletConsumption(mode: ShotMode): number {
+    return mode === ShotMode.Burst ? 5 : 1
   }
 }
 
@@ -117,15 +114,14 @@ export class Gatling extends Weapon {
     this.baseAccuracy = 80 // elevated: was 70
     this.accuracyPerMetre = 2.5 // lowered: was 4
     this.damage = 35
-    this.armorPen = 0.1
-    this.armorShred = 12
-    this.areaRadius = 0
-    this.maxRange = 18
-    this.maxClip = 12
-    this.currentClip = 12
+    this.maxClip = 30
+    this.currentClip = 30
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Burst] // ONLY option for Gatling
+  }
+  override bulletConsumption(mode: ShotMode): number {
+    return mode === ShotMode.Burst ? 10 : 1
   }
 }
 
