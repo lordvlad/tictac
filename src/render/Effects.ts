@@ -140,7 +140,7 @@ export class Effects {
 
     const texture = this.getSmokeTexture()
     const sprites: Sprite[] = []
-    const count = 9
+    const count = Math.round(7 * radius)
     for (let i = 0; i < count; i++) {
       const mat = new SpriteMaterial({
         map: texture,
@@ -152,7 +152,7 @@ export class Effects {
       const sprite = new Sprite(mat)
 
       const a = Math.random() * Math.PI * 2
-      const r = Math.random() * radius * 0.5
+      const r = Math.random() * radius * 0.82
       sprite.position.set(
         worldPos.x + Math.cos(a) * r,
         FX.smokeHeight + (Math.random() * 0.5 - 0.25),
@@ -256,10 +256,10 @@ export class Effects {
     const ctx = canvas.getContext('2d')!
 
     const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
-    grad.addColorStop(0, 'rgba(255, 255, 255, 0.46)')
-    grad.addColorStop(0.3, 'rgba(240, 240, 240, 0.28)')
-    grad.addColorStop(0.7, 'rgba(200, 200, 200, 0.06)')
-    grad.addColorStop(1, 'rgba(200, 200, 200, 0)')
+    grad.addColorStop(0, 'rgba(80, 85, 90, 0.46)')
+    grad.addColorStop(0.3, 'rgba(75, 80, 85, 0.28)')
+    grad.addColorStop(0.7, 'rgba(65, 70, 75, 0.06)')
+    grad.addColorStop(1, 'rgba(65, 70, 75, 0)')
 
     ctx.fillStyle = grad
     ctx.fillRect(0, 0, size, size)
