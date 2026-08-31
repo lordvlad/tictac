@@ -8,6 +8,7 @@ import type { OrbitRig } from '../camera/OrbitRig'
 import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
 import { buildHudModel, type HudIntent } from '../hud/HudModel'
+import { calculateHitChance, tickStatuses } from './Combat'
 import type { OffscreenPortraits } from '../render/Portraits'
 import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
@@ -55,7 +56,7 @@ export class InteractionController {
     private readonly engine: EngineContext,
   ) {
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
-    this.shoot = new ShootPlanner(battlefield.grid, hud, tracers, engine)
+    this.shoot = new ShootPlanner(battlefield.grid, squads, tracers, engine)
     this.fog = new FogOfWar(battlefield.grid, battlefield.ground, battlefield.blocks)
     this.xray = new WallXray(rig, squads, battlefield.blocks)
     this.picker = new GroundPicker(engine.camera)
@@ -86,6 +87,7 @@ export class InteractionController {
 
   /** Re-project game state into the HUD. The HUD reads nothing on its own. */
   private refreshHud(): void {
+    const shooter = this.turnManager.selectedSoldier
     this.hud.render(
       buildHudModel({
         turnManager: this.turnManager,
@@ -95,6 +97,21 @@ export class InteractionController {
         seedLabel: this.seedLabel,
         shootActive: this.shoot.active,
         waypointActive: this.planner.waypointMode,
+        shoot:
+          this.shoot.active && shooter
+            ? {
+                targets: this.shoot.availableTargets(shooter).map((soldier) => ({
+                  soldier,
+                  hitChance: calculateHitChance(
+                    this.battlefield.grid,
+                    shooter,
+                    soldier,
+                    this.shoot.shotMode,
+                  ),
+                })),
+                pending: this.shoot.pending(shooter),
+              }
+            : null,
       }),
     )
   }
@@ -116,6 +133,22 @@ export class InteractionController {
       case 'cancelShoot':
         this.exitShootMode()
         break
+      case 'selectTarget': {
+        const enemy = this.squads.byFaction[this.enemyFaction][intent.index]
+        if (enemy && !enemy.isDead) this.shoot.selectTarget(enemy)
+        this.renderOverlay()
+        this.refreshHud()
+        break
+      }
+      case 'setShotMode':
+        this.shoot.setShotMode(intent.mode)
+        this.refreshHud()
+        break
+      case 'confirmShot': {
+        const shooter = this.turnManager.selectedSoldier
+        if (shooter) this.shoot.confirm(shooter)
+        break
+      }
       case 'toggleCover':
         this.toggleCover()
         break
@@ -209,6 +242,8 @@ export class InteractionController {
   onTurnSwitched(): void {
     if (this.rig.isCharacterViewActive) this.rig.exitCharacterView()
     this.exitShootMode()
+    // Statuses are measured in turns, so they expire on the handover.
+    tickStatuses(this.squads.soldiers)
     this.recomputeVisibility()
   }
 
@@ -274,9 +309,15 @@ export class InteractionController {
     if (!selected || selected.isDead) return
     const tile = this.tileFromEvent(event)
 
+    // In shoot mode a click on an enemy picks it as the target; confirmation
+    // happens on the panel, so a stray click can never fire.
     if (this.shoot.active) {
       const enemy = this.pickSoldierUnderCursor(event, this.enemyFaction)
-      this.shoot.handleClick(event.clientX, event.clientY, selected, enemy, tile !== null)
+      if (enemy) {
+        this.shoot.selectTarget(enemy)
+        this.renderOverlay()
+        this.refreshHud()
+      }
       return
     }
 

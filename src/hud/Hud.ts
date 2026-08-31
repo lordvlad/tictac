@@ -1,4 +1,5 @@
-import type { HudAction, HudIntent, HudModel } from './HudModel'
+import { ShotMode } from '../core/Arsenal'
+import type { HudAction, HudIntent, HudModel, HudShotPanel } from './HudModel'
 
 export interface ContextMenuItem {
   label: string
@@ -21,6 +22,8 @@ export interface ContextMenuItem {
 export class Hud {
   private readonly uiRoot: HTMLElement
   private readonly topRightEl: HTMLElement
+  private readonly bottomCentreEl: HTMLElement
+  private readonly targetStripEl: HTMLElement
   private readonly squadBarEl: HTMLElement
   private readonly actionPanelEl: HTMLElement
   private readonly turnOverlayEl: HTMLElement
@@ -34,9 +37,18 @@ export class Hud {
 
     this.topRightEl = document.createElement('div')
     this.topRightEl.className = 'hud-top-right'
+    // Strip and squad bar share one bottom-centred column: stacking them in the
+    // layout means they cannot overlap, whatever height the cards grow to.
+    this.bottomCentreEl = document.createElement('div')
+    this.bottomCentreEl.className = 'hud-bottom-centre'
+
+    this.targetStripEl = document.createElement('div')
+    this.targetStripEl.className = 'hud-target-strip'
 
     this.squadBarEl = document.createElement('div')
     this.squadBarEl.className = 'hud-squad-bar'
+
+    this.bottomCentreEl.append(this.targetStripEl, this.squadBarEl)
 
     this.actionPanelEl = document.createElement('div')
     this.actionPanelEl.className = 'hud-action-panel'
@@ -50,7 +62,7 @@ export class Hud {
 
     this.uiRoot.append(
       this.topRightEl,
-      this.squadBarEl,
+      this.bottomCentreEl,
       this.actionPanelEl,
       this.turnOverlayEl,
       this.contextMenuEl,
@@ -65,7 +77,7 @@ export class Hud {
     this.uiRoot.removeEventListener('click', this.onUiClick)
     for (const el of [
       this.topRightEl,
-      this.squadBarEl,
+      this.bottomCentreEl,
       this.actionPanelEl,
       this.turnOverlayEl,
       this.contextMenuEl,
@@ -83,6 +95,7 @@ export class Hud {
   render(model: HudModel): void {
     this.model = model
     this.renderTopRight(model)
+    this.renderTargetStrip(model)
     this.renderSquadBar(model)
     this.renderActionPanel(model)
   }
@@ -184,7 +197,43 @@ export class Hud {
     `
   }
 
+  /**
+   * Enemies that can be shot, as a centred row of small portraits above the
+   * squad bar. Picking one only previews the shot; the panel confirms it.
+   */
+  private renderTargetStrip(model: HudModel): void {
+    if (model.targets.length === 0) {
+      this.targetStripEl.innerHTML = ''
+      this.targetStripEl.classList.remove('visible')
+      return
+    }
+
+    this.targetStripEl.classList.add('visible')
+    this.targetStripEl.innerHTML = model.targets
+      .map(
+        (t) => `
+      <button class="target-icon interactive ${t.selected ? 'selected' : ''}"
+              title="${t.name} — ${t.hitChance}% to hit"
+              ${Hud.intentAttr({ type: 'selectTarget', index: t.index })}>
+        <img class="target-portrait" src="${t.portrait}" alt="${t.name}" />
+        <span class="target-chance">${t.hitChance}%</span>
+        <span class="target-hp"><span class="target-hp-fill" style="width: ${Math.round(t.hpFraction * 100)}%;"></span></span>
+      </button>`,
+      )
+      .join('')
+  }
+
+  /**
+   * The right-hand panel. A lined-up shot takes the whole panel over: while
+   * aiming, confirming or cancelling the shot is the only thing the player
+   * should be able to reach there.
+   */
   private renderActionPanel(model: HudModel): void {
+    if (model.shotPanel) {
+      this.actionPanelEl.innerHTML = this.shotCard(model.shotPanel)
+      return
+    }
+
     if (model.selectedName === null) {
       this.actionPanelEl.innerHTML = ''
       return
@@ -193,6 +242,46 @@ export class Hud {
     this.actionPanelEl.innerHTML = `
       <div class="action-header">${model.selectedName} Actions</div>
       ${model.actions.map((action) => this.actionButton(action)).join('')}
+    `
+  }
+
+  private shotCard(shot: HudShotPanel): string {
+    const blocked = shot.outOfRange || !shot.affordable
+    return `
+      <div class="action-header">Firing at ${shot.targetName}</div>
+      <div class="shot-card">
+        <div class="shot-chance ${shot.hitChance >= 50 ? 'good' : 'poor'}">${shot.hitChance}<span>%</span></div>
+        <div class="shot-weapon">${shot.weaponName} · ${shot.ammoName}</div>
+        <div class="shot-rows">
+          ${shot.terms
+            .map(
+              (t) => `
+            <div class="shot-row ${t.penalty ? 'penalty' : ''}">
+              <span>${t.label}</span><span>${t.value}</span>
+            </div>`,
+            )
+            .join('')}
+        </div>
+        <div class="shot-rows shot-outcome">
+          <div class="shot-row"><span>Damage</span><span>${shot.damage}</span></div>
+          ${shot.armorShred > 0 ? `<div class="shot-row"><span>Armor shred</span><span>-${shot.armorShred}</span></div>` : ''}
+          <div class="shot-row"><span>Target</span><span>${shot.targetHp} HP · ${shot.targetArmor} AR</span></div>
+        </div>
+      </div>
+      <button class="action-btn interactive ${shot.mode === ShotMode.Aimed ? 'active' : ''}"
+              ${Hud.intentAttr({ type: 'setShotMode', mode: shot.mode === ShotMode.Aimed ? ShotMode.Snap : ShotMode.Aimed })}>
+        <span>${shot.mode === ShotMode.Aimed ? 'Aimed Shot' : 'Snap Shot'}</span>
+        <span class="action-tag">${shot.mode === ShotMode.Aimed ? 'x2 odds' : 'tap to aim'}</span>
+      </button>
+      <button class="action-btn action-fire interactive" ${blocked ? 'disabled' : ''}
+              ${Hud.intentAttr({ type: 'confirmShot' })}>
+        <span>${shot.outOfRange ? 'Out of range' : 'FIRE'}</span>
+        <span class="action-tag">${shot.apCost} AP</span>
+      </button>
+      <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelShoot' })}>
+        <span>Cancel</span>
+        <span class="action-tag">Esc</span>
+      </button>
     `
   }
 

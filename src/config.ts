@@ -109,13 +109,22 @@ export const SIGHT_RANGE = 14
  *  the `run` (Jog_Fwd_Loop) clip so the feet do not visibly slide. */
 export const MOVE_SPEED = 3.4
 
+/**
+ * Global aim clamps and tuning offsets. Per-weapon accuracy and range falloff
+ * live in {@link Arsenal}: what separates a shotgun from a sniper rifle is the
+ * weapon, not a single global constant.
+ */
 export const AIM = {
-  base: 85,
-  /** Accuracy lost per metre of range. */
-  perMetre: 3,
+  /** Flat hit-chance offset applied to every shot. A tuning/debug knob. */
+  globalBonus: 0,
   min: 5,
   max: 95,
+  /** A hit always does at least this much, however good the armour. */
+  minDamage: 5,
 } as const
+
+/** Armour points a soldier starts with. Subtracts flat damage from hits. */
+export const MAX_ARMOR = 20
 
 /**
  * Accuracy the shooter loses against a target, by the cover the bullet crosses

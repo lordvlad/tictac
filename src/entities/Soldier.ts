@@ -2,7 +2,19 @@ import Entity3D from '@mavonengine/core/World/Entity3D'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { LoopOnce, LoopRepeat, Mesh, MeshStandardMaterial, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
-import { Faction, FACTION_INFO, MAX_AP, MAX_HP, MOVE_SPEED, SOLDIER_HEIGHT, STEP_DIAGONAL, STEP_ORTHOGONAL } from '../config'
+import {
+  Faction,
+  FACTION_INFO,
+  MAX_AP,
+  MAX_ARMOR,
+  MAX_HP,
+  MOVE_SPEED,
+  SOLDIER_HEIGHT,
+  STEP_DIAGONAL,
+  STEP_ORTHOGONAL,
+} from '../config'
+import { AmmoId, GrenadeId, WeaponId } from '../core/Arsenal'
+import type { StatusState } from '../core/Ballistics'
 import type { Grid, Tile } from '../core/Grid'
 
 /**
@@ -25,7 +37,26 @@ export class Soldier extends Entity3D {
   readonly name: string
 
   hp = MAX_HP
+  maxHp = MAX_HP
   ap = MAX_AP
+  maxAp = MAX_AP
+  /** Armour points. Subtracts flat damage; stripped by shred effects. */
+  armor = MAX_ARMOR
+  maxArmor = MAX_ARMOR
+
+  // --- loadout --------------------------------------------------------------
+  weaponId: WeaponId = WeaponId.Rifle
+  ammoId: AmmoId = AmmoId.Standard
+  /** Grenades still in the pouch, by kind. */
+  readonly grenades: Record<GrenadeId, number> = {
+    [GrenadeId.Frag]: 1,
+    [GrenadeId.Flash]: 1,
+    [GrenadeId.Smoke]: 1,
+  }
+
+  /** Live status effects (flashed, smoked, shredded). */
+  statuses: StatusState[] = []
+
   tile: Tile
 
   /** Logical target position in world space. */
