@@ -305,7 +305,7 @@ export class Hud {
 
   /** The armed grenade: who is in the blast, and whether that includes us. */
   private throwCard(shot: HudThrowPanel): string {
-    const blocked = !shot.affordable || !shot.inRange || shot.caught.length === 0
+    const blocked = !shot.affordable || !shot.inRange
     const friendlies = shot.caught.filter((c) => c.friendly).length
     return `
       <div class="action-header">${shot.name}</div>
