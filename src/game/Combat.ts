@@ -104,8 +104,6 @@ export function executeShot(
   shooter.ap -= eff.apCost
 
   const chance = calculateHitChance(grid, shooter, target, mode)
-  const hit = Math.random() * 100 <= chance
-
   const shooterWorld = grid.tileToWorld(shooter.tile)
   const targetWorld = grid.tileToWorld(target.tile)
 
@@ -114,28 +112,45 @@ export function executeShot(
   const dz = targetWorld.z - shooterWorld.z
   if (Math.hypot(dx, dz) > 0.01) shooter.targetYaw = Math.atan2(dx, dz)
 
-  tracers.spawnTracer(shooterWorld, targetWorld, hit)
-  shooter.playShoot()
+  const bullets = eff.weapon.bulletConsumption(mode)
+  let totalDamage = 0
+  let totalArmorShred = 0
+  let anyHit = false
+  let killed = false
 
-  if (!hit) {
-    return { hit: false, damage: 0, armorShred: 0, killed: false, hitChance: chance, apSpent: eff.apCost }
-  }
+  for (let i = 0; i < bullets; i++) {
+    const hit = Math.random() * 100 <= chance
+    if (hit) anyHit = true
 
-  const primary = applyWeaponDamage(eff, target)
-  if (eff.areaRadius > 0) {
-    for (const other of soldiers) {
-      if (other === target || other.isDead) continue
-      const distance = grid.distance(target.tile, other.tile)
-      if (distance > eff.areaRadius) continue
-      applyWeaponDamage(eff, other, 1 - distance / (eff.areaRadius + 1))
+    tracers.spawnTracer(shooterWorld, targetWorld, hit)
+    // Only the first tracer-spawn plays the sound/visual cue
+    if (i === 0) shooter.playShoot()
+
+    if (hit) {
+      const primary = applyWeaponDamage(eff, target)
+      totalDamage += primary.damage
+      totalArmorShred += primary.armorShred
+      if (target.isDead) killed = true
+
+      if (eff.areaRadius > 0) {
+        for (const other of soldiers) {
+          if (other === target || other.isDead) continue
+          const distance = grid.distance(target.tile, other.tile)
+          if (distance > eff.areaRadius) continue
+          const area = applyWeaponDamage(eff, other, 1 - distance / (eff.areaRadius + 1))
+          totalDamage += area.damage
+          totalArmorShred += area.armorShred
+          if (other.isDead) killed = true
+        }
+      }
     }
   }
 
   return {
-    hit: true,
-    damage: primary.damage,
-    armorShred: primary.armorShred,
-    killed: target.isDead,
+    hit: anyHit,
+    damage: totalDamage,
+    armorShred: totalArmorShred,
+    killed,
     hitChance: chance,
     apSpent: eff.apCost,
   }
