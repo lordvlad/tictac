@@ -1072,3 +1072,15 @@ canvas {
     font-size: 8px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Fullscreen Flash Overlay
+   --------------------------------------------------------------------------- */
+.fullscreen-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 150;
+  opacity: 0;
+  transition: none; /* absolute control via opacity in JS */
+}

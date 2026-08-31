@@ -68,6 +68,11 @@ export class OrbitRig implements CameraRigTarget {
   private readonly euler = new Euler(0, 0, 0, 'YXZ')
   private readonly scratchVec = new Vector3()
   private readonly scratchNdc = new Vector2()
+  private readonly shakeOffset = new Vector3()
+
+  private shakeTime = 0
+  private shakeDuration = 0
+  private shakeIntensity = 0
 
   private rafHandle = 0
   private lastFrameTime = 0
@@ -119,6 +124,13 @@ export class OrbitRig implements CameraRigTarget {
 
   get focusPoint(): Vector3 {
     return this.focusCurrent
+  }
+
+  /** Trigger a camera shake of `intensity` (metres) decaying over `duration` (seconds). */
+  shake(intensity: number, duration: number): void {
+    this.shakeIntensity = intensity
+    this.shakeDuration = duration
+    this.shakeTime = 0
   }
 
   get distance(): number {
@@ -367,6 +379,23 @@ export class OrbitRig implements CameraRigTarget {
     const k = 1 - Math.exp(-CAM.smoothing * delta)
     const kReset = 1 - Math.exp(-CAM.resetSmoothing * delta)
 
+    // Decay screen shake over time.
+    if (this.shakeTime < this.shakeDuration) {
+      this.shakeTime += delta
+      const progress = clamp(this.shakeTime / this.shakeDuration, 0, 1)
+      const decay = 1 - progress
+      const amp = this.shakeIntensity * decay
+      // Rapid organic oscillation using prime-related sine frequencies
+      const t = this.shakeTime * 60
+      this.shakeOffset.set(
+        Math.sin(t * 1.1) * amp,
+        Math.cos(t * 1.3) * amp,
+        Math.sin(t * 1.7) * amp,
+      )
+    } else {
+      this.shakeOffset.set(0, 0, 0)
+    }
+
     if (this.isCharacterView) {
       this.eyePositionCurrent.lerp(this.eyePositionTarget, k)
       this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k
@@ -396,7 +425,7 @@ export class OrbitRig implements CameraRigTarget {
 
   private applyTransform(): void {
     if (this.isCharacterView) {
-      this.camera.position.copy(this.eyePositionCurrent)
+      this.camera.position.copy(this.eyePositionCurrent).add(this.shakeOffset)
       // Horizontal level look, plus whatever free-look offset is applied.
       this.euler.set(this.freePitchCurrent, this.azimuthCurrent + this.freeYawCurrent, 0, 'YXZ')
       this.camera.quaternion.setFromEuler(this.euler)
@@ -415,6 +444,7 @@ export class OrbitRig implements CameraRigTarget {
       this.focusCurrent.y + sinP * this.distCurrent,
       this.focusCurrent.z + Math.cos(az) * cosP * this.distCurrent,
     )
+    this.camera.position.add(this.shakeOffset)
 
     // With YXZ order, yaw = azimuth and pitch = -tilt reproduces lookAt(focus)
     // exactly, which lets the free-look offsets compose additively.

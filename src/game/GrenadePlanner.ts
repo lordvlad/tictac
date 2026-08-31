@@ -4,9 +4,12 @@ import type { Grid, Tile } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import { DamageIndicators } from '../render/DamageIndicators'
 import type { Ground } from '../render/Ground'
+import type { Effects } from '../render/Effects'
 import { throwGrenade } from './Combat'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
+import { FX } from '../config'
+import { Vector3 } from 'three'
 
 const BLAST_TINT = 0xff9a3c
 const BLAST_CENTRE = 0xffd166
@@ -50,6 +53,8 @@ export class GrenadePlanner {
   constructor(
     private readonly grid: Grid,
     private readonly squads: Squads,
+    private readonly effects: Effects,
+    private readonly rig: { shake(intensity: number, duration: number): void },
     engine: EngineContext,
   ) {
     this.damageIndicators = new DamageIndicators(engine)
@@ -122,6 +127,20 @@ export class GrenadePlanner {
 
     const result = throwGrenade(this.grid, thrower, pending.at, pending.kind, this.squads.soldiers)
     if (!result.thrown) return false
+
+    // Trigger visual effects: flash, screen shake, and 3D smoke
+    const worldPos = this.grid.tileToWorld(pending.at)
+    this.effects.triggerFlash(pending.kind)
+
+    if (pending.kind === 'frag') {
+      this.rig.shake(FX.shakeIntensityFrag, FX.shakeDurationFrag)
+      this.effects.spawnBlastPuffs(worldPos, pending.radius)
+    } else if (pending.kind === 'smoke') {
+      // Persistent smoke cloud covers the area, mapped by its tile index.
+      // It stays active for the duration of the status effect.
+      const tileIdx = this.grid.index(pending.at.x, pending.at.y)
+      this.effects.spawnPersistentSmoke(tileIdx, worldPos, pending.radius)
+    }
 
     for (const hit of result.hits) {
       if (hit.damage > 0) this.damageIndicators.spawn(hit.soldier.position, true, hit.damage)

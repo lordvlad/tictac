@@ -16,6 +16,7 @@ import { MovementPlanner } from './MovementPlanner'
 import { DebugPanel } from '../hud/DebugPanel'
 import { GrenadePlanner } from './GrenadePlanner'
 import { ShootPlanner } from './ShootPlanner'
+import { Effects } from '../render/Effects'
 import { WallXray } from './WallXray'
 import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
@@ -37,7 +38,7 @@ export class InteractionController {
   private readonly debug: DebugPanel
   private readonly fog: FogOfWar
   private readonly xray: WallXray
-
+  private readonly effects: Effects
   // Hover state (mouse only — touch has no hover phase).
   private hoveredTile: Tile | null = null
   private hoveredEnemy: Soldier | null = null
@@ -59,9 +60,10 @@ export class InteractionController {
     tracers: Tracers,
     private readonly engine: EngineContext,
   ) {
+    this.effects = new Effects(engine)
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
     this.shoot = new ShootPlanner(battlefield.grid, squads, tracers, engine)
-    this.grenade = new GrenadePlanner(battlefield.grid, squads, engine)
+    this.grenade = new GrenadePlanner(battlefield.grid, squads, this.effects, rig, engine)
     this.debug = new DebugPanel(
       () => {
         // Live edits can change reach, cost and visibility, so everything the
@@ -238,6 +240,7 @@ export class InteractionController {
     this.shoot.dispose()
     this.grenade.dispose()
     this.debug.dispose()
+    this.effects.dispose()
   }
 
   // ---------------------------------------------------------------------------
@@ -283,8 +286,9 @@ export class InteractionController {
   onTurnSwitched(): void {
     if (this.rig.isCharacterViewActive) this.rig.exitCharacterView()
     this.exitShootMode()
-    // Statuses are measured in turns, so they expire on the handover.
+    // Statuses and persistent smoke expire on the handover.
     tickStatuses(this.squads.soldiers)
+    this.effects.tickTurn()
     this.recomputeVisibility()
   }
 
@@ -450,6 +454,7 @@ export class InteractionController {
   }
 
   update(delta: number): void {
+    this.effects.update(delta)
     this.planner.update(delta)
 
     const selected = this.turnManager.selectedSoldier

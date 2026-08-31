@@ -222,3 +222,19 @@ export const FACTION_INFO: Record<Faction, {
 } as const
 
 export const SQUAD_SIZE = 4
+
+// ---------------------------------------------------------------------------
+// Grenade Visual Effects (FX)
+// ---------------------------------------------------------------------------
+
+export const FX = {
+  /** Flash durations in seconds. */
+  flashDurationFrag: 0.15,
+  flashDurationFlashbang: 0.55,
+  /** Screen shake constants. */
+  shakeDurationFrag: 0.45,
+  shakeIntensityFrag: 0.18,
+  /** Smoke cloud heights and sizes. */
+  smokeHeight: 0.45,
+  smokeSpriteSize: 1.5,
+} as const
