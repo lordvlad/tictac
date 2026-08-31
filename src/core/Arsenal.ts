@@ -16,85 +16,125 @@ export const WeaponId = {
 } as const
 export type WeaponId = (typeof WeaponId)[keyof typeof WeaponId]
 
-export interface WeaponSpec {
-  id: WeaponId
-  name: string
-  /** AP for one snap shot. */
-  apCost: number
-  /** Hit chance at point blank, before range, cover and status. */
-  baseAccuracy: number
-  /**
-   * Hit chance lost per metre of range. This is the knob that separates a
-   * shotgun from a sniper rifle far more than damage does.
-   */
-  accuracyPerMetre: number
-  /** Damage before armour. */
-  damage: number
-  /** Fraction of the target's armour ignored, 0..1. */
-  armorPen: number
-  /** Armour points stripped from the target on a hit, permanently. */
-  armorShred: number
-  /** Blast radius in tiles. 0 means the shot only touches the target tile. */
-  areaRadius: number
-  /** Beyond this range the weapon cannot be fired at all. */
-  maxRange: number
+export abstract class Weapon {
+  abstract readonly id: WeaponId
+  abstract readonly name: string
+
+  apCost = 4
+  baseAccuracy = 85
+  accuracyPerMetre = 3
+  damage = 55
+  armorPen = 0.25
+  armorShred = 0
+  areaRadius = 0
+  maxRange = 22
+
+  maxClip = 6
+  currentClip = 6
+
+  abstract get availableModes(): readonly ShotMode[]
+
+  bulletConsumption(mode: ShotMode): number {
+    return mode === ShotMode.Burst ? 3 : 1
+  }
+
+  clone(): this {
+    const copy = Object.create(Object.getPrototypeOf(this)) as this
+    Object.assign(copy, this)
+    return copy
+  }
 }
 
-export const WEAPONS: Record<WeaponId, WeaponSpec> = {
-  [WeaponId.Rifle]: {
-    id: WeaponId.Rifle,
-    name: 'Rifle',
-    apCost: 4,
-    baseAccuracy: 85,
-    accuracyPerMetre: 3,
-    damage: 55,
-    armorPen: 0.25,
-    armorShred: 0,
-    areaRadius: 0,
-    maxRange: 22,
-  },
-  [WeaponId.Shotgun]: {
-    id: WeaponId.Shotgun,
-    name: 'Shotgun',
-    apCost: 4,
-    baseAccuracy: 95,
-    // Devastating up close and useless at range: the pellets spread.
-    accuracyPerMetre: 9,
-    damage: 85,
-    // Pellets flatten against plate.
-    armorPen: 0.05,
-    armorShred: 0,
-    areaRadius: 0,
-    maxRange: 12,
-  },
-  [WeaponId.Sniper]: {
-    id: WeaponId.Sniper,
-    name: 'Sniper Rifle',
-    apCost: 6,
-    baseAccuracy: 80,
-    // Range is barely a factor; the cost is AP and a poor point-blank profile.
-    accuracyPerMetre: 0.4,
-    damage: 70,
-    armorPen: 0.5,
-    armorShred: 0,
-    areaRadius: 0,
-    maxRange: 40,
-  },
-  [WeaponId.Gatling]: {
-    id: WeaponId.Gatling,
-    name: 'Gatling',
-    apCost: 5,
-    baseAccuracy: 70,
-    accuracyPerMetre: 4,
-    damage: 35,
-    armorPen: 0.1,
-    // Its job is chewing armour off a target for someone else to finish.
-    armorShred: 12,
-    areaRadius: 0,
-    maxRange: 18,
-  },
+export class Rifle extends Weapon {
+  readonly id = WeaponId.Rifle
+  readonly name = 'Rifle'
+  constructor() {
+    super()
+    this.apCost = 4
+    this.baseAccuracy = 85
+    this.accuracyPerMetre = 1.8 // lowered: was 3
+    this.damage = 55
+    this.armorPen = 0.25
+    this.armorShred = 0
+    this.areaRadius = 0
+    this.maxRange = 22
+    this.maxClip = 6
+    this.currentClip = 6
+  }
+  get availableModes(): readonly ShotMode[] {
+    return [ShotMode.Snap, ShotMode.Aimed, ShotMode.Burst]
+  }
 }
 
+export class Shotgun extends Weapon {
+  readonly id = WeaponId.Shotgun
+  readonly name = 'Shotgun'
+  constructor() {
+    super()
+    this.apCost = 4
+    this.baseAccuracy = 95
+    this.accuracyPerMetre = 6.0 // lowered: was 9
+    this.damage = 85
+    this.armorPen = 0.05
+    this.armorShred = 0
+    this.areaRadius = 0
+    this.maxRange = 12
+    this.maxClip = 4
+    this.currentClip = 4
+  }
+  get availableModes(): readonly ShotMode[] {
+    return [ShotMode.Snap, ShotMode.Aimed]
+  }
+}
+
+export class Sniper extends Weapon {
+  readonly id = WeaponId.Sniper
+  readonly name = 'Sniper Rifle'
+  constructor() {
+    super()
+    this.apCost = 6
+    this.baseAccuracy = 80
+    this.accuracyPerMetre = 0.25 // lowered: was 0.4
+    this.damage = 70
+    this.armorPen = 0.5
+    this.armorShred = 0
+    this.areaRadius = 0
+    this.maxRange = 40
+    this.maxClip = 5
+    this.currentClip = 5
+  }
+  get availableModes(): readonly ShotMode[] {
+    return [ShotMode.Snap, ShotMode.Aimed]
+  }
+}
+
+export class Gatling extends Weapon {
+  readonly id = WeaponId.Gatling
+  readonly name = 'Gatling'
+  constructor() {
+    super()
+    this.apCost = 5
+    this.baseAccuracy = 80 // elevated: was 70
+    this.accuracyPerMetre = 2.5 // lowered: was 4
+    this.damage = 35
+    this.armorPen = 0.1
+    this.armorShred = 12
+    this.areaRadius = 0
+    this.maxRange = 18
+    this.maxClip = 12
+    this.currentClip = 12
+  }
+  get availableModes(): readonly ShotMode[] {
+    return [ShotMode.Burst] // ONLY option for Gatling
+  }
+}
+
+export const WEAPONS: Record<WeaponId, Weapon> = {
+  [WeaponId.Rifle]: new Rifle(),
+  [WeaponId.Shotgun]: new Shotgun(),
+  [WeaponId.Sniper]: new Sniper(),
+  [WeaponId.Gatling]: new Gatling(),
+}
 export const AmmoId = {
   Standard: 'standard',
   ArmorPiercing: 'ap',
@@ -152,6 +192,7 @@ export const AMMO: Record<AmmoId, AmmoSpec> = {
 export const ShotMode = {
   Snap: 'snap',
   Aimed: 'aimed',
+  Burst: 'burst',
 } as const
 export type ShotMode = (typeof ShotMode)[keyof typeof ShotMode]
 
@@ -167,6 +208,7 @@ export interface ShotModeSpec {
 export const SHOT_MODES: Record<ShotMode, ShotModeSpec> = {
   [ShotMode.Snap]: { id: ShotMode.Snap, name: 'Snap Shot', apMul: 1, chanceMul: 1 },
   [ShotMode.Aimed]: { id: ShotMode.Aimed, name: 'Aimed Shot', apMul: 2, chanceMul: 2 },
+  [ShotMode.Burst]: { id: ShotMode.Burst, name: 'Burst Fire', apMul: 1.25, chanceMul: 0.9 },
 }
 
 // ---------------------------------------------------------------------------

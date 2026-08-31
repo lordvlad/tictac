@@ -266,7 +266,7 @@ export class Hud {
   private shotCard(shot: HudShotPanel): string {
     return `
       <div class="action-header">Firing at ${shot.targetName}</div>
-      <div class="shot-target">${shot.weaponName} · ${shot.ammoName} — target ${shot.targetHp} HP · ${shot.targetArmor} AR</div>
+      <div class="shot-target">${shot.weaponName} (${shot.currentClip}/${shot.maxClip} ammo) · ${shot.ammoName} — target ${shot.targetHp} HP · ${shot.targetArmor} AR</div>
       ${shot.cards.map((card) => this.shotOptionCard(card)).join('')}
       <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelShoot' })}>
         <span>Cancel</span>
@@ -281,7 +281,7 @@ export class Hud {
               ${card.available ? '' : 'disabled'} ${Hud.intentAttr({ type: 'fireShot', mode: card.mode })}>
         <div class="shot-option-head">
           <span class="shot-option-name">${card.name}</span>
-          <span class="shot-option-ap">${card.apCost} AP</span>
+          <span class="shot-option-ap">${card.apCost} AP · ${card.bullets} ammo</span>
         </div>
         <div class="shot-option-chance ${card.hitChance >= 50 ? 'good' : 'poor'}">
           ${card.outOfRange ? 'OUT OF RANGE' : `${card.hitChance}<span>%</span>`}

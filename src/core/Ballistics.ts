@@ -6,7 +6,7 @@ import {
   STATUSES,
   type ShotMode,
   type StatusKind,
-  type WeaponSpec,
+  Weapon,
 } from './Arsenal'
 import { CoverLevel } from './Cover'
 import { clamp } from './math'
@@ -23,8 +23,8 @@ export interface CombatantStats {
   maxHp: number
   armor: number
   isCrouching: boolean
-  /** This unit's own weapon spec, not a reference into the shared table. */
-  weapon: WeaponSpec
+  /** This unit's own weapon instance. */
+  weapon: Weapon
   /** This unit's own loaded round. */
   ammo: AmmoSpec
   statuses: StatusState[]
@@ -32,7 +32,7 @@ export interface CombatantStats {
 
 /** A weapon with its loaded ammo folded in. */
 export interface EffectiveWeapon {
-  weapon: WeaponSpec
+  weapon: Weapon
   apCost: number
   baseAccuracy: number
   accuracyPerMetre: number

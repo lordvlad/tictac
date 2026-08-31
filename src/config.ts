@@ -108,8 +108,9 @@ export const RULES = {
   maxHp: 100,
   maxAp: 12,
   maxArmor: 20,
-  /** AP to hunker down into cover (crouch stance). */
+  /** AP to hunker down into cover (crouch stance) / reload. */
   coverApCost: 2,
+  reloadApCost: 2,
   /** Tiles a soldier can see. */
   sightRange: 14,
   /** AP per tile of movement. */

@@ -1,5 +1,6 @@
 import type { EngineContext } from '../engine'
 import { Faction, SQUAD_SIZE } from '../config'
+import { AmmoId, WeaponId } from '../core/Arsenal'
 import type { Grid, Tile } from '../core/Grid'
 import { Soldier } from '../entities/Soldier'
 
@@ -14,17 +15,20 @@ export class Squads {
     const blueNames = ['Viper', 'Ghost', 'Spectre', 'Reaper']
     const redNames = ['Cobalt', 'Crimson', 'Razor', 'Shadow']
 
+    const weapons = [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun] as const
+
     for (let i = 0; i < SQUAD_SIZE; i++) {
       const tileB = spawns[Faction.Blue][i] ?? { x: 2 + i * 2, y: 2 }
       const solB = new Soldier(Faction.Blue, i, blueNames[i]!, tileB, grid, engine)
+      solB.equip(weapons[i]!, AmmoId.Standard)
       this.soldiers.push(solB)
       this.byFaction[Faction.Blue].push(solB)
 
       const tileR = spawns[Faction.Red][i] ?? { x: 2 + i * 2, y: grid.size - 3 }
       const solR = new Soldier(Faction.Red, i, redNames[i]!, tileR, grid, engine)
+      solR.equip(weapons[i]!, AmmoId.Standard)
       this.soldiers.push(solR)
       this.byFaction[Faction.Red].push(solR)
-
       // Register into MavonEngine BaseWorld entity map
       engine.world.add({
         [solB.id]: solB,

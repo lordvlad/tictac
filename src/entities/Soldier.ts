@@ -11,7 +11,7 @@ import {
   type GrenadeSpec,
   GrenadeId,
   WEAPONS,
-  type WeaponSpec,
+  Weapon,
   WeaponId,
 } from '../core/Arsenal'
 import type { StatusState } from '../core/Ballistics'
@@ -52,7 +52,7 @@ export class Soldier extends Entity3D {
    * The tables in {@link Arsenal} are the templates these are stamped from.
    */
   weaponId: WeaponId = WeaponId.Rifle
-  weapon: WeaponSpec = { ...WEAPONS[WeaponId.Rifle] }
+  weapon: Weapon = WEAPONS[WeaponId.Rifle].clone()
   ammoId: AmmoId = AmmoId.Standard
   ammo: AmmoSpec = { ...AMMO[AmmoId.Standard] }
   /** Per-unit grenade specs, so throw range and blast are tunable per soldier. */
@@ -81,7 +81,7 @@ export class Soldier extends Entity3D {
   /** Re-stamp the loadout from the shared templates. */
   equip(weaponId: WeaponId, ammoId: AmmoId): void {
     this.weaponId = weaponId
-    this.weapon = { ...WEAPONS[weaponId] }
+    this.weapon = WEAPONS[weaponId].clone()
     this.ammoId = ammoId
     this.ammo = { ...AMMO[ammoId] }
   }

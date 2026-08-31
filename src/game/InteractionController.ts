@@ -166,6 +166,15 @@ export class InteractionController {
         if (shooter) this.shoot.fire(shooter, intent.mode)
         break
       }
+      case 'reload': {
+        const selected = this.turnManager.selectedSoldier
+        if (selected && !selected.isDead && selected.ap >= RULES.reloadApCost) {
+          selected.ap -= RULES.reloadApCost
+          selected.weapon.currentClip = selected.weapon.maxClip
+          this.refreshHud()
+        }
+        break
+      }
       case 'armGrenade': {
         const thrower = this.turnManager.selectedSoldier
         this.shoot.exit()

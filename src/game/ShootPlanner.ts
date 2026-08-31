@@ -22,6 +22,7 @@ export interface ShotOption {
   mode: ShotMode
   name: string
   apCost: number
+  bullets: number
   breakdown: HitChanceBreakdown
   /** Damage on a hit, after the target's armour. */
   damage: number
@@ -35,6 +36,8 @@ export interface PendingShot {
   target: Soldier
   weaponName: string
   ammoName: string
+  currentClip: number
+  maxClip: number
   /**
    * One entry per shot mode, so the panel can put each option on its own card
    * with its real numbers rather than making the player toggle to compare.
@@ -129,18 +132,20 @@ export class ShootPlanner {
     const target = this.target
     if (!target || target.isDead) return null
 
-    const options: ShotOption[] = Object.values(ShotMode).map((mode) => {
+    const options: ShotOption[] = shooter.weapon.availableModes.map((mode) => {
       const apCost = shotApCost(shooter, mode)
       const breakdown = shotBreakdown(this.grid, shooter, target, mode)
       const preview = previewDamage(shooter, target, mode)
+      const bullets = shooter.weapon.bulletConsumption(mode)
       return {
         mode,
         name: SHOT_MODES[mode].name,
         apCost,
+        bullets,
         breakdown,
         damage: preview.damage,
         armorShred: preview.armorShred,
-        available: shooter.ap >= apCost && !breakdown.outOfRange,
+        available: shooter.ap >= apCost && !breakdown.outOfRange && shooter.weapon.currentClip >= bullets,
       }
     })
 
@@ -148,16 +153,21 @@ export class ShootPlanner {
       target,
       weaponName: shooter.weapon.name,
       ammoName: shooter.ammo.name,
+      currentClip: shooter.weapon.currentClip,
+      maxClip: shooter.weapon.maxClip,
       options,
     }
   }
-
   /** Take the shot in `mode`. Picking a card is the trigger. */
   fire(shooter: Soldier, mode: ShotMode): boolean {
     const pending = this.pending(shooter)
     if (!pending) return false
     const option = pending.options.find((o) => o.mode === mode)
     if (!option || !option.available) return false
+
+    const consumption = shooter.weapon.bulletConsumption(mode)
+    if (shooter.weapon.currentClip < consumption) return false
+    shooter.weapon.currentClip -= consumption
 
     const result = executeShot(
       this.grid,

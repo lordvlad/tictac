@@ -18,6 +18,7 @@ export type HudIntent =
   | { type: 'cancelShoot' }
   | { type: 'selectTarget'; index: number }
   | { type: 'fireShot'; mode: ShotMode }
+  | { type: 'reload' }
   | { type: 'armGrenade'; kind: GrenadeId }
   | { type: 'confirmThrow' }
   | { type: 'cancelGrenade' }
@@ -81,6 +82,7 @@ export interface HudShotCard {
   damage: number
   armorShred: number
   apCost: number
+  bullets: number
   available: boolean
   outOfRange: boolean
   terms: HudShotTerm[]
@@ -93,6 +95,8 @@ export interface HudShotPanel {
   targetArmor: number
   weaponName: string
   ammoName: string
+  currentClip: number
+  maxClip: number
   cards: HudShotCard[]
 }
 
@@ -217,6 +221,14 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       })
     }
     actions.push({
+      id: 'reload',
+      label: 'Reload',
+      tag: `${RULES.reloadApCost} AP · ${selected.weapon.currentClip}/${selected.weapon.maxClip}`,
+      active: false,
+      disabled: selected.weapon.currentClip === selected.weapon.maxClip || selected.ap < RULES.reloadApCost,
+      intent: { type: 'reload' },
+    })
+    actions.push({
       id: 'endUnitTurn',
       label: 'End Unit Turn',
       tag: '0 AP',
@@ -275,6 +287,8 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
     targetArmor: pending.target.armor,
     weaponName: pending.weaponName,
     ammoName: pending.ammoName,
+    currentClip: pending.currentClip,
+    maxClip: pending.maxClip,
     cards: pending.options.map((option) => {
       const b = option.breakdown
       const terms: HudShotTerm[] = [
@@ -302,6 +316,7 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
         damage: option.damage,
         armorShred: option.armorShred,
         apCost: option.apCost,
+        bullets: option.bullets,
         available: option.available,
         outOfRange: b.outOfRange,
         terms,
