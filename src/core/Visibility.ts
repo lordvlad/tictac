@@ -1,4 +1,4 @@
-import { SIGHT_RANGE } from '../config'
+import { RULES } from '../config'
 import type { Grid, Tile } from './Grid'
 
 /**
@@ -93,15 +93,15 @@ export function computeFactionVisibility(
   }
 
   for (const origin of soldierTiles) {
-    const minX = Math.max(0, origin.x - SIGHT_RANGE)
-    const maxX = Math.min(size - 1, origin.x + SIGHT_RANGE)
-    const minY = Math.max(0, origin.y - SIGHT_RANGE)
-    const maxY = Math.min(size - 1, origin.y + SIGHT_RANGE)
+    const minX = Math.max(0, origin.x - RULES.sightRange)
+    const maxX = Math.min(size - 1, origin.x + RULES.sightRange)
+    const minY = Math.max(0, origin.y - RULES.sightRange)
+    const maxY = Math.min(size - 1, origin.y + RULES.sightRange)
 
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         const distSq = (x - origin.x) ** 2 + (y - origin.y) ** 2
-        if (distSq > SIGHT_RANGE ** 2) continue
+        if (distSq > RULES.sightRange ** 2) continue
 
         const targetTile = { x, y }
         if (hasLineOfSight(grid, origin, targetTile)) {

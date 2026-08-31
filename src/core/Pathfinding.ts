@@ -1,4 +1,4 @@
-import { STEP_DIAGONAL, STEP_ORTHOGONAL } from '../config'
+import { RULES } from '../config'
 import { NEIGHBOURS, type Grid, type Tile, tileEquals } from './Grid'
 
 export interface PathResult {
@@ -77,7 +77,7 @@ export function findPathSegment(
         if (occupiedTiles.has(grid.index(cx + dx, cy)) || occupiedTiles.has(grid.index(cx, cy + dy))) continue
       }
 
-      const stepCost = isDiagonal ? STEP_DIAGONAL : STEP_ORTHOGONAL
+      const stepCost = isDiagonal ? RULES.stepDiagonal : RULES.stepOrthogonal
       const tentativeG = gScore[current]! + stepCost
 
       if (tentativeG < gScore[nIdx]!) {

@@ -1,4 +1,4 @@
-import { COVER_AP_COST, FACTION_INFO, Faction, MAX_AP, MAX_HP } from '../config'
+import { FACTION_INFO, Faction, RULES } from '../config'
 import {
   AMMO,
   AmmoId,
@@ -189,9 +189,9 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     actions.push({
       id: 'cover',
       label: selected.isCrouching ? 'Stand Up' : 'Take Cover',
-      tag: selected.isCrouching ? 'Free' : `${COVER_AP_COST} AP`,
+      tag: selected.isCrouching ? 'Free' : `${RULES.coverApCost} AP`,
       active: selected.isCrouching,
-      disabled: !selected.isCrouching && selected.ap < COVER_AP_COST,
+      disabled: !selected.isCrouching && selected.ap < RULES.coverApCost,
       intent: { type: 'toggleCover' },
     })
     actions.push({
@@ -247,8 +247,8 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     factionIsBlue: faction === Faction.Blue,
     turnNumber: turnManager.turnNumber,
     seedLabel,
-    maxHp: MAX_HP,
-    maxAp: MAX_AP,
+    maxHp: selected?.maxHp ?? RULES.maxHp,
+    maxAp: selected?.maxAp ?? RULES.maxAp,
     squad,
     selectedName: selected && !selected.isDead ? selected.name : null,
     actions,

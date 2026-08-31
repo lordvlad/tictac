@@ -1,4 +1,4 @@
-import { Faction, MAX_AP } from '../config'
+import { Faction, RULES } from '../config'
 import type { Soldier } from '../entities/Soldier'
 import type { Squads } from './Squads'
 import type { OrbitRig } from '../camera/OrbitRig'
@@ -54,7 +54,7 @@ export class TurnManager {
     }
 
     for (const soldier of this.squads.getLiving(this.activeFaction)) {
-      soldier.ap = MAX_AP
+      soldier.ap = soldier.maxAp
     }
 
     // Start turn with no character selected

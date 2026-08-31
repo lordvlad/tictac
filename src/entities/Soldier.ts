@@ -2,17 +2,7 @@ import Entity3D from '@mavonengine/core/World/Entity3D'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { LoopOnce, LoopRepeat, Mesh, MeshStandardMaterial, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
-import {
-  Faction,
-  FACTION_INFO,
-  MAX_AP,
-  MAX_ARMOR,
-  MAX_HP,
-  MOVE_SPEED,
-  SOLDIER_HEIGHT,
-  STEP_DIAGONAL,
-  STEP_ORTHOGONAL,
-} from '../config'
+import { Faction, FACTION_INFO, RULES, SOLDIER_HEIGHT } from '../config'
 import { AmmoId, GrenadeId, WeaponId } from '../core/Arsenal'
 import type { StatusState } from '../core/Ballistics'
 import type { Grid, Tile } from '../core/Grid'
@@ -36,13 +26,13 @@ export class Soldier extends Entity3D {
   readonly squadIndex: number // 0..3
   readonly name: string
 
-  hp = MAX_HP
-  maxHp = MAX_HP
-  ap = MAX_AP
-  maxAp = MAX_AP
+  hp = RULES.maxHp
+  maxHp = RULES.maxHp
+  ap = RULES.maxAp
+  maxAp = RULES.maxAp
   /** Armour points. Subtracts flat damage; stripped by shred effects. */
-  armor = MAX_ARMOR
-  maxArmor = MAX_ARMOR
+  armor = RULES.maxArmor
+  maxArmor = RULES.maxArmor
 
   // --- loadout --------------------------------------------------------------
   weaponId: WeaponId = WeaponId.Rifle
@@ -160,7 +150,7 @@ export class Soldier extends Entity3D {
 
   /** Locomotion clip synced so its stride matches MOVE_SPEED (no foot sliding). */
   private playLocomotion(key: 'walk' | 'run' | 'crouchWalk'): void {
-    this.playLoop(key, MOVE_SPEED / CLIP_GROUND_SPEED[key])
+    this.playLoop(key, RULES.moveSpeed / CLIP_GROUND_SPEED[key])
   }
 
   /** Play a clip once and hold its final frame. */
@@ -243,7 +233,7 @@ export class Soldier extends Entity3D {
     // Distance budget for this tick. Leftover carries across tile boundaries,
     // otherwise the remainder is discarded on every arrival and the unit
     // travels measurably slower than MOVE_SPEED.
-    let budget = MOVE_SPEED * delta
+    let budget = RULES.moveSpeed * delta
 
     while (budget > 0) {
       if (this.movePathIndex >= this.movingPath.length) {
@@ -257,7 +247,7 @@ export class Soldier extends Entity3D {
       // halts on a tile boundary, so stopping here leaves a valid grid position.
       const prev = this.movingPath[this.movePathIndex - 1]!
       const stepCost =
-        prev.x !== nextTile.x && prev.y !== nextTile.y ? STEP_DIAGONAL : STEP_ORTHOGONAL
+        prev.x !== nextTile.x && prev.y !== nextTile.y ? RULES.stepDiagonal : RULES.stepOrthogonal
       if (this.ap < stepCost) {
         this.stopMovement()
         return false

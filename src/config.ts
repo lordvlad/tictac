@@ -95,19 +95,32 @@ export const WALL_XRAY = {
 // Combat
 // ---------------------------------------------------------------------------
 
-export const MAX_HP = 100
-export const BULLET_DAMAGE = 55 // 2 bullets kill
-export const MAX_AP = 12
-export const SHOOT_AP_COST = 4
-/** AP to hunker down into cover (crouch stance). */
-export const COVER_AP_COST = 2
-
-/** Tiles a soldier can see. */
-export const SIGHT_RANGE = 14
-
-/** Metres per second while moving. Tuned to sit close to the natural pace of
- *  the `run` (Jog_Fwd_Loop) clip so the feet do not visibly slide. */
-export const MOVE_SPEED = 3.4
+/**
+ * Live gameplay rules.
+ *
+ * Mutable on purpose: the debug panel edits these at runtime, so every system
+ * must read `RULES.x` at the point of use rather than capturing a copy at
+ * import time. Weapon, ammo, grenade and status numbers live in
+ * {@link Arsenal} for the same reason.
+ */
+export const RULES = {
+  /** Starting/among-caps for a fresh soldier. */
+  maxHp: 100,
+  maxAp: 12,
+  maxArmor: 20,
+  /** AP to hunker down into cover (crouch stance). */
+  coverApCost: 2,
+  /** Tiles a soldier can see. */
+  sightRange: 14,
+  /** AP per tile of movement. */
+  stepOrthogonal: 1,
+  stepDiagonal: 1.5,
+  /**
+   * Metres per second while moving. Tuned to sit close to the natural pace of
+   * the `run` (Jog_Fwd_Loop) clip so the feet do not visibly slide.
+   */
+  moveSpeed: 3.4,
+}
 
 /**
  * Global aim clamps and tuning offsets. Per-weapon accuracy and range falloff
@@ -121,10 +134,7 @@ export const AIM = {
   max: 95,
   /** A hit always does at least this much, however good the armour. */
   minDamage: 5,
-} as const
-
-/** Armour points a soldier starts with. Subtracts flat damage from hits. */
-export const MAX_ARMOR = 20
+}
 
 /**
  * Accuracy the shooter loses against a target, by the cover the bullet crosses
@@ -142,7 +152,7 @@ export const COVER = {
   tallStand: 45,
   /** Crouching behind a wall/edge. */
   tallCrouch: 60,
-} as const
+}
 
 // ---------------------------------------------------------------------------
 // Movement cost, in "steps" (action points)

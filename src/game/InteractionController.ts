@@ -1,6 +1,6 @@
 import { Raycaster, Vector2 } from 'three'
 import type { EngineContext } from '../engine'
-import { COVER_AP_COST, Faction } from '../config'
+import { Faction, RULES } from '../config'
 import { clientToNdc } from '../core/screen'
 import type { Tile } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
@@ -13,6 +13,7 @@ import type { OffscreenPortraits } from '../render/Portraits'
 import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
 import { MovementPlanner } from './MovementPlanner'
+import { DebugPanel } from '../hud/DebugPanel'
 import { GrenadePlanner } from './GrenadePlanner'
 import { ShootPlanner } from './ShootPlanner'
 import { WallXray } from './WallXray'
@@ -33,6 +34,7 @@ export class InteractionController {
   private readonly planner: MovementPlanner
   private readonly shoot: ShootPlanner
   private readonly grenade: GrenadePlanner
+  private readonly debug: DebugPanel
   private readonly fog: FogOfWar
   private readonly xray: WallXray
 
@@ -60,6 +62,17 @@ export class InteractionController {
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
     this.shoot = new ShootPlanner(battlefield.grid, squads, tracers, engine)
     this.grenade = new GrenadePlanner(battlefield.grid, squads, engine)
+    this.debug = new DebugPanel(
+      () => {
+        // Live edits can change reach, cost and visibility, so everything the
+        // player is looking at has to be recomputed, not just the panels.
+        this.recomputeVisibility()
+        this.renderOverlay()
+        this.battlefield.flush()
+        this.refreshHud()
+      },
+      () => this.turnManager.selectedSoldier,
+    )
     this.fog = new FogOfWar(battlefield.grid, battlefield.ground, battlefield.blocks)
     this.xray = new WallXray(rig, squads, battlefield.blocks)
     this.picker = new GroundPicker(engine.camera)
@@ -84,6 +97,7 @@ export class InteractionController {
     window.addEventListener('keydown', this.onKeyDown)
 
     turnManager.onSelectionChanged = () => {
+      this.debug.refresh()
       this.planner.clear()
       this.renderOverlay()
       this.battlefield.flush()
@@ -179,6 +193,9 @@ export class InteractionController {
         this.renderOverlay()
         this.refreshHud()
         break
+      case 'openDebug':
+        this.debug.toggle()
+        break
       case 'toggleCover':
         this.toggleCover()
         break
@@ -229,6 +246,7 @@ export class InteractionController {
     this.planner.dispose()
     this.shoot.dispose()
     this.grenade.dispose()
+    this.debug.dispose()
   }
 
   // ---------------------------------------------------------------------------
@@ -258,8 +276,8 @@ export class InteractionController {
     if (soldier.isCrouching) {
       soldier.exitCover()
     } else {
-      if (soldier.ap < COVER_AP_COST) return
-      soldier.ap -= COVER_AP_COST
+      if (soldier.ap < RULES.coverApCost) return
+      soldier.ap -= RULES.coverApCost
       soldier.enterCover()
     }
     this.refreshHud()
