@@ -1,19 +1,10 @@
 import { FACTION_INFO, Faction, RULES } from '../config'
-import {
-  AMMO,
-  AmmoId,
-  GRENADES,
-  GrenadeId,
-  SHOT_MODES,
-  ShotMode,
-  WEAPONS,
-  WeaponId,
-} from '../core/Arsenal'
+import { AMMO, AmmoId, GRENADES, GrenadeId, ShotMode, WEAPONS, WeaponId } from '../core/Arsenal'
 import { effectiveWeapon } from '../core/Ballistics'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
 import type { PendingThrow } from '../game/GrenadePlanner'
-import type { PendingShot } from '../game/ShootPlanner'
+import type { PendingShot, ShotModeOption } from '../game/ShootPlanner'
 import type { Squads } from '../game/Squads'
 import type { TurnManager } from '../game/TurnManager'
 import type { OffscreenPortraits } from '../render/Portraits'
@@ -70,6 +61,11 @@ export interface HudTargetIcon {
   selected: boolean
 }
 
+/** A shot mode as offered by the panel, with the current pick marked. */
+export interface HudShotMode extends ShotModeOption {
+  active: boolean
+}
+
 /** One line of the "why is my chance this bad" breakdown. */
 export interface HudShotTerm {
   label: string
@@ -91,8 +87,8 @@ export interface HudShotPanel {
   outOfRange: boolean
   weaponName: string
   ammoName: string
-  mode: ShotMode
-  modeName: string
+  /** Every way of taking this shot, each with its own odds and price. */
+  modes: HudShotMode[]
   terms: HudShotTerm[]
 }
 
@@ -296,8 +292,7 @@ function shotPanelOf(pending: PendingShot, shooter: Soldier | null): HudShotPane
     outOfRange: b.outOfRange,
     weaponName: WEAPONS[shooter?.weaponId ?? WeaponId.Rifle].name,
     ammoName: AMMO[shooter?.ammoId ?? AmmoId.Standard].name,
-    mode: pending.mode,
-    modeName: SHOT_MODES[pending.mode].name,
+    modes: pending.modes.map((m) => ({ ...m, active: m.mode === pending.mode })),
     terms,
   }
 }

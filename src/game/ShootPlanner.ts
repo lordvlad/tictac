@@ -4,7 +4,7 @@ import { DamageIndicators } from '../render/DamageIndicators'
 import type { Ground } from '../render/Ground'
 import type { Tracers } from '../render/Tracers'
 import { hasLineOfSight } from '../core/Visibility'
-import { ShotMode } from '../core/Arsenal'
+import { SHOT_MODES, ShotMode } from '../core/Arsenal'
 import {
   effectiveWeapon,
   type HitChanceBreakdown,
@@ -17,6 +17,15 @@ import type { EngineContext } from '../engine'
 const LOS_CLEAR = 0x79d98b
 const LOS_BLOCKED = 0xe05c4f
 
+/** One selectable way of taking the shot, priced and rated. */
+export interface ShotModeOption {
+  mode: ShotMode
+  name: string
+  apCost: number
+  chance: number
+  affordable: boolean
+}
+
 /** Everything the HUD needs to render one shot before it is taken. */
 export interface PendingShot {
   target: Soldier
@@ -27,6 +36,11 @@ export interface PendingShot {
   /** Damage the shot would do on a hit, after the target's armour. */
   damage: number
   armorShred: number
+  /**
+   * Every shot mode against this target, so the panel can offer them side by
+   * side with their real odds instead of hiding one behind a toggle.
+   */
+  modes: ShotModeOption[]
 }
 
 /**
@@ -127,6 +141,18 @@ export class ShootPlanner {
     const apCost = shotApCost(shooter, this.mode)
     const preview = previewDamage(shooter, target, this.mode)
 
+    const modes: ShotModeOption[] = Object.values(ShotMode).map((mode) => {
+      const cost = shotApCost(shooter, mode)
+      const odds = shotBreakdown(this.grid, shooter, target, mode)
+      return {
+        mode,
+        name: SHOT_MODES[mode].name,
+        apCost: cost,
+        chance: odds.chance,
+        affordable: shooter.ap >= cost && !odds.outOfRange,
+      }
+    })
+
     return {
       target,
       mode: this.mode,
@@ -135,6 +161,7 @@ export class ShootPlanner {
       breakdown,
       damage: preview.damage,
       armorShred: preview.armorShred,
+      modes,
     }
   }
 

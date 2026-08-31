@@ -1,4 +1,3 @@
-import { ShotMode } from '../core/Arsenal'
 import type { HudAction, HudIntent, HudModel, HudShotPanel, HudThrowPanel } from './HudModel'
 
 export interface ContextMenuItem {
@@ -273,11 +272,16 @@ export class Hud {
           <div class="shot-row"><span>Target</span><span>${shot.targetHp} HP · ${shot.targetArmor} AR</span></div>
         </div>
       </div>
-      <button class="action-btn interactive ${shot.mode === ShotMode.Aimed ? 'active' : ''}"
-              ${Hud.intentAttr({ type: 'setShotMode', mode: shot.mode === ShotMode.Aimed ? ShotMode.Snap : ShotMode.Aimed })}>
-        <span>${shot.mode === ShotMode.Aimed ? 'Aimed Shot' : 'Snap Shot'}</span>
-        <span class="action-tag">${shot.mode === ShotMode.Aimed ? 'x2 odds' : 'tap to aim'}</span>
-      </button>
+      ${shot.modes
+        .map(
+          (m) => `
+      <button class="action-btn interactive ${m.active ? 'active' : ''}" ${m.affordable ? '' : 'disabled'}
+              ${Hud.intentAttr({ type: 'setShotMode', mode: m.mode })}>
+        <span>${m.name}</span>
+        <span class="action-tag">${m.chance}% · ${m.apCost} AP</span>
+      </button>`,
+        )
+        .join('')}
       <button class="action-btn action-fire interactive" ${blocked ? 'disabled' : ''}
               ${Hud.intentAttr({ type: 'confirmShot' })}>
         <span>${shot.outOfRange ? 'Out of range' : 'FIRE'}</span>
