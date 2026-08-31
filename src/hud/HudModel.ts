@@ -4,7 +4,7 @@ import { effectiveWeapon } from '../core/Ballistics'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
 import type { PendingThrow } from '../game/GrenadePlanner'
-import type { PendingShot, ShotModeOption } from '../game/ShootPlanner'
+import type { PendingShot } from '../game/ShootPlanner'
 import type { Squads } from '../game/Squads'
 import type { TurnManager } from '../game/TurnManager'
 import type { OffscreenPortraits } from '../render/Portraits'
@@ -17,8 +17,7 @@ export type HudIntent =
   | { type: 'shoot' }
   | { type: 'cancelShoot' }
   | { type: 'selectTarget'; index: number }
-  | { type: 'setShotMode'; mode: ShotMode }
-  | { type: 'confirmShot' }
+  | { type: 'fireShot'; mode: ShotMode }
   | { type: 'armGrenade'; kind: GrenadeId }
   | { type: 'confirmThrow' }
   | { type: 'cancelGrenade' }
@@ -61,11 +60,6 @@ export interface HudTargetIcon {
   selected: boolean
 }
 
-/** A shot mode as offered by the panel, with the current pick marked. */
-export interface HudShotMode extends ShotModeOption {
-  active: boolean
-}
-
 /** One line of the "why is my chance this bad" breakdown. */
 export interface HudShotTerm {
   label: string
@@ -74,22 +68,27 @@ export interface HudShotTerm {
   penalty: boolean
 }
 
-/** The shot lined up and awaiting confirmation. */
-export interface HudShotPanel {
-  targetName: string
-  targetHp: number
-  targetArmor: number
+/** One shot option, rendered as a card that fires when clicked. */
+export interface HudShotCard {
+  mode: ShotMode
+  name: string
   hitChance: number
   damage: number
   armorShred: number
   apCost: number
-  affordable: boolean
+  available: boolean
   outOfRange: boolean
+  terms: HudShotTerm[]
+}
+
+/** The target being aimed at, and a card per way of shooting it. */
+export interface HudShotPanel {
+  targetName: string
+  targetHp: number
+  targetArmor: number
   weaponName: string
   ammoName: string
-  /** Every way of taking this shot, each with its own odds and price. */
-  modes: HudShotMode[]
-  terms: HudShotTerm[]
+  cards: HudShotCard[]
 }
 
 /** The throw lined up and awaiting confirmation. */
@@ -171,7 +170,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     dead: soldier.isDead,
   }))
 
-  const shootApCost = selected ? weaponApCost(selected, shoot?.pending?.mode ?? ShotMode.Snap) : 0
+  const shootApCost = selected ? weaponApCost(selected, ShotMode.Snap) : 0
   const actions: HudAction[] = []
   if (selected && !selected.isDead) {
     actions.push({
@@ -249,7 +248,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     selectedName: selected && !selected.isDead ? selected.name : null,
     actions,
     targets,
-    shotPanel: shoot?.pending ? shotPanelOf(shoot.pending, selected) : null,
+    shotPanel: shoot?.pending ? shotPanelOf(shoot.pending) : null,
     throwPanel: sources.grenade.pending ? throwPanelOf(sources.grenade.pending) : null,
     freelookActive: rig.isFreeLookActive && !rig.isCharacterViewActive,
     unitViewActive: rig.isCharacterViewActive,
@@ -262,38 +261,46 @@ function weaponApCost(soldier: Soldier, mode: ShotMode): number {
   return effectiveWeapon(soldier, mode).apCost
 }
 
-/** Turn a pending shot into display rows, including why the odds are what they are. */
-function shotPanelOf(pending: PendingShot, shooter: Soldier | null): HudShotPanel {
-  const b = pending.breakdown
-  const terms: HudShotTerm[] = [
-    { label: 'Weapon base', value: `${Math.round(b.base)}%`, penalty: false },
-    { label: `Range ${b.distance.toFixed(1)} m`, value: `-${b.rangePenalty}%`, penalty: b.rangePenalty > 0 },
-    { label: 'Cover', value: `-${b.coverPenalty}%`, penalty: b.coverPenalty > 0 },
-  ]
-  if (b.shooterPenalty > 0) {
-    terms.push({ label: 'Blinded', value: `-${b.shooterPenalty}%`, penalty: true })
-  }
-  if (b.targetDefence > 0) {
-    terms.push({ label: 'Concealment', value: `-${b.targetDefence}%`, penalty: true })
-  }
-  if (b.modeMultiplier !== 1) {
-    terms.push({ label: 'Aimed', value: `x${b.modeMultiplier}`, penalty: false })
-  }
-
+/** Turn a pending shot into one card per option, each with its own breakdown. */
+function shotPanelOf(pending: PendingShot): HudShotPanel {
   return {
     targetName: pending.target.name,
     targetHp: pending.target.hp,
     targetArmor: pending.target.armor,
-    hitChance: b.chance,
-    damage: pending.damage,
-    armorShred: pending.armorShred,
-    apCost: pending.apCost,
-    affordable: pending.affordable && (shooter?.ap ?? 0) >= pending.apCost,
-    outOfRange: b.outOfRange,
-    weaponName: shooter?.weapon.name ?? '—',
-    ammoName: shooter?.ammo.name ?? '—',
-    modes: pending.modes.map((m) => ({ ...m, active: m.mode === pending.mode })),
-    terms,
+    weaponName: pending.weaponName,
+    ammoName: pending.ammoName,
+    cards: pending.options.map((option) => {
+      const b = option.breakdown
+      const terms: HudShotTerm[] = [
+        { label: 'Weapon base', value: `${Math.round(b.base)}%`, penalty: false },
+        {
+          label: `Range ${b.distance.toFixed(1)} m`,
+          value: `-${b.rangePenalty}%`,
+          penalty: b.rangePenalty > 0,
+        },
+        { label: 'Cover', value: `-${b.coverPenalty}%`, penalty: b.coverPenalty > 0 },
+      ]
+      if (b.shooterPenalty > 0) {
+        terms.push({ label: 'Blinded', value: `-${b.shooterPenalty}%`, penalty: true })
+      }
+      if (b.targetDefence > 0) {
+        terms.push({ label: 'Concealment', value: `-${b.targetDefence}%`, penalty: true })
+      }
+      if (b.modeMultiplier !== 1) {
+        terms.push({ label: 'Aimed', value: `x${b.modeMultiplier}`, penalty: false })
+      }
+      return {
+        mode: option.mode,
+        name: option.name,
+        hitChance: b.chance,
+        damage: option.damage,
+        armorShred: option.armorShred,
+        apCost: option.apCost,
+        available: option.available,
+        outOfRange: b.outOfRange,
+        terms,
+      }
+    }),
   }
 }
 

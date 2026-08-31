@@ -17,30 +17,29 @@ import type { EngineContext } from '../engine'
 const LOS_CLEAR = 0x79d98b
 const LOS_BLOCKED = 0xe05c4f
 
-/** One selectable way of taking the shot, priced and rated. */
-export interface ShotModeOption {
+/** One way of taking the shot, fully priced and rated. */
+export interface ShotOption {
   mode: ShotMode
   name: string
   apCost: number
-  chance: number
-  affordable: boolean
-}
-
-/** Everything the HUD needs to render one shot before it is taken. */
-export interface PendingShot {
-  target: Soldier
-  mode: ShotMode
-  apCost: number
-  affordable: boolean
   breakdown: HitChanceBreakdown
-  /** Damage the shot would do on a hit, after the target's armour. */
+  /** Damage on a hit, after the target's armour. */
   damage: number
   armorShred: number
+  /** Affordable and in range — i.e. this shot can actually be taken. */
+  available: boolean
+}
+
+/** The target being aimed at, and every shot that could be taken at it. */
+export interface PendingShot {
+  target: Soldier
+  weaponName: string
+  ammoName: string
   /**
-   * Every shot mode against this target, so the panel can offer them side by
-   * side with their real odds instead of hiding one behind a toggle.
+   * One entry per shot mode, so the panel can put each option on its own card
+   * with its real numbers rather than making the player toggle to compare.
    */
-  modes: ShotModeOption[]
+  options: ShotOption[]
 }
 
 /**
@@ -60,7 +59,6 @@ export class ShootPlanner {
   private readonly damageIndicators: DamageIndicators
   private activeOn = false
   private target: Soldier | null = null
-  private mode: ShotMode = ShotMode.Snap
 
   constructor(
     private readonly grid: Grid,
@@ -79,13 +77,12 @@ export class ShootPlanner {
     return this.target
   }
 
-  get shotMode(): ShotMode {
-    return this.mode
-  }
-
   /**
    * Enemies this shooter may fire at: alive, actually rendered (fog of war must
    * not leak positions through the target list) and inside the weapon's range.
+   *
+   * Range is judged by the cheapest shot: if any mode can reach, the target is
+   * worth offering.
    */
   availableTargets(shooter: Soldier): Soldier[] {
     if (shooter.isDead) return []
@@ -94,23 +91,23 @@ export class ShootPlanner {
         s.faction !== shooter.faction &&
         !s.isDead &&
         s.instance?.visible !== false &&
-        canShoot(this.grid, shooter, s, this.mode),
+        canShoot(this.grid, shooter, s, ShotMode.Snap),
     )
   }
 
   /** @returns true when shoot mode was entered (the unit can still afford it). */
   enter(shooter: Soldier | null): boolean {
     if (!shooter || shooter.isDead) return false
-    if (shooter.ap < shotApCost(shooter, this.mode)) return false
+    if (shooter.ap < shotApCost(shooter, ShotMode.Snap)) return false
     this.activeOn = true
-    // Pre-select the best odds so a single confirm is enough in the common case.
+    // Pre-select the best odds so the player usually only has to pick a card.
     const targets = this.availableTargets(shooter)
     this.target =
       targets.length === 0
         ? null
         : targets.reduce((best, s) =>
-            shotBreakdown(this.grid, shooter, s, this.mode).chance >
-            shotBreakdown(this.grid, shooter, best, this.mode).chance
+            shotBreakdown(this.grid, shooter, s, ShotMode.Snap).chance >
+            shotBreakdown(this.grid, shooter, best, ShotMode.Snap).chance
               ? s
               : best,
           )
@@ -120,55 +117,47 @@ export class ShootPlanner {
   exit(): void {
     this.activeOn = false
     this.target = null
-    this.mode = ShotMode.Snap
   }
 
   selectTarget(soldier: Soldier | null): void {
     this.target = soldier
   }
 
-  setShotMode(mode: ShotMode): void {
-    this.mode = mode
-  }
-
-  /** The shot currently lined up, or null when there is nothing to confirm. */
+  /** The target being aimed at with every shot option, or null if none is. */
   pending(shooter: Soldier | null): PendingShot | null {
     if (!this.activeOn || !shooter || shooter.isDead) return null
     const target = this.target
     if (!target || target.isDead) return null
 
-    const breakdown = shotBreakdown(this.grid, shooter, target, this.mode)
-    const apCost = shotApCost(shooter, this.mode)
-    const preview = previewDamage(shooter, target, this.mode)
-
-    const modes: ShotModeOption[] = Object.values(ShotMode).map((mode) => {
-      const cost = shotApCost(shooter, mode)
-      const odds = shotBreakdown(this.grid, shooter, target, mode)
+    const options: ShotOption[] = Object.values(ShotMode).map((mode) => {
+      const apCost = shotApCost(shooter, mode)
+      const breakdown = shotBreakdown(this.grid, shooter, target, mode)
+      const preview = previewDamage(shooter, target, mode)
       return {
         mode,
         name: SHOT_MODES[mode].name,
-        apCost: cost,
-        chance: odds.chance,
-        affordable: shooter.ap >= cost && !odds.outOfRange,
+        apCost,
+        breakdown,
+        damage: preview.damage,
+        armorShred: preview.armorShred,
+        available: shooter.ap >= apCost && !breakdown.outOfRange,
       }
     })
 
     return {
       target,
-      mode: this.mode,
-      apCost,
-      affordable: shooter.ap >= apCost && !breakdown.outOfRange,
-      breakdown,
-      damage: preview.damage,
-      armorShred: preview.armorShred,
-      modes,
+      weaponName: shooter.weapon.name,
+      ammoName: shooter.ammo.name,
+      options,
     }
   }
 
-  /** Pull the trigger on the lined-up shot. */
-  confirm(shooter: Soldier): boolean {
+  /** Take the shot in `mode`. Picking a card is the trigger. */
+  fire(shooter: Soldier, mode: ShotMode): boolean {
     const pending = this.pending(shooter)
-    if (!pending || !pending.affordable) return false
+    if (!pending) return false
+    const option = pending.options.find((o) => o.mode === mode)
+    if (!option || !option.available) return false
 
     const result = executeShot(
       this.grid,
@@ -176,15 +165,13 @@ export class ShootPlanner {
       pending.target,
       this.tracers,
       this.squads.soldiers,
-      this.mode,
+      mode,
     )
     if (!result.apSpent) return false
 
     this.damageIndicators.spawn(pending.target.position, result.hit, result.damage)
-    // Keep the target if it survived and can still be shot; otherwise fall back
-    // so the panel never points at a corpse.
+    // Never leave the panel pointing at a corpse.
     if (pending.target.isDead) this.target = null
-    this.mode = ShotMode.Snap
     this.onShotResolved?.()
     return true
   }

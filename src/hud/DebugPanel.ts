@@ -80,10 +80,6 @@ export class DebugPanel {
         note: 'peek: also see from the free tiles beside the wall it hugs',
       })
       groups.push({
-        title: `${soldier.name} — grenade count`,
-        target: soldier.grenades as unknown as Record<string, unknown>,
-      })
-      groups.push({
         title: `${soldier.name} — weapon: ${soldier.weapon.name}`,
         target: soldier.weapon as unknown as Record<string, unknown>,
         note: 'AP per shot, base hit chance, range falloff, armour penetration',
@@ -152,6 +148,21 @@ export class DebugPanel {
               .join('')}
           </select>
         </label>
+        <div class="debug-group-title" style="margin-top: 6px;">Grenades carried</div>
+        ${Object.values(GrenadeId)
+          .map(
+            (kind) => `
+        <label class="debug-row">
+          <span>${this.soldier?.grenadeSpecs[kind].name ?? kind}</span>
+          <span class="debug-stepper">
+            <button data-grenade-minus="${kind}">-</button>
+            <input type="number" step="1" min="0" value="${this.soldier?.grenades[kind] ?? 0}"
+                   data-path="grenades" data-key="${kind}" />
+            <button data-grenade-plus="${kind}">+</button>
+          </span>
+        </label>`,
+          )
+          .join('')}
         <div class="debug-row">
           <span>statuses</span>
           <span class="debug-statuses">
@@ -312,6 +323,22 @@ export class DebugPanel {
       return
     }
     if (!this.soldier) return
+
+    if (el.dataset.grenadePlus || el.dataset.grenadeMinus) {
+      const kind = (el.dataset.grenadePlus ?? el.dataset.grenadeMinus) as GrenadeId
+      const delta = el.dataset.grenadePlus ? 1 : -1
+      const next = Math.max(0, (this.soldier.grenades[kind] ?? 0) + delta)
+      this.soldier.grenades[kind] = next
+      // Patch the field in place instead of re-rendering: a full re-render
+      // replaces the button under the cursor, and the next click of a repeated
+      // press lands on a detached node and is lost.
+      const field = this.root.querySelector<HTMLInputElement>(
+        `input[data-path="grenades"][data-key="${kind}"]`,
+      )
+      if (field) field.value = String(next)
+      this.onChange()
+      return
+    }
 
     if (el.dataset.applyStatus) {
       const kind = el.dataset.applyStatus as keyof typeof STATUSES

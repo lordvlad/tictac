@@ -125,12 +125,7 @@ export class InteractionController {
             ? {
                 targets: this.shoot.availableTargets(shooter).map((soldier) => ({
                   soldier,
-                  hitChance: calculateHitChance(
-                    this.battlefield.grid,
-                    shooter,
-                    soldier,
-                    this.shoot.shotMode,
-                  ),
+                  hitChance: calculateHitChance(this.battlefield.grid, shooter, soldier),
                 })),
                 pending: this.shoot.pending(shooter),
               }
@@ -164,13 +159,9 @@ export class InteractionController {
         this.refreshHud()
         break
       }
-      case 'setShotMode':
-        this.shoot.setShotMode(intent.mode)
-        this.refreshHud()
-        break
-      case 'confirmShot': {
+      case 'fireShot': {
         const shooter = this.turnManager.selectedSoldier
-        if (shooter) this.shoot.confirm(shooter)
+        if (shooter) this.shoot.fire(shooter, intent.mode)
         break
       }
       case 'armGrenade': {
