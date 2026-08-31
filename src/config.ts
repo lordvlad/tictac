@@ -160,6 +160,10 @@ export const PATH = {
   waypointRadius: 0.35,
   /** Radius of the selected-unit foot circle. */
   selectionRadius: 0.42,
+  /** How far above the goal pole the AP cost plate floats. */
+  labelRise: 0.42,
+  /** World height of the AP cost plate. */
+  labelScale: 0.46,
   colorValid: 0x66ff99,
   colorInvalid: 0xff5a4a,
   colorWaypoint: 0xe0b64f,

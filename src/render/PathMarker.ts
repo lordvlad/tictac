@@ -47,7 +47,8 @@ export class PathMarker {
    * Rebuild the overlay. `path`, `waypoints` and `goal` are floor-level tile
    * centres (y = 0); the hover height is applied here. `coverLevels`, aligned to
    * {@link COVER_DIRS}, adds a directional cover shield on each protected side
-   * of the goal tile.
+   * of the goal tile. `apCost`, when given, is shown above the goal pole so the
+   * price of the move is readable without counting tiles.
    */
   show(
     path: Vector3[],
@@ -55,6 +56,7 @@ export class PathMarker {
     goal: Vector3,
     valid: boolean,
     coverLevels?: readonly CoverLevel[],
+    apCost?: number,
   ): void {
     const beaconColor = valid ? PATH.colorValid : PATH.colorInvalid
 
@@ -68,6 +70,10 @@ export class PathMarker {
     }
 
     this.beacon(goal, PATH.goalHeight, [PATH.goalInnerRadius, PATH.goalOuterRadius], beaconColor)
+
+    if (apCost !== undefined && Number.isFinite(apCost)) {
+      this.label(goal, `${formatAp(apCost)} AP`, valid)
+    }
 
     if (coverLevels) {
       COVER_DIRS.forEach(([dx, dy], i) => {
@@ -140,6 +146,25 @@ export class PathMarker {
     this.group.add(sprite)
   }
 
+  /** Camera-facing text plate floating just above the goal pole. */
+  private label(goal: Vector3, text: string, valid: boolean): void {
+    const texture = labelTexture(text, valid)
+    this.textures.push(texture)
+    const mat = new SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    })
+    this.materials.push(mat)
+    const sprite = new Sprite(mat)
+    sprite.position.set(goal.x, PATH.goalHeight + PATH.labelRise, goal.z)
+    sprite.scale.set(PATH.labelScale * LABEL_ASPECT, PATH.labelScale, 1)
+    sprite.renderOrder = 12
+    this.group.add(sprite)
+  }
+
   /** Gentle radiating pulse. Call once per frame. */
   update(delta: number): void {
     if (this.pulses.length === 0) return
@@ -202,6 +227,52 @@ function shieldTexture(filled: boolean): CanvasTexture {
   ctx.lineWidth = 5
   ctx.lineJoin = 'round'
   ctx.stroke(shield)
+
+  return new CanvasTexture(canvas)
+}
+
+/** Width/height ratio of the label plate, so text is not squashed. */
+const LABEL_ASPECT = 2.5
+
+/** Trim the trailing ".0" that whole-step routes would otherwise show. */
+function formatAp(cost: number): string {
+  return Number.isInteger(cost) ? String(cost) : cost.toFixed(1)
+}
+
+/**
+ * Draw the AP cost onto a canvas texture: pill background so the digits stay
+ * readable against bright floor and dark shadow alike, tinted by affordability.
+ */
+function labelTexture(text: string, valid: boolean): CanvasTexture {
+  const width = 160
+  const height = 64
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')!
+  const ink = valid ? '#8effb4' : '#ff9a8e'
+
+  const radius = height / 2
+  ctx.beginPath()
+  ctx.moveTo(radius, 4)
+  ctx.lineTo(width - radius, 4)
+  ctx.quadraticCurveTo(width - 4, 4, width - 4, radius)
+  ctx.quadraticCurveTo(width - 4, height - 4, width - radius, height - 4)
+  ctx.lineTo(radius, height - 4)
+  ctx.quadraticCurveTo(4, height - 4, 4, radius)
+  ctx.quadraticCurveTo(4, 4, radius, 4)
+  ctx.closePath()
+  ctx.fillStyle = 'rgba(8, 12, 18, 0.78)'
+  ctx.fill()
+  ctx.strokeStyle = ink
+  ctx.lineWidth = 3
+  ctx.stroke()
+
+  ctx.fillStyle = ink
+  ctx.font = 'bold 34px "Segoe UI", Inter, system-ui, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, width / 2, height / 2 + 2)
 
   return new CanvasTexture(canvas)
 }

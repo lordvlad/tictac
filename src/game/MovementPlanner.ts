@@ -173,6 +173,9 @@ export class MovementPlanner {
       this.grid.tileToWorld(endpoint),
       result.valid,
       provisional ? undefined : directionalCover(this.grid, endpoint),
+      // Unreachable routes report Infinity; showing the walkable prefix's cost
+      // would be a lie, so the label is left off entirely.
+      Number.isFinite(result.totalCost) ? result.totalCost : undefined,
     )
   }
 
