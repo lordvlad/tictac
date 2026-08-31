@@ -2,15 +2,18 @@ import { Color, SRGBColorSpace } from 'three'
 import { FACTION_INFO, type Faction, SQUAD_SIZE } from '../config'
 
 /**
- * How far a squadmate's tint may drift from the faction colour.
+ * How far a squadmate's tint drifts from the faction colour.
  *
- * Small on purpose: teammates must still read as one team at a glance, so the
- * hue fans out by a few degrees either side and the lighter/darker steps stay
- * subtle. Red sits near hue 0, so anything wider starts turning the far end of
- * the squad orange.
+ * Most of the separation is carried by lightness, not hue. Red sits at the hue
+ * wrap, so a wide hue fan runs one end into pink and the other into orange —
+ * whereas a dark-brick to light-coral ramp stays unmistakably red while being
+ * obvious at a glance, even on a 40 px portrait.
+ *
+ * Spread is the full width across the squad; the per-soldier step is this
+ * divided by SQUAD_SIZE - 1.
  */
-const HUE_SPREAD = 0.035
-const LIGHTNESS_SPREAD = 0.07
+const HUE_SPREAD = 0.045
+const LIGHTNESS_SPREAD = 0.28
 
 const cache = new Map<string, Color>()
 
