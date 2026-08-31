@@ -1084,3 +1084,26 @@ canvas {
   opacity: 0;
   transition: none; /* absolute control via opacity in JS */
 }
+
+/* ---------------------------------------------------------------------------
+   Armor indicators
+   --------------------------------------------------------------------------- */
+.bar-fill.armor {
+  background: #b5c0d0; /* steel grey */
+}
+
+.target-ar {
+  display: block;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  margin-top: 1px;
+}
+
+.target-ar-fill {
+  display: block;
+  height: 100%;
+  background: #b5c0d0; /* steel grey */
+}

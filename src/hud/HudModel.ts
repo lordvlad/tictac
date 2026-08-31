@@ -44,7 +44,11 @@ export interface HudSquadCard {
   index: number
   name: string
   hp: number
+  maxHp: number
   ap: number
+  maxAp: number
+  armor: number
+  maxArmor: number
   portrait: string
   selected: boolean
   dead: boolean
@@ -56,6 +60,7 @@ export interface HudTargetIcon {
   name: string
   portrait: string
   hpFraction: number
+  armorFraction: number
   hitChance: number
   selected: boolean
 }
@@ -109,8 +114,6 @@ export interface HudModel {
   factionIsBlue: boolean
   turnNumber: number
   seedLabel: string
-  maxHp: number
-  maxAp: number
   squad: HudSquadCard[]
   selectedName: string | null
   actions: HudAction[]
@@ -164,7 +167,11 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     index,
     name: soldier.name,
     hp: soldier.hp,
+    maxHp: soldier.maxHp,
     ap: soldier.ap,
+    maxAp: soldier.maxAp,
+    armor: soldier.armor,
+    maxArmor: soldier.maxArmor,
     portrait: portraits.getPortrait(faction, index),
     selected: soldier === selected,
     dead: soldier.isDead,
@@ -233,6 +240,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     name: soldier.name,
     portrait: portraits.getPortrait(nextFaction, enemyIndex.get(soldier) ?? 0),
     hpFraction: soldier.maxHp > 0 ? soldier.hp / soldier.maxHp : 0,
+    armorFraction: soldier.maxArmor > 0 ? soldier.armor / soldier.maxArmor : 0,
     hitChance,
     selected: soldier === shoot?.pending?.target,
   }))
@@ -242,8 +250,6 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     factionIsBlue: faction === Faction.Blue,
     turnNumber: turnManager.turnNumber,
     seedLabel,
-    maxHp: selected?.maxHp ?? RULES.maxHp,
-    maxAp: selected?.maxAp ?? RULES.maxAp,
     squad,
     selectedName: selected && !selected.isDead ? selected.name : null,
     actions,

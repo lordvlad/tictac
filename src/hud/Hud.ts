@@ -185,18 +185,19 @@ export class Hud {
         <img class="squad-portrait" src="${card.portrait}" alt="${card.name}" />
         <div class="squad-name">${card.name}</div>
         <div class="squad-bars">
-          ${this.bar('hp', card.hp, model.maxHp, 'HP')}
-          ${this.bar('ap', card.ap, model.maxAp, 'AP')}
+          ${this.bar('hp', card.hp, card.maxHp, 'HP')}
+          ${this.bar('ap', card.ap, card.maxAp, 'AP')}
+          ${this.bar('armor', card.armor, card.maxArmor, 'AR')}
         </div>
       </div>`,
       )
       .join('')
   }
 
-  private bar(kind: 'hp' | 'ap', value: number, max: number, label: string): string {
+  private bar(kind: 'hp' | 'ap' | 'armor', value: number, max: number, label: string): string {
     const percent = Math.max(0, Math.min(100, (value / max) * 100))
     return `
-      <div class="bar-container"${kind === 'ap' ? ' style="margin-top: 3px;"' : ''}>
+      <div class="bar-container"${kind === 'ap' || kind === 'armor' ? ' style="margin-top: 3px;"' : ''}>
         <div class="bar-fill ${kind}" style="width: ${percent}%;"></div>
       </div>
       <div class="bar-label"><span>${label}</span><span>${value}/${max}</span></div>
@@ -224,6 +225,7 @@ export class Hud {
         <img class="target-portrait" src="${t.portrait}" alt="${t.name}" />
         <span class="target-chance">${t.hitChance}%</span>
         <span class="target-hp"><span class="target-hp-fill" style="width: ${Math.round(t.hpFraction * 100)}%;"></span></span>
+        <span class="target-ar"><span class="target-ar-fill" style="width: ${Math.round(t.armorFraction * 100)}%;"></span></span>
       </button>`,
       )
       .join('')
