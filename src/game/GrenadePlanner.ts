@@ -120,11 +120,10 @@ export class GrenadePlanner {
     }
   }
 
-  executeThrowAt(thrower: Soldier, kind: GrenadeId, targetTile: Tile): boolean {
+  executeThrowAt(thrower: Soldier, kind: GrenadeId, targetTile: Tile, force = false): boolean {
     const spec = thrower.grenadeSpecs[kind]
-    const result = throwGrenade(this.grid, thrower, targetTile, kind, this.squads.soldiers)
+    const result = throwGrenade(this.grid, thrower, targetTile, kind, this.squads.soldiers, force)
     if (!result.thrown) return false
-
     const worldPos = this.grid.tileToWorld(targetTile)
     this.effects.triggerFlash(kind)
 

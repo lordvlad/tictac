@@ -96,13 +96,14 @@ export function executeShot(
   soldiers: readonly Soldier[],
   mode: ShotMode = ShotMode.Snap,
   overrideRolls?: boolean[],
+  force = false,
 ): ShotResult {
   const eff = effectiveWeapon(shooter, mode)
-  if (!canShoot(grid, shooter, target, mode)) {
+  if (!force && !canShoot(grid, shooter, target, mode)) {
     return { hit: false, damage: 0, armorShred: 0, killed: false, hitChance: 0, apSpent: 0 }
   }
 
-  shooter.ap -= eff.apCost
+  shooter.ap = Math.max(0, shooter.ap - eff.apCost)
 
   const chance = calculateHitChance(grid, shooter, target, mode)
   const shooterWorld = grid.tileToWorld(shooter.tile)
@@ -183,13 +184,16 @@ export function throwGrenade(
   at: Tile,
   kind: GrenadeId,
   soldiers: readonly Soldier[],
+  force = false,
 ): GrenadeResult {
   const spec = thrower.grenadeSpecs[kind]
-  if (thrower.isDead || thrower.ap < spec.apCost) return { thrown: false, apSpent: 0, hits: [] }
-  if ((thrower.grenades[kind] ?? 0) <= 0) return { thrown: false, apSpent: 0, hits: [] }
-  if (grid.distance(thrower.tile, at) > spec.throwRange) return { thrown: false, apSpent: 0, hits: [] }
+  if (!force) {
+    if (thrower.isDead || thrower.ap < spec.apCost) return { thrown: false, apSpent: 0, hits: [] }
+    if ((thrower.grenades[kind] ?? 0) <= 0) return { thrown: false, apSpent: 0, hits: [] }
+    if (grid.distance(thrower.tile, at) > spec.throwRange) return { thrown: false, apSpent: 0, hits: [] }
+  }
 
-  thrower.ap -= spec.apCost
+  thrower.ap = Math.max(0, thrower.ap - spec.apCost)
   thrower.grenades[kind] -= 1
   thrower.playShoot()
 

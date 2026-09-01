@@ -177,7 +177,7 @@ export class ShootPlanner {
     return result ? { target, rolls } : null
   }
 
-  executeShotWithRolls(shooter: Soldier, target: Soldier, mode: ShotMode, rolls: boolean[]): ShotResult | null {
+  executeShotWithRolls(shooter: Soldier, target: Soldier, mode: ShotMode, rolls: boolean[], force = false): ShotResult | null {
     const consumption = shooter.weapon.bulletConsumption(mode)
     shooter.weapon.currentClip = Math.max(0, shooter.weapon.currentClip - consumption)
 
@@ -189,9 +189,9 @@ export class ShootPlanner {
       this.squads.soldiers,
       mode,
       rolls,
+      force,
     )
     if (!result.apSpent) return null
-
     this.damageIndicators.spawn(target.position, result.hit, result.damage)
     if (target.isDead && this.target === target) this.target = null
     this.onShotResolved?.()

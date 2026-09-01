@@ -306,12 +306,16 @@ export class InteractionController {
     }
   }
   handleRemoteNetworkMessage(msg: NetworkMessage): void {
+    console.group(`%c[P2P ⚙️ EXECUTE: ${msg.type}]`, 'color: #22c55e; font-weight: bold;')
     switch (msg.type) {
       case 'moveUnit': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
         if (soldier && !soldier.isDead) {
+          console.log(`[P2P 🏃 MOVE] ${soldier.name} (Faction ${msg.faction}) moving along path:`, msg.path)
           this.planner.startMovePath(soldier, msg.path)
           this.refreshHud()
+        } else {
+          console.warn(`[P2P ⚠️ MOVE REJECTED] Unit not found or dead (Faction ${msg.faction}, #${msg.squadIndex})`)
         }
         break
       }
@@ -319,54 +323,68 @@ export class InteractionController {
         const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
         const target = this.squads.byFaction[msg.targetFaction][msg.targetIndex]
         if (shooter && target) {
-          this.shoot.executeShotWithRolls(shooter, target, msg.mode, msg.rolls)
+          console.log(`[P2P 💥 SHOT] ${shooter.name} -> ${target.name} (${msg.mode}), rolls:`, msg.rolls)
+          this.shoot.executeShotWithRolls(shooter, target, msg.mode, msg.rolls, true)
           this.recomputeVisibility()
           this.renderOverlay()
           this.refreshHud()
+        } else {
+          console.warn(`[P2P ⚠️ SHOT REJECTED] Shooter or target missing/dead`, { shooter, target })
         }
         break
       }
       case 'throwGrenade': {
         const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
         if (shooter) {
-          this.grenade.executeThrowAt(shooter, msg.kind, msg.targetTile)
+          console.log(`[P2P 💣 GRENADE] ${shooter.name} throws ${msg.kind} at`, msg.targetTile)
+          this.grenade.executeThrowAt(shooter, msg.kind, msg.targetTile, true)
           this.recomputeVisibility()
           this.renderOverlay()
           this.refreshHud()
+        } else {
+          console.warn(`[P2P ⚠️ GRENADE REJECTED] Shooter missing/dead`)
         }
         break
       }
       case 'reload': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (soldier && !soldier.isDead && soldier.ap >= RULES.reloadApCost) {
-          soldier.ap -= RULES.reloadApCost
+        if (soldier && !soldier.isDead) {
+          console.log(`[P2P 🔄 RELOAD] ${soldier.name} reloaded weapon`)
+          soldier.ap = Math.max(0, soldier.ap - RULES.reloadApCost)
           soldier.weapon.currentClip = soldier.weapon.maxClip
           this.refreshHud()
+        } else {
+          console.warn(`[P2P ⚠️ RELOAD REJECTED] Unit missing/dead`)
         }
         break
       }
       case 'toggleCover': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
         if (soldier && !soldier.isDead) {
+          console.log(`[P2P 🛡 COVER] ${soldier.name} toggled cover`)
           if (soldier.isCrouching) {
             soldier.exitCover()
-          } else if (soldier.ap >= RULES.coverApCost) {
-            soldier.ap -= RULES.coverApCost
+          } else {
+            soldier.ap = Math.max(0, soldier.ap - RULES.coverApCost)
             soldier.enterCover()
           }
           this.refreshHud()
+        } else {
+          console.warn(`[P2P ⚠️ COVER REJECTED] Unit missing/dead`)
         }
         break
       }
       case 'endUnitTurn': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
         if (soldier && !soldier.isDead) {
+          console.log(`[P2P ⏹ END-UNIT-TURN] ${soldier.name} ended unit turn`)
           this.turnManager.finishSoldierTurn(soldier)
           this.refreshHud()
         }
         break
       }
       case 'endTurn': {
+        console.log(`[P2P ⏭ TURN SWITCH] Handing over turn from Faction ${msg.faction}`)
         this.turnManager.startNextTurn()
         this.onTurnSwitched()
         this.refreshHud()
@@ -375,6 +393,7 @@ export class InteractionController {
       case 'rightClickFacing': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
         if (soldier && !soldier.isDead) {
+          console.log(`[P2P 🔄 FACING] ${soldier.name} turning to face (${msg.x.toFixed(1)}, ${msg.z.toFixed(1)})`)
           const dx = msg.x - soldier.position.x
           const dz = msg.z - soldier.position.z
           if (Math.hypot(dx, dz) > 0.01) soldier.targetYaw = Math.atan2(dx, dz)
@@ -382,6 +401,7 @@ export class InteractionController {
         break
       }
     }
+    console.groupEnd()
   }
 
   dispose(): void {

@@ -29,7 +29,9 @@ export class NetworkManager {
   private setupConn(conn: DataConnection): void {
     this.conn = conn
     conn.on('data', (data) => {
-      this.onMessage?.(data as NetworkMessage)
+      const msg = data as NetworkMessage
+      console.info(`%c[P2P 📥 IN: ${msg.type}]`, 'color: #a855f7; font-weight: bold;', msg)
+      this.onMessage?.(msg)
     })
     conn.on('close', () => {
       console.warn('[p2p] Connection closed by remote peer')
@@ -117,7 +119,10 @@ export class NetworkManager {
 
   send(msg: NetworkMessage): void {
     if (this.conn && this.conn.open) {
+      console.info(`%c[P2P 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
       this.conn.send(msg)
+    } else {
+      console.warn(`%c[P2P ⚠️ SEND-FAILED: ${msg.type}] Connection not open`, 'color: #ef4444;', msg)
     }
   }
 
