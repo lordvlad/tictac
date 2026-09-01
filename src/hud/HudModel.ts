@@ -114,6 +114,8 @@ export interface HudThrowPanel {
 
 /** Immutable snapshot of what the HUD should show right now. */
 export interface HudModel {
+  isMyTurn: boolean
+  networkMode: string
   factionName: string
   networkBadge: string
   factionIsBlue: boolean
@@ -265,9 +267,14 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     selected: soldier === shoot?.pending?.target,
   }))
 
+  const isMyTurn =
+    sources.networkMode === 'local' ||
+    (sources.networkMode !== undefined &&
+      sources.myFaction !== undefined &&
+      turnManager.activeFaction === sources.myFaction)
+
   let networkBadge = FACTION_INFO[faction].name
   if (sources.networkMode && sources.networkMode !== 'local') {
-    const isMyTurn = faction === sources.myFaction
     const myRole = sources.myFaction === Faction.Blue ? 'BLUE / HOST' : 'RED / GUEST'
     networkBadge = isMyTurn
       ? `${myRole} — YOUR TURN`
@@ -275,6 +282,8 @@ export function buildHudModel(sources: HudModelSources): HudModel {
   }
 
   return {
+    isMyTurn,
+    networkMode: sources.networkMode ?? 'local',
     factionName: FACTION_INFO[faction].name,
     networkBadge,
     factionIsBlue: faction === Faction.Blue,

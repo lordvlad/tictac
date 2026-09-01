@@ -148,14 +148,10 @@ export class Hud {
         disabled: !model.unitViewEnabled,
         intent: { type: 'toggleUnitView' },
       },
-      {
-        label: 'End Turn ⏭',
-        title: 'Hand over to the other faction',
-        classes: 'hud-btn-danger',
-        disabled: false,
-        intent: { type: 'requestTurnSwitch' },
-      },
     ]
+    if (!model.isMyTurn && model.networkMode !== 'local') {
+      buttons.splice(2, 1)
+    }
 
     this.topRightEl.innerHTML = `
       <div class="hud-info-card">
@@ -180,8 +176,8 @@ export class Hud {
     this.squadBarEl.innerHTML = model.squad
       .map(
         (card) => `
-      <div class="squad-card interactive ${card.selected ? 'selected' : ''} ${card.dead ? 'dead' : ''}"
-           ${Hud.intentAttr({ type: 'selectUnit', index: card.index })}>
+      <div class="squad-card ${model.isMyTurn || model.networkMode === 'local' ? 'interactive' : 'waiting'} ${card.selected ? 'selected' : ''} ${card.dead ? 'dead' : ''}"
+           ${model.isMyTurn || model.networkMode === 'local' ? Hud.intentAttr({ type: 'selectUnit', index: card.index }) : ''}>
         <img class="squad-portrait" src="${card.portrait}" alt="${card.name}" />
         <div class="squad-name">${card.name}</div>
         <div class="squad-bars">
@@ -209,7 +205,7 @@ export class Hud {
    * squad bar. Picking one only previews the shot; the panel confirms it.
    */
   private renderTargetStrip(model: HudModel): void {
-    if (model.targets.length === 0) {
+    if (model.targets.length === 0 || (!model.isMyTurn && model.networkMode !== 'local')) {
       this.targetStripEl.innerHTML = ''
       this.targetStripEl.classList.remove('visible')
       return
@@ -237,6 +233,18 @@ export class Hud {
    * should be able to reach there.
    */
   private renderActionPanel(model: HudModel): void {
+    if (!model.isMyTurn && model.networkMode !== 'local') {
+      this.actionPanelEl.innerHTML = `
+        <div class="action-header" style="color: #cbd5e1;">Opponent's Turn</div>
+        <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 8px; padding: 24px 16px; text-align: center; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);">
+          <div style="font-size: 28px; margin-bottom: 8px; animation: pulse 2s infinite;">⏳</div>
+          <div style="font-size: 14px; font-weight: 600; color: #38bdf8; margin-bottom: 6px; letter-spacing: 0.5px;">OPPONENT'S TURN</div>
+          <div style="font-size: 12px; color: #94a3b8; line-height: 1.4;">Waiting for opponent to complete their actions...</div>
+        </div>
+      `
+      return
+    }
+
     if (model.throwPanel) {
       this.actionPanelEl.innerHTML = this.throwCard(model.throwPanel)
       return

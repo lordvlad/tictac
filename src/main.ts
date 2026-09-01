@@ -199,6 +199,44 @@ function start(seed: number, seedLabel: string, network: NetworkManager): void {
     controller.handleRemoteNetworkMessage(msg)
   }
 
+  network.onDisconnected = (reason) => {
+    const ui = Game.instance().uiRoot
+    if (document.getElementById('disconnection-overlay')) return
+
+    const overlay = document.createElement('div')
+    overlay.id = 'disconnection-overlay'
+    overlay.style.cssText = `
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 14, 20, 0.92);
+      backdrop-filter: blur(8px);
+      z-index: 10000;
+      font-family: inherit;
+      color: #e2e8f0;
+    `
+
+    overlay.innerHTML = `
+      <div style="background: #1e293b; padding: 32px 40px; border-radius: 12px; border: 1px solid #ef4444; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); width: 380px; text-align: center;">
+        <h2 style="margin: 0 0 8px 0; font-size: 24px; color: #ef4444;">Connection Interrupted</h2>
+        <p style="margin: 0 0 24px 0; font-size: 14px; color: #94a3b8;">${reason || 'The opponent has left the match or connection was lost.'}</p>
+        <button id="btn-return-menu" style="padding: 12px 24px; background: #ef4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Return to Main Menu</button>
+      </div>
+    `
+
+    ui.appendChild(overlay)
+
+    overlay.querySelector('#btn-return-menu')?.addEventListener('click', () => {
+      overlay.remove()
+      controller.dispose()
+      hud.dispose()
+      network.dispose()
+      showMenu()
+    })
+  }
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
   const commander = squads.byFaction[myFaction][0]
   if (commander) {
