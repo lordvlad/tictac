@@ -269,7 +269,14 @@ export class InteractionController {
         break
       }
       case 'requestTurnSwitch':
-        this.hud.showTurnOverlay()
+        if (this.network && this.network.mode !== 'local') {
+          this.network.send({ type: 'endTurn', faction: this.turnManager.activeFaction })
+          this.turnManager.startNextTurn()
+          this.onTurnSwitched()
+          this.refreshHud()
+        } else {
+          this.hud.showTurnOverlay()
+        }
         break
       case 'confirmTurnSwitch':
         this.hud.hideTurnOverlay()

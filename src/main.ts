@@ -55,7 +55,9 @@ function showMenu(): void {
     font-family: inherit;
     color: #e2e8f0;
   `
-
+  container.addEventListener('pointerdown', (e) => e.stopPropagation())
+  container.addEventListener('mousedown', (e) => e.stopPropagation())
+  container.addEventListener('click', (e) => e.stopPropagation())
   container.innerHTML = `
     <div style="background: #1e293b; padding: 32px 40px; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); width: 380px; text-align: center;">
       <h1 style="margin: 0 0 8px 0; font-size: 28px; letter-spacing: 2px; color: #38bdf8;">TICTAC P2P</h1>
@@ -132,6 +134,7 @@ function showMenu(): void {
       </div>
       <p id="join-status" style="font-size: 12px; color: #ef4444; margin-top: 8px; display: none;"></p>
     `
+      setTimeout(() => (container.querySelector('#join-peer-id') as HTMLInputElement)?.focus(), 50)
 
     container.querySelector('#btn-back')?.addEventListener('click', () => {
       detailsEl.style.display = 'none'
@@ -218,6 +221,9 @@ function start(seed: number, seedLabel: string, network: NetworkManager): void {
       font-family: inherit;
       color: #e2e8f0;
     `
+    overlay.addEventListener('pointerdown', (e) => e.stopPropagation())
+    overlay.addEventListener('mousedown', (e) => e.stopPropagation())
+    overlay.addEventListener('click', (e) => e.stopPropagation())
 
     overlay.innerHTML = `
       <div style="background: #1e293b; padding: 32px 40px; border-radius: 12px; border: 1px solid #ef4444; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); width: 380px; text-align: center;">
