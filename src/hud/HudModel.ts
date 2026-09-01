@@ -170,7 +170,12 @@ export function buildHudModel(sources: HudModelSources): HudModel {
   const selected = turnManager.selectedSoldier
   const nextFaction = faction === Faction.Blue ? Faction.Red : Faction.Blue
 
-  const squad: HudSquadCard[] = squads.byFaction[faction].map((soldier, index) => ({
+  const displayFaction =
+    sources.networkMode && sources.networkMode !== 'local' && sources.myFaction !== undefined
+      ? sources.myFaction
+      : faction
+
+  const squad: HudSquadCard[] = squads.byFaction[displayFaction].map((soldier, index) => ({
     index,
     name: soldier.name,
     hp: soldier.hp,
@@ -179,7 +184,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     maxAp: soldier.maxAp,
     armor: soldier.armor,
     maxArmor: soldier.maxArmor,
-    portrait: portraits.getPortrait(faction, index),
+    portrait: portraits.getPortrait(displayFaction, index),
     selected: soldier === selected,
     dead: soldier.isDead,
   }))
@@ -262,8 +267,11 @@ export function buildHudModel(sources: HudModelSources): HudModel {
 
   let networkBadge = FACTION_INFO[faction].name
   if (sources.networkMode && sources.networkMode !== 'local') {
-    const isMine = faction === sources.myFaction
-    networkBadge += isMine ? ' (YOU)' : ' (ENEMY)'
+    const isMyTurn = faction === sources.myFaction
+    const myRole = sources.myFaction === Faction.Blue ? 'BLUE / HOST' : 'RED / GUEST'
+    networkBadge = isMyTurn
+      ? `${myRole} — YOUR TURN`
+      : `${myRole} — OPPONENT'S TURN`
   }
 
   return {

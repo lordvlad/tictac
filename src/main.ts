@@ -3,7 +3,7 @@ import type { Asset } from '@mavonengine/core/Types/Asset'
 import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
 import { createEngineContext } from './engine'
-import { SIM } from './config'
+import { Faction, SIM } from './config'
 import { resolveSeed } from './core/rng'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
@@ -192,14 +192,23 @@ function start(seed: number, seedLabel: string, network: NetworkManager): void {
     seedLabel,
     tracers,
     engine,
+    network,
   )
-  controller.network = network
 
   network.onMessage = (msg) => {
     controller.handleRemoteNetworkMessage(msg)
   }
 
-  rig.snapTo(new Vector3(0, 0, 0))
+  const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
+  const commander = squads.byFaction[myFaction][0]
+  if (commander) {
+    rig.snapTo(commander.position)
+    if (turnManager.activeFaction === myFaction) {
+      turnManager.selectSoldier(commander)
+    }
+  } else {
+    rig.snapTo(new Vector3(0, 0, 0))
+  }
 
   let accumulator = 0
   Game.instance().onUpdate((delta) => {

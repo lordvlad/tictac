@@ -33,7 +33,6 @@ import type { Tracers } from '../render/Tracers'
  * genuinely about input: listeners, picking, and per-frame orchestration.
  */
 export class InteractionController {
-  network: NetworkManager | null = null
   private readonly planner: MovementPlanner
   private readonly shoot: ShootPlanner
   private readonly grenade: GrenadePlanner
@@ -61,6 +60,7 @@ export class InteractionController {
     private readonly seedLabel: string,
     tracers: Tracers,
     private readonly engine: EngineContext,
+    public network: NetworkManager | null = null,
   ) {
     this.effects = new Effects(engine)
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
@@ -325,11 +325,26 @@ export class InteractionController {
     // Statuses and persistent smoke expire on the handover.
     tickStatuses(this.squads.soldiers)
     this.effects.tickTurn()
+
+    if (this.network && this.network.mode !== 'local') {
+      const myFaction = this.network.myFaction
+      if (this.turnManager.activeFaction === myFaction) {
+        const living = this.squads.getLiving(myFaction)
+        if (living.length > 0) this.turnManager.selectSoldier(living[0]!)
+      } else {
+        this.turnManager.selectSoldier(null)
+      }
+    }
+
     this.recomputeVisibility()
   }
 
   recomputeVisibility(): void {
-    this.fog.recompute(this.turnManager.activeFaction, this.squads)
+    const fogFaction =
+      this.network && this.network.mode !== 'local'
+        ? this.network.myFaction
+        : this.turnManager.activeFaction
+    this.fog.recompute(fogFaction, this.squads)
   }
 
   // ---------------------------------------------------------------------------
