@@ -12,8 +12,8 @@ export class Squads {
   }
 
   constructor(grid: Grid, spawns: Record<Faction, Tile[]>, engine: EngineContext) {
-    const blueNames = ['Viper', 'Ghost', 'Spectre', 'Reaper']
-    const redNames = ['Cobalt', 'Crimson', 'Razor', 'Shadow']
+    const blueNames = ['Cobalt', 'Azure', 'Sapphire', 'Indigo']
+    const redNames = ['Crimson', 'Scarlet', 'Ruby', 'Garnet']
 
     const weapons = [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun] as const
 
