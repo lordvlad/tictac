@@ -13,19 +13,14 @@ import { Hud } from './hud/Hud'
 import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
 import './game.css'
+import { NetworkManager } from './game/NetworkManager'
 
-// Vite exposed the deploy base via `import.meta.env.BASE_URL`; under Bun we
-// resolve runtime-loaded assets against the document's own base URL instead,
-// which works both at the dev-server root and under a GitHub Pages subpath.
 const baseUrl = new URL('./', document.baseURI).href
 
 const ASSETS: Asset[] = [
   { name: 'character', type: 'gltfModel', path: `${baseUrl}character.glb` },
 ]
 
-const { seed, label: seedLabel } = resolveSeed()
-
-// Initialize MavonEngine without physics world (grid-based game)
 const game = new Game(ASSETS)
 game.resources.loaders.gltfLoader.dracoLoader?.setDecoderPath(`${baseUrl}draco/`)
 
@@ -33,17 +28,140 @@ game.on('documentReady', () => {
   const ui = game.uiRoot
   ui.innerHTML = `
     <div id="loadingBar"></div>
-    <div id="bootLabel">Deploying — seed ${seedLabel}</div>
+    <div id="bootLabel">Deploying...</div>
   `
   game.trigger('uiMounted')
 })
 
 game.resources.on('loaded', () => {
   document.getElementById('bootLabel')?.classList.add('ended')
-  start()
+  showMenu()
 })
 
-function start(): void {
+function showMenu(): void {
+  const ui = Game.instance().uiRoot
+  const container = document.createElement('div')
+  container.id = 'start-menu-overlay'
+  container.style.cssText = `
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 14, 20, 0.92);
+    backdrop-filter: blur(8px);
+    z-index: 10000;
+    font-family: inherit;
+    color: #e2e8f0;
+  `
+
+  container.innerHTML = `
+    <div style="background: #1e293b; padding: 32px 40px; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); width: 380px; text-align: center;">
+      <h1 style="margin: 0 0 8px 0; font-size: 28px; letter-spacing: 2px; color: #38bdf8;">TICTAC P2P</h1>
+      <p style="margin: 0 0 24px 0; font-size: 14px; color: #94a3b8;">Tactical Combat Engine</p>
+      
+      <div id="menu-actions" style="display: flex; flex-direction: column; gap: 12px;">
+        <button id="btn-local" style="padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Local Versus (Same Screen)</button>
+        <button id="btn-host-mode" style="padding: 12px; background: #0ea5e9; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Host P2P Match</button>
+        <button id="btn-join-mode" style="padding: 12px; background: #6366f1; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Join P2P Match</button>
+      </div>
+
+      <div id="menu-details" style="margin-top: 20px; display: none;"></div>
+    </div>
+  `
+
+  ui.appendChild(container)
+
+  const actionsEl = container.querySelector('#menu-actions') as HTMLElement
+  const detailsEl = container.querySelector('#menu-details') as HTMLElement
+
+  // Local Mode
+  container.querySelector('#btn-local')?.addEventListener('click', () => {
+    container.remove()
+    const { seed, label } = resolveSeed()
+    const network = new NetworkManager()
+    start(seed, label, network)
+  })
+
+  // Host Mode
+  container.querySelector('#btn-host-mode')?.addEventListener('click', async () => {
+    actionsEl.style.display = 'none'
+    detailsEl.style.display = 'block'
+    detailsEl.innerHTML = `<p style="font-size: 14px; color: #94a3b8;">Initializing PeerJS Host...</p>`
+
+    const { seed, label } = resolveSeed()
+    const network = new NetworkManager()
+    const hostId = await network.initHost(seed, label)
+
+    detailsEl.innerHTML = `
+      <p style="font-size: 14px; color: #38bdf8; margin-bottom: 8px;">Host Created!</p>
+      <p style="font-size: 12px; color: #94a3b8; margin-bottom: 8px;">Share this Peer ID with your opponent:</p>
+      <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <input id="peer-id-input" value="${hostId}" readonly style="flex: 1; padding: 8px; background: #0f172a; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; font-family: monospace; font-size: 12px;" />
+        <button id="btn-copy-id" style="padding: 8px 12px; background: #334155; color: white; border: none; border-radius: 4px; cursor: pointer;">Copy</button>
+      </div>
+      <p style="font-size: 12px; color: #e2e8f0; animation: pulse 2s infinite;">Waiting for peer to join...</p>
+    `
+
+    container.querySelector('#btn-copy-id')?.addEventListener('click', () => {
+      const input = container.querySelector('#peer-id-input') as HTMLInputElement
+      input.select()
+      navigator.clipboard.writeText(input.value)
+      const btn = container.querySelector('#btn-copy-id') as HTMLButtonElement
+      btn.textContent = 'Copied!'
+      setTimeout(() => (btn.textContent = 'Copy'), 2000)
+    })
+
+    network.onConnected = () => {
+      container.remove()
+      start(seed, label, network)
+    }
+  })
+
+  // Join Mode
+  container.querySelector('#btn-join-mode')?.addEventListener('click', () => {
+    actionsEl.style.display = 'none'
+    detailsEl.style.display = 'block'
+    detailsEl.innerHTML = `
+      <p style="font-size: 14px; color: #818cf8; margin-bottom: 8px;">Join P2P Game</p>
+      <input id="join-peer-id" placeholder="Enter Host Peer ID..." style="width: 100%; box-sizing: border-box; padding: 8px; background: #0f172a; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; font-family: monospace; font-size: 12px; margin-bottom: 12px;" />
+      <div style="display: flex; gap: 8px;">
+        <button id="btn-connect-peer" style="flex: 1; padding: 10px; background: #6366f1; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Connect</button>
+        <button id="btn-back" style="padding: 10px; background: #475569; color: white; border: none; border-radius: 4px; cursor: pointer;">Back</button>
+      </div>
+      <p id="join-status" style="font-size: 12px; color: #ef4444; margin-top: 8px; display: none;"></p>
+    `
+
+    container.querySelector('#btn-back')?.addEventListener('click', () => {
+      detailsEl.style.display = 'none'
+      actionsEl.style.display = 'flex'
+    })
+
+    container.querySelector('#btn-connect-peer')?.addEventListener('click', async () => {
+      const input = container.querySelector('#join-peer-id') as HTMLInputElement
+      const hostId = input.value.trim()
+      if (!hostId) return
+
+      const statusEl = container.querySelector('#join-status') as HTMLElement
+      statusEl.style.color = '#38bdf8'
+      statusEl.style.display = 'block'
+      statusEl.textContent = 'Connecting to host...'
+
+      try {
+        const network = new NetworkManager()
+        const initData = await network.initJoin(hostId)
+        container.remove()
+        start(initData.seed, initData.seedLabel, network)
+      } catch (err) {
+        statusEl.style.color = '#ef4444'
+        statusEl.textContent = 'Failed to connect. Verify Peer ID.'
+      }
+    })
+  })
+}
+
+function start(seed: number, seedLabel: string, network: NetworkManager): void {
   const engine = createEngineContext(Game.instance())
 
   const battlefield = new Battlefield(seed, engine)
@@ -57,11 +175,14 @@ function start(): void {
   const tracers = new Tracers(engine)
   const turnManager = new TurnManager(squads, rig)
 
-  // The HUD is a pure view: it emits intents, the controller carries them out.
-  // `controller` is assigned just below, so the handler defers the lookup.
-  const hud = new Hud((intent) => controller.handleIntent(intent))
+  // Declare controller before hud so hud handler can reference it
+  let controller!: InteractionController
 
-  const controller = new InteractionController(
+  const hud = new Hud((intent) => {
+    controller.handleIntent(intent)
+  })
+
+  controller = new InteractionController(
     battlefield,
     squads,
     turnManager,
@@ -72,16 +193,14 @@ function start(): void {
     tracers,
     engine,
   )
+  controller.network = network
 
-  // Initial camera focus on map center (no character selected on start)
+  network.onMessage = (msg) => {
+    controller.handleRemoteNetworkMessage(msg)
+  }
+
   rig.snapTo(new Vector3(0, 0, 0))
 
-  // The engine ticks on a setInterval, which browsers clamp hard in a hidden or
-  // busy tab — a delivery can carry seconds of wall time. Draining it in fixed
-  // steps keeps movement, animation and fog advancing at the rate they would at
-  // full frame rate, and the catch-up ceiling bounds the work instead of
-  // discarding the frame: the previous `delta > 0.5` bail froze the entire
-  // simulation for as long as the tab stayed throttled.
   let accumulator = 0
   Game.instance().onUpdate((delta) => {
     accumulator = Math.min(accumulator + delta, SIM.maxCatchUp)
@@ -106,8 +225,9 @@ function start(): void {
       tracers,
       seed,
       seedLabel,
+      network,
     },
   })
 
-  console.info(`[tictac] tactical combat ready — seed ${seedLabel}`)
+  console.info(`[tictac] tactical combat ready — mode: ${network.mode}, seed ${seedLabel}`)
 }

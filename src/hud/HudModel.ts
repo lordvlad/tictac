@@ -115,6 +115,7 @@ export interface HudThrowPanel {
 /** Immutable snapshot of what the HUD should show right now. */
 export interface HudModel {
   factionName: string
+  networkBadge: string
   factionIsBlue: boolean
   turnNumber: number
   seedLabel: string
@@ -145,6 +146,8 @@ export interface HudModelSources {
   shoot: ShootSnapshot | null
   /** The armed grenade and its aimed blast, when one is armed. */
   grenade: { armed: GrenadeId | null; pending: PendingThrow | null }
+  networkMode?: string
+  myFaction?: Faction
 }
 
 /** What the model builder needs from the shoot planner. */
@@ -257,8 +260,15 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     selected: soldier === shoot?.pending?.target,
   }))
 
+  let networkBadge = FACTION_INFO[faction].name
+  if (sources.networkMode && sources.networkMode !== 'local') {
+    const isMine = faction === sources.myFaction
+    networkBadge += isMine ? ' (YOU)' : ' (ENEMY)'
+  }
+
   return {
     factionName: FACTION_INFO[faction].name,
+    networkBadge,
     factionIsBlue: faction === Faction.Blue,
     turnNumber: turnManager.turnNumber,
     seedLabel,

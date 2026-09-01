@@ -159,7 +159,7 @@ export class Hud {
 
     this.topRightEl.innerHTML = `
       <div class="hud-info-card">
-        <span class="hud-faction-badge ${model.factionIsBlue ? 'blue' : 'red'}">${model.factionName}</span>
+        <span class="hud-faction-badge ${model.factionIsBlue ? 'blue' : 'red'}">${model.networkBadge}</span>
         <span class="hud-turn-label">Turn ${model.turnNumber}</span>
         <span class="hud-turn-label" style="opacity: 0.6;">Seed ${model.seedLabel}</span>
       </div>

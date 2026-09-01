@@ -1,3 +1,4 @@
+import { NetworkManager, type NetworkMessage } from './NetworkManager'
 import { Raycaster, Vector2 } from 'three'
 import type { EngineContext } from '../engine'
 import { Faction, RULES } from '../config'
@@ -32,6 +33,7 @@ import type { Tracers } from '../render/Tracers'
  * genuinely about input: listeners, picking, and per-frame orchestration.
  */
 export class InteractionController {
+  network: NetworkManager | null = null
   private readonly planner: MovementPlanner
   private readonly shoot: ShootPlanner
   private readonly grenade: GrenadePlanner
@@ -133,12 +135,21 @@ export class InteractionController {
               }
             : null,
         grenade: { armed: this.grenade.armed, pending: this.grenade.pending(shooter) },
+        networkMode: this.network?.mode ?? 'local',
+        myFaction: this.network?.myFaction ?? Faction.Blue,
       }),
     )
   }
 
   /** Single place where a HUD press becomes a change to the game. */
-  handleIntent(intent: HudIntent): void {
+  handleIntent(intent: HudIntent, isFromNetwork = false): void {
+    if (!isFromNetwork && this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) {
+      return
+    }
+    if (!isFromNetwork && this.network && this.network.mode !== 'local') {
+      this.network.send({ type: 'hudIntent', intent })
+    }
+
     switch (intent.type) {
       case 'selectUnit': {
         const soldier = this.squads.byFaction[this.turnManager.activeFaction][intent.index]
@@ -237,6 +248,22 @@ export class InteractionController {
       }
     }
   }
+  handleRemoteNetworkMessage(msg: NetworkMessage): void {
+    switch (msg.type) {
+      case 'hudIntent':
+        this.handleIntent(msg.intent, true)
+        break
+      case 'clickTile':
+        this.executeClickTile(msg.tile, msg.shiftKey)
+        break
+      case 'clickSoldier':
+        this.executeClickSoldier(msg.soldierIndex, msg.faction)
+        break
+      case 'rightClickFacing':
+        this.executeRightClickFacing(msg.x, msg.z)
+        break
+    }
+  }
 
   dispose(): void {
     const canvas = this.engine.canvas
@@ -316,21 +343,29 @@ export class InteractionController {
   /** Right-click (not right-drag) turns the selected unit to face the cursor. */
   private readonly onPointerUp = (event: PointerEvent): void => {
     if (event.button !== 2) return
+    if (this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) return
+
     const travel = Math.hypot(
       event.clientX - this.rightDownPos.x,
       event.clientY - this.rightDownPos.y,
     )
     if (travel >= 6) return
 
-    const selected = this.turnManager.selectedSoldier
-    if (!selected || selected.isMoving || selected.isDead) return
-
     clientToNdc(this.engine.canvas, event.clientX, event.clientY, this.ndc)
     const pt = this.picker.fromNdc(this.ndc)
     if (!pt) return
 
-    const dx = pt.x - selected.position.x
-    const dz = pt.z - selected.position.z
+    this.executeRightClickFacing(pt.x, pt.z)
+    if (this.network && this.network.mode !== 'local') {
+      this.network.send({ type: 'rightClickFacing', x: pt.x, z: pt.z })
+    }
+  }
+
+  executeRightClickFacing(x: number, z: number): void {
+    const selected = this.turnManager.selectedSoldier
+    if (!selected || selected.isMoving || selected.isDead) return
+    const dx = x - selected.position.x
+    const dz = z - selected.position.z
     if (Math.hypot(dx, dz) > 0.01) selected.targetYaw = Math.atan2(dx, dz)
   }
 
@@ -348,47 +383,71 @@ export class InteractionController {
 
   private readonly onClick = (event: MouseEvent): void => {
     if (this.rig.isDragging) return
+    if (this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) return
 
     const selected = this.turnManager.selectedSoldier
 
     // Tapping a friendly selects it.
     const friendly = this.pickSoldierUnderCursor(event, this.turnManager.activeFaction)
     if (friendly && friendly !== selected) {
-      this.turnManager.selectSoldier(friendly)
-      this.exitShootMode()
-      this.refreshHud()
+      this.executeClickSoldier(friendly.squadIndex, friendly.faction)
+      if (this.network && this.network.mode !== 'local') {
+        this.network.send({ type: 'clickSoldier', soldierIndex: friendly.squadIndex, faction: friendly.faction })
+      }
       return
     }
 
     if (!selected || selected.isDead) return
     const tile = this.tileFromEvent(event)
+    if (!tile) return
 
     // With a grenade armed, a click aims the blast; the panel throws it.
     if (this.grenade.active) {
-      if (tile) {
-        this.grenade.aimAt(tile)
-        this.renderOverlay()
-        this.refreshHud()
-      }
+      this.grenade.aimAt(tile)
+      this.renderOverlay()
+      this.refreshHud()
       return
     }
 
-    // In shoot mode a click on an enemy picks it as the target; confirmation
-    // happens on the panel, so a stray click can never fire.
+    // In shoot mode a click on an enemy picks it as the target.
     if (this.shoot.active) {
       const enemy = this.pickSoldierUnderCursor(event, this.enemyFaction)
       if (enemy) {
-        this.shoot.selectTarget(enemy)
-        this.renderOverlay()
-        this.refreshHud()
+        this.executeClickSoldier(enemy.squadIndex, enemy.faction)
+        if (this.network && this.network.mode !== 'local') {
+          this.network.send({ type: 'clickSoldier', soldierIndex: enemy.squadIndex, faction: enemy.faction })
+        }
       }
       return
     }
 
-    if (!tile || selected.isMoving || selected.ap <= 0) return
-    // Shift-click stays a desktop shortcut for adding a waypoint outright.
-    const started = this.planner.handleClick(selected, tile, event.shiftKey)
+    if (selected.isMoving || selected.ap <= 0) return
+    const shiftKey = event.shiftKey
+    const started = this.executeClickTile(tile, shiftKey)
+    if (started && this.network && this.network.mode !== 'local') {
+      this.network.send({ type: 'clickTile', tile: { x: tile.x, y: tile.y }, shiftKey })
+    }
+  }
+
+  executeClickSoldier(soldierIndex: number, faction: Faction): void {
+    const soldier = this.squads.byFaction[faction][soldierIndex]
+    if (!soldier || soldier.isDead) return
+    if (faction === this.turnManager.activeFaction) {
+      this.turnManager.selectSoldier(soldier)
+      this.exitShootMode()
+    } else if (this.shoot.active) {
+      this.shoot.selectTarget(soldier)
+    }
+    this.renderOverlay()
+    this.refreshHud()
+  }
+
+  executeClickTile(tile: Tile, shiftKey: boolean): boolean {
+    const selected = this.turnManager.selectedSoldier
+    if (!selected || selected.isDead || selected.isMoving || selected.ap <= 0) return false
+    const started = this.planner.handleClick(selected, tile, shiftKey)
     if (started) this.refreshHud()
+    return started
   }
 
   // ---------------------------------------------------------------------------
