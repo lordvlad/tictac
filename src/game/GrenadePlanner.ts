@@ -120,26 +120,20 @@ export class GrenadePlanner {
     }
   }
 
-  /** Throw the armed grenade at the aimed tile. */
-  confirm(thrower: Soldier): boolean {
-    const pending = this.pending(thrower)
-    if (!pending || !pending.affordable || !pending.inRange) return false
-
-    const result = throwGrenade(this.grid, thrower, pending.at, pending.kind, this.squads.soldiers)
+  executeThrowAt(thrower: Soldier, kind: GrenadeId, targetTile: Tile): boolean {
+    const spec = thrower.grenadeSpecs[kind]
+    const result = throwGrenade(this.grid, thrower, targetTile, kind, this.squads.soldiers)
     if (!result.thrown) return false
 
-    // Trigger visual effects: flash, screen shake, and 3D smoke
-    const worldPos = this.grid.tileToWorld(pending.at)
-    this.effects.triggerFlash(pending.kind)
+    const worldPos = this.grid.tileToWorld(targetTile)
+    this.effects.triggerFlash(kind)
 
-    if (pending.kind === 'frag') {
+    if (kind === 'frag') {
       this.rig.shake(FX.shakeIntensityFrag, FX.shakeDurationFrag)
-      this.effects.spawnBlastPuffs(worldPos, pending.radius)
-    } else if (pending.kind === 'smoke') {
-      // Persistent smoke cloud covers the area, mapped by its tile index.
-      // It stays active for the duration of the status effect.
-      const tileIdx = this.grid.index(pending.at.x, pending.at.y)
-      this.effects.spawnPersistentSmoke(tileIdx, worldPos, pending.radius)
+      this.effects.spawnBlastPuffs(worldPos, spec.areaRadius)
+    } else if (kind === 'smoke') {
+      const tileIdx = this.grid.index(targetTile.x, targetTile.y)
+      this.effects.spawnPersistentSmoke(tileIdx, worldPos, spec.areaRadius)
     }
 
     for (const hit of result.hits) {
@@ -149,6 +143,17 @@ export class GrenadePlanner {
     this.exit()
     this.onThrowResolved?.()
     return true
+  }
+
+  /** Throw the armed grenade at the aimed tile. Returns thrown data for P2P sync. */
+  confirm(thrower: Soldier): { kind: GrenadeId; targetTile: Tile } | null {
+    const pending = this.pending(thrower)
+    if (!pending || !pending.affordable || !pending.inRange) return null
+
+    const kind = pending.kind
+    const targetTile = pending.at
+    const success = this.executeThrowAt(thrower, kind, targetTile)
+    return success ? { kind, targetTile } : null
   }
 
   /** Paint the blast footprint, brightest at the centre. */

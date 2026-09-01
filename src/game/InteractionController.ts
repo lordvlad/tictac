@@ -65,6 +65,16 @@ export class InteractionController {
     this.effects = new Effects(engine)
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
     this.shoot = new ShootPlanner(battlefield.grid, squads, tracers, engine)
+    this.planner.onMovementStarted = (soldier, path) => {
+      if (this.network && this.network.mode !== 'local' && this.network.isMyTurn(soldier.faction)) {
+        this.network.send({
+          type: 'moveUnit',
+          faction: soldier.faction,
+          squadIndex: soldier.squadIndex,
+          path: path.map((t) => ({ x: t.x, y: t.y })),
+        })
+      }
+    }
     this.grenade = new GrenadePlanner(battlefield.grid, squads, this.effects, rig, engine)
     this.debug = new DebugPanel(
       () => {
@@ -142,12 +152,9 @@ export class InteractionController {
   }
 
   /** Single place where a HUD press becomes a change to the game. */
-  handleIntent(intent: HudIntent, isFromNetwork = false): void {
-    if (!isFromNetwork && this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) {
+  handleIntent(intent: HudIntent): void {
+    if (this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) {
       return
-    }
-    if (!isFromNetwork && this.network && this.network.mode !== 'local') {
-      this.network.send({ type: 'hudIntent', intent })
     }
 
     switch (intent.type) {
@@ -174,7 +181,20 @@ export class InteractionController {
       }
       case 'fireShot': {
         const shooter = this.turnManager.selectedSoldier
-        if (shooter) this.shoot.fire(shooter, intent.mode)
+        if (shooter) {
+          const shotData = this.shoot.fire(shooter, intent.mode)
+          if (shotData && this.network && this.network.mode !== 'local') {
+            this.network.send({
+              type: 'fireShot',
+              shooterFaction: shooter.faction,
+              shooterIndex: shooter.squadIndex,
+              targetFaction: shotData.target.faction,
+              targetIndex: shotData.target.squadIndex,
+              mode: intent.mode,
+              rolls: shotData.rolls,
+            })
+          }
+        }
         break
       }
       case 'reload': {
@@ -183,6 +203,13 @@ export class InteractionController {
           selected.ap -= RULES.reloadApCost
           selected.weapon.currentClip = selected.weapon.maxClip
           this.refreshHud()
+          if (this.network && this.network.mode !== 'local') {
+            this.network.send({
+              type: 'reload',
+              faction: selected.faction,
+              squadIndex: selected.squadIndex,
+            })
+          }
         }
         break
       }
@@ -198,7 +225,18 @@ export class InteractionController {
       }
       case 'confirmThrow': {
         const thrower = this.turnManager.selectedSoldier
-        if (thrower) this.grenade.confirm(thrower)
+        if (thrower) {
+          const throwData = this.grenade.confirm(thrower)
+          if (throwData && this.network && this.network.mode !== 'local') {
+            this.network.send({
+              type: 'throwGrenade',
+              shooterFaction: thrower.faction,
+              shooterIndex: thrower.squadIndex,
+              kind: throwData.kind,
+              targetTile: throwData.targetTile,
+            })
+          }
+        }
         break
       }
       case 'cancelGrenade':
@@ -217,8 +255,17 @@ export class InteractionController {
         break
       case 'endUnitTurn': {
         const selected = this.turnManager.selectedSoldier
-        if (selected) this.turnManager.finishSoldierTurn(selected)
-        this.refreshHud()
+        if (selected && !selected.isDead) {
+          this.turnManager.finishSoldierTurn(selected)
+          this.refreshHud()
+          if (this.network && this.network.mode !== 'local') {
+            this.network.send({
+              type: 'endUnitTurn',
+              faction: selected.faction,
+              squadIndex: selected.squadIndex,
+            })
+          }
+        }
         break
       }
       case 'requestTurnSwitch':
@@ -226,6 +273,9 @@ export class InteractionController {
         break
       case 'confirmTurnSwitch':
         this.hud.hideTurnOverlay()
+        if (this.network && this.network.mode !== 'local') {
+          this.network.send({ type: 'endTurn', faction: this.turnManager.activeFaction })
+        }
         this.turnManager.startNextTurn()
         this.onTurnSwitched()
         this.refreshHud()
@@ -250,18 +300,80 @@ export class InteractionController {
   }
   handleRemoteNetworkMessage(msg: NetworkMessage): void {
     switch (msg.type) {
-      case 'hudIntent':
-        this.handleIntent(msg.intent, true)
+      case 'moveUnit': {
+        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
+        if (soldier && !soldier.isDead) {
+          this.planner.startMovePath(soldier, msg.path)
+          this.refreshHud()
+        }
         break
-      case 'clickTile':
-        this.executeClickTile(msg.tile, msg.shiftKey)
+      }
+      case 'fireShot': {
+        const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
+        const target = this.squads.byFaction[msg.targetFaction][msg.targetIndex]
+        if (shooter && target) {
+          this.shoot.executeShotWithRolls(shooter, target, msg.mode, msg.rolls)
+          this.recomputeVisibility()
+          this.renderOverlay()
+          this.refreshHud()
+        }
         break
-      case 'clickSoldier':
-        this.executeClickSoldier(msg.soldierIndex, msg.faction)
+      }
+      case 'throwGrenade': {
+        const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
+        if (shooter) {
+          this.grenade.executeThrowAt(shooter, msg.kind, msg.targetTile)
+          this.recomputeVisibility()
+          this.renderOverlay()
+          this.refreshHud()
+        }
         break
-      case 'rightClickFacing':
-        this.executeRightClickFacing(msg.x, msg.z)
+      }
+      case 'reload': {
+        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
+        if (soldier && !soldier.isDead && soldier.ap >= RULES.reloadApCost) {
+          soldier.ap -= RULES.reloadApCost
+          soldier.weapon.currentClip = soldier.weapon.maxClip
+          this.refreshHud()
+        }
         break
+      }
+      case 'toggleCover': {
+        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
+        if (soldier && !soldier.isDead) {
+          if (soldier.isCrouching) {
+            soldier.exitCover()
+          } else if (soldier.ap >= RULES.coverApCost) {
+            soldier.ap -= RULES.coverApCost
+            soldier.enterCover()
+          }
+          this.refreshHud()
+        }
+        break
+      }
+      case 'endUnitTurn': {
+        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
+        if (soldier && !soldier.isDead) {
+          this.turnManager.finishSoldierTurn(soldier)
+          this.refreshHud()
+        }
+        break
+      }
+      case 'endTurn': {
+        this.turnManager.startNextTurn()
+        this.onTurnSwitched()
+        this.refreshHud()
+        break
+      }
+      case 'rightClickFacing': {
+        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
+        if (soldier && !soldier.isDead) {
+          const dx = msg.x - soldier.position.x
+          const dz = msg.z - soldier.position.z
+          if (Math.hypot(dx, dz) > 0.01) soldier.targetYaw = Math.atan2(dx, dz)
+        }
+        break
+      }
     }
   }
 
@@ -278,11 +390,6 @@ export class InteractionController {
     this.debug.dispose()
     this.effects.dispose()
   }
-
-  // ---------------------------------------------------------------------------
-  // Mode transitions
-  // ---------------------------------------------------------------------------
-
   enterShootMode(): void {
     if (!this.shoot.enter(this.turnManager.selectedSoldier)) return
     this.planner.clear()
@@ -311,6 +418,13 @@ export class InteractionController {
       soldier.enterCover()
     }
     this.refreshHud()
+    if (this.network && this.network.mode !== 'local') {
+      this.network.send({
+        type: 'toggleCover',
+        faction: soldier.faction,
+        squadIndex: soldier.squadIndex,
+      })
+    }
   }
 
   toggleWaypointMode(): void {
@@ -366,23 +480,33 @@ export class InteractionController {
     )
     if (travel >= 6) return
 
+    const selected = this.turnManager.selectedSoldier
+    if (!selected || selected.isMoving || selected.isDead) return
+
     clientToNdc(this.engine.canvas, event.clientX, event.clientY, this.ndc)
     const pt = this.picker.fromNdc(this.ndc)
     if (!pt) return
 
-    this.executeRightClickFacing(pt.x, pt.z)
+    this.executeRightClickFacing(selected.squadIndex, selected.faction, pt.x, pt.z)
     if (this.network && this.network.mode !== 'local') {
-      this.network.send({ type: 'rightClickFacing', x: pt.x, z: pt.z })
+      this.network.send({
+        type: 'rightClickFacing',
+        faction: selected.faction,
+        squadIndex: selected.squadIndex,
+        x: pt.x,
+        z: pt.z,
+      })
     }
   }
 
-  executeRightClickFacing(x: number, z: number): void {
-    const selected = this.turnManager.selectedSoldier
-    if (!selected || selected.isMoving || selected.isDead) return
-    const dx = x - selected.position.x
-    const dz = z - selected.position.z
-    if (Math.hypot(dx, dz) > 0.01) selected.targetYaw = Math.atan2(dx, dz)
+  executeRightClickFacing(squadIndex: number, faction: Faction, x: number, z: number): void {
+    const soldier = this.squads.byFaction[faction][squadIndex]
+    if (!soldier || soldier.isMoving || soldier.isDead) return
+    const dx = x - soldier.position.x
+    const dz = z - soldier.position.z
+    if (Math.hypot(dx, dz) > 0.01) soldier.targetYaw = Math.atan2(dx, dz)
   }
+
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'Escape') this.exitShootMode()
@@ -406,9 +530,7 @@ export class InteractionController {
     const friendly = this.pickSoldierUnderCursor(event, this.turnManager.activeFaction)
     if (friendly && friendly !== selected) {
       this.executeClickSoldier(friendly.squadIndex, friendly.faction)
-      if (this.network && this.network.mode !== 'local') {
-        this.network.send({ type: 'clickSoldier', soldierIndex: friendly.squadIndex, faction: friendly.faction })
-      }
+      // Selecting friendly unit is local-only
       return
     }
 
@@ -429,19 +551,13 @@ export class InteractionController {
       const enemy = this.pickSoldierUnderCursor(event, this.enemyFaction)
       if (enemy) {
         this.executeClickSoldier(enemy.squadIndex, enemy.faction)
-        if (this.network && this.network.mode !== 'local') {
-          this.network.send({ type: 'clickSoldier', soldierIndex: enemy.squadIndex, faction: enemy.faction })
-        }
       }
       return
     }
 
     if (selected.isMoving || selected.ap <= 0) return
     const shiftKey = event.shiftKey
-    const started = this.executeClickTile(tile, shiftKey)
-    if (started && this.network && this.network.mode !== 'local') {
-      this.network.send({ type: 'clickTile', tile: { x: tile.x, y: tile.y }, shiftKey })
-    }
+    this.executeClickTile(tile, shiftKey)
   }
 
   executeClickSoldier(soldierIndex: number, faction: Faction): void {
@@ -553,17 +669,21 @@ export class InteractionController {
       selected.instance.visible = true
     }
 
-    if (selected && selected.isMoving) {
-      const moved = selected.updateMovement(delta, this.battlefield.grid, () => {
-        this.recomputeVisibility()
-        this.refreshHud()
-      })
+    for (const soldier of this.squads.soldiers) {
+      if (soldier.isMoving) {
+        const moved = soldier.updateMovement(delta, this.battlefield.grid, () => {
+          this.recomputeVisibility()
+          this.refreshHud()
+        })
 
-      if (!this.rig.isCharacterViewActive) this.rig.focusOn(selected.position)
+        if (soldier === selected && !this.rig.isCharacterViewActive) {
+          this.rig.focusOn(soldier.position)
+        }
 
-      if (!moved) {
-        this.recomputeVisibility()
-        this.refreshHud()
+        if (!moved) {
+          this.recomputeVisibility()
+          this.refreshHud()
+        }
       }
     }
 

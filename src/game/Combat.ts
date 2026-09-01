@@ -95,6 +95,7 @@ export function executeShot(
   tracers: Tracers,
   soldiers: readonly Soldier[],
   mode: ShotMode = ShotMode.Snap,
+  overrideRolls?: boolean[],
 ): ShotResult {
   const eff = effectiveWeapon(shooter, mode)
   if (!canShoot(grid, shooter, target, mode)) {
@@ -119,7 +120,7 @@ export function executeShot(
   let killed = false
 
   for (let i = 0; i < bullets; i++) {
-    const hit = Math.random() * 100 <= chance
+    const hit = overrideRolls ? (overrideRolls[i] ?? false) : Math.random() * 100 <= chance
     if (hit) anyHit = true
 
     tracers.spawnTracer(shooterWorld, targetWorld, hit)

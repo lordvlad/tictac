@@ -1,15 +1,19 @@
 import { Peer, DataConnection } from 'peerjs'
 import { Faction } from '../config'
-import type { HudIntent } from '../hud/HudModel'
+import type { GrenadeId, ShotMode } from '../core/Arsenal'
 
 export type NetworkMode = 'local' | 'host' | 'join'
 
 export type NetworkMessage =
   | { type: 'init'; seed: number; seedLabel: string }
-  | { type: 'hudIntent'; intent: HudIntent }
-  | { type: 'clickTile'; tile: { x: number; y: number }; shiftKey: boolean }
-  | { type: 'clickSoldier'; soldierIndex: number; faction: Faction }
-  | { type: 'rightClickFacing'; x: number; z: number }
+  | { type: 'moveUnit'; faction: Faction; squadIndex: number; path: { x: number; y: number }[] }
+  | { type: 'fireShot'; shooterFaction: Faction; shooterIndex: number; targetFaction: Faction; targetIndex: number; mode: ShotMode; rolls: boolean[] }
+  | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number } }
+  | { type: 'reload'; faction: Faction; squadIndex: number }
+  | { type: 'toggleCover'; faction: Faction; squadIndex: number }
+  | { type: 'endUnitTurn'; faction: Faction; squadIndex: number }
+  | { type: 'endTurn'; faction: Faction }
+  | { type: 'rightClickFacing'; faction: Faction; squadIndex: number; x: number; z: number }
 
 export class NetworkManager {
   peer: Peer | null = null

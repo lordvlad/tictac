@@ -25,6 +25,7 @@ export class MovementPlanner {
   private path: Tile[] = []
   private pathValid = false
   private waypointModeOn = false
+  onMovementStarted?: (soldier: Soldier, path: Tile[]) => void
 
   constructor(
     private readonly grid: Grid,
@@ -108,11 +109,19 @@ export class MovementPlanner {
     this.render(soldier)
   }
 
+  startMovePath(soldier: Soldier, path: Tile[]): boolean {
+    this.clear()
+    if (path.length <= 1) return false
+    soldier.startMovement(path)
+    return true
+  }
+
   private confirm(soldier: Soldier): boolean {
     const path = this.pathValid && this.path.length > 1 ? [...this.path] : null
     this.clear()
     if (!path) return false
     soldier.startMovement(path)
+    this.onMovementStarted?.(soldier, path)
     return true
   }
 

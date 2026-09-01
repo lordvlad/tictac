@@ -10,7 +10,7 @@ import {
   type HitChanceBreakdown,
   resolveDamage,
 } from '../core/Ballistics'
-import { canShoot, executeShot, shotApCost, shotBreakdown } from './Combat'
+import { calculateHitChance, canShoot, executeShot, shotApCost, shotBreakdown, type ShotResult } from './Combat'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
 
@@ -158,32 +158,44 @@ export class ShootPlanner {
       options,
     }
   }
-  /** Take the shot in `mode`. Picking a card is the trigger. */
-  fire(shooter: Soldier, mode: ShotMode): boolean {
+  /** Take the shot in `mode`. Returns target and hit rolls for P2P sync. */
+  fire(shooter: Soldier, mode: ShotMode): { target: Soldier; rolls: boolean[] } | null {
     const pending = this.pending(shooter)
-    if (!pending) return false
+    if (!pending) return null
     const option = pending.options.find((o) => o.mode === mode)
-    if (!option || !option.available) return false
+    if (!option || !option.available) return null
 
+    const target = pending.target
+    const chance = calculateHitChance(this.grid, shooter, target, mode)
+    const bullets = shooter.weapon.bulletConsumption(mode)
+    const rolls: boolean[] = []
+    for (let i = 0; i < bullets; i++) {
+      rolls.push(Math.random() * 100 <= chance)
+    }
+
+    const result = this.executeShotWithRolls(shooter, target, mode, rolls)
+    return result ? { target, rolls } : null
+  }
+
+  executeShotWithRolls(shooter: Soldier, target: Soldier, mode: ShotMode, rolls: boolean[]): ShotResult | null {
     const consumption = shooter.weapon.bulletConsumption(mode)
-    if (shooter.weapon.currentClip < consumption) return false
-    shooter.weapon.currentClip -= consumption
+    shooter.weapon.currentClip = Math.max(0, shooter.weapon.currentClip - consumption)
 
     const result = executeShot(
       this.grid,
       shooter,
-      pending.target,
+      target,
       this.tracers,
       this.squads.soldiers,
       mode,
+      rolls,
     )
-    if (!result.apSpent) return false
+    if (!result.apSpent) return null
 
-    this.damageIndicators.spawn(pending.target.position, result.hit, result.damage)
-    // Never leave the panel pointing at a corpse.
-    if (pending.target.isDead) this.target = null
+    this.damageIndicators.spawn(target.position, result.hit, result.damage)
+    if (target.isDead && this.target === target) this.target = null
     this.onShotResolved?.()
-    return true
+    return result
   }
 
   /** Paint reachable-by-bullet tiles, plus a bright marker on the current target. */
