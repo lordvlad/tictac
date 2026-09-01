@@ -133,6 +133,7 @@ export class Hud {
   // ---------------------------------------------------------------------------
 
   private renderTopRight(model: HudModel): void {
+    const isMyTurn = model.isMyTurn || model.networkMode === 'local'
     const buttons: { label: string; title: string; classes: string; disabled: boolean; intent: HudIntent }[] = [
       {
         label: '🎥 Freelook',
@@ -148,10 +149,14 @@ export class Hud {
         disabled: !model.unitViewEnabled,
         intent: { type: 'toggleUnitView' },
       },
+      {
+        label: 'End Turn ⏭',
+        title: isMyTurn ? 'Hand over to the other faction' : "Opponent's Turn",
+        classes: isMyTurn ? 'hud-btn-danger' : '',
+        disabled: !isMyTurn,
+        intent: { type: 'requestTurnSwitch' },
+      },
     ]
-    if (!model.isMyTurn && model.networkMode !== 'local') {
-      buttons.splice(2, 1)
-    }
 
     this.topRightEl.innerHTML = `
       <div class="hud-info-card">

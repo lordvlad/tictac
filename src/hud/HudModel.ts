@@ -275,10 +275,10 @@ export function buildHudModel(sources: HudModelSources): HudModel {
 
   let networkBadge = FACTION_INFO[faction].name
   if (sources.networkMode && sources.networkMode !== 'local') {
-    const myRole = sources.myFaction === Faction.Blue ? 'BLUE / HOST' : 'RED / GUEST'
+    const activeRole = faction === Faction.Blue ? 'BLUE (HOST)' : 'RED (GUEST)'
     networkBadge = isMyTurn
-      ? `${myRole} — YOUR TURN`
-      : `${myRole} — OPPONENT'S TURN`
+      ? `🟢 YOUR TURN — ${activeRole}`
+      : `⏳ OPPONENT'S TURN — ${activeRole}`
   }
 
   return {
