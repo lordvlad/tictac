@@ -1,31 +1,24 @@
-import { Block, type Grid, ORTHOGONAL, type Tile } from './Grid'
-
-/**
- * Directional cover model. Cover is evaluated independently for each of a
- * tile's four orthogonal sides:
- *
- *   - a Half block (1 m crate) gives Low cover;
- *   - a Full block (2 m wall) — or the map boundary — gives Tall cover;
- *   - open ground gives no cover.
- *
- * A shot only benefits from the cover on the side(s) it actually crosses.
- */
-export const CoverLevel = {
-  None: 0,
-  Low: 1,
-  Tall: 2,
-} as const
-export type CoverLevel = (typeof CoverLevel)[keyof typeof CoverLevel]
+import { Block, faceToward, type Grid, ORTHOGONAL, type Tile } from './Grid'
+import { CoverLevel, WALLS } from './Walls'
 
 /** The four side directions, in the same order as {@link ORTHOGONAL}: +x, -x, +z, -z. */
 export const COVER_DIRS = ORTHOGONAL
 
-/** Cover provided by the block on one side of `tile`. Out-of-bounds counts as Tall (map edge). */
+/**
+ * Cover shielding one side of `tile`.
+ *
+ * Two different things can shelter that side: the wall on the edge itself, and
+ * a crate standing on the neighbouring tile. The better of the two wins — a
+ * unit does not lose the wall it is hugging because the tile beyond happens to
+ * be empty.
+ */
 export function coverLevelInDir(grid: Grid, tile: Tile, dx: number, dy: number): CoverLevel {
-  const block = grid.blockAt(tile.x + dx, tile.y + dy)
-  if (block === Block.Full) return CoverLevel.Tall
-  if (block === Block.Half) return CoverLevel.Low
-  return CoverLevel.None
+  const neighbour = { x: tile.x + dx, y: tile.y + dy }
+  const side = faceToward(tile, neighbour)
+  const fromWall = side === 0 ? CoverLevel.None : WALLS[grid.wallAt(tile.x, tile.y, side)].cover
+  const fromBlock =
+    grid.blockAt(neighbour.x, neighbour.y) === Block.Half ? CoverLevel.Low : CoverLevel.None
+  return Math.max(fromWall, fromBlock) as CoverLevel
 }
 
 /** Cover level on every side of `tile`, aligned to {@link COVER_DIRS}. */

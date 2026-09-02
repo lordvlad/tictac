@@ -91,13 +91,15 @@ describe('Command transport', () => {
 
     const receiver = new NetworkManager()
     receiver.mode = 'join'
-    let received: NetworkMessage | null = null
+    // Collected rather than assigned: a single `let` narrows to `null` here,
+    // which silently picks the `toEqual(null)` overload and asserts nothing.
+    const received: NetworkMessage[] = []
     receiver.onMessage = (msg) => {
-      received = msg
+      received.push(msg)
     }
     receive(receiver, sent[0])
 
-    expect(received).toEqual(original)
+    expect(received[0]).toEqual(original)
   })
 
   test('local play transmits nothing', () => {

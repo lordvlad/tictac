@@ -12,9 +12,10 @@ import {
   type Vector3,
 } from 'three'
 import { LEVEL_HEIGHT, TILE } from '../config'
-import { Block, blockHeight, type Grid, LadderFace } from '../core/Grid'
-import { markOccludedTiles } from '../core/Occlusion'
+import { Block, blockHeight, type Grid, Side } from '../core/Grid'
+import { markOccluders, type OcclusionMasks } from '../core/Occlusion'
 import { VIS_BRIGHTNESS, VisState } from '../core/Visibility'
+import { WALLS, WallKind } from '../core/Walls'
 
 /** Per-instance opacity attribute name (the wall x-ray fade). */
 const FADE_ATTRIBUTE = 'aFade'
@@ -22,27 +23,34 @@ const FADE_ATTRIBUTE = 'aFade'
 /** Base colour per block kind, before fog dimming. */
 const BLOCK_COLORS: Record<Exclude<Block, typeof Block.None>, number> = {
   [Block.Half]: 0x9a7c4f,
-  [Block.Full]: 0x8b8f96,
   [Block.Stair]: 0x00d2ff,
 }
+
+/** How a wall looks, per kind. Glazing is drawn see-through, as it is played. */
+const WALL_STYLE: Record<
+  Exclude<WallKind, typeof WallKind.None>,
+  { color: number; opacity: number }
+> = {
+  [WallKind.Solid]: { color: 0x8b8f96, opacity: 1 },
+  [WallKind.Parapet]: { color: 0x7d8a7a, opacity: 1 },
+  [WallKind.Glass]: { color: 0x9fd8e8, opacity: 0.3 },
+}
+
+/** Thickness of a wall face in metres — a boundary, not a room-sized block. */
+const WALL_THICKNESS = 0.12
 
 /** Ladders are edges, not tiles, so they get their own colour and layer. */
 const LADDER_COLOR = 0xff8800
 
 /** Face bits in a stable order, so instances and their offsets stay paired. */
-const LADDER_FACE_ORDER: readonly number[] = [
-  LadderFace.North,
-  LadderFace.East,
-  LadderFace.South,
-  LadderFace.West,
-]
+const LADDER_FACE_ORDER: readonly number[] = [Side.North, Side.East, Side.South, Side.West]
 
 /** Grid-space step from a tile centre toward each face, as [dx, dy]. */
-const LADDER_FACE_OFFSET: Record<number, readonly [number, number]> = {
-  [LadderFace.North]: [0, -1],
-  [LadderFace.East]: [1, 0],
-  [LadderFace.South]: [0, 1],
-  [LadderFace.West]: [-1, 0],
+const FACE_OFFSET: Record<number, readonly [number, number]> = {
+  [Side.North]: [0, -1],
+  [Side.East]: [1, 0],
+  [Side.South]: [0, 1],
+  [Side.West]: [-1, 0],
 }
 
 /**
@@ -51,14 +59,20 @@ const LADDER_FACE_OFFSET: Record<number, readonly [number, number]> = {
  * level filter.
  *
  * `transparent` so per-instance alpha blends; depth write stays on so opaque
- * walls still occlude normally.
+ * walls still occlude normally. `opacity` is the kind's own baseline — glazing
+ * is see-through before any fade is applied — and `aFade` scales it.
  */
-function createFadedMaterial(roughness: number, metalness: number): MeshStandardMaterial {
+function createFadedMaterial(
+  roughness: number,
+  metalness: number,
+  opacity = 1,
+): MeshStandardMaterial {
   const material = new MeshStandardMaterial({
     color: 0xffffff,
     roughness,
     metalness,
     transparent: true,
+    opacity,
   })
 
   // Multiply lit output by instance colour so unexplored tiles (black) go to
@@ -222,10 +236,17 @@ export function createLadderWallGeometry(rungs = 5): BufferGeometry {
   return geometry
 }
 
+/**
+ * One drawn thing. Tile-keyed for anything standing on the floor; wall
+ * instances additionally name the edge they occupy, because that is what the
+ * occlusion pass marks and what identifies them in the grid.
+ */
 interface BlockInstance {
   x: number
   y: number
   index: number
+  side?: Side
+  edge?: number
 }
 
 /**
@@ -238,6 +259,8 @@ interface BlockLayer {
   instances: BlockInstance[]
   baseColor: Color
   fade: InstancedBufferAttribute
+  /** Walls are rebuilt as a group when one changes kind. */
+  isWall?: boolean
 }
 
 /**
@@ -257,8 +280,8 @@ export class Blocks {
   private readonly dummy = new Object3D()
   private readonly scratch = new Color()
 
-  /** Per-tile occlusion scratch for the x-ray pass. */
-  private readonly occlusionMask: Uint8Array
+  /** Occlusion scratch for the x-ray pass: tiles for occupants, edges for walls. */
+  private readonly masks: OcclusionMasks
   private activeLevelFilter: number | null = null
   private occlusionActive = false
 
@@ -279,13 +302,121 @@ export class Blocks {
     }
 
     this.group.name = 'blocks'
-    this.occlusionMask = new Uint8Array(grid.size * grid.size)
+    this.masks = {
+      tiles: new Uint8Array(grid.size * grid.size),
+      edges: new Uint8Array(grid.edgeCount),
+    }
 
     for (const extra of [this.buildUpperFloors(), this.buildLadders()]) {
       if (extra === null) continue
       this.layers.push(extra)
       this.group.add(extra.mesh)
     }
+
+    this.addWallLayers()
+  }
+
+  /**
+   * Rebuild the wall meshes from the grid.
+   *
+   * Walls change kind during a match — glazing shatters — and the instance
+   * tables are keyed by kind, so the group is thrown away and re-derived
+   * rather than patched in place.
+   */
+  rebuildWalls(): void {
+    for (const layer of this.layers) {
+      if (!layer.isWall) continue
+      this.group.remove(layer.mesh)
+      layer.mesh.geometry.dispose()
+      ;(layer.mesh.material as MeshStandardMaterial).dispose()
+      layer.mesh.dispose()
+    }
+    let kept = 0
+    for (const layer of this.layers) if (!layer.isWall) this.layers[kept++] = layer
+    this.layers.length = kept
+
+    this.addWallLayers()
+  }
+
+  private addWallLayers(): void {
+    const kinds = Object.keys(WALL_STYLE).map(Number) as Exclude<
+      WallKind,
+      typeof WallKind.None
+    >[]
+
+    const byKind = new Map<WallKind, BlockInstance[]>(kinds.map((kind) => [kind, []]))
+    for (let edge = 0; edge < this.grid.edgeCount; edge++) {
+      const { x, y, side } = this.grid.edgeTile(edge)
+      const found = byKind.get(this.grid.wallAt(x, y, side))
+      if (found) found.push({ x, y, side, edge, index: found.length })
+    }
+
+    for (const kind of kinds) {
+      const instances = byKind.get(kind) ?? []
+      if (instances.length === 0) continue
+      const layer = this.buildWallLayer(kind, instances)
+      this.layers.push(layer)
+      this.group.add(layer.mesh)
+    }
+  }
+
+  /**
+   * One wall kind as a run of thin faces standing on tile boundaries.
+   *
+   * The face is a slab as long as a tile and only {@link WALL_THICKNESS} deep,
+   * placed on the shared edge and turned to lie in it, so it consumes no floor
+   * on either side.
+   */
+  private buildWallLayer(
+    kind: Exclude<WallKind, typeof WallKind.None>,
+    instances: BlockInstance[],
+  ): BlockLayer {
+    const { height } = WALLS[kind]
+    const style = WALL_STYLE[kind]
+    const capacity = instances.length
+
+    const geometry = new BoxGeometry(TILE, height, WALL_THICKNESS)
+    const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
+    geometry.setAttribute(FADE_ATTRIBUTE, fade)
+
+    const material = createFadedMaterial(0.85, 0.02, style.opacity)
+
+    const mesh = new InstancedMesh(geometry, material, capacity)
+    mesh.instanceMatrix.setUsage(DynamicDrawUsage)
+    mesh.count = capacity
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    mesh.userData.type = 'wall'
+    mesh.frustumCulled = false
+
+    const baseColor = new Color(style.color)
+    const layer: BlockLayer = { mesh, instances, baseColor, fade, isWall: true }
+
+    for (const inst of instances) {
+      const [dx, dz] = FACE_OFFSET[inst.side!]!
+      const neighbour = { x: inst.x + dx, y: inst.y + dz }
+      // A wall stands on the lower of the two floors it divides.
+      const level = Math.min(
+        this.grid.levelAt(inst.x, inst.y),
+        this.grid.levelAt(neighbour.x, neighbour.y),
+      )
+
+      this.dummy.position.set(
+        this.grid.worldX(inst.x) + (dx * TILE) / 2,
+        level * LEVEL_HEIGHT + height / 2,
+        this.grid.worldZ(inst.y) + (dz * TILE) / 2,
+      )
+      // Geometry runs along X; a wall on an east/west face runs along Z.
+      this.dummy.rotation.y = dx !== 0 ? Math.PI / 2 : 0
+      this.dummy.updateMatrix()
+      mesh.setMatrixAt(inst.index, this.dummy.matrix)
+      mesh.setColorAt(inst.index, baseColor)
+    }
+
+    mesh.instanceMatrix.needsUpdate = true
+    if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true
+
+    return layer
   }
 
   private buildLayer(kind: Exclude<Block, typeof Block.None>, instances: BlockInstance[]): BlockLayer {
@@ -318,9 +449,8 @@ export class Blocks {
 
   private buildUpperFloors(): BlockLayer | null {
     const instances: BlockInstance[] = []
-    this.grid.forEach((x, y, block) => {
-      const level = this.grid.levelAt(x, y)
-      if (level > 0 && block !== Block.Full) {
+    this.grid.forEach((x, y) => {
+      if (this.grid.levelAt(x, y) > 0) {
         instances.push({ x, y, index: instances.length })
       }
     })
@@ -400,7 +530,7 @@ export class Blocks {
     const layer: BlockLayer = { mesh, instances, baseColor, fade }
 
     instances.forEach((tile, i) => {
-      const [dx, dz] = LADDER_FACE_OFFSET[faces[i]!]!
+      const [dx, dz] = FACE_OFFSET[faces[i]!]!
       const level = this.grid.levelAt(tile.x, tile.y)
 
       this.dummy.position.set(
@@ -453,14 +583,22 @@ export class Blocks {
    * `values` is one {@link VisState} byte per tile.
    *
    * Exact tile state is used: visibility must not bleed into neighbouring
-   * unexplored wall tiles.
+   * unexplored tiles. A wall is lit by the better-known of the two tiles it
+   * divides — having seen one face of it is knowing the wall is there.
    */
   applyVisibility(values: Uint8Array): void {
     for (const layer of this.layers) {
-      for (const tile of layer.instances) {
-        const state = (values[this.grid.index(tile.x, tile.y)] ?? VisState.Unknown) as VisState
+      for (const inst of layer.instances) {
+        let state = (values[this.grid.index(inst.x, inst.y)] ?? VisState.Unknown) as VisState
+        if (inst.side !== undefined) {
+          const [dx, dz] = FACE_OFFSET[inst.side]!
+          const beyond = this.grid.inBounds(inst.x + dx, inst.y + dz)
+            ? ((values[this.grid.index(inst.x + dx, inst.y + dz)] ?? VisState.Unknown) as VisState)
+            : VisState.Unknown
+          if (beyond > state) state = beyond
+        }
         this.scratch.copy(layer.baseColor).multiplyScalar(VIS_BRIGHTNESS[state])
-        layer.mesh.setColorAt(tile.index, this.scratch)
+        layer.mesh.setColorAt(inst.index, this.scratch)
       }
       if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
     }
@@ -484,12 +622,13 @@ export class Blocks {
    * number of characters can contribute without allocating a target list.
    */
   beginOcclusionFade(): void {
-    this.occlusionMask.fill(0)
+    this.masks.tiles.fill(0)
+    this.masks.edges.fill(0)
   }
 
-  /** Mark the blocks the camera→character segment passes through. */
+  /** Mark the occluders the camera→character segment passes. */
   addOcclusionRay(from: Vector3, to: Vector3): void {
-    markOccludedTiles(this.grid, from, to, this.occlusionMask)
+    markOccluders(this.grid, from, to, this.masks)
   }
 
   /** Fade every marked block to `opacity`; all others return to fully opaque. */
@@ -520,18 +659,28 @@ export class Blocks {
   private applyFade(layer: BlockLayer, xrayOpacity: number): void {
     const values = layer.fade.array as Float32Array
     let dirty = false
-    for (const tile of layer.instances) {
-      const tileLevel = this.grid.levelAt(tile.x, tile.y)
+    for (const inst of layer.instances) {
+      // A wall belongs to the lower of the floors it divides, so it is only
+      // dimmed by the level filter once both of them are above the view.
+      let instLevel = this.grid.levelAt(inst.x, inst.y)
+      if (inst.side !== undefined) {
+        const [dx, dz] = FACE_OFFSET[inst.side]!
+        instLevel = Math.min(instLevel, this.grid.levelAt(inst.x + dx, inst.y + dz))
+      }
+
       let levelOpacity = 1.0
-      if (this.activeLevelFilter !== null && tileLevel > this.activeLevelFilter) {
+      if (this.activeLevelFilter !== null && instLevel > this.activeLevelFilter) {
         levelOpacity = 0.15 // Transparent for upper levels when viewing lower level
       }
 
-      const isXrayFaded = this.occlusionMask[this.grid.index(tile.x, tile.y)]
-      const targetOpacity = isXrayFaded ? Math.min(levelOpacity, xrayOpacity) : levelOpacity
+      const marked =
+        inst.edge !== undefined
+          ? this.masks.edges[inst.edge]
+          : this.masks.tiles[this.grid.index(inst.x, inst.y)]
+      const targetOpacity = marked ? Math.min(levelOpacity, xrayOpacity) : levelOpacity
 
-      if (values[tile.index] !== targetOpacity) {
-        values[tile.index] = targetOpacity
+      if (values[inst.index] !== targetOpacity) {
+        values[inst.index] = targetOpacity
         dirty = true
       }
     }

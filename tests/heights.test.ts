@@ -1,11 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { Blocks } from '../src/render/Blocks'
-import { LadderFace } from '../src/core/Grid'
 import { generateMap } from '../src/core/MapGenerator'
-import { Block, Grid, StairDirection } from '../src/core/Grid'
-import { findChainedPath, findPathSegment } from '../src/core/Pathfinding'
+import { Block, Grid, Side, StairDirection, type Tile } from '../src/core/Grid'
+import { findPathSegment } from '../src/core/Pathfinding'
 import { Faction, RULES } from '../src/config'
-import type { Tile } from '../src/core/Grid'
 import { World } from '../src/ecs/World'
 import { PositionComponent } from '../src/ecs/components/PositionComponent'
 import { StanceComponent } from '../src/ecs/components/StanceComponent'
@@ -55,7 +53,7 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     // face looking back at the ground tile.
     grid.setLevel(3, 2, 0)
     grid.setLevel(3, 3, 1)
-    grid.setLadderFace(3, 3, LadderFace.North)
+    grid.setLadderFace(3, 3, Side.North)
 
     // Both tiles remain floor: the ladder is an edge, not an occupant.
     expect(grid.isWalkable(3, 2)).toBe(true)
@@ -72,7 +70,7 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
   test('a ladder only serves the face it is mounted on', () => {
     const grid = new Grid(10)
     grid.setLevel(5, 5, 1)
-    grid.setLadderFace(5, 5, LadderFace.North)
+    grid.setLadderFace(5, 5, Side.North)
     // Ground on all four sides of the raised tile.
     for (const [dx, dy] of [[0, -1], [0, 1], [1, 0], [-1, 0]]) {
       grid.setLevel(5 + dx!, 5 + dy!, 0)
@@ -89,13 +87,13 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     const grid = new Grid(10)
     grid.setLevel(2, 2, 0)
     grid.setLevel(2, 3, 2) // two storeys up
-    grid.setLadderFace(2, 3, LadderFace.North)
+    grid.setLadderFace(2, 3, Side.North)
     expect(grid.canTraverse({ x: 2, y: 2 }, { x: 2, y: 3 })).toBe(false)
 
     // Diagonal neighbours are not edges, so they carry no ladder.
     grid.setLevel(7, 7, 0)
     grid.setLevel(8, 8, 1)
-    grid.setLadderFace(8, 8, LadderFace.North)
+    grid.setLadderFace(8, 8, Side.North)
     expect(grid.canTraverse({ x: 7, y: 7 }, { x: 8, y: 8 })).toBe(false)
   })
 
@@ -124,7 +122,7 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     grid.setLevel(3, 2, 0)
     grid.setLevel(3, 3, 1)
     grid.setLevel(3, 4, 1)
-    grid.setLadderFace(3, 3, LadderFace.North)
+    grid.setLadderFace(3, 3, Side.North)
 
     const res = findPathSegment(grid, { x: 3, y: 2 }, { x: 3, y: 4 }, new Set())
     expect(res.path).toEqual([{ x: 3, y: 2 }, { x: 3, y: 3 }, { x: 3, y: 4 }])
@@ -162,7 +160,7 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     const grid = new Grid(10)
     grid.setLevel(3, 2, 0)
     grid.setLevel(3, 3, 1)
-    grid.setLadderFace(3, 3, LadderFace.North)
+    grid.setLadderFace(3, 3, Side.North)
 
     const world = new World()
     const moveSystem = new MovementSystem(grid)
@@ -204,10 +202,10 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
 
   test('Blocks setLevelFilter applies transparency to upper level blocks', () => {
     const grid = new Grid(10)
-    grid.setBlock(2, 2, Block.Full)
+    grid.setBlock(2, 2, Block.Half)
     grid.setLevel(2, 2, 0)
 
-    grid.setBlock(4, 4, Block.Full)
+    grid.setBlock(4, 4, Block.Half)
     grid.setLevel(4, 4, 1)
 
     const blocks = new Blocks(grid)

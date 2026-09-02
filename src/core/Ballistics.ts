@@ -8,7 +8,7 @@ import {
   type StatusKind,
   Weapon,
 } from './Arsenal'
-import { CoverLevel } from './Cover'
+import { CoverLevel } from './Walls'
 import { clamp } from './math'
 
 /** A live status on a unit. */

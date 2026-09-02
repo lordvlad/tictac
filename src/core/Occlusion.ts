@@ -1,5 +1,6 @@
-import { Block, blockHeight, type Grid } from './Grid'
-import { TILE } from '../config'
+import { Block, blockHeight, faceToward, type Grid } from './Grid'
+import { LEVEL_HEIGHT, TILE } from '../config'
+import { WALLS } from './Walls'
 
 /** A world-space point. Structural, so callers can pass a three `Vector3`. */
 export interface Point3 {
@@ -9,21 +10,33 @@ export interface Point3 {
 }
 
 /**
- * Mark every blocking tile the segment `from`→`to` passes through.
+ * What a camera→character segment has to see past.
  *
- * A 2D DDA walk over the grid columns the segment crosses, keeping only the
- * columns whose block actually stands in the way: the segment's height while it
- * is inside a column must dip below that block's height. Columns the segment
- * merely flies over (a 1 m crate with the ray still metres up) do not count.
- *
- * `mask` is one byte per tile and is written, never cleared, so several segments
- * can accumulate into one pass.
+ * Two buffers because the two occluder families are addressed differently: a
+ * crate belongs to a tile, a wall to an edge. Both are written, never cleared,
+ * so several segments accumulate into one pass.
  */
-export function markOccludedTiles(
+export interface OcclusionMasks {
+  /** One byte per tile, indexed by {@link Grid.index}. */
+  tiles: Uint8Array
+  /** One byte per edge, indexed by {@link Grid.edgeId}. */
+  edges: Uint8Array
+}
+
+/**
+ * Mark every occluder the segment `from`→`to` has to pass.
+ *
+ * A 2D DDA walk over the grid columns the segment crosses. A column counts
+ * when the segment's height while inside it dips below whatever stands there;
+ * a column it merely flies over — a 1 m crate with the ray still metres up —
+ * does not. Each step between columns crosses one edge, which is exactly where
+ * a wall lives, so walls are tested at the crossing rather than by footprint.
+ */
+export function markOccluders(
   grid: Grid,
   from: Point3,
   to: Point3,
-  mask: Uint8Array,
+  masks: OcclusionMasks,
 ): void {
   const half = grid.halfExtent
 
@@ -57,15 +70,34 @@ export function markOccludedTiles(
       if (block !== Block.None) {
         const yEnter = from.y + dy * tEnter
         const yExit = from.y + dy * tExit
-        // Blocks span y in [0, height]; both segment endpoints sit above the
-        // floor, so overlap reduces to comparing the low end vs. the height.
-        if (Math.min(yEnter, yExit) < blockHeight(block)) {
-          mask[grid.index(cx, cy)] = 1
+        const base = grid.levelAt(cx, cy) * LEVEL_HEIGHT
+        // Blocks span y in [base, base + height]; both segment endpoints sit
+        // above the floor, so overlap reduces to comparing the low end.
+        if (Math.min(yEnter, yExit) < base + blockHeight(block)) {
+          masks.tiles[grid.index(cx, cy)] = 1
         }
       }
     }
 
     if (tExit >= 1 || (cx === endX && cy === endY)) break
+
+    // Stepping to the next column crosses one edge — test the wall on it at
+    // the height the segment actually has there.
+    const nextX = tMaxX < tMaxZ ? cx + stepX : cx
+    const nextY = tMaxX < tMaxZ ? cy : cy + stepZ
+    const side = faceToward({ x: cx, y: cy }, { x: nextX, y: nextY })
+    if (side !== 0) {
+      const kind = grid.wallAt(cx, cy, side)
+      const spec = WALLS[kind]
+      if (spec.height > 0) {
+        const base =
+          Math.min(grid.levelAt(cx, cy), grid.levelAt(nextX, nextY)) * LEVEL_HEIGHT
+        if (from.y + dy * tExit < base + spec.height) {
+          masks.edges[grid.edgeId(cx, cy, side)] = 1
+        }
+      }
+    }
+
     if (tMaxX < tMaxZ) {
       cx += stepX
       tMaxX += tDeltaX

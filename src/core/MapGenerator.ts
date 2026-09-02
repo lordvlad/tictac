@@ -1,5 +1,6 @@
 import { Faction, GRID_SIZE, SQUAD_SIZE } from '../config'
-import { Block, faceToward, Grid, LadderFace, ORTHOGONAL, StairDirection, type Tile } from './Grid'
+import { Block, faceToward, Grid, ORTHOGONAL, Side, StairDirection, type Tile } from './Grid'
+import { WallKind } from './Walls'
 import { clamp } from './math'
 import { Rng } from './rng'
 
@@ -30,23 +31,18 @@ function inRect(r: Rect, x: number, y: number): boolean {
 
 /**
  * Procedural urban-ish battlefield:
- *   - solid map border
- *   - rectangular buildings (full-height walls, doorways, open interiors)
- *   - free-standing wall segments for mid-map cover
+ *   - rectangular buildings — walls on their boundary edges, open interiors,
+ *     doorways and the odd glazed frontage
+ *   - free-standing wall runs for mid-map cover
  *   - crate clusters (half-height, shootable over)
  *   - two opposing deployment zones, guaranteed clear and mutually reachable
+ *
+ * No border pass: the map edge is solid by construction, so there is nothing
+ * to draw and no ring of tiles lost to it.
  */
 export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMap {
   const rng = new Rng(seed)
   const grid = new Grid(size)
-
-  // --- Border ---------------------------------------------------------------
-  for (let i = 0; i < size; i++) {
-    grid.setBlock(i, 0, Block.Full)
-    grid.setBlock(i, size - 1, Block.Full)
-    grid.setBlock(0, i, Block.Full)
-    grid.setBlock(size - 1, i, Block.Full)
-  }
 
   // --- Deployment zones -----------------------------------------------------
   // Blue deploys along the low-Y edge, Red along the high-Y edge, both centred
@@ -92,10 +88,11 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
     reserved.add(grid.index(x, y))
   }
 
+  /** Raise a whole room onto the upper storey. Its wall ring comes along. */
   const elevate = (rect: Rect): boolean => {
     if (rect.w < 4 || rect.h < 4) return false
-    for (let dy = 1; dy < rect.h - 1; dy++) {
-      for (let dx = 1; dx < rect.w - 1; dx++) {
+    for (let dy = 0; dy < rect.h; dy++) {
+      for (let dx = 0; dx < rect.w; dx++) {
         grid.setBlock(rect.x + dx, rect.y + dy, Block.None)
         grid.setLevel(rect.x + dx, rect.y + dy, 1)
       }
@@ -105,47 +102,45 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
 
   const stairBuilding = buildings[0]
   if (stairBuilding !== undefined && elevate(stairBuilding)) {
-    // The stair sits in the high-Y wall, so the ground approach is outside at
-    // +Y and the landing is the storey inside at -Y. Facing South puts the
-    // upper side inward; facing North would strand the storey.
+    // The ramp stands on the ground just outside the south frontage: its foot
+    // is the ground further out, its head is the room. Facing South puts that
+    // head inward; facing North would strand the storey.
     const stairX = stairBuilding.x + Math.floor(stairBuilding.w / 2)
-    const stairY = stairBuilding.y + stairBuilding.h - 1
-    grid.setStair(stairX, stairY, StairDirection.South, 0)
+    const roomY = stairBuilding.y + stairBuilding.h - 1
+    const stairY = roomY + 1
 
-    // Approach, on the ground outside.
+    grid.setStair(stairX, stairY, StairDirection.South, 0)
+    // The doorway the ramp arrives at. Without it the wall would refuse the
+    // step the stair exists to make.
+    grid.setWall(stairX, roomY, Side.South, WallKind.None)
+
+    // Approach, on the ground further out.
     grid.setBlock(stairX, stairY + 1, Block.None)
     grid.setLevel(stairX, stairY + 1, 0)
-    // Landing, on the storey inside. Left at level 1 by `elevate`.
-    grid.setBlock(stairX, stairY - 1, Block.None)
-    grid.setLevel(stairX, stairY - 1, 1)
 
     reserve(stairX, stairY)
     reserve(stairX, stairY + 1)
-    reserve(stairX, stairY - 1)
+    reserve(stairX, roomY)
   }
 
   const ladderBuilding = buildings[1]
   if (ladderBuilding !== undefined && elevate(ladderBuilding)) {
-    // Punch the low-X wall into a ground-level alcove, then hang a ladder off
-    // the storey's exposed face above it. The ladder eats no floor: the alcove
-    // stays walkable and the storey tile stays walkable.
-    const alcoveX = ladderBuilding.x
+    // A ladder up the outside of the west wall. The wall stays: the climb goes
+    // over it, onto the storey whose floor is that wall's top.
+    const roomX = ladderBuilding.x
     const ladY = ladderBuilding.y + Math.floor(ladderBuilding.h / 2)
 
-    grid.setBlock(alcoveX, ladY, Block.None)
-    grid.setLevel(alcoveX, ladY, 0)
-    grid.setBlock(alcoveX - 1, ladY, Block.None)
-    grid.setLevel(alcoveX - 1, ladY, 0)
+    grid.setBlock(roomX - 1, ladY, Block.None)
+    grid.setLevel(roomX - 1, ladY, 0)
+    grid.setLadderFace(roomX, ladY, Side.West)
 
-    // Storey tile just inside, one level up, ladder on the face looking out.
-    grid.setLevel(alcoveX + 1, ladY, 1)
-    grid.setLadderFace(alcoveX + 1, ladY, LadderFace.West)
-
-    reserve(alcoveX, ladY)
-    reserve(alcoveX - 1, ladY)
-    reserve(alcoveX + 1, ladY)
+    reserve(roomX - 1, ladY)
+    reserve(roomX, ladY)
   }
-  // --- Free-standing walls --------------------------------------------------
+  // --- Free-standing wall runs ---------------------------------------------
+  // A run lies along one lattice line: a horizontal run is a row of north-side
+  // edges, a vertical run a column of west-side edges. It costs no floor, so
+  // both sides of it stay playable.
   const wallCount = rng.int(4, 8)
   for (let i = 0; i < wallCount; i++) {
     const horizontal = rng.chance(0.5)
@@ -158,10 +153,12 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
     if (zones.some((z) => rectsOverlap(rect, z, 2))) continue
     if (buildings.some((b) => rectsOverlap(rect, b, 1))) continue
 
-    for (let dy = 0; dy < h; dy++) {
-      for (let dx = 0; dx < w; dx++) {
-        grid.setBlock(x + dx, y + dy, Block.Full)
-      }
+    const side = horizontal ? Side.North : Side.West
+    for (let step = 0; step < length; step++) {
+      const tx = horizontal ? x + step : x
+      const ty = horizontal ? y : y + step
+      if (reserved.has(grid.index(tx, ty))) continue
+      grid.setWall(tx, ty, side, WallKind.Solid)
     }
   }
 
@@ -184,10 +181,17 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   }
 
   // --- Clear the deployment zones ------------------------------------------
+  // Both the floor and every edge around it: a squad that starts walled in has
+  // nowhere to deploy to.
   for (const zone of zones) {
     for (let dy = 0; dy < zone.h; dy++) {
       for (let dx = 0; dx < zone.w; dx++) {
-        grid.setBlock(zone.x + dx, zone.y + dy, Block.None)
+        const tx = zone.x + dx
+        const ty = zone.y + dy
+        grid.setBlock(tx, ty, Block.None)
+        for (const face of [Side.North, Side.East, Side.South, Side.West]) {
+          grid.setWall(tx, ty, face, WallKind.None)
+        }
       }
     }
   }
@@ -204,24 +208,52 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   return { grid, spawns }
 }
 
-/** Walls on the perimeter of `rect`, hollow interior, 1–2 doorways. */
+/**
+ * A building: walls on the boundary edges of `rect`, floor throughout, one or
+ * two doorways and sometimes a glazed frontage.
+ *
+ * The whole footprint is walkable — the wall ring costs no tiles, so the
+ * interior is a room a squad can fight over rather than a solid block.
+ */
 function carveBuilding(grid: Grid, rng: Rng, rect: Rect): void {
   const { x, y, w, h } = rect
+
   for (let dy = 0; dy < h; dy++) {
     for (let dx = 0; dx < w; dx++) {
-      const isEdge = dx === 0 || dy === 0 || dx === w - 1 || dy === h - 1
-      grid.setBlock(x + dx, y + dy, isEdge ? Block.Full : Block.None)
+      grid.setBlock(x + dx, y + dy, Block.None)
     }
   }
 
-  // Doorways: punch holes in random wall segments (never in a corner).
+  for (let dx = 0; dx < w; dx++) {
+    grid.setWall(x + dx, y, Side.North, WallKind.Solid)
+    grid.setWall(x + dx, y + h - 1, Side.South, WallKind.Solid)
+  }
+  for (let dy = 0; dy < h; dy++) {
+    grid.setWall(x, y + dy, Side.West, WallKind.Solid)
+    grid.setWall(x + w - 1, y + dy, Side.East, WallKind.Solid)
+  }
+
+  /** A non-corner edge on one of the four frontages. */
+  const frontage = (which: number): { x: number; y: number; side: Side } => {
+    if (which === 0) return { x: x + rng.int(1, w - 2), y, side: Side.North }
+    if (which === 1) return { x: x + rng.int(1, w - 2), y: y + h - 1, side: Side.South }
+    if (which === 2) return { x, y: y + rng.int(1, h - 2), side: Side.West }
+    return { x: x + w - 1, y: y + rng.int(1, h - 2), side: Side.East }
+  }
+
+  // Doorways: gaps in the ring, never at a corner.
   const doors = rng.int(1, 2)
   for (let d = 0; d < doors; d++) {
-    const side = rng.int(0, 3)
-    if (side === 0) grid.setBlock(x + rng.int(1, w - 2), y, Block.None)
-    else if (side === 1) grid.setBlock(x + rng.int(1, w - 2), y + h - 1, Block.None)
-    else if (side === 2) grid.setBlock(x, y + rng.int(1, h - 2), Block.None)
-    else grid.setBlock(x + w - 1, y + rng.int(1, h - 2), Block.None)
+    const spot = frontage(rng.int(0, 3))
+    grid.setWall(spot.x, spot.y, spot.side, WallKind.None)
+  }
+
+  // Glazing: you can watch the room through it, but not walk in.
+  if (rng.chance(0.5)) {
+    const spot = frontage(rng.int(0, 3))
+    if (grid.wallAt(spot.x, spot.y, spot.side) === WallKind.Solid) {
+      grid.setWall(spot.x, spot.y, spot.side, WallKind.Glass)
+    }
   }
 
   // A little interior clutter so buildings are not empty boxes.
@@ -364,7 +396,9 @@ function labelComponents(grid: Grid): Component[] {
  *
  * Corridor tiles are flattened to `level`, or the run would be cut by the very
  * storey change it is meant to bypass. Tiles a vertical link depends on are
- * left alone: flattening a stair landing would undo the link.
+ * left alone: flattening a stair landing would undo the link. Walls along the
+ * run always come down — a corridor whose boundaries still stand is not a
+ * corridor.
  */
 function carveCorridor(
   grid: Grid,
@@ -374,24 +408,32 @@ function carveCorridor(
   reserved: Set<number>,
 ): void {
   const size = grid.size
-  const clear = (x: number, y: number) => {
-    if (x <= 0 || y <= 0 || x >= size - 1 || y >= size - 1) return
-    if (reserved.has(grid.index(x, y))) return
-    grid.setBlock(x, y, Block.None)
-    grid.setLevel(x, y, level)
+  let prev = from
+
+  const advance = (x: number, y: number) => {
+    const curr = { x, y }
+    const side = faceToward(prev, curr)
+    if (side !== 0) grid.setWall(prev.x, prev.y, side, WallKind.None)
+
+    const onBorder = x <= 0 || y <= 0 || x >= size - 1 || y >= size - 1
+    if (!onBorder && !reserved.has(grid.index(x, y))) {
+      grid.setBlock(x, y, Block.None)
+      grid.setLevel(x, y, level)
+    }
+    prev = curr
   }
 
   const stepX = Math.sign(to.x - from.x)
   let x = from.x
   while (x !== to.x) {
     x += stepX
-    clear(x, from.y)
+    advance(x, from.y)
   }
   const stepY = Math.sign(to.y - from.y)
   let y = from.y
   while (y !== to.y) {
     y += stepY
-    clear(to.x, y)
+    advance(to.x, y)
   }
 }
 

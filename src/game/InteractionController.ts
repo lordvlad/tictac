@@ -23,7 +23,7 @@ import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
-import { MovementSystem, CombatSystem, ItemSystem, RenderSystem } from '../ecs/systems'
+import { MovementSystem, CombatSystem, ItemSystem, RenderSystem, WallSystem } from '../ecs/systems'
 import type { ItemId } from '../core/Items'
 
 /**
@@ -47,6 +47,7 @@ export class InteractionController {
   readonly combatSystem: CombatSystem
   readonly itemSystem: ItemSystem
   readonly renderSystem: RenderSystem
+  readonly wallSystem: WallSystem
   // Hover state (mouse only — touch has no hover phase).
   private hoveredTile: Tile | null = null
   private hoveredEnemy: Soldier | null = null
@@ -81,12 +82,24 @@ export class InteractionController {
     this.combatSystem = new CombatSystem(battlefield.grid, squads, tracers)
     this.itemSystem = new ItemSystem()
     this.renderSystem = new RenderSystem()
+    this.wallSystem = new WallSystem(battlefield.grid)
 
     this.world.addSystem(this.movementSystem)
     this.world.addSystem(this.combatSystem)
     this.world.addSystem(this.itemSystem)
     this.world.addSystem(turnManager.turns)
     this.world.addSystem(this.renderSystem)
+    this.world.addSystem(this.wallSystem)
+
+    // One entity per wall, so the map's boundaries are state the systems and
+    // the network can reach like any other.
+    this.wallSystem.spawnFromGrid(this.world)
+    this.wallSystem.onWallsChanged = () => {
+      this.battlefield.blocks.rebuildWalls()
+      this.recomputeVisibility()
+      this.renderOverlay()
+      this.battlefield.flush()
+    }
 
     this.itemSystem.onItemUsed = () => {
       this.recomputeVisibility()
@@ -107,10 +120,14 @@ export class InteractionController {
     }
 
     if (network && network.mode !== 'local') {
-      // Each side owns its own squad; the host additionally owns the shared
-      // rule tables, which live on the global entity.
+      // Each side owns its own squad. The host additionally owns everything
+      // shared: the rule tables on the global entity, and the terrain. Walls
+      // belong to no faction, so without naming an authority neither peer
+      // would ever replicate a change to one.
+      const wallEntities = new Set(this.wallSystem.entityIds)
       network.bindWorld(this.world, (entityId) => {
         if (entityId === GLOBAL_ENTITY_ID) return network.mode !== 'join'
+        if (wallEntities.has(entityId)) return network.mode !== 'join'
         return squads.byEntityId(entityId)?.faction === network.myFaction
       })
       // Peer state landed in components; the view has to catch up with it.

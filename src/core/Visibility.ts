@@ -34,41 +34,53 @@ export function createVisibilityMap(size: number): Uint8Array {
 }
 
 /**
- * Check if there is clear line of sight between two tiles on the grid.
- * Only FULL blocks stop line of sight rays.
+ * Is there clear line of sight from one tile centre to another?
+ *
+ * Sight is blocked by the walls the ray *crosses*, so this walks grid lines
+ * rather than tiles: a wall is a boundary with no footprint, and asking "does
+ * this tile block sight" has no meaning any more.
+ *
+ * Where the ray threads a lattice point exactly — the diagonal case — it slips
+ * past unless both walls meeting at that corner are opaque. That is what lets
+ * a unit see diagonally around the end of a wall.
  */
 export function hasLineOfSight(grid: Grid, from: Tile, to: Tile): boolean {
-  if (from.x === to.x && from.y === to.y) return true
+  let x = from.x
+  let y = from.y
+  if (x === to.x && y === to.y) return true
 
-  let x0 = from.x
-  let y0 = from.y
-  const x1 = to.x
-  const y1 = to.y
+  const spanX = Math.abs(to.x - from.x)
+  const spanY = Math.abs(to.y - from.y)
+  const stepX = Math.sign(to.x - from.x)
+  const stepY = Math.sign(to.y - from.y)
 
-  const dx = Math.abs(x1 - x0)
-  const dy = Math.abs(y1 - y0)
+  // Ray parameter at the next grid line: half a tile out of the centre, then
+  // one tile per crossing.
+  let nextX = spanX === 0 ? Infinity : 0.5 / spanX
+  let nextY = spanY === 0 ? Infinity : 0.5 / spanY
+  const strideX = spanX === 0 ? Infinity : 1 / spanX
+  const strideY = spanY === 0 ? Infinity : 1 / spanY
 
-  const sx = x0 < x1 ? 1 : -1
-  const sy = y0 < y1 ? 1 : -1
+  while (x !== to.x || y !== to.y) {
+    // An axis that has arrived must not be stepped again, or the walk overruns
+    // the target and reads walls beyond it.
+    const dueX = x === to.x ? Infinity : nextX
+    const dueY = y === to.y ? Infinity : nextY
 
-  let err = dx - dy
-
-  while (x0 !== x1 || y0 !== y1) {
-    // If intermediate tile (excluding start and end) blocks sight, ray is blocked
-    if ((x0 !== from.x || y0 !== from.y) && (x0 !== to.x || y0 !== to.y)) {
-      if (grid.blocksSight(x0, y0)) {
-        return false
-      }
-    }
-
-    const e2 = 2 * err
-    if (e2 > -dy) {
-      err -= dy
-      x0 += sx
-    }
-    if (e2 < dx) {
-      err += dx
-      y0 += sy
+    if (Math.abs(dueX - dueY) < 1e-9) {
+      if (grid.cornerClosed({ x, y }, { x: x + stepX, y: y + stepY }, true)) return false
+      x += stepX
+      y += stepY
+      nextX += strideX
+      nextY += strideY
+    } else if (dueX < dueY) {
+      if (grid.blocksSightBetween({ x, y }, { x: x + stepX, y })) return false
+      x += stepX
+      nextX += strideX
+    } else {
+      if (grid.blocksSightBetween({ x, y }, { x, y: y + stepY })) return false
+      y += stepY
+      nextY += strideY
     }
   }
 
@@ -85,15 +97,15 @@ export interface Viewer {
 /**
  * Tiles a peeking unit may also look from.
  *
- * Leaning only makes sense against something: the unit must be touching a
- * sight-blocking tile, and it can then lean into any free orthogonal
- * neighbour. Standing at the end of a wall, that neighbour is the tile past
+ * Leaning only makes sense against something: the unit must be up against a
+ * sight-blocking wall, and it can then lean into any neighbour it could have
+ * stepped to. Standing at the end of a wall, that neighbour is the tile past
  * the corner — which is exactly the view the wall was denying.
  */
 export function peekOrigins(grid: Grid, from: Tile): Tile[] {
   let hugsWall = false
   for (const [dx, dy] of ORTHOGONAL) {
-    if (grid.blocksSight(from.x + dx, from.y + dy)) {
+    if (grid.blocksSightBetween(from, { x: from.x + dx, y: from.y + dy })) {
       hugsWall = true
       break
     }
@@ -102,9 +114,8 @@ export function peekOrigins(grid: Grid, from: Tile): Tile[] {
 
   const origins: Tile[] = []
   for (const [dx, dy] of ORTHOGONAL) {
-    const x = from.x + dx
-    const y = from.y + dy
-    if (grid.isWalkable(x, y)) origins.push({ x, y })
+    const to = { x: from.x + dx, y: from.y + dy }
+    if (grid.canTraverse(from, to)) origins.push(to)
   }
   return origins
 }

@@ -14,7 +14,8 @@ import {
 } from 'three'
 import type { EngineContext } from '../engine'
 import { PATH } from '../config'
-import { CoverLevel, COVER_DIRS } from '../core/Cover'
+import { COVER_DIRS } from '../core/Cover'
+import { CoverLevel } from '../core/Walls'
 
 const CIRCLE_SEGMENTS = 48
 

@@ -1,56 +1,60 @@
 import { Vector3 } from 'three'
-import { FULL_BLOCK_HEIGHT, GRID_SIZE, HALF_BLOCK_HEIGHT, LEVEL_HEIGHT, RULES, TILE } from '../config'
+import { GRID_SIZE, HALF_BLOCK_HEIGHT, LEVEL_HEIGHT, RULES, TILE } from '../config'
+import { WALLS, WallKind } from './Walls'
 
+/**
+ * What occupies a tile's floor.
+ *
+ * Walls are deliberately absent: a wall is a boundary between two tiles, held
+ * as an edge, so it consumes no floor. What is left here are things that
+ * genuinely stand on a tile.
+ */
 export const Block = {
   /** Open floor. */
   None: 0,
   /** 1 m crate — blocks movement, does NOT block line of sight, grants half cover. */
   Half: 1,
-  /** 2 m wall/building — blocks movement AND line of sight, grants full cover. */
-  Full: 2,
   /** A flight of steps. Enterable from its foot and its head only. */
-  Stair: 3,
+  Stair: 2,
 } as const
 export type Block = (typeof Block)[keyof typeof Block]
 
 export const StairDirection = {
-  North: 0, // Lower at (x, y-1), Upper at (x, y+1)
-  East: 1,  // Lower at (x-1, y), Upper at (x+1, y)
-  South: 2, // Lower at (x, y+1), Upper at (x, y-1)
-  West: 3,  // Lower at (x+1, y), Upper at (x-1, y)
+  North: 0,
+  East: 1,
+  South: 2,
+  West: 3,
 } as const
 export type StairDirection = (typeof StairDirection)[keyof typeof StairDirection]
 
 /**
- * Which vertical face of a tile carries a ladder, as bit flags.
+ * One of a tile's four vertical faces, as bit flags so a tile can name several.
  *
- * A ladder is bolted to the face of a raised tile and links it to the tile one
- * storey below on that side. It is an edge between two tiles, not a tile of
- * its own: it costs no floor space and nothing stands "on" it.
+ * Both fixtures that live on a boundary rather than on a floor are addressed
+ * this way: the wall between two tiles, and the ladder bolted to a raised
+ * tile's edge.
  */
-export const LadderFace = {
-  North: 1 << 0, // face toward y - 1
-  East: 1 << 1,  // face toward x + 1
-  South: 1 << 2, // face toward y + 1
-  West: 1 << 3,  // face toward x - 1
+export const Side = {
+  North: 1,
+  East: 2,
+  South: 4,
+  West: 8,
 } as const
-export type LadderFace = (typeof LadderFace)[keyof typeof LadderFace]
+export type Side = (typeof Side)[keyof typeof Side]
 
 /** The face of `from` that looks at `to`, or 0 when they are not orthogonal neighbours. */
-export function faceToward(from: Tile, to: Tile): LadderFace | 0 {
+export function faceToward(from: Tile, to: Tile): Side | 0 {
   const dx = to.x - from.x
   const dy = to.y - from.y
-  if (dx === 0 && dy === -1) return LadderFace.North
-  if (dx === 0 && dy === 1) return LadderFace.South
-  if (dx === 1 && dy === 0) return LadderFace.East
-  if (dx === -1 && dy === 0) return LadderFace.West
+  if (dx === 0 && dy === -1) return Side.North
+  if (dx === 0 && dy === 1) return Side.South
+  if (dx === 1 && dy === 0) return Side.East
+  if (dx === -1 && dy === 0) return Side.West
   return 0
 }
 
 export function blockHeight(block: Block): number {
-  if (block === Block.Half) return HALF_BLOCK_HEIGHT
-  if (block === Block.Full) return FULL_BLOCK_HEIGHT
-  return 0
+  return block === Block.Half ? HALF_BLOCK_HEIGHT : 0
 }
 
 /** A tile coordinate. Immutable value object; compare with `Grid.index`. */
@@ -92,8 +96,19 @@ export class Grid {
   readonly blocks: Uint8Array
   readonly levels: Uint8Array
   readonly stairDirections: Uint8Array
-  /** Ladder faces per tile, as a {@link LadderFace} bitmask. */
+  /** Ladder faces per tile, as a {@link Side} bitmask. */
   readonly ladderFaces: Uint8Array
+
+  /**
+   * Wall kinds on the edges running north-south, one slot per edge.
+   *
+   * An edge is shared by the two tiles it separates, so it is stored once,
+   * addressed by the lattice line it lies on. Holding a copy per tile side
+   * would mean two writable spellings of one wall, and they would drift.
+   */
+  private readonly wallsV: Uint8Array
+  /** Wall kinds on the edges running east-west. */
+  private readonly wallsH: Uint8Array
 
   constructor(size: number = GRID_SIZE) {
     this.size = size
@@ -101,6 +116,142 @@ export class Grid {
     this.levels = new Uint8Array(size * size)
     this.stairDirections = new Uint8Array(size * size)
     this.ladderFaces = new Uint8Array(size * size)
+    this.wallsV = new Uint8Array((size + 1) * size)
+    this.wallsH = new Uint8Array(size * (size + 1))
+  }
+
+  // -------------------------------------------------------------------------
+  // Wall edges
+  //
+  // A vertical edge at lattice column `x` separates tile (x-1, y) from (x, y);
+  // a horizontal edge at lattice row `y` separates (x, y-1) from (x, y). Both
+  // families run one past the last tile, which is where the map border sits.
+  // -------------------------------------------------------------------------
+
+  /** Total addressable edges, for callers sizing a per-edge buffer. */
+  get edgeCount(): number {
+    return this.wallsV.length + this.wallsH.length
+  }
+
+  /**
+   * A stable id for the edge on `side` of a tile, unique across both families.
+   *
+   * Vertical edges occupy the low range and horizontal ones follow, so an edge
+   * mask or an instance table can be a single flat array.
+   */
+  edgeId(x: number, y: number, side: Side): number {
+    return side === Side.West || side === Side.East
+      ? y * (this.size + 1) + (side === Side.East ? x + 1 : x)
+      : this.wallsV.length + (side === Side.South ? y + 1 : y) * this.size + x
+  }
+
+  /** Decode an {@link edgeId} back to the lower-coordinate tile and its side. */
+  edgeTile(id: number): { x: number; y: number; side: Side } {
+    if (id < this.wallsV.length) {
+      const stride = this.size + 1
+      return { x: id % stride, y: (id / stride) | 0, side: Side.West }
+    }
+    const rest = id - this.wallsV.length
+    return { x: rest % this.size, y: (rest / this.size) | 0, side: Side.North }
+  }
+
+  /**
+   * The wall on one side of a tile.
+   *
+   * The map border reads as solid: it is the one wall no generator has to draw,
+   * and it keeps units, sight and cover from running off the edge of the world.
+   */
+  wallAt(x: number, y: number, side: Side): WallKind {
+    if (side === Side.West || side === Side.East) {
+      const lattice = side === Side.East ? x + 1 : x
+      if (y < 0 || y >= this.size) return WallKind.Solid
+      if (lattice <= 0 || lattice >= this.size) return WallKind.Solid
+      return this.wallsV[y * (this.size + 1) + lattice] as WallKind
+    }
+    const lattice = side === Side.South ? y + 1 : y
+    if (x < 0 || x >= this.size) return WallKind.Solid
+    if (lattice <= 0 || lattice >= this.size) return WallKind.Solid
+    return this.wallsH[lattice * this.size + x] as WallKind
+  }
+
+  /** Raise or clear a wall. The border is the grid's own invariant and is not writable. */
+  setWall(x: number, y: number, side: Side, kind: WallKind): void {
+    if (side === Side.West || side === Side.East) {
+      const lattice = side === Side.East ? x + 1 : x
+      if (y < 0 || y >= this.size) return
+      if (lattice <= 0 || lattice >= this.size) return
+      this.wallsV[y * (this.size + 1) + lattice] = kind
+      return
+    }
+    const lattice = side === Side.South ? y + 1 : y
+    if (x < 0 || x >= this.size) return
+    if (lattice <= 0 || lattice >= this.size) return
+    this.wallsH[lattice * this.size + x] = kind
+  }
+
+  /**
+   * The wall standing between two orthogonally adjacent tiles.
+   *
+   * Returns {@link WallKind.None} for anything that is not a shared edge, so a
+   * diagonal pair reports no wall: a diagonal crosses a corner, not a face,
+   * and {@link canTraverse} resolves it from the two faces instead.
+   */
+  wallBetween(a: Tile, b: Tile): WallKind {
+    const side = faceToward(a, b)
+    if (side === 0) return WallKind.None
+    return this.wallAt(a.x, a.y, side)
+  }
+
+  /**
+   * Every wall that is actual map data, in edge order.
+   *
+   * Skips the border, which is the grid's own invariant rather than something
+   * a generator placed or a system may change.
+   */
+  forEachWall(fn: (x: number, y: number, side: Side, kind: WallKind) => void): void {
+    for (let y = 0; y < this.size; y++) {
+      for (let lattice = 1; lattice < this.size; lattice++) {
+        const kind = this.wallsV[y * (this.size + 1) + lattice] as WallKind
+        if (kind !== WallKind.None) fn(lattice, y, Side.West, kind)
+      }
+    }
+    for (let lattice = 1; lattice < this.size; lattice++) {
+      for (let x = 0; x < this.size; x++) {
+        const kind = this.wallsH[lattice * this.size + x] as WallKind
+        if (kind !== WallKind.None) fn(x, lattice, Side.North, kind)
+      }
+    }
+  }
+
+  /** Is one edge passable? `forSight` swaps a body's rules for a sightline's. */
+  private edgeOpen(x: number, y: number, side: Side, forSight: boolean): boolean {
+    const kind = this.wallAt(x, y, side)
+    return forSight ? !WALLS[kind].blocksSight : kind === WallKind.None
+  }
+
+  /**
+   * Is the corner between two diagonally adjacent tiles closed?
+   *
+   * A diagonal grazes a lattice point and slips past it if either way round
+   * that point is clear. So a wall merely *ending* at the corner leaves the
+   * other route open, while a wall running straight through it — or one
+   * wrapping the far tile — closes both.
+   *
+   * `forSight` selects what counts as a barrier, which is how one piece of
+   * geometry answers both for a body and for a line of sight.
+   */
+  cornerClosed(from: Tile, to: Tile, forSight: boolean): boolean {
+    const sideX = to.x > from.x ? Side.East : Side.West
+    const sideY = to.y > from.y ? Side.South : Side.North
+
+    const viaX =
+      this.edgeOpen(from.x, from.y, sideX, forSight) &&
+      this.edgeOpen(to.x, from.y, sideY, forSight)
+    const viaY =
+      this.edgeOpen(from.x, from.y, sideY, forSight) &&
+      this.edgeOpen(from.x, to.y, sideX, forSight)
+
+    return !viaX && !viaY
   }
 
   index(x: number, y: number): number {
@@ -112,7 +263,7 @@ export class Grid {
   }
 
   blockAt(x: number, y: number): Block {
-    if (!this.inBounds(x, y)) return Block.Full
+    if (!this.inBounds(x, y)) return Block.None
     return this.blocks[y * this.size + x] as Block
   }
 
@@ -151,7 +302,7 @@ export class Grid {
    * `x, y` is the *upper* tile: the ladder hangs from its edge down to the
    * tile one storey below on that side.
    */
-  setLadderFace(x: number, y: number, face: LadderFace): void {
+  setLadderFace(x: number, y: number, face: Side): void {
     if (!this.inBounds(x, y)) return
     const idx = y * this.size + x
     this.ladderFaces[idx] = this.ladderFaces[idx]! | face
@@ -190,10 +341,15 @@ export class Grid {
     return block === Block.None || block === Block.Stair
   }
 
-  /** Does terrain here stop a line of sight ray? Only full-height blocks do. */
-  blocksSight(x: number, y: number): boolean {
-    if (!this.inBounds(x, y)) return true
-    return this.blocks[y * this.size + x] === Block.Full
+  /**
+   * Does the wall between two adjacent tiles stop a line of sight ray?
+   *
+   * Sight is now purely a question about boundaries: nothing standing on a
+   * tile is tall enough to block a view, so there is no per-tile answer left
+   * to give.
+   */
+  blocksSightBetween(a: Tile, b: Tile): boolean {
+    return WALLS[this.wallBetween(a, b)].blocksSight
   }
 
   // -------------------------------------------------------------------------
@@ -273,8 +429,8 @@ export class Grid {
   /**
    * Can a unit step directly from `from` to `to`?
    *
-   * Enforces walkability, the stair's two-sided access, ladder edges, level
-   * matching and the no-diagonal rule on vertical links.
+   * Enforces walkability, wall edges, the stair's two-sided access, ladder
+   * edges, level matching and the no-diagonal rule on vertical links.
    */
   canTraverse(from: Tile, to: Tile): boolean {
     if (!this.isWalkable(from.x, from.y) || !this.isWalkable(to.x, to.y)) return false
@@ -284,6 +440,24 @@ export class Grid {
     if (dx === 0 && dy === 0) return false
 
     const isDiagonal = dx !== 0 && dy !== 0
+
+    // A ladder is the sanctioned way across its own boundary: it is bolted to
+    // the wall and takes a unit *over* it, onto the floor whose height is that
+    // wall's top. So a climb is judged by the ladder, not by the wall.
+    const climbing = this.ladderBetween(from, to)
+
+    if (climbing) {
+      // Nothing more to check: a ladder exists only between two orthogonally
+      // adjacent tiles exactly one storey apart.
+    } else if (!isDiagonal) {
+      if (this.wallBetween(from, to) !== WallKind.None) return false
+    } else {
+      // A diagonal cuts a corner rather than crossing a face, so it is allowed
+      // as long as a unit could have walked round that corner one way or the
+      // other.
+      if (this.cornerClosed(from, to, false)) return false
+    }
+
     const fromBlock = this.blockAt(from.x, from.y)
     const toBlock = this.blockAt(to.x, to.y)
 
@@ -305,7 +479,7 @@ export class Grid {
     // Changing storey needs a stair or a ladder, and cannot be done cornerwise.
     if (isDiagonal) return false
     if (fromBlock === Block.Stair || toBlock === Block.Stair) return true
-    return this.ladderBetween(from, to)
+    return climbing
   }
 
   /** Action points to step from `from` to `to`. */
