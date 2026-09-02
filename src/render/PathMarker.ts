@@ -61,8 +61,7 @@ export class PathMarker {
     const beaconColor = valid ? PATH.colorValid : PATH.colorInvalid
 
     if (path.length >= 2) {
-      const points = path.map((p) => new Vector3(p.x, PATH.hover, p.z))
-      this.group.add(this.line(points, beaconColor, 0.9))
+      const points = path.map((p) => new Vector3(p.x, p.y + PATH.hover, p.z))
     }
 
     for (const wp of waypoints) {
@@ -91,7 +90,7 @@ export class PathMarker {
   /** A floating circle (or circles) at hover height plus a vertical beacon pole. */
   private beacon(base: Vector3, height: number, radii: number[], color: number): void {
     for (const radius of radii) this.group.add(this.ring(base, radius, color))
-    const pole = [new Vector3(base.x, PATH.hover, base.z), new Vector3(base.x, height, base.z)]
+    const pole = [new Vector3(base.x, base.y + PATH.hover, base.z), new Vector3(base.x, base.y + height, base.z)]
     this.group.add(this.line(pole, color, 0.75))
   }
 
@@ -100,7 +99,7 @@ export class PathMarker {
     const points: Vector3[] = []
     for (let i = 0; i < CIRCLE_SEGMENTS; i++) {
       const a = (i / CIRCLE_SEGMENTS) * Math.PI * 2
-      points.push(new Vector3(base.x + Math.cos(a) * radius, PATH.hover, base.z + Math.sin(a) * radius))
+      points.push(new Vector3(base.x + Math.cos(a) * radius, base.y + PATH.hover, base.z + Math.sin(a) * radius))
     }
     const geometry = new BufferGeometry().setFromPoints(points)
     this.geometries.push(geometry)

@@ -32,7 +32,7 @@ export type HudIntent =
   | { type: 'toggleFreelook' }
   | { type: 'toggleUnitView' }
   | { type: 'openDebug' }
-  | { type: 'selectLevel'; level: number | null }
+  | { type: 'selectLevel'; level: number }
 
 /** One button in the selected unit's action panel. */
 export interface HudAction {
@@ -135,7 +135,7 @@ export interface HudModel {
   throwPanel: HudThrowPanel | null
   freelookActive: boolean
   unitViewActive: boolean
-  selectedLevelFilter: number | null
+  selectedLevelFilter: number
   waypointActive: boolean
   unitViewEnabled: boolean
   nextFactionName: string
@@ -157,7 +157,7 @@ export interface HudModelSources {
   /** The player's unit-view toggle. Aiming moves the camera without setting it. */
   unitViewRequested: boolean
   myFaction?: Faction
-  selectedLevelFilter: number | null
+  selectedLevelFilter: number
 }
 
 /** What the model builder needs from the shoot planner. */

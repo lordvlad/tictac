@@ -56,7 +56,7 @@ export class InteractionController {
   private readonly ndc = new Vector2()
   /** The player asked for unit view. Aiming borrows the same camera on its own. */
   private unitViewRequested = false
-  private selectedLevelFilter: number | null = null
+  private selectedLevelFilter: number = 0
   /** Scratch aim point for the shoulder camera, to avoid a per-frame allocation. */
   private readonly aimPoint = new Vector3()
   /** Where the right button went down, to tell a facing click from an orbit drag. */
@@ -154,6 +154,8 @@ export class InteractionController {
     this.fog = new FogOfWar(battlefield.grid, battlefield.ground, battlefield.blocks)
     this.xray = new WallXray(rig, squads, battlefield.blocks)
     this.picker = new GroundPicker(engine.camera)
+
+    this.battlefield.blocks.setLevelFilter(0)
 
     this.grenade.onThrowResolved = () => {
       this.recomputeVisibility()

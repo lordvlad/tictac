@@ -192,7 +192,6 @@ export class Hud {
 
   private renderLevelSelector(model: HudModel): void {
     const levels = [
-      { label: 'ALL', level: null },
       { label: 'L1', level: 1 },
       { label: 'L0', level: 0 },
     ]
@@ -204,7 +203,7 @@ export class Hud {
           .map(
             (item) => `
           <button class="hud-btn interactive ${model.selectedLevelFilter === item.level ? 'active' : ''}"
-                  title="${item.level === null ? 'View all floors' : `View Floor ${item.level}`}"
+                  title="View Floor ${item.level}"
                   ${Hud.intentAttr({ type: 'selectLevel', level: item.level })}>
             ${item.label}
           </button>`,

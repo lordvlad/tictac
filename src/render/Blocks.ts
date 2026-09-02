@@ -27,29 +27,72 @@ const BLOCK_COLORS: Record<Exclude<Block, typeof Block.None>, number> = {
   [Block.Ladder]: 0xff8800, // Distinct orange ladder highlight
 }
 
-function createStairGeometry(): BufferGeometry {
+function createSteppedStairGeometry(): BufferGeometry {
   const w = (TILE * 0.98) / 2
   const h = 2.0 / 2
   const l = (TILE * 0.98) / 2
+  const steps = 4
+  const stepH = (2 * h) / steps
+  const stepL = (2 * l) / steps
 
-  const positions = new Float32Array([
-    // Slope
-    -w, -h, -l,  w, -h, -l,  w, h, l,
-    -w, -h, -l,  w, h, l,  -w, h, l,
-    // Back wall
-    -w, -h, l,  w, -h, l,  w, h, l,
-    -w, -h, l,  w, h, l,  -w, h, l,
-    // Bottom base
-    -w, -h, -l, -w, -h, l,  w, -h, l,
-    -w, -h, -l,  w, -h, l,  w, -h, -l,
-    // West side triangle
-    -w, -h, -l, -w, -h, l, -w, h, l,
-    // East side triangle
-    w, -h, -l,  w, h, l,  w, -h, l,
-  ])
+  const pos: number[] = []
+
+  // Generate 4 steps (treads and risers)
+  for (let i = 0; i < steps; i++) {
+    const zStart = +-l + i * stepL
+    const zEnd = zStart + stepL
+    const yBottom = +-h + i * stepH
+    const yTop = yBottom + stepH
+
+    // Riser (vertical face at zStart)
+    pos.push(
+      +-w, yBottom, zStart,   w, yBottom, zStart,   w, yTop, zStart,
+      +-w, yBottom, zStart,   w, yTop, zStart,    +-w, yTop, zStart
+    )
+
+    // Tread (horizontal face at yTop)
+    pos.push(
+      +-w, yTop, zStart,   w, yTop, zStart,   w, yTop, zEnd,
+      +-w, yTop, zStart,   w, yTop, zEnd,    +-w, yTop, zEnd
+    )
+  }
+
+  // Back wall (at z = +l, from y = -h to +h)
+  pos.push(
+    w, +-h, l,   +-w, +-h, l,   +-w, h, l,
+    w, +-h, l,   +-w, h, l,     w, h, l
+  )
+
+  // Bottom base (at y = -h, from z = -l to +l)
+  pos.push(
+    +-w, +-h, +-l,   w, +-h, +-l,   w, +-h, l,
+    +-w, +-h, +-l,   w, +-h, l,   +-w, +-h, l
+  )
+
+  // West side wall (-w)
+  for (let i = 0; i < steps; i++) {
+    const zStart = +-l + i * stepL
+    const zEnd = zStart + stepL
+    const yTop = +-h + (i + 1) * stepH
+    pos.push(
+      +-w, +-h, zStart,  +-w, +-h, zEnd,  +-w, yTop, zEnd,
+      +-w, +-h, zStart,  +-w, yTop, zEnd, +-w, yTop, zStart
+    )
+  }
+
+  // East side wall (+w)
+  for (let i = 0; i < steps; i++) {
+    const zStart = +-l + i * stepL
+    const zEnd = zStart + stepL
+    const yTop = +-h + (i + 1) * stepH
+    pos.push(
+      w, +-h, zEnd,  w, +-h, zStart,  w, yTop, zStart,
+      w, +-h, zEnd,  w, yTop, zStart,  w, yTop, zEnd
+    )
+  }
 
   const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('position', new Float32BufferAttribute(pos, 3))
   geometry.computeVertexNormals()
   return geometry
 }
@@ -112,13 +155,17 @@ export class Blocks {
 
     this.group.name = 'blocks'
     this.occlusionMask = new Uint8Array(grid.size * grid.size)
-  }
 
+    const upperFloorLayer = this.buildUpperFloors()
+    if (upperFloorLayer) {
+      this.layers.push(upperFloorLayer)
+      this.group.add(upperFloorLayer.mesh)
+    }
+  }
   private buildLayer(kind: Exclude<Block, typeof Block.None>, instances: BlockInstance[]): BlockLayer {
     const height = blockHeight(kind) || 2.0
     const capacity = Math.max(1, instances.length)
-
-    const geometry = kind === Block.Stair ? createStairGeometry() : new BoxGeometry(TILE * 0.98, height, TILE * 0.98)
+    const geometry = kind === Block.Stair ? createSteppedStairGeometry() : new BoxGeometry(TILE * 0.98, height, TILE * 0.98)
     // Per-instance x-ray opacity. Starts fully opaque; Float32Array zero-inits,
     // so the fill(1) is required.
     const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
@@ -172,6 +219,69 @@ export class Blocks {
     return layer
   }
 
+  private buildUpperFloors(): BlockLayer | null {
+    const instances: BlockInstance[] = []
+    this.grid.forEach((x, y, block) => {
+      const level = this.grid.levelAt(x, y)
+      if (level > 0 && block !== Block.Full) {
+        instances.push({ x, y, index: instances.length })
+      }
+    })
+    if (instances.length === 0) return null
+
+    const height = 0.15
+    const capacity = instances.length
+    const geometry = new BoxGeometry(TILE * 0.98, height, TILE * 0.98)
+    const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
+    geometry.setAttribute(FADE_ATTRIBUTE, fade)
+
+    const material = new MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.8,
+      metalness: 0.1,
+      transparent: true,
+    })
+
+    material.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float aFade;\nvarying float vFade;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFade = aFade;')
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vFade;')
+        .replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>\n#ifdef USE_INSTANCING_COLOR\n  gl_FragColor.rgb *= vColor.rgb;\n#endif\ngl_FragColor.a *= vFade;`
+        )
+    }
+
+    const mesh = new InstancedMesh(geometry, material, capacity)
+    mesh.instanceMatrix.setUsage(DynamicDrawUsage)
+    mesh.count = instances.length
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    mesh.userData.type = 'floor'
+    mesh.frustumCulled = false
+
+    const baseColor = new Color(0x64748b)
+    const layer: BlockLayer = { mesh, instances, baseColor, fade }
+
+    for (const tile of layer.instances) {
+      const level = this.grid.levelAt(tile.x, tile.y)
+      this.dummy.position.set(
+        this.grid.worldX(tile.x),
+        level * 2.0 - height / 2,
+        this.grid.worldZ(tile.y)
+      )
+      this.dummy.rotation.y = 0
+      this.dummy.updateMatrix()
+      layer.mesh.setMatrixAt(tile.index, this.dummy.matrix)
+      layer.mesh.setColorAt(tile.index, baseColor)
+    }
+    layer.mesh.instanceMatrix.needsUpdate = true
+    if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
+
+    return layer
+  }
   private placeAll(layer: BlockLayer, height: number): void {
     for (const tile of layer.instances) {
       const level = this.grid.levelAt(tile.x, tile.y)

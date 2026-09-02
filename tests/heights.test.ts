@@ -76,6 +76,18 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     expect(res.path.length).toBe(3)
     expect(res.path).toEqual([{ x: 2, y: 2 }, { x: 2, y: 3 }, { x: 2, y: 4 }])
   })
+  test('pathfinding specifically picks up ladder route to reach an upper level', () => {
+    const grid = new Grid(10)
+    // Level 0 at (3, 2). Ladder at (3, 3). Level 1 at (3, 4).
+    grid.setLevel(3, 2, 0)
+    grid.setLadder(3, 3, 0)
+    grid.setLevel(3, 4, 1)
+
+    const res = findPathSegment(grid, { x: 3, y: 2 }, { x: 3, y: 4 }, new Set())
+    expect(res.path.length).toBe(3)
+    expect(res.path).toEqual([{ x: 3, y: 2 }, { x: 3, y: 3 }, { x: 3, y: 4 }])
+    expect(res.cost).toBe(RULES.ladderStepCost * 2)
+  })
 
   test('pathfinding routes around to valid stair entrance when approaching from side', () => {
     const grid = new Grid(10)
