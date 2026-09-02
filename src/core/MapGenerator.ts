@@ -1,5 +1,5 @@
 import { Faction, GRID_SIZE, SQUAD_SIZE } from '../config'
-import { Block, Grid, ORTHOGONAL, type Tile } from './Grid'
+import { Block, Grid, ORTHOGONAL, StairDirection, type Tile } from './Grid'
 import { clamp } from './math'
 import { Rng } from './rng'
 
@@ -79,6 +79,42 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
 
     buildings.push(rect)
     carveBuilding(grid, rng, rect)
+  }
+  // --- Upper Levels, Stairs, and Ladders ----------------------------------
+  // Convert 1-3 buildings into multi-level structures with walkable rooftops,
+  // stairs for gradual access, and ladder walls for quick vertical climbing.
+  const elevatedBuildingCount = Math.min(buildings.length, rng.int(1, 3))
+  for (let bIdx = 0; bIdx < elevatedBuildingCount; bIdx++) {
+    const b = buildings[bIdx]!
+    if (b.w < 4 || b.h < 4) continue
+
+    // Set interior floor tiles to level 1
+    for (let dy = 1; dy < b.h - 1; dy++) {
+      for (let dx = 1; dx < b.w - 1; dx++) {
+        const tx = b.x + dx
+        const ty = b.y + dy
+        grid.setLevel(tx, ty, 1)
+        grid.setBlock(tx, ty, Block.None)
+      }
+    }
+
+    // Place a stair block on the South or North wall doorway
+    const stairX = b.x + Math.floor(b.w / 2)
+    const stairY = b.y + b.h - 1 // South edge
+    grid.setStair(stairX, stairY, StairDirection.North, 0) // Lower entrance (stairX, stairY-1), Upper exit (stairX, stairY+1)
+    grid.setLevel(stairX, stairY - 1, 0)
+    grid.setLevel(stairX, stairY + 1, 1)
+    grid.setBlock(stairX, stairY - 1, Block.None)
+    grid.setBlock(stairX, stairY + 1, Block.None)
+
+    // Place a ladder wall on the East or West wall
+    const ladX = b.x
+    const ladY = b.y + Math.floor(b.h / 2)
+    grid.setLadder(ladX, ladY, 0)
+    grid.setLevel(ladX - 1, ladY, 0)
+    grid.setLevel(ladX + 1, ladY, 1)
+    grid.setBlock(ladX - 1, ladY, Block.None)
+    grid.setBlock(ladX + 1, ladY, Block.None)
   }
 
   // --- Free-standing walls --------------------------------------------------

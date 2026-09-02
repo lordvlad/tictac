@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { generateMap } from '../src/core/MapGenerator'
 import { Block, Grid, StairDirection } from '../src/core/Grid'
 import { findChainedPath, findPathSegment } from '../src/core/Pathfinding'
 import { RULES } from '../src/config'
@@ -116,5 +117,22 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     expect(pos?.tile).toEqual({ x: 3, y: 3 })
     expect(pos?.level).toBe(1)
     expect(ap?.ap).toBe(7) // 10 - 3 ladder AP cost
+  })
+
+  test('MapGenerator builds multi-level maps with stairs, ladders, and upper levels', () => {
+    const map = generateMap(42)
+    let stairCount = 0
+    let ladderCount = 0
+    let upperLevelCount = 0
+
+    map.grid.forEach((x, y, block) => {
+      if (block === Block.Stair) stairCount++
+      if (block === Block.Ladder) ladderCount++
+      if (map.grid.levelAt(x, y) > 0) upperLevelCount++
+    })
+
+    expect(stairCount).toBeGreaterThan(0)
+    expect(ladderCount).toBeGreaterThan(0)
+    expect(upperLevelCount).toBeGreaterThan(0)
   })
 })
