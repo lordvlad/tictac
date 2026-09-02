@@ -28,6 +28,7 @@ export interface ContextMenuItem {
 export class Hud {
   private readonly uiRoot: HTMLElement
   private readonly topRightEl: HTMLElement
+  private readonly levelSelectorEl: HTMLElement
   private readonly bottomCentreEl: HTMLElement
   private readonly targetStripEl: HTMLElement
   private readonly squadBarEl: HTMLElement
@@ -41,6 +42,8 @@ export class Hud {
   constructor(private readonly onIntent: (intent: HudIntent) => void) {
     this.uiRoot = document.getElementById('ui') ?? document.body
 
+    this.levelSelectorEl = document.createElement('div')
+    this.levelSelectorEl.className = 'hud-level-selector'
     this.topRightEl = document.createElement('div')
     this.topRightEl.className = 'hud-top-right'
     // Strip and squad bar share one bottom-centred column: stacking them in the
@@ -68,6 +71,7 @@ export class Hud {
 
     this.uiRoot.append(
       this.topRightEl,
+      this.levelSelectorEl,
       this.bottomCentreEl,
       this.actionPanelEl,
       this.turnOverlayEl,
@@ -83,6 +87,7 @@ export class Hud {
     this.uiRoot.removeEventListener('click', this.onUiClick)
     for (const el of [
       this.topRightEl,
+      this.levelSelectorEl,
       this.bottomCentreEl,
       this.actionPanelEl,
       this.turnOverlayEl,
@@ -101,6 +106,7 @@ export class Hud {
   render(model: HudModel): void {
     this.model = model
     this.renderTopRight(model)
+    this.renderLevelSelector(model)
     this.renderTargetStrip(model)
     this.renderSquadBar(model)
     this.renderActionPanel(model)
@@ -177,6 +183,30 @@ export class Hud {
             (b) => `
           <button class="hud-btn interactive ${b.classes}" title="${b.title}" ${b.disabled ? 'disabled' : ''} ${Hud.intentAttr(b.intent)}>
             ${b.label}
+          </button>`,
+          )
+          .join('')}
+      </div>
+    `
+  }
+
+  private renderLevelSelector(model: HudModel): void {
+    const levels = [
+      { label: 'ALL', level: null },
+      { label: 'L1', level: 1 },
+      { label: 'L0', level: 0 },
+    ]
+
+    this.levelSelectorEl.innerHTML = `
+      <div class="hud-level-title">LEVEL</div>
+      <div class="hud-level-buttons">
+        ${levels
+          .map(
+            (item) => `
+          <button class="hud-btn interactive ${model.selectedLevelFilter === item.level ? 'active' : ''}"
+                  title="${item.level === null ? 'View all floors' : `View Floor ${item.level}`}"
+                  ${Hud.intentAttr({ type: 'selectLevel', level: item.level })}>
+            ${item.label}
           </button>`,
           )
           .join('')}

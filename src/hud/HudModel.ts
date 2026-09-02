@@ -32,6 +32,7 @@ export type HudIntent =
   | { type: 'toggleFreelook' }
   | { type: 'toggleUnitView' }
   | { type: 'openDebug' }
+  | { type: 'selectLevel'; level: number | null }
 
 /** One button in the selected unit's action panel. */
 export interface HudAction {
@@ -134,6 +135,7 @@ export interface HudModel {
   throwPanel: HudThrowPanel | null
   freelookActive: boolean
   unitViewActive: boolean
+  selectedLevelFilter: number | null
   waypointActive: boolean
   unitViewEnabled: boolean
   nextFactionName: string
@@ -155,6 +157,7 @@ export interface HudModelSources {
   /** The player's unit-view toggle. Aiming moves the camera without setting it. */
   unitViewRequested: boolean
   myFaction?: Faction
+  selectedLevelFilter: number | null
 }
 
 /** What the model builder needs from the shoot planner. */
@@ -301,6 +304,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     squad,
     selectedName: selected && !selected.isDead ? selected.name : null,
     actions,
+    selectedLevelFilter: sources.selectedLevelFilter,
     targets,
     shotPanel: shoot?.pending ? shotPanelOf(shoot.pending) : null,
     throwPanel: sources.grenade.pending ? throwPanelOf(sources.grenade.pending) : null,

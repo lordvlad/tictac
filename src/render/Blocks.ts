@@ -1,7 +1,9 @@
 import {
   BoxGeometry,
+  BufferGeometry,
   Color,
   DynamicDrawUsage,
+  Float32BufferAttribute,
   Group,
   InstancedBufferAttribute,
   InstancedMesh,
@@ -23,6 +25,33 @@ const BLOCK_COLORS: Record<Exclude<Block, typeof Block.None>, number> = {
   [Block.Full]: 0x8b8f96,
   [Block.Stair]: 0x00d2ff, // Distinct cyan stair highlight
   [Block.Ladder]: 0xff8800, // Distinct orange ladder highlight
+}
+
+function createStairGeometry(): BufferGeometry {
+  const w = (TILE * 0.98) / 2
+  const h = 2.0 / 2
+  const l = (TILE * 0.98) / 2
+
+  const positions = new Float32Array([
+    // Slope
+    -w, -h, -l,  w, -h, -l,  w, h, l,
+    -w, -h, -l,  w, h, l,  -w, h, l,
+    // Back wall
+    -w, -h, l,  w, -h, l,  w, h, l,
+    -w, -h, l,  w, h, l,  -w, h, l,
+    // Bottom base
+    -w, -h, -l, -w, -h, l,  w, -h, l,
+    -w, -h, -l,  w, -h, l,  w, -h, -l,
+    // West side triangle
+    -w, -h, -l, -w, -h, l, -w, h, l,
+    // East side triangle
+    w, -h, -l,  w, h, l,  w, -h, l,
+  ])
+
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.computeVertexNormals()
+  return geometry
 }
 
 interface BlockInstance {
@@ -62,6 +91,7 @@ export class Blocks {
 
   /** Per-tile occlusion scratch for the x-ray pass. */
   private readonly occlusionMask: Uint8Array
+  private activeLevelFilter: number | null = null
   private occlusionActive = false
 
   constructor(private readonly grid: Grid) {
@@ -88,8 +118,7 @@ export class Blocks {
     const height = blockHeight(kind) || 2.0
     const capacity = Math.max(1, instances.length)
 
-    // Slight inset so adjacent blocks read as separate volumes.
-    const geometry = new BoxGeometry(TILE * 0.98, height, TILE * 0.98)
+    const geometry = kind === Block.Stair ? createStairGeometry() : new BoxGeometry(TILE * 0.98, height, TILE * 0.98)
     // Per-instance x-ray opacity. Starts fully opaque; Float32Array zero-inits,
     // so the fill(1) is required.
     const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
@@ -228,19 +257,38 @@ export class Blocks {
     for (const layer of this.layers) this.applyFade(layer, 1)
   }
 
-  private applyFade(layer: BlockLayer, opacity: number): void {
+  /**
+   * Set active level filter.
+   * Blocks above `level` are rendered transparently (0.15 opacity), while
+   * blocks at or below `level` remain fully opaque. `null` means all levels opaque.
+   */
+  setLevelFilter(level: number | null): void {
+    this.activeLevelFilter = level
+    for (const layer of this.layers) {
+      this.applyFade(layer, 1)
+    }
+  }
+
+  private applyFade(layer: BlockLayer, xrayOpacity: number): void {
     const values = layer.fade.array as Float32Array
     let dirty = false
     for (const tile of layer.instances) {
-      const value = this.occlusionMask[this.grid.index(tile.x, tile.y)] ? opacity : 1
-      if (values[tile.index] !== value) {
-        values[tile.index] = value
+      const tileLevel = this.grid.levelAt(tile.x, tile.y)
+      let levelOpacity = 1.0
+      if (this.activeLevelFilter !== null && tileLevel > this.activeLevelFilter) {
+        levelOpacity = 0.15 // Transparent for upper levels when viewing lower level
+      }
+
+      const isXrayFaded = this.occlusionMask[this.grid.index(tile.x, tile.y)]
+      const targetOpacity = isXrayFaded ? Math.min(levelOpacity, xrayOpacity) : levelOpacity
+
+      if (values[tile.index] !== targetOpacity) {
+        values[tile.index] = targetOpacity
         dirty = true
       }
     }
     if (dirty) layer.fade.needsUpdate = true
   }
-
   dispose(): void {
     for (const layer of this.layers) {
       layer.mesh.geometry.dispose()

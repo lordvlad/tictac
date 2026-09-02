@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { Blocks } from '../src/render/Blocks'
 import { generateMap } from '../src/core/MapGenerator'
 import { Block, Grid, StairDirection } from '../src/core/Grid'
 import { findChainedPath, findPathSegment } from '../src/core/Pathfinding'
@@ -134,5 +135,32 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     expect(stairCount).toBeGreaterThan(0)
     expect(ladderCount).toBeGreaterThan(0)
     expect(upperLevelCount).toBeGreaterThan(0)
+  })
+
+  test('Blocks setLevelFilter applies transparency to upper level blocks', () => {
+    const grid = new Grid(10)
+    grid.setBlock(2, 2, Block.Full)
+    grid.setLevel(2, 2, 0)
+
+    grid.setBlock(4, 4, Block.Full)
+    grid.setLevel(4, 4, 1)
+
+    const blocks = new Blocks(grid)
+    blocks.setLevelFilter(0) // Ground level active: level 1 blocks should be transparent
+
+    const layers = (blocks as unknown as { layers: Array<{ fade: { array: Float32Array }; instances: Array<{ x: number; y: number; index: number }> }> }).layers
+    expect(layers.length).toBeGreaterThan(0)
+
+    let level0Opacity = 0
+    let level1Opacity = 0
+    for (const layer of layers) {
+      for (const inst of layer.instances) {
+        if (inst.x === 2 && inst.y === 2) level0Opacity = layer.fade.array[inst.index]!
+        if (inst.x === 4 && inst.y === 4) level1Opacity = layer.fade.array[inst.index]!
+      }
+    }
+
+    expect(level0Opacity).toBe(1.0)
+    expect(level1Opacity).toBeCloseTo(0.15)
   })
 })

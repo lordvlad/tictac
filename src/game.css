@@ -54,6 +54,35 @@ canvas {
 #ui .interactive {
   pointer-events: auto;
 }
+/* Left side level selector */
+.hud-level-selector {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+  z-index: 20;
+}
+
+.hud-level-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--hud-dim);
+}
+
+.hud-level-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 
 #loadingBar {
   position: fixed;

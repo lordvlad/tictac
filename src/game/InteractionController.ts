@@ -56,6 +56,7 @@ export class InteractionController {
   private readonly ndc = new Vector2()
   /** The player asked for unit view. Aiming borrows the same camera on its own. */
   private unitViewRequested = false
+  private selectedLevelFilter: number | null = null
   /** Scratch aim point for the shoulder camera, to avoid a per-frame allocation. */
   private readonly aimPoint = new Vector3()
   /** Where the right button went down, to tell a facing click from an orbit drag. */
@@ -197,6 +198,7 @@ export class InteractionController {
         seedLabel: this.seedLabel,
         shootActive: this.shoot.active,
         waypointActive: this.planner.waypointMode,
+        selectedLevelFilter: this.selectedLevelFilter,
         shoot:
           this.shoot.active && shooter
             ? {
@@ -335,6 +337,12 @@ export class InteractionController {
         }
         this.turnManager.startNextTurn()
         this.onTurnSwitched()
+        this.refreshHud()
+        break
+      case 'selectLevel':
+        this.selectedLevelFilter = intent.level
+        this.battlefield.blocks.setLevelFilter(intent.level)
+        this.renderOverlay()
         this.refreshHud()
         break
       case 'toggleFreelook':
