@@ -404,6 +404,18 @@ describe('TurnSystem', () => {
     expect(world.getComponent(blue, ActionPointsComponent)?.ap).toBe(0)
   })
 
+  test('the round refill honours a raised ceiling', () => {
+    const world = new World()
+    const system = new TurnSystem()
+    const unit = squad(world, Faction.Red)
+    world.addComponent(unit, new StatusesComponent([{ kind: StatusKind.Stimmed, turnsLeft: 2 }]))
+
+    system.endTurn(world)
+
+    // 8 base, lifted a fifth by the stim.
+    expect(world.getComponent(unit, ActionPointsComponent)?.ap).toBe(10)
+  })
+
   test('the dead get no action points back', () => {
     const world = new World()
     const system = new TurnSystem()

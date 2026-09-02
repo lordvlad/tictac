@@ -232,11 +232,17 @@ export function applyStatus(soldier: Soldier, kind: StatusKind): void {
   else soldier.statuses.push({ kind, turnsLeft: spec.turns })
 }
 
-/** Count down every unit's statuses by one turn and drop the expired ones. */
+/**
+ * Count down every unit's statuses by one turn and drop the expired ones.
+ *
+ * A lapsed stim lowers the action-point ceiling, so anything held above the
+ * new ceiling is given back rather than left as a permanent surplus.
+ */
 export function tickStatuses(soldiers: readonly Soldier[]): void {
   for (const soldier of soldiers) {
     if (soldier.statuses.length === 0) continue
     for (const status of soldier.statuses) status.turnsLeft -= 1
     soldier.statuses = soldier.statuses.filter((s) => s.turnsLeft > 0)
+    soldier.ap = Math.min(soldier.ap, soldier.effectiveMaxAp)
   }
 }

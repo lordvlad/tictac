@@ -11,7 +11,8 @@ import {
   Weapon,
   WeaponId,
 } from '../core/Arsenal'
-import type { StatusState } from '../core/Ballistics'
+import { effectiveMaxAp, type StatusState } from '../core/Ballistics'
+import type { ItemId } from '../core/Items'
 import type { Grid, Tile } from '../core/Grid'
 import { soldierColor } from './palette'
 import type { World } from '../ecs/World'
@@ -27,6 +28,7 @@ import {
   StanceComponent,
   StatusesComponent,
   WeaponComponent,
+  ItemsComponent,
 } from '../ecs/components'
 
 /**
@@ -63,6 +65,7 @@ export class Soldier extends Entity3D {
   private readonly armorComponent: ArmorComponent
   private readonly weaponComponent: WeaponComponent
   private readonly ammoComponent: AmmoComponent
+  private readonly itemsComponent: ItemsComponent
   private readonly grenadeSpecsComponent: GrenadeSpecsComponent
   private readonly inventory: InventoryComponent
   private readonly stance: StanceComponent
@@ -109,6 +112,7 @@ export class Soldier extends Entity3D {
     )
     this.weaponComponent = world.addComponent(this.entityId, new WeaponComponent())
     this.ammoComponent = world.addComponent(this.entityId, new AmmoComponent())
+    this.itemsComponent = world.addComponent(this.entityId, new ItemsComponent())
     this.grenadeSpecsComponent = world.addComponent(this.entityId, new GrenadeSpecsComponent())
     this.inventory = world.addComponent(this.entityId, new InventoryComponent())
     this.stance = world.addComponent(this.entityId, new StanceComponent())
@@ -173,6 +177,18 @@ export class Soldier extends Entity3D {
   }
   get grenadeSpecs(): Record<GrenadeId, GrenadeSpec> {
     return this.grenadeSpecsComponent.specs
+  }
+  /** Consumables still in the pouch, by item. */
+  get items(): Record<ItemId, number> {
+    return this.itemsComponent.items
+  }
+
+  /**
+   * The action-point ceiling right now, including a stim's temporary lift.
+   * `maxAp` stays the unit's own baseline so the bonus can lapse.
+   */
+  get effectiveMaxAp(): number {
+    return effectiveMaxAp(this.actionPoints.maxAp, this.statusesComponent.list)
   }
   /** Grenades still in the pouch, by kind. */
   get grenades(): Record<GrenadeId, number> {

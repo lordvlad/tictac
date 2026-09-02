@@ -1,4 +1,5 @@
 export { MovementSystem } from './MovementSystem'
 export { CombatSystem } from './CombatSystem'
+export { ItemSystem } from './ItemSystem'
 export { TurnSystem } from './TurnSystem'
 export { RenderSystem } from './RenderSystem'

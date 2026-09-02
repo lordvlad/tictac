@@ -4,6 +4,8 @@ import { Faction } from '../../config'
 import { ActionPointsComponent } from '../components/ActionPointsComponent'
 import { HealthComponent } from '../components/HealthComponent'
 import { IdentityComponent } from '../components/IdentityComponent'
+import { StatusesComponent } from '../components/StatusesComponent'
+import { effectiveMaxAp } from '../../core/Ballistics'
 
 /** Whose turn it is, and the AP everyone gets back when it comes round. */
 export class TurnSystem extends System {
@@ -32,7 +34,9 @@ export class TurnSystem extends System {
       const health = world.getComponent(entityId, HealthComponent)!
       if (health.hp <= 0 || identity.faction !== this.activeFaction) continue
       const ap = world.getComponent(entityId, ActionPointsComponent)!
-      ap.ap = ap.maxAp
+      // A live stim raises the ceiling, so the refill has to read it.
+      const statuses = world.getComponent(entityId, StatusesComponent)
+      ap.ap = effectiveMaxAp(ap.maxAp, statuses?.list ?? [])
     }
   }
 }

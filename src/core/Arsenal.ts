@@ -218,6 +218,8 @@ export const StatusKind = {
   Smoked: 'smoked',
   /** Armour compromised: incoming damage is amplified. */
   Shredded: 'shredded',
+  /** Stimulated: action points are raised while it lasts. */
+  Stimmed: 'stimmed',
 } as const
 export type StatusKind = (typeof StatusKind)[keyof typeof StatusKind]
 
@@ -232,6 +234,8 @@ export interface StatusSpec {
   defenceBonus: number
   /** Extra incoming damage, as a fraction. */
   damageTakenBonus: number
+  /** Extra action points, as a fraction of the unit's own maximum. */
+  apBonus: number
 }
 
 export const STATUSES: Record<StatusKind, StatusSpec> = {
@@ -242,6 +246,7 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     accuracyPenalty: 40,
     defenceBonus: 0,
     damageTakenBonus: 0,
+    apBonus: 0,
   },
   [StatusKind.Smoked]: {
     kind: StatusKind.Smoked,
@@ -250,6 +255,7 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     accuracyPenalty: 0,
     defenceBonus: 35,
     damageTakenBonus: 0,
+    apBonus: 0,
   },
   [StatusKind.Shredded]: {
     kind: StatusKind.Shredded,
@@ -258,6 +264,18 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     accuracyPenalty: 0,
     defenceBonus: 0,
     damageTakenBonus: 0.25,
+    apBonus: 0,
+  },
+  [StatusKind.Stimmed]: {
+    kind: StatusKind.Stimmed,
+    name: 'Stimmed',
+    // Statuses tick once per handover, and a round is two of those, so four
+    // covers the unit's own next two turns.
+    turns: 4,
+    accuracyPenalty: 0,
+    defenceBonus: 0,
+    damageTakenBonus: 0,
+    apBonus: 0.2,
   },
 }
 

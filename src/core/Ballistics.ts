@@ -70,6 +70,21 @@ export function coverPenalty(level: CoverLevel, crouching: boolean): number {
   return crouching ? COVER.openCrouch : 0
 }
 
+/**
+ * The unit's action-point ceiling with live status effects folded in.
+ *
+ * A stim raises the ceiling rather than handing out points directly, so the
+ * bonus lapses on its own when the status expires.
+ */
+export function effectiveMaxAp(maxAp: number, statuses: StatusState[]): number {
+  let bonus = 0
+  for (const status of statuses) {
+    if (status.turnsLeft <= 0) continue
+    bonus += STATUSES[status.kind]?.apBonus ?? 0
+  }
+  return Math.round(maxAp * (1 + bonus))
+}
+
 function statusTotals(statuses: StatusState[]): {
   accuracyPenalty: number
   defenceBonus: number
