@@ -1,5 +1,5 @@
 import { Euler, Matrix4, type PerspectiveCamera, Vector2, Vector3 } from 'three'
-import { CAM } from '../config'
+import { CAM, EYE_HEIGHT } from '../config'
 import { clamp, smoothstep } from '../core/math'
 import { clientToNdc } from '../core/screen'
 import { CameraInput, type CameraRigTarget } from './CameraInput'
@@ -54,13 +54,16 @@ export class OrbitRig implements CameraRigTarget {
 
   // --- over-the-shoulder view mode ------------------------------------------
   private isShoulderView = false
-  /** Where the camera sits: behind, above and to one side of the unit. */
-  private readonly shoulderPosTarget = new Vector3()
-  private readonly shoulderPosCurrent = new Vector3()
+  /** Unit eye anchor position that camera rotates and tilts around. */
+  private readonly eyeAnchorTarget = new Vector3()
+  private readonly eyeAnchorCurrent = new Vector3()
   /** Downward tilt for this shot, on top of the free-look offset. */
   private shoulderPitchTarget = CAM.shoulderPitch
   private shoulderPitchCurrent = CAM.shoulderPitch
 
+  /** Tactical camera state preserved when entering shoulder view, restored on exit. */
+  private preShoulderDist: number = CAM.distStart
+  private preShoulderAzimuth: number = CAM.azimuthStart
   /** Camera state frozen at pan start, so panning cannot feed back on itself. */
   private readonly panStartFocus = new Vector3()
   private readonly panStartCamPos = new Vector3()
@@ -164,12 +167,16 @@ export class OrbitRig implements CameraRigTarget {
    * eye-level shot it used to be.
    */
   enterShoulderView(position: Vector3, yaw: number, lookAt?: Vector3): void {
+    if (!this.isShoulderView) {
+      this.preShoulderDist = this.distTarget
+      this.preShoulderAzimuth = this.azimuthTarget
+    }
     this.isShoulderView = true
     this.freeLookToggleActive = true
 
     this.aimShoulderView(position, yaw, lookAt)
     // Ease in from wherever the tactical camera happened to be.
-    this.shoulderPosCurrent.copy(this.camera.position)
+    this.eyeAnchorCurrent.copy(this.eyeAnchorTarget)
     this.azimuthCurrent = this.azimuthTarget
     this.shoulderPitchCurrent = this.shoulderPitchTarget
     this.freeYawTarget = 0
@@ -186,9 +193,9 @@ export class OrbitRig implements CameraRigTarget {
     this.isShoulderView = false
     this.freeLookToggleActive = false
     this.resetFreeLook()
-    this.azimuthTarget = CAM.azimuthStart
-    this.distTarget = CAM.distStart
-    this.focusTarget.set(this.shoulderPosTarget.x, 0, this.shoulderPosTarget.z)
+    this.azimuthTarget = this.preShoulderAzimuth
+    this.distTarget = this.preShoulderDist
+    this.focusTarget.set(this.eyeAnchorCurrent.x, 0, this.eyeAnchorCurrent.z)
     this.clampFocus(this.focusTarget)
   }
 
@@ -205,14 +212,7 @@ export class OrbitRig implements CameraRigTarget {
   }
 
   private aimShoulderView(position: Vector3, yaw: number, lookAt?: Vector3): void {
-    // Forward is (sin, cos) to match the yaw convention units are rotated by.
-    const forwardX = Math.sin(yaw)
-    const forwardZ = Math.cos(yaw)
-    this.shoulderPosTarget.set(
-      position.x - forwardX * CAM.shoulderBack + forwardZ * CAM.shoulderSide,
-      position.y + CAM.shoulderHeight,
-      position.z - forwardZ * CAM.shoulderBack - forwardX * CAM.shoulderSide,
-    )
+    this.eyeAnchorTarget.set(position.x, position.y + EYE_HEIGHT, position.z)
 
     if (!lookAt) {
       this.azimuthTarget = yaw + Math.PI
@@ -220,11 +220,10 @@ export class OrbitRig implements CameraRigTarget {
       return
     }
 
-    // Aim from where the camera will be, not from the unit, or the side
-    // offset would push the target off centre by however far away it is.
-    const dx = lookAt.x - this.shoulderPosTarget.x
-    const dy = this.shoulderPosTarget.y - lookAt.y
-    const dz = lookAt.z - this.shoulderPosTarget.z
+    // Aim from where the camera sits relative to unit's eyes anchor point
+    const dx = lookAt.x - this.eyeAnchorTarget.x
+    const dy = this.eyeAnchorTarget.y - lookAt.y
+    const dz = lookAt.z - this.eyeAnchorTarget.z
     const flat = Math.hypot(dx, dz)
     this.azimuthTarget = Math.atan2(dx, dz) + Math.PI
     this.shoulderPitchTarget = flat > 0.001 ? Math.atan2(dy, flat) : CAM.shoulderPitch
@@ -428,12 +427,12 @@ export class OrbitRig implements CameraRigTarget {
     }
 
     if (this.isShoulderView) {
-      this.shoulderPosCurrent.lerp(this.shoulderPosTarget, k)
+      this.eyeAnchorCurrent.lerp(this.eyeAnchorTarget, k)
       this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k
       this.shoulderPitchCurrent += (this.shoulderPitchTarget - this.shoulderPitchCurrent) * k
       this.freeYawCurrent += (this.freeYawTarget - this.freeYawCurrent) * k
       this.freePitchCurrent += (this.freePitchTarget - this.freePitchCurrent) * k
-      this.focusCurrent.set(this.shoulderPosCurrent.x, 0, this.shoulderPosCurrent.z)
+      this.focusCurrent.set(this.eyeAnchorCurrent.x, 0, this.eyeAnchorCurrent.z)
     } else {
       this.applyEdgePan(delta)
       this.focusCurrent.lerp(this.focusTarget, k)
@@ -457,14 +456,15 @@ export class OrbitRig implements CameraRigTarget {
 
   private applyTransform(): void {
     if (this.isShoulderView) {
-      this.camera.position.copy(this.shoulderPosCurrent).add(this.shakeOffset)
-      // Tilted down over the unit's head, plus any free-look offset.
-      this.euler.set(
-        -this.shoulderPitchCurrent + this.freePitchCurrent,
-        this.azimuthCurrent + this.freeYawCurrent,
-        0,
-        'YXZ',
-      )
+      const pitch = -this.shoulderPitchCurrent + this.freePitchCurrent
+      const yaw = this.azimuthCurrent + this.freeYawCurrent
+      this.euler.set(pitch, yaw, 0, 'YXZ')
+
+      // Camera offset relative to the unit's eyes anchor point
+      this.scratchVec.set(CAM.shoulderSide, CAM.shoulderHeight - EYE_HEIGHT, -CAM.shoulderBack)
+      this.scratchVec.applyEuler(this.euler)
+
+      this.camera.position.copy(this.eyeAnchorCurrent).add(this.scratchVec).add(this.shakeOffset)
       this.camera.quaternion.setFromEuler(this.euler)
       this.camera.updateMatrixWorld()
       return
