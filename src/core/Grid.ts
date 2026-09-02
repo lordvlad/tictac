@@ -163,6 +163,45 @@ export class Grid {
     const heightOffset = block === Block.Stair ? 1.0 : 0
     return target.set(this.worldX(tile.x), level * 2.0 + heightOffset, this.worldZ(tile.y))
   }
+  /**
+   * Convert a tile path into 3D world points that follow the terrain floor,
+   * slope up along stairs, and climb vertically up/down ladder walls.
+   */
+  pathToWorldPoints(path: Tile[]): Vector3[] {
+    const points: Vector3[] = []
+    if (path.length === 0) return points
+
+    for (let i = 0; i < path.length; i++) {
+      const curr = path[i]!
+      const currLevel = this.levelAt(curr.x, curr.y)
+      const currBlock = this.blockAt(curr.x, curr.y)
+
+      if (i === 0) {
+        points.push(this.tileToWorld(curr))
+        continue
+      }
+
+      const prev = path[i - 1]!
+      const prevLevel = this.levelAt(prev.x, prev.y)
+      const prevBlock = this.blockAt(prev.x, prev.y)
+
+      const isLadderStep = currBlock === Block.Ladder || prevBlock === Block.Ladder
+      if (isLadderStep && prevLevel !== currLevel) {
+        // Insert vertical ladder climbing points
+        const wx = this.worldX(prev.x)
+        const wz = this.worldZ(prev.y)
+        const yStart = prevLevel * 2.0
+        const yEnd = currLevel * 2.0
+        points.push(new Vector3(wx, Math.min(yStart, yEnd), wz))
+        points.push(new Vector3(wx, Math.max(yStart, yEnd), wz))
+        points.push(this.tileToWorld(curr))
+      } else {
+        points.push(this.tileToWorld(curr))
+      }
+    }
+
+    return points
+  }
   /** Get allowed entrance and exit tiles for a stair block at (x, y). */
   getStairAccessTiles(x: number, y: number): { lower: Tile; upper: Tile } {
     const dir = this.stairDirectionAt(x, y)

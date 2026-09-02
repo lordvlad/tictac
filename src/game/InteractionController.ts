@@ -344,6 +344,7 @@ export class InteractionController {
       case 'selectLevel':
         this.selectedLevelFilter = intent.level
         this.battlefield.blocks.setLevelFilter(intent.level)
+        this.rig.setFocusLevel(intent.level)
         this.renderOverlay()
         this.refreshHud()
         break

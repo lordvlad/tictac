@@ -118,8 +118,14 @@ export class OrbitRig implements CameraRigTarget {
 
   /** Smoothly move the focus point (keeps zoom, azimuth and tilt). */
   focusOn(position: Vector3): void {
-    this.focusTarget.set(position.x, 0, position.z)
+    this.focusTarget.set(position.x, position.y, position.z)
     this.clampFocus(this.focusTarget)
+  }
+
+  /** Smoothly adjust camera focus elevation Y when selecting a level in the UI. */
+  setFocusLevel(level: number | null): void {
+    const targetY = level !== null ? level * 2.0 : 0
+    this.focusTarget.y = targetY
   }
 
   /** Jump the focus point with no easing. */

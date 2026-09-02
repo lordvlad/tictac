@@ -170,7 +170,7 @@ export class MovementPlanner {
     this.pathValid = provisional ? false : result.valid
 
     this.marker.show(
-      result.path.map((t) => this.grid.tileToWorld(t)),
+      this.grid.pathToWorldPoints(result.path),
       (provisional ? this.waypoints : via).map((t) => this.grid.tileToWorld(t)),
       this.grid.tileToWorld(endpoint),
       result.valid,

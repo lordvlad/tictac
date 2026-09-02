@@ -96,6 +96,53 @@ function createSteppedStairGeometry(): BufferGeometry {
   geometry.computeVertexNormals()
   return geometry
 }
+function createLadderWallGeometry(): BufferGeometry {
+  const railW = 0.05
+  const railH = 2.0
+  const railD = 0.08
+  const rungW = 0.51
+  const rungH = 0.04
+  const rungD = 0.05
+  const rungs = 5
+
+  const pos: number[] = []
+
+  // Helper to push a box into pos array
+  const addBox = (cx: number, cy: number, cz: number, bw: number, bh: number, bd: number) => {
+    const x0 = cx - bw / 2, x1 = cx + bw / 2
+    const y0 = cy - bh / 2, y1 = cy + bh / 2
+    const z0 = cz - bd / 2, z1 = cz + bd / 2
+
+    // Front (z1)
+    pos.push(x0, y0, z1,  x1, y0, z1,  x1, y1, z1,   x0, y0, z1,  x1, y1, z1,  x0, y1, z1)
+    // Back (z0)
+    pos.push(x1, y0, z0,  x0, y0, z0,  x0, y1, z0,   x1, y0, z0,  x0, y1, z0,  x1, y1, z0)
+    // Left (x0)
+    pos.push(x0, y0, z0,  x0, y0, z1,  x0, y1, z1,   x0, y0, z0,  x0, y1, z1,  x0, y1, z0)
+    // Right (x1)
+    pos.push(x1, y0, z1,  x1, y0, z0,  x1, y1, z0,   x1, y0, z1,  x1, y1, z0,  x1, y1, z1)
+    // Top (y1)
+    pos.push(x0, y1, z1,  x1, y1, z1,  x1, y1, z0,   x0, y1, z1,  x1, y1, z0,  x0, y1, z0)
+    // Bottom (y0)
+    pos.push(x0, y0, z0,  x1, y0, z0,  x1, y0, z1,   x0, y0, z0,  x1, y0, z1,  x0, y0, z1)
+  }
+
+  // Left rail
+  addBox(-0.28, 0, 0, railW, railH, railD)
+  // Right rail
+  addBox(0.28, 0, 0, railW, railH, railD)
+
+  // 5 horizontal rungs
+  for (let i = 0; i < rungs; i++) {
+    const ry = -0.8 + i * 0.4
+    addBox(0, ry, 0, rungW, rungH, rungD)
+  }
+
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(pos, 3))
+  geometry.computeVertexNormals()
+  return geometry
+}
 
 interface BlockInstance {
   x: number
@@ -162,10 +209,16 @@ export class Blocks {
       this.group.add(upperFloorLayer.mesh)
     }
   }
+
   private buildLayer(kind: Exclude<Block, typeof Block.None>, instances: BlockInstance[]): BlockLayer {
     const height = blockHeight(kind) || 2.0
     const capacity = Math.max(1, instances.length)
-    const geometry = kind === Block.Stair ? createSteppedStairGeometry() : new BoxGeometry(TILE * 0.98, height, TILE * 0.98)
+    const geometry =
+      kind === Block.Stair
+        ? createSteppedStairGeometry()
+        : kind === Block.Ladder
+          ? createLadderWallGeometry()
+          : new BoxGeometry(TILE * 0.98, height, TILE * 0.98)
     // Per-instance x-ray opacity. Starts fully opaque; Float32Array zero-inits,
     // so the fill(1) is required.
     const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
