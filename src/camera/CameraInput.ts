@@ -19,7 +19,8 @@ export interface CameraRigTarget {
   readonly enabled: boolean
   /** Free-look toggle (mobile / no middle mouse button). */
   readonly freeLookMode: boolean
-  /** Orbit distance the camera is easing towards. */
+  /** Over-the-shoulder view mode active. */
+  readonly shoulderView?: boolean
   zoom: number
   /** Orbit azimuth the camera is easing towards, in radians. */
   azimuth: number
@@ -179,31 +180,38 @@ export class CameraInput {
       /* ignore synthetic/test events */
     }
 
-    // A second finger turns this into a pinch: PinchGesture drives zoom, twist
-    // and pan from here on, so any single-finger drag must let go.
-    if (this.activePointers.size > 1) {
-      this.dragMode = 'none'
-      this.dragPointerId = -1
-      return
-    }
-
-    if (this.dragMode !== 'none') return
-
-    if (event.pointerType === 'mouse' && event.button === MOUSE_LEFT && event.shiftKey) {
-      // Shift+left is reserved for waypoint placement.
-      return
-    }
-
-    if (event.pointerType === 'touch' || event.button === MOUSE_LEFT) {
-      this.dragMode = this.rig.freeLookMode ? 'freelook' : 'pan'
-    } else if (event.button === MOUSE_RIGHT) {
-      this.dragMode = 'orbit'
-    } else if (event.button === MOUSE_MIDDLE) {
+    // In over-the-shoulder view, no two-finger gestures are allowed.
+    if (this.rig.shoulderView) {
+      if (this.activePointers.size > 1) {
+        return
+      }
+      if (this.dragMode !== 'none') return
       this.dragMode = 'freelook'
     } else {
-      return
-    }
+      // A second finger turns this into a pinch in tactical view.
+      if (this.activePointers.size > 1) {
+        this.dragMode = 'none'
+        this.dragPointerId = -1
+        return
+      }
 
+      if (this.dragMode !== 'none') return
+
+      if (event.pointerType === 'mouse' && event.button === MOUSE_LEFT && event.shiftKey) {
+        // Shift+left is reserved for waypoint placement.
+        return
+      }
+
+      if (event.pointerType === 'touch' || event.button === MOUSE_LEFT) {
+        this.dragMode = this.rig.freeLookMode ? 'freelook' : 'pan'
+      } else if (event.button === MOUSE_RIGHT) {
+        this.dragMode = 'orbit'
+      } else if (event.button === MOUSE_MIDDLE) {
+        this.dragMode = 'freelook'
+      } else {
+        return
+      }
+    }
     event.preventDefault()
     this.dragPointerId = event.pointerId
     this.lastPointer.set(event.clientX, event.clientY)
@@ -301,8 +309,7 @@ export class CameraInput {
     originX: number,
     originY: number,
   ): void {
-    if (!this.rig.enabled) return
-
+    if (!this.rig.enabled || this.rig.shoulderView) return
     if (first) {
       this.pinching = true
       this.pinchStartZoom = this.rig.zoom
