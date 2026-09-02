@@ -1,6 +1,6 @@
 import { Vector3 } from 'three'
 import { GRID_SIZE, HALF_BLOCK_HEIGHT, LEVEL_HEIGHT, RULES, TILE } from '../config'
-import { WALLS, WallKind } from './Walls'
+import { WALLS, wallHidesSight, WallKind } from './Walls'
 
 /**
  * What occupies a tile's floor.
@@ -223,10 +223,31 @@ export class Grid {
     }
   }
 
-  /** Is one edge passable? `forSight` swaps a body's rules for a sightline's. */
-  private edgeOpen(x: number, y: number, side: Side, forSight: boolean): boolean {
+  /**
+   * Absolute world Y coordinate of a wall's top.
+   *
+   * A wall stands on the lower of the two floors it divides, so its top is that
+   * floor's height plus the wall kind's height.
+   */
+  wallTop(x: number, y: number, side: Side): number {
     const kind = this.wallAt(x, y, side)
-    return forSight ? !WALLS[kind].blocksSight : kind === WallKind.None
+    if (kind === WallKind.None) return 0
+    let nx = x
+    let ny = y
+    if (side === Side.East) nx += 1
+    else if (side === Side.West) nx -= 1
+    else if (side === Side.South) ny += 1
+    else if (side === Side.North) ny -= 1
+    const level = Math.max(this.levelAt(x, y), this.levelAt(nx, ny))
+    return level * LEVEL_HEIGHT + WALLS[kind].height
+  }
+
+  /** Is one edge passable? `observerFloorY` names the eye floor for sight, or `null` for a body. */
+  private edgeOpen(x: number, y: number, side: Side, observerFloorY: number | null): boolean {
+    const kind = this.wallAt(x, y, side)
+    if (observerFloorY === null) return kind === WallKind.None
+    const top = this.wallTop(x, y, side)
+    return !wallHidesSight(kind, top, observerFloorY)
   }
 
   /**
@@ -237,23 +258,22 @@ export class Grid {
    * other route open, while a wall running straight through it — or one
    * wrapping the far tile — closes both.
    *
-   * `forSight` selects what counts as a barrier, which is how one piece of
-   * geometry answers both for a body and for a line of sight.
+   * `observerFloorY` selects what counts as a barrier: `null` for a body, or
+   * the eye's floor height in metres for a line of sight.
    */
-  cornerClosed(from: Tile, to: Tile, forSight: boolean): boolean {
+  cornerClosed(from: Tile, to: Tile, observerFloorY: number | null): boolean {
     const sideX = to.x > from.x ? Side.East : Side.West
     const sideY = to.y > from.y ? Side.South : Side.North
 
     const viaX =
-      this.edgeOpen(from.x, from.y, sideX, forSight) &&
-      this.edgeOpen(to.x, from.y, sideY, forSight)
+      this.edgeOpen(from.x, from.y, sideX, observerFloorY) &&
+      this.edgeOpen(to.x, from.y, sideY, observerFloorY)
     const viaY =
-      this.edgeOpen(from.x, from.y, sideY, forSight) &&
-      this.edgeOpen(from.x, to.y, sideX, forSight)
+      this.edgeOpen(from.x, from.y, sideY, observerFloorY) &&
+      this.edgeOpen(from.x, to.y, sideX, observerFloorY)
 
     return !viaX && !viaY
   }
-
   index(x: number, y: number): number {
     return y * this.size + x
   }
@@ -348,8 +368,18 @@ export class Grid {
    * tile is tall enough to block a view, so there is no per-tile answer left
    * to give.
    */
-  blocksSightBetween(a: Tile, b: Tile): boolean {
-    return WALLS[this.wallBetween(a, b)].blocksSight
+  /**
+   * Does the wall between two adjacent tiles stop a line of sight ray?
+   *
+   * Evaluated relative to `observerFloorY` in metres: a wall whose top sits
+   * at or below the observer's feet does not block their view.
+   */
+  blocksSightBetween(a: Tile, b: Tile, observerFloorY = 0): boolean {
+    const side = faceToward(a, b)
+    if (side === 0) return false
+    const kind = this.wallAt(a.x, a.y, side)
+    if (kind === WallKind.None) return false
+    return wallHidesSight(kind, this.wallTop(a.x, a.y, side), observerFloorY)
   }
 
   // -------------------------------------------------------------------------
@@ -455,7 +485,7 @@ export class Grid {
       // A diagonal cuts a corner rather than crossing a face, so it is allowed
       // as long as a unit could have walked round that corner one way or the
       // other.
-      if (this.cornerClosed(from, to, false)) return false
+      if (this.cornerClosed(from, to, null)) return false
     }
 
     const fromBlock = this.blockAt(from.x, from.y)

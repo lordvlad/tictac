@@ -154,11 +154,12 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
     if (buildings.some((b) => rectsOverlap(rect, b, 1))) continue
 
     const side = horizontal ? Side.North : Side.West
+    const kind = rng.chance(0.35) ? WallKind.Parapet : WallKind.Solid
     for (let step = 0; step < length; step++) {
       const tx = horizontal ? x + step : x
       const ty = horizontal ? y : y + step
       if (reserved.has(grid.index(tx, ty))) continue
-      grid.setWall(tx, ty, side, WallKind.Solid)
+      grid.setWall(tx, ty, side, kind)
     }
   }
 
@@ -256,12 +257,19 @@ function carveBuilding(grid: Grid, rng: Rng, rect: Rect): void {
     }
   }
 
-  // A little interior clutter so buildings are not empty boxes.
-  if (w > 4 && h > 4 && rng.chance(0.6)) {
-    grid.setBlock(x + rng.int(1, w - 2), y + rng.int(1, h - 2), Block.Half)
+  // A little interior clutter (crates or low partition walls) so buildings are not empty.
+  if (w > 4 && h > 4) {
+    if (rng.chance(0.4)) {
+      grid.setBlock(x + rng.int(1, w - 2), y + rng.int(1, h - 2), Block.Half)
+    }
+    if (w > 5 && h > 5 && rng.chance(0.4)) {
+      // Low interior partition wall
+      const partX = x + Math.floor(w / 2)
+      const partY = y + rng.int(1, h - 2)
+      grid.setWall(partX, partY, Side.North, WallKind.Parapet)
+    }
   }
 }
-
 /**
  * Reduce the map to a single region a unit can actually walk around.
  *

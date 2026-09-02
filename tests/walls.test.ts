@@ -308,3 +308,39 @@ describe('Walls in the ECS', () => {
     expect(wallFrames[0]!.data.kind).toBe(WallKind.None)
   })
 })
+describe('Storey-relative sight and parapets', () => {
+  test('a unit on an upper storey sees over the building wall below its feet and gets Low cover', () => {
+    const grid = new Grid(10)
+    grid.setLevel(5, 5, 1)
+    grid.setWall(5, 5, Side.West, WallKind.Parapet)
+
+    // Sight from roof to ground is open across that wall.
+    expect(hasLineOfSight(grid, { x: 5, y: 5 }, { x: 4, y: 5 })).toBe(true)
+
+    // Cover for the unit on the roof looking outward over the wall is Low (parapet-like), not Tall.
+    expect(coverLevelInDir(grid, { x: 5, y: 5 }, -1, 0)).toBe(CoverLevel.Low)
+
+    // But for a ground unit looking up, the 2m wall is above eye level and gives Tall cover to the roof unit against ground shots.
+    expect(coverLevelInDir(grid, { x: 4, y: 5 }, 1, 0)).toBe(CoverLevel.Tall)
+  })
+
+  test('parapets give Low cover and do not block line of sight', () => {
+    const grid = new Grid(10)
+    grid.setWall(4, 4, Side.East, WallKind.Parapet)
+
+    expect(grid.canTraverse({ x: 4, y: 4 }, { x: 5, y: 4 })).toBe(false)
+    expect(hasLineOfSight(grid, { x: 4, y: 4 }, { x: 5, y: 4 })).toBe(true)
+    expect(coverLevelInDir(grid, { x: 4, y: 4 }, 1, 0)).toBe(CoverLevel.Low)
+  })
+
+  test('generated maps contain parapets', () => {
+    let parapetFound = false
+    for (const seed of [1, 42, 100, 1337]) {
+      const { grid } = generateMap(seed)
+      grid.forEachWall((_x, _y, _s, kind) => {
+        if (kind === WallKind.Parapet) parapetFound = true
+      })
+    }
+    expect(parapetFound).toBe(true)
+  })
+})

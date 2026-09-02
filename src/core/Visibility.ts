@@ -1,4 +1,4 @@
-import { RULES } from '../config'
+import { LEVEL_HEIGHT, RULES } from '../config'
 import { ORTHOGONAL, type Grid, type Tile } from './Grid'
 
 /**
@@ -49,6 +49,7 @@ export function hasLineOfSight(grid: Grid, from: Tile, to: Tile): boolean {
   let y = from.y
   if (x === to.x && y === to.y) return true
 
+  const observerFloorY = grid.levelAt(from.x, from.y) * LEVEL_HEIGHT
   const spanX = Math.abs(to.x - from.x)
   const spanY = Math.abs(to.y - from.y)
   const stepX = Math.sign(to.x - from.x)
@@ -68,17 +69,17 @@ export function hasLineOfSight(grid: Grid, from: Tile, to: Tile): boolean {
     const dueY = y === to.y ? Infinity : nextY
 
     if (Math.abs(dueX - dueY) < 1e-9) {
-      if (grid.cornerClosed({ x, y }, { x: x + stepX, y: y + stepY }, true)) return false
+      if (grid.cornerClosed({ x, y }, { x: x + stepX, y: y + stepY }, observerFloorY)) return false
       x += stepX
       y += stepY
       nextX += strideX
       nextY += strideY
     } else if (dueX < dueY) {
-      if (grid.blocksSightBetween({ x, y }, { x: x + stepX, y })) return false
+      if (grid.blocksSightBetween({ x, y }, { x: x + stepX, y }, observerFloorY)) return false
       x += stepX
       nextX += strideX
     } else {
-      if (grid.blocksSightBetween({ x, y }, { x, y: y + stepY })) return false
+      if (grid.blocksSightBetween({ x, y }, { x, y: y + stepY }, observerFloorY)) return false
       y += stepY
       nextY += strideY
     }

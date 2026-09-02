@@ -396,7 +396,7 @@ export class Blocks {
       const [dx, dz] = FACE_OFFSET[inst.side!]!
       const neighbour = { x: inst.x + dx, y: inst.y + dz }
       // A wall stands on the lower of the two floors it divides.
-      const level = Math.min(
+      const level = Math.max(
         this.grid.levelAt(inst.x, inst.y),
         this.grid.levelAt(neighbour.x, neighbour.y),
       )
@@ -665,7 +665,7 @@ export class Blocks {
       let instLevel = this.grid.levelAt(inst.x, inst.y)
       if (inst.side !== undefined) {
         const [dx, dz] = FACE_OFFSET[inst.side]!
-        instLevel = Math.min(instLevel, this.grid.levelAt(inst.x + dx, inst.y + dz))
+        instLevel = Math.max(instLevel, this.grid.levelAt(inst.x + dx, inst.y + dz))
       }
 
       let levelOpacity = 1.0
