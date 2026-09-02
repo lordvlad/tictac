@@ -62,5 +62,6 @@ export const RpcMethods = {
   toggleCover: 'tictac/system/combat/toggleCover',
   endUnitTurn: 'tictac/system/turn/endUnitTurn',
   endTurn: 'tictac/system/turn/endTurn',
+  useItem: 'tictac/system/items/useItem',
   rightClickFacing: 'tictac/system/render/rightClickFacing',
 } as const satisfies Record<NetworkMessage['type'], string>

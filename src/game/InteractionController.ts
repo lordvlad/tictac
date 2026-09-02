@@ -1,7 +1,7 @@
 import { NetworkManager, type NetworkMessage } from './NetworkManager'
-import { Raycaster, Vector2 } from 'three'
+import { Raycaster, Vector2, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
-import { Faction } from '../config'
+import { CAM, Faction } from '../config'
 import { clientToNdc } from '../core/screen'
 import type { Tile } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
@@ -23,7 +23,8 @@ import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
-import { MovementSystem, CombatSystem, TurnSystem, RenderSystem } from '../ecs/systems'
+import { MovementSystem, CombatSystem, ItemSystem, RenderSystem } from '../ecs/systems'
+import type { ItemId } from '../core/Items'
 
 /**
  * Routes player input to the subsystem that owns the decision, and keeps the
@@ -44,7 +45,7 @@ export class InteractionController {
   private readonly effects: Effects
   readonly movementSystem: MovementSystem
   readonly combatSystem: CombatSystem
-  readonly turnSystem: TurnSystem
+  readonly itemSystem: ItemSystem
   readonly renderSystem: RenderSystem
   // Hover state (mouse only — touch has no hover phase).
   private hoveredTile: Tile | null = null
@@ -53,6 +54,10 @@ export class InteractionController {
   private readonly raycaster = new Raycaster()
   private readonly picker: GroundPicker
   private readonly ndc = new Vector2()
+  /** The player asked for unit view. Aiming borrows the same camera on its own. */
+  private unitViewRequested = false
+  /** Scratch aim point for the shoulder camera, to avoid a per-frame allocation. */
+  private readonly aimPoint = new Vector3()
   /** Where the right button went down, to tell a facing click from an orbit drag. */
   private readonly rightDownPos = new Vector2()
 
@@ -73,13 +78,21 @@ export class InteractionController {
 
     this.movementSystem = new MovementSystem(battlefield.grid)
     this.combatSystem = new CombatSystem(battlefield.grid, squads, tracers)
-    this.turnSystem = new TurnSystem()
+    this.itemSystem = new ItemSystem()
     this.renderSystem = new RenderSystem()
 
     this.world.addSystem(this.movementSystem)
     this.world.addSystem(this.combatSystem)
-    this.world.addSystem(this.turnSystem)
+    this.world.addSystem(this.itemSystem)
+    this.world.addSystem(turnManager.turns)
     this.world.addSystem(this.renderSystem)
+
+    this.itemSystem.onItemUsed = () => {
+      this.recomputeVisibility()
+      this.renderOverlay()
+      this.refreshHud()
+      this.debug.refresh()
+    }
 
     for (const soldier of squads.soldiers) this.renderSystem.bind(soldier)
 
@@ -195,6 +208,7 @@ export class InteractionController {
               }
             : null,
         grenade: { armed: this.grenade.armed, pending: this.grenade.pending(shooter) },
+        unitViewRequested: this.unitViewRequested,
         networkMode: this.network?.mode ?? 'local',
         myFaction: this.network?.myFaction ?? Faction.Blue,
       }),
@@ -269,22 +283,12 @@ export class InteractionController {
         this.refreshHud()
         break
       }
-      case 'confirmThrow': {
-        const thrower = this.turnManager.selectedSoldier
-        if (thrower) {
-          const throwData = this.grenade.confirm(thrower)
-          if (throwData && this.network && this.network.mode !== 'local') {
-            this.network.send({
-              type: 'throwGrenade',
-              shooterFaction: thrower.faction,
-              shooterIndex: thrower.squadIndex,
-              kind: throwData.kind,
-              targetTile: throwData.targetTile,
-            })
-          }
-        }
+      case 'useItem':
+        this.useItem(intent.itemId)
         break
-      }
+      case 'confirmThrow':
+        this.confirmThrow()
+        break
       case 'cancelGrenade':
         this.grenade.exit()
         this.renderOverlay()
@@ -334,21 +338,16 @@ export class InteractionController {
         this.refreshHud()
         break
       case 'toggleFreelook':
-        if (this.rig.isCharacterViewActive) this.rig.exitCharacterView()
+        this.unitViewRequested = false
+        if (this.rig.isShoulderViewActive) this.rig.exitShoulderView()
         this.rig.toggleFreeLookMode()
         this.refreshHud()
         break
-      case 'toggleUnitView': {
-        const selected = this.turnManager.selectedSoldier
-        if (!selected) break
-        if (this.rig.isCharacterViewActive) {
-          this.rig.exitCharacterView()
-        } else {
-          this.rig.enterCharacterView(selected.position, selected.currentYaw)
-        }
+      case 'toggleUnitView':
+        if (!this.turnManager.selectedSoldier) break
+        this.unitViewRequested = !this.unitViewRequested
         this.refreshHud()
         break
-      }
     }
   }
   handleRemoteNetworkMessage(msg: NetworkMessage): void {
@@ -411,6 +410,13 @@ export class InteractionController {
         if (Math.hypot(dx, dz) > 0.01) soldier.targetYaw = Math.atan2(dx, dz)
         break
       }
+      case 'useItem': {
+        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
+        if (!soldier) break
+        this.itemSystem.use(soldier, msg.itemId, true)
+        this.refreshHud()
+        break
+      }
       case 'init':
         break
     }
@@ -451,6 +457,34 @@ export class InteractionController {
     this.refreshHud()
   }
 
+  /** Throw the armed grenade at the aimed tile, and tell the peer. */
+  confirmThrow(): void {
+    const thrower = this.turnManager.selectedSoldier
+    if (!thrower) return
+    const thrown = this.grenade.confirm(thrower)
+    if (!thrown) return
+    this.network?.send({
+      type: 'throwGrenade',
+      shooterFaction: thrower.faction,
+      shooterIndex: thrower.squadIndex,
+      kind: thrown.kind,
+      targetTile: thrown.targetTile,
+    })
+  }
+
+  /** Use a carried consumable on the selected unit, and tell the peer. */
+  useItem(itemId: ItemId): void {
+    const soldier = this.turnManager.selectedSoldier
+    if (!soldier) return
+    if (!this.itemSystem.use(soldier, itemId)) return
+    this.network?.send({
+      type: 'useItem',
+      faction: soldier.faction,
+      squadIndex: soldier.squadIndex,
+      itemId,
+    })
+  }
+
   /** Hunker into / out of a crouch cover stance. Entering costs AP; standing is free. */
   toggleCover(): void {
     const soldier = this.turnManager.selectedSoldier
@@ -471,7 +505,8 @@ export class InteractionController {
   }
 
   onTurnSwitched(): void {
-    if (this.rig.isCharacterViewActive) this.rig.exitCharacterView()
+    this.unitViewRequested = false
+    if (this.rig.isShoulderViewActive) this.rig.exitShoulderView()
     this.exitShootMode()
     // Statuses and persistent smoke expire on the handover.
     tickStatuses(this.squads.soldiers)
@@ -575,9 +610,12 @@ export class InteractionController {
     const tile = this.tileFromEvent(event)
     if (!tile) return
 
-    // With a grenade armed, a click aims the blast; the panel throws it.
+    // A grenade is armed: the first tap aims the blast, a second tap on the
+    // same tile throws it. Tapping elsewhere re-aims instead of committing, so
+    // a mis-tap costs nothing.
     if (this.grenade.active) {
-      this.grenade.aimAt(tile)
+      if (this.grenade.isAimedAt(tile)) this.confirmThrow()
+      else this.grenade.aimAt(tile)
       this.renderOverlay()
       this.refreshHud()
       return
@@ -695,18 +733,12 @@ export class InteractionController {
     this.effects.update(delta)
     this.planner.update(delta)
 
+    this.updateShoulderCamera()
+
     const selected = this.turnManager.selectedSoldier
-    if (this.rig.isCharacterViewActive) {
-      if (selected && !selected.isDead) {
-        // Hide the selected unit's own mesh in first person so it cannot occlude the camera.
-        if (selected.instance) selected.instance.visible = false
-        this.rig.updateCharacterView(selected.position, selected.currentYaw)
-      } else {
-        this.rig.exitCharacterView()
-      }
-    } else if (selected && !selected.isDead && selected.instance) {
+    if (selected && !selected.isDead && selected.instance) {
       selected.instance.visible = true
-      if (selected.isMoving) this.rig.focusOn(selected.position)
+      if (selected.isMoving && !this.rig.isShoulderViewActive) this.rig.focusOn(selected.position)
     }
 
     this.xray.update(this.engine.camera.position)
@@ -714,5 +746,43 @@ export class InteractionController {
     // One pass at the end: whatever changed this tick — from input, combat,
     // a system or the debug panel — replicates from here and nowhere else.
     this.world.syncDirty()
+  }
+
+  /**
+   * Decide whether the shoulder camera is up this frame, and where it looks.
+   *
+   * Two things ask for it — the unit-view toggle, and lining up a shot — so
+   * the question is answered in one place rather than by enter/exit calls
+   * scattered across the input handlers.
+   */
+  private updateShoulderCamera(): void {
+    const selected = this.turnManager.selectedSoldier
+    const alive = selected !== null && !selected.isDead
+    const aimTarget = this.shoot.active ? this.shoot.selectedTarget : null
+    const wanted = alive && (this.unitViewRequested || aimTarget !== null)
+
+    if (!wanted) {
+      if (this.rig.isShoulderViewActive) this.rig.exitShoulderView()
+      return
+    }
+
+    const shooter = selected!
+    let yaw = shooter.currentYaw
+    let lookAt: Vector3 | undefined
+
+    if (aimTarget) {
+      const dx = aimTarget.position.x - shooter.position.x
+      const dz = aimTarget.position.z - shooter.position.z
+      if (Math.hypot(dx, dz) > 0.01) {
+        // Stand behind the shot line and centre the target's chest in frame.
+        yaw = Math.atan2(dx, dz)
+        lookAt = this.aimPoint
+          .copy(aimTarget.position)
+          .setY(aimTarget.position.y + CAM.shoulderAimHeight)
+      }
+    }
+
+    if (this.rig.isShoulderViewActive) this.rig.updateShoulderView(shooter.position, yaw, lookAt)
+    else this.rig.enterShoulderView(shooter.position, yaw, lookAt)
   }
 }

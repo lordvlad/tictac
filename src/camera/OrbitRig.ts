@@ -1,5 +1,5 @@
 import { Euler, Matrix4, type PerspectiveCamera, Vector2, Vector3 } from 'three'
-import { CAM, EYE_HEIGHT } from '../config'
+import { CAM } from '../config'
 import { clamp, smoothstep } from '../core/math'
 import { clientToNdc } from '../core/screen'
 import { CameraInput, type CameraRigTarget } from './CameraInput'
@@ -52,10 +52,14 @@ export class OrbitRig implements CameraRigTarget {
   private freePitchCurrent = 0
   private freeLookToggleActive = false
 
-  // --- character eye-level view mode ----------------------------------------
-  private isCharacterView = false
-  private readonly eyePositionTarget = new Vector3()
-  private readonly eyePositionCurrent = new Vector3()
+  // --- over-the-shoulder view mode ------------------------------------------
+  private isShoulderView = false
+  /** Where the camera sits: behind, above and to one side of the unit. */
+  private readonly shoulderPosTarget = new Vector3()
+  private readonly shoulderPosCurrent = new Vector3()
+  /** Downward tilt for this shot, on top of the free-look offset. */
+  private shoulderPitchTarget = CAM.shoulderPitch
+  private shoulderPitchCurrent = CAM.shoulderPitch
 
   /** Camera state frozen at pan start, so panning cannot feed back on itself. */
   private readonly panStartFocus = new Vector3()
@@ -148,27 +152,26 @@ export class OrbitRig implements CameraRigTarget {
    * character view sits at ~0 (horizontal). Used by the wall x-ray fade.
    */
   get tilt(): number {
-    const base = this.isCharacterView ? 0 : this.pitchForDistance(this.distCurrent)
+    const base = this.isShoulderView ? this.shoulderPitchCurrent : this.pitchForDistance(this.distCurrent)
     return base - this.freePitchCurrent
   }
 
   /**
-   * Enter first-person / eye-level view for a selected character.
-   * Camera moves to character's eye position looking outward in character's facing direction.
+   * Enter over-the-shoulder view behind a unit.
+   *
+   * The camera sits behind and above the unit looking past it, so the unit
+   * stays on screen — which is the point of the view, and why it is not the
+   * eye-level shot it used to be.
    */
-  enterCharacterView(position: Vector3, yaw: number): void {
-    this.isCharacterView = true
+  enterShoulderView(position: Vector3, yaw: number, lookAt?: Vector3): void {
+    this.isShoulderView = true
     this.freeLookToggleActive = true
 
-    const camYaw = yaw + Math.PI
-    this.eyePositionTarget.set(
-      position.x + Math.sin(yaw) * 0.15,
-      position.y + EYE_HEIGHT,
-      position.z + Math.cos(yaw) * 0.15,
-    )
-    this.eyePositionCurrent.copy(this.camera.position) // Smooth transition from current camera location
-    this.azimuthTarget = camYaw
-    this.azimuthCurrent = camYaw
+    this.aimShoulderView(position, yaw, lookAt)
+    // Ease in from wherever the tactical camera happened to be.
+    this.shoulderPosCurrent.copy(this.camera.position)
+    this.azimuthCurrent = this.azimuthTarget
+    this.shoulderPitchCurrent = this.shoulderPitchTarget
     this.freeYawTarget = 0
     this.freeYawCurrent = 0
     this.freePitchTarget = 0
@@ -176,37 +179,65 @@ export class OrbitRig implements CameraRigTarget {
   }
 
   /**
-   * Exit character view and return camera to tactical orbit view.
-   * Resets free yaw/pitch, azimuth rotation, zoom distance, and tilt back to arc defaults.
+   * Exit shoulder view and return the camera to the tactical orbit.
+   * Resets free yaw/pitch, azimuth, zoom distance and tilt to arc defaults.
    */
-  exitCharacterView(): void {
-    this.isCharacterView = false
+  exitShoulderView(): void {
+    this.isShoulderView = false
     this.freeLookToggleActive = false
     this.resetFreeLook()
     this.azimuthTarget = CAM.azimuthStart
     this.distTarget = CAM.distStart
-    this.focusTarget.set(this.eyePositionTarget.x, 0, this.eyePositionTarget.z)
+    this.focusTarget.set(this.shoulderPosTarget.x, 0, this.shoulderPosTarget.z)
     this.clampFocus(this.focusTarget)
   }
 
-  updateCharacterView(position: Vector3, yaw: number): void {
-    if (!this.isCharacterView) return
-    this.eyePositionTarget.set(
-      position.x + Math.sin(yaw) * 0.15,
-      position.y + EYE_HEIGHT,
-      position.z + Math.cos(yaw) * 0.15,
-    )
-    this.azimuthTarget = yaw + Math.PI
+  /**
+   * Re-aim the shoulder camera.
+   *
+   * `lookAt` centres a specific point in frame — used when lining up a shot,
+   * so the target sits under the middle of the screen despite the camera
+   * being offset to one side. Without it the camera looks along `yaw`.
+   */
+  updateShoulderView(position: Vector3, yaw: number, lookAt?: Vector3): void {
+    if (!this.isShoulderView) return
+    this.aimShoulderView(position, yaw, lookAt)
   }
 
-  get isCharacterViewActive(): boolean {
-    return this.isCharacterView
+  private aimShoulderView(position: Vector3, yaw: number, lookAt?: Vector3): void {
+    // Forward is (sin, cos) to match the yaw convention units are rotated by.
+    const forwardX = Math.sin(yaw)
+    const forwardZ = Math.cos(yaw)
+    this.shoulderPosTarget.set(
+      position.x - forwardX * CAM.shoulderBack + forwardZ * CAM.shoulderSide,
+      position.y + CAM.shoulderHeight,
+      position.z - forwardZ * CAM.shoulderBack - forwardX * CAM.shoulderSide,
+    )
+
+    if (!lookAt) {
+      this.azimuthTarget = yaw + Math.PI
+      this.shoulderPitchTarget = CAM.shoulderPitch
+      return
+    }
+
+    // Aim from where the camera will be, not from the unit, or the side
+    // offset would push the target off centre by however far away it is.
+    const dx = lookAt.x - this.shoulderPosTarget.x
+    const dy = this.shoulderPosTarget.y - lookAt.y
+    const dz = lookAt.z - this.shoulderPosTarget.z
+    const flat = Math.hypot(dx, dz)
+    this.azimuthTarget = Math.atan2(dx, dz) + Math.PI
+    this.shoulderPitchTarget = flat > 0.001 ? Math.atan2(dy, flat) : CAM.shoulderPitch
+  }
+
+  get isShoulderViewActive(): boolean {
+    return this.isShoulderView
   }
 
   /** Toggle or set explicit freelook mode (for mobile / laptops without 3rd mouse button). */
   setFreeLookMode(active: boolean): void {
-    if (!active && this.isCharacterView) {
-      this.exitCharacterView()
+    if (!active && this.isShoulderView) {
+      this.exitShoulderView()
       return
     }
     this.freeLookToggleActive = active
@@ -224,7 +255,7 @@ export class OrbitRig implements CameraRigTarget {
   }
 
   get isFreeLookActive(): boolean {
-    return this.freeLookToggleActive || this.isCharacterView
+    return this.freeLookToggleActive || this.isShoulderView
   }
 
   // ===========================================================================
@@ -235,8 +266,8 @@ export class OrbitRig implements CameraRigTarget {
     return this.freeLookToggleActive
   }
 
-  get characterView(): boolean {
-    return this.isCharacterView
+  get shoulderView(): boolean {
+    return this.isShoulderView
   }
 
   get zoom(): number {
@@ -256,8 +287,8 @@ export class OrbitRig implements CameraRigTarget {
   }
 
   freeLookBy(dxPixels: number, dyPixels: number): void {
-    const yawLimit = this.isCharacterView ? Math.PI : CAM.freeYawLimit
-    const pitchLimit = this.isCharacterView ? (82 * Math.PI) / 180 : CAM.freePitchLimit
+    const yawLimit = this.isShoulderView ? Math.PI : CAM.freeYawLimit
+    const pitchLimit = this.isShoulderView ? (82 * Math.PI) / 180 : CAM.freePitchLimit
 
     this.freeYawTarget = clamp(
       this.freeYawTarget - dxPixels * CAM.freeLookSpeed,
@@ -396,12 +427,13 @@ export class OrbitRig implements CameraRigTarget {
       this.shakeOffset.set(0, 0, 0)
     }
 
-    if (this.isCharacterView) {
-      this.eyePositionCurrent.lerp(this.eyePositionTarget, k)
+    if (this.isShoulderView) {
+      this.shoulderPosCurrent.lerp(this.shoulderPosTarget, k)
       this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k
+      this.shoulderPitchCurrent += (this.shoulderPitchTarget - this.shoulderPitchCurrent) * k
       this.freeYawCurrent += (this.freeYawTarget - this.freeYawCurrent) * k
       this.freePitchCurrent += (this.freePitchTarget - this.freePitchCurrent) * k
-      this.focusCurrent.set(this.eyePositionCurrent.x, 0, this.eyePositionCurrent.z)
+      this.focusCurrent.set(this.shoulderPosCurrent.x, 0, this.shoulderPosCurrent.z)
     } else {
       this.applyEdgePan(delta)
       this.focusCurrent.lerp(this.focusTarget, k)
@@ -424,10 +456,15 @@ export class OrbitRig implements CameraRigTarget {
   }
 
   private applyTransform(): void {
-    if (this.isCharacterView) {
-      this.camera.position.copy(this.eyePositionCurrent).add(this.shakeOffset)
-      // Horizontal level look, plus whatever free-look offset is applied.
-      this.euler.set(this.freePitchCurrent, this.azimuthCurrent + this.freeYawCurrent, 0, 'YXZ')
+    if (this.isShoulderView) {
+      this.camera.position.copy(this.shoulderPosCurrent).add(this.shakeOffset)
+      // Tilted down over the unit's head, plus any free-look offset.
+      this.euler.set(
+        -this.shoulderPitchCurrent + this.freePitchCurrent,
+        this.azimuthCurrent + this.freeYawCurrent,
+        0,
+        'YXZ',
+      )
       this.camera.quaternion.setFromEuler(this.euler)
       this.camera.updateMatrixWorld()
       return

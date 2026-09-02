@@ -1,5 +1,6 @@
 import { FACTION_INFO, Faction, RULES } from '../config'
 import { GrenadeId, ShotMode } from '../core/Arsenal'
+import { ITEMS, ItemId } from '../core/Items'
 import { effectiveWeapon } from '../core/Ballistics'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
@@ -20,6 +21,7 @@ export type HudIntent =
   | { type: 'fireShot'; mode: ShotMode }
   | { type: 'reload' }
   | { type: 'armGrenade'; kind: GrenadeId }
+  | { type: 'useItem'; itemId: ItemId }
   | { type: 'confirmThrow' }
   | { type: 'cancelGrenade' }
   | { type: 'toggleCover' }
@@ -132,6 +134,7 @@ export interface HudModel {
   throwPanel: HudThrowPanel | null
   freelookActive: boolean
   unitViewActive: boolean
+  waypointActive: boolean
   unitViewEnabled: boolean
   nextFactionName: string
 }
@@ -149,6 +152,8 @@ export interface HudModelSources {
   /** The armed grenade and its aimed blast, when one is armed. */
   grenade: { armed: GrenadeId | null; pending: PendingThrow | null }
   networkMode?: string
+  /** The player's unit-view toggle. Aiming moves the camera without setting it. */
+  unitViewRequested: boolean
   myFaction?: Faction
 }
 
@@ -183,7 +188,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     hp: soldier.hp,
     maxHp: soldier.maxHp,
     ap: soldier.ap,
-    maxAp: soldier.maxAp,
+    maxAp: soldier.effectiveMaxAp,
     armor: soldier.armor,
     maxArmor: soldier.maxArmor,
     portrait: portraits.getPortrait(displayFaction, index),
@@ -210,14 +215,6 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       disabled: !selected.isCrouching && selected.ap < RULES.coverApCost,
       intent: { type: 'toggleCover' },
     })
-    actions.push({
-      id: 'waypoints',
-      label: 'Waypoints',
-      tag: waypointActive ? 'On' : 'Off',
-      active: waypointActive,
-      disabled: false,
-      intent: { type: 'toggleWaypoints' },
-    })
     for (const kind of Object.values(GrenadeId)) {
       const spec = selected.grenadeSpecs[kind]
       const count = selected.grenades[kind] ?? 0
@@ -228,6 +225,18 @@ export function buildHudModel(sources: HudModelSources): HudModel {
         active: sources.grenade.armed === kind,
         disabled: count <= 0 || selected.ap < spec.apCost,
         intent: { type: 'armGrenade', kind },
+      })
+    }
+    for (const id of Object.values(ItemId)) {
+      const spec = ITEMS[id]
+      const count = selected.items[id] ?? 0
+      actions.push({
+        id: `item-${id}`,
+        label: spec.name,
+        tag: count > 0 ? `${spec.apCost} AP · x${count}` : 'none left',
+        active: false,
+        disabled: count <= 0 || selected.ap < spec.apCost,
+        intent: { type: 'useItem', itemId: id },
       })
     }
     actions.push({
@@ -295,8 +304,9 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     targets,
     shotPanel: shoot?.pending ? shotPanelOf(shoot.pending) : null,
     throwPanel: sources.grenade.pending ? throwPanelOf(sources.grenade.pending) : null,
-    freelookActive: rig.isFreeLookActive && !rig.isCharacterViewActive,
-    unitViewActive: rig.isCharacterViewActive,
+    freelookActive: rig.isFreeLookActive && !rig.isShoulderViewActive,
+    unitViewActive: sources.unitViewRequested,
+    waypointActive,
     unitViewEnabled: selected !== null,
     nextFactionName: FACTION_INFO[nextFaction].name,
   }

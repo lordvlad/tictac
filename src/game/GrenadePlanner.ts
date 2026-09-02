@@ -1,6 +1,6 @@
 import { type GrenadeId, STATUSES } from '../core/Arsenal'
 import { blastFalloff, grenadeDamageAt } from '../core/Ballistics'
-import type { Grid, Tile } from '../core/Grid'
+import { type Grid, type Tile, tileEquals } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import { DamageIndicators } from '../render/DamageIndicators'
 import type { Ground } from '../render/Ground'
@@ -9,7 +9,6 @@ import type { CombatSystem } from '../ecs/systems/CombatSystem'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
 import { FX } from '../config'
-import { Vector3 } from 'three'
 
 const BLAST_TINT = 0xff9a3c
 const BLAST_CENTRE = 0xffd166
@@ -84,6 +83,15 @@ export class GrenadePlanner {
 
   aimAt(tile: Tile): void {
     if (this.kind) this.aim = { ...tile }
+  }
+
+  /**
+   * True when `tile` is already the aimed tile, so a second tap on it means
+   * "throw" rather than "re-aim" — the same tap-to-target, tap-again-to-commit
+   * contract movement uses.
+   */
+  isAimedAt(tile: Tile): boolean {
+    return this.aim !== null && tileEquals(this.aim, tile)
   }
 
   /** The throw currently lined up, or null when nothing is aimed yet. */

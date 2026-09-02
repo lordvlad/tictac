@@ -16,6 +16,7 @@ import './game.css'
 import { NetworkManager } from './game/NetworkManager'
 import { World } from './ecs/World'
 import { createGlobalRules } from './ecs/globals'
+import { TurnSystem } from './ecs/systems'
 
 const baseUrl = new URL('./', document.baseURI).href
 
@@ -181,11 +182,11 @@ function start(seed: number, seedLabel: string, network: NetworkManager): void {
 
   const portraits = new OffscreenPortraits(engine)
   const tracers = new Tracers(engine)
-  const turnManager = new TurnManager(squads, rig)
+  const turnSystem = new TurnSystem()
+  const turnManager = new TurnManager(world, turnSystem, squads, rig)
 
   // Declare controller before hud so hud handler can reference it
   let controller!: InteractionController
-
   const hud = new Hud((intent) => {
     controller.handleIntent(intent)
   })

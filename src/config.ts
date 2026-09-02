@@ -76,6 +76,18 @@ export const CAM = {
   edgePanMargin: 24,
   /** Edge-pan speed as a fraction of the zoom distance travelled per second at full push. */
   edgePanSpeed: 0.5,
+
+  // --- over-the-shoulder view (unit view, and shot aiming) -----------------
+  /** How far behind the unit the camera sits, in metres. */
+  shoulderBack: 3.4,
+  /** Camera height above the unit's feet — above the head, looking over it. */
+  shoulderHeight: 2.35,
+  /** Sideways offset, so the unit sits off-centre and does not mask the target. */
+  shoulderSide: 0.9,
+  /** Downward tilt of the shoulder camera. */
+  shoulderPitch: (12 * Math.PI) / 180,
+  /** Height above the target's feet the aim camera points at. */
+  shoulderAimHeight: 1.2,
 } as const
 
 // ---------------------------------------------------------------------------

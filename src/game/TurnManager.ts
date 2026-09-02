@@ -1,32 +1,41 @@
-import { Faction, RULES } from '../config'
+import type { Faction } from '../config'
 import type { Soldier } from '../entities/Soldier'
 import type { Squads } from './Squads'
 import type { OrbitRig } from '../camera/OrbitRig'
+import type { World } from '../ecs/World'
+import type { TurnSystem } from '../ecs/systems/TurnSystem'
 
+/**
+ * Whose unit the player is commanding, and where the camera is pointed.
+ *
+ * The turn's *rules* — active faction, round number, action-point
+ * replenishment — belong to {@link TurnSystem}, and are read through it rather
+ * than tracked again here. Two copies of "how much AP does a new turn grant"
+ * is how the two drift apart.
+ */
 export class TurnManager {
-  activeFaction: Faction = Faction.Blue
-  turnNumber = 1
   selectedSoldier: Soldier | null = null
 
   onSelectionChanged?: (soldier: Soldier | null) => void
 
-  private readonly squads: Squads
-  private readonly rig: OrbitRig
+  constructor(
+    private readonly world: World,
+    readonly turns: TurnSystem,
+    private readonly squads: Squads,
+    private readonly rig: OrbitRig,
+  ) {}
 
-  constructor(squads: Squads, rig: OrbitRig) {
-    this.squads = squads
-    this.rig = rig
-    // Scene starts with no character selected
-    this.selectedSoldier = null
+  get activeFaction(): Faction {
+    return this.turns.activeFaction
+  }
+
+  get turnNumber(): number {
+    return this.turns.turnNumber
   }
 
   autoSelectFirst(): void {
     const living = this.squads.getLiving(this.activeFaction)
-    if (living.length > 0) {
-      this.selectSoldier(living[0]!)
-    } else {
-      this.selectSoldier(null)
-    }
+    this.selectSoldier(living.length > 0 ? living[0]! : null)
   }
 
   selectSoldier(soldier: Soldier | null): void {
@@ -38,25 +47,18 @@ export class TurnManager {
     this.onSelectionChanged?.(soldier)
   }
 
+  /** Spend the unit's remaining AP and move on to one that still has some. */
   finishSoldierTurn(soldier: Soldier): void {
-    soldier.ap = 0
-    const living = this.squads.getLiving(this.activeFaction)
-    const next = living.find((s) => s.ap > 0)
+    this.turns.endUnitTurn(this.world, soldier.entityId)
+    const next = this.squads.getLiving(this.activeFaction).find((s) => s.ap > 0)
     if (next) {
       this.selectSoldier(next)
     }
   }
 
+  /** Hand over to the other faction, replenishing whoever is up next. */
   startNextTurn(): void {
-    this.activeFaction = this.activeFaction === Faction.Blue ? Faction.Red : Faction.Blue
-    if (this.activeFaction === Faction.Blue) {
-      this.turnNumber++
-    }
-
-    for (const soldier of this.squads.getLiving(this.activeFaction)) {
-      soldier.ap = soldier.maxAp
-    }
-
+    this.turns.endTurn(this.world)
     // Start turn with no character selected
     this.selectedSoldier = null
   }

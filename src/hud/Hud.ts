@@ -150,6 +150,13 @@ export class Hud {
         intent: { type: 'toggleUnitView' },
       },
       {
+        label: '⛳ Waypoints',
+        title: 'Plan a multi-leg route, one tap per leg',
+        classes: model.waypointActive ? 'active' : '',
+        disabled: false,
+        intent: { type: 'toggleWaypoints' },
+      },
+      {
         label: 'End Turn ⏭',
         title: isMyTurn ? 'Hand over to the other faction' : "Opponent's Turn",
         classes: isMyTurn ? 'hud-btn-danger' : '',

@@ -19,7 +19,6 @@ export interface CameraRigTarget {
   readonly enabled: boolean
   /** Free-look toggle (mobile / no middle mouse button). */
   readonly freeLookMode: boolean
-  readonly characterView: boolean
   /** Orbit distance the camera is easing towards. */
   zoom: number
   /** Orbit azimuth the camera is easing towards, in radians. */

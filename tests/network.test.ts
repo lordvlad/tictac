@@ -66,6 +66,7 @@ describe('JSON-RPC framing', () => {
       'endUnitTurn',
       'endTurn',
       'rightClickFacing',
+      'useItem',
     ]
     for (const type of types) expect(RpcMethods[type]).toBeTruthy()
     expect(new Set(Object.values(RpcMethods)).size).toBe(types.length)

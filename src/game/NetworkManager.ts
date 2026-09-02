@@ -1,6 +1,7 @@
 import { Peer, DataConnection } from 'peerjs'
 import { Faction } from '../config'
 import type { GrenadeId, ShotMode } from '../core/Arsenal'
+import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
 import {
   type JsonRpcFrame,
@@ -29,6 +30,7 @@ export type NetworkMessage =
   | { type: 'reload'; faction: Faction; squadIndex: number }
   | { type: 'toggleCover'; faction: Faction; squadIndex: number }
   | { type: 'endUnitTurn'; faction: Faction; squadIndex: number }
+  | { type: 'useItem'; faction: Faction; squadIndex: number; itemId: ItemId }
   | { type: 'endTurn'; faction: Faction }
   | { type: 'rightClickFacing'; faction: Faction; squadIndex: number; x: number; z: number }
 

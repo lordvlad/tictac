@@ -1,5 +1,6 @@
 import { RULES, AIM, COVER } from '../config'
 import { AMMO, AmmoId, GrenadeId, STATUSES, WEAPONS, WeaponId } from '../core/Arsenal'
+import { ITEMS, ItemId } from '../core/Items'
 import type { Soldier } from '../entities/Soldier'
 
 /** A group of live values the panel can edit. */
@@ -163,6 +164,21 @@ export class DebugPanel {
         </label>`,
           )
           .join('')}
+        <div class="debug-group-title" style="margin-top: 6px;">Items carried</div>
+        ${Object.values(ItemId)
+          .map(
+            (id) => `
+        <label class="debug-row">
+          <span>${ITEMS[id].name}</span>
+          <span class="debug-stepper">
+            <button data-item-minus="${id}">-</button>
+            <input type="number" step="1" min="0" value="${this.soldier?.items[id] ?? 0}"
+                   data-path="items" data-key="${id}" />
+            <button data-item-plus="${id}">+</button>
+          </span>
+        </label>`,
+          )
+          .join('')}
         <div class="debug-row">
           <span>statuses</span>
           <span class="debug-statuses">
@@ -261,6 +277,8 @@ export class DebugPanel {
         return this.soldier as unknown as Record<string, unknown> | null
       case 'grenades':
         return (this.soldier?.grenades as unknown as Record<string, unknown>) ?? null
+      case 'items':
+        return (this.soldier?.items as unknown as Record<string, unknown>) ?? null
       case 'weapon':
         return (this.soldier?.weapon as unknown as Record<string, unknown>) ?? null
       case 'ammo':
@@ -325,6 +343,18 @@ export class DebugPanel {
       this.soldier.grenades[kind] = next
       const field = this.root.querySelector<HTMLInputElement>(
         `input[data-path="grenades"][data-key="${kind}"]`,
+      )
+      if (field) field.value = String(next)
+      this.onChange()
+      return
+    }
+
+    if (el.dataset.itemPlus || el.dataset.itemMinus) {
+      const id = (el.dataset.itemPlus ?? el.dataset.itemMinus) as ItemId
+      const next = Math.max(0, (this.soldier.items[id] ?? 0) + (el.dataset.itemPlus ? 1 : -1))
+      this.soldier.items[id] = next
+      const field = this.root.querySelector<HTMLInputElement>(
+        `input[data-path="items"][data-key="${id}"]`,
       )
       if (field) field.value = String(next)
       this.onChange()
