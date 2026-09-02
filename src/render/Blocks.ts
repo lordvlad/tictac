@@ -11,7 +11,7 @@ import {
   Object3D,
   type Vector3,
 } from 'three'
-import { TILE } from '../config'
+import { LEVEL_HEIGHT, TILE } from '../config'
 import { Block, blockHeight, type Grid } from '../core/Grid'
 import { markOccludedTiles } from '../core/Occlusion'
 import { VIS_BRIGHTNESS, VisState } from '../core/Visibility'
@@ -27,83 +27,108 @@ const BLOCK_COLORS: Record<Exclude<Block, typeof Block.None>, number> = {
   [Block.Ladder]: 0xff8800, // Distinct orange ladder highlight
 }
 
-function createSteppedStairGeometry(): BufferGeometry {
-  const w = (TILE * 0.98) / 2
-  const h = 2.0 / 2
-  const l = (TILE * 0.98) / 2
-  const steps = 4
-  const stepH = (2 * h) / steps
-  const stepL = (2 * l) / steps
+/**
+ * A flight of steps rising from the low edge (`-Z`) to the high edge (`+Z`).
+ *
+ * Every face is wound counter-clockwise *seen from outside the solid*, so its
+ * normal points away from the volume. Getting a face backwards is invisible
+ * from below and collapses the whole flight into one flat slab from above —
+ * which is the angle the tactical camera actually looks from.
+ */
+export function createSteppedStairGeometry(steps = 4): BufferGeometry {
+  const east = (TILE * 0.98) / 2
+  const west = east * -1
+  const high = LEVEL_HEIGHT / 2
+  const floor = high * -1
+  const back = (TILE * 0.98) / 2
+  const front = back * -1
+  const stepH = LEVEL_HEIGHT / steps
+  const stepL = (back * 2) / steps
 
   const pos: number[] = []
 
-  // Generate 4 steps (treads and risers)
-  for (let i = 0; i < steps; i++) {
-    const zStart = +-l + i * stepL
-    const zEnd = zStart + stepL
-    const yBottom = +-h + i * stepH
-    const yTop = yBottom + stepH
+  /** Two triangles for a planar quad, wound a to d as seen from outside. */
+  const quad = (
+    ax: number, ay: number, az: number,
+    bx: number, by: number, bz: number,
+    cx: number, cy: number, cz: number,
+    dx: number, dy: number, dz: number,
+  ): void => {
+    pos.push(ax, ay, az, bx, by, bz, cx, cy, cz)
+    pos.push(ax, ay, az, cx, cy, cz, dx, dy, dz)
+  }
 
-    // Riser (vertical face at zStart)
-    pos.push(
-      +-w, yBottom, zStart,   w, yBottom, zStart,   w, yTop, zStart,
-      +-w, yBottom, zStart,   w, yTop, zStart,    +-w, yTop, zStart
+  for (let i = 0; i < steps; i++) {
+    const zFront = front + i * stepL
+    const zBack = zFront + stepL
+    const yFoot = floor + i * stepH
+    const yTread = yFoot + stepH
+
+    // Riser, facing the approach (-Z).
+    quad(
+      east, yFoot, zFront,
+      west, yFoot, zFront,
+      west, yTread, zFront,
+      east, yTread, zFront,
     )
 
-    // Tread (horizontal face at yTop)
-    pos.push(
-      +-w, yTop, zStart,   w, yTop, zStart,   w, yTop, zEnd,
-      +-w, yTop, zStart,   w, yTop, zEnd,    +-w, yTop, zEnd
+    // Tread, the walkable surface (+Y).
+    quad(
+      west, yTread, zBack,
+      east, yTread, zBack,
+      east, yTread, zFront,
+      west, yTread, zFront,
+    )
+
+    // Side skirts down to the floor (-X and +X).
+    quad(
+      west, floor, zFront,
+      west, floor, zBack,
+      west, yTread, zBack,
+      west, yTread, zFront,
+    )
+    quad(
+      east, floor, zBack,
+      east, floor, zFront,
+      east, yTread, zFront,
+      east, yTread, zBack,
     )
   }
 
-  // Back wall (at z = +l, from y = -h to +h)
-  pos.push(
-    w, +-h, l,   +-w, +-h, l,   +-w, h, l,
-    w, +-h, l,   +-w, h, l,     w, h, l
+  // Back wall under the top landing (+Z).
+  quad(
+    west, floor, back,
+    east, floor, back,
+    east, high, back,
+    west, high, back,
   )
 
-  // Bottom base (at y = -h, from z = -l to +l)
-  pos.push(
-    +-w, +-h, +-l,   w, +-h, +-l,   w, +-h, l,
-    +-w, +-h, +-l,   w, +-h, l,   +-w, +-h, l
+  // Underside (-Y).
+  quad(
+    west, floor, front,
+    east, floor, front,
+    east, floor, back,
+    west, floor, back,
   )
-
-  // West side wall (-w)
-  for (let i = 0; i < steps; i++) {
-    const zStart = +-l + i * stepL
-    const zEnd = zStart + stepL
-    const yTop = +-h + (i + 1) * stepH
-    pos.push(
-      +-w, +-h, zStart,  +-w, +-h, zEnd,  +-w, yTop, zEnd,
-      +-w, +-h, zStart,  +-w, yTop, zEnd, +-w, yTop, zStart
-    )
-  }
-
-  // East side wall (+w)
-  for (let i = 0; i < steps; i++) {
-    const zStart = +-l + i * stepL
-    const zEnd = zStart + stepL
-    const yTop = +-h + (i + 1) * stepH
-    pos.push(
-      w, +-h, zEnd,  w, +-h, zStart,  w, yTop, zStart,
-      w, +-h, zEnd,  w, yTop, zStart,  w, yTop, zEnd
-    )
-  }
 
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(pos, 3))
   geometry.computeVertexNormals()
   return geometry
 }
-function createLadderWallGeometry(): BufferGeometry {
+/**
+ * A climbable ladder: two rails and their rungs, standing in the plane of the
+ * wall it is bolted to rather than filling the tile. A ladder is the vertical
+ * link between two floors, not a floor of its own.
+ */
+export function createLadderWallGeometry(rungs = 5): BufferGeometry {
   const railW = 0.05
-  const railH = 2.0
+  const railH = LEVEL_HEIGHT
   const railD = 0.08
-  const rungW = 0.51
+  const railOffsetX = 0.28
+  const rungW = railOffsetX * 2 - railW
   const rungH = 0.04
   const rungD = 0.05
-  const rungs = 5
 
   const pos: number[] = []
 
@@ -127,15 +152,13 @@ function createLadderWallGeometry(): BufferGeometry {
     pos.push(x0, y0, z0,  x1, y0, z0,  x1, y0, z1,   x0, y0, z0,  x1, y0, z1,  x0, y0, z1)
   }
 
-  // Left rail
-  addBox(-0.28, 0, 0, railW, railH, railD)
-  // Right rail
-  addBox(0.28, 0, 0, railW, railH, railD)
+  addBox(railOffsetX * -1, 0, 0, railW, railH, railD)
+  addBox(railOffsetX, 0, 0, railW, railH, railD)
 
-  // 5 horizontal rungs
+  // Rungs spaced evenly between the rail ends.
+  const spacing = railH / (rungs + 1)
   for (let i = 0; i < rungs; i++) {
-    const ry = -0.8 + i * 0.4
-    addBox(0, ry, 0, rungW, rungH, rungD)
+    addBox(0, railH / -2 + spacing * (i + 1), 0, rungW, rungH, rungD)
   }
 
   const geometry = new BufferGeometry()
@@ -211,7 +234,7 @@ export class Blocks {
   }
 
   private buildLayer(kind: Exclude<Block, typeof Block.None>, instances: BlockInstance[]): BlockLayer {
-    const height = blockHeight(kind) || 2.0
+    const height = blockHeight(kind) || LEVEL_HEIGHT
     const capacity = Math.max(1, instances.length)
     const geometry =
       kind === Block.Stair
@@ -322,7 +345,7 @@ export class Blocks {
       const level = this.grid.levelAt(tile.x, tile.y)
       this.dummy.position.set(
         this.grid.worldX(tile.x),
-        level * 2.0 - height / 2,
+        level * LEVEL_HEIGHT - height / 2,
         this.grid.worldZ(tile.y)
       )
       this.dummy.rotation.y = 0
@@ -338,7 +361,7 @@ export class Blocks {
   private placeAll(layer: BlockLayer, height: number): void {
     for (const tile of layer.instances) {
       const level = this.grid.levelAt(tile.x, tile.y)
-      const baseY = level * 2.0
+      const baseY = level * LEVEL_HEIGHT
       this.dummy.position.set(
         this.grid.worldX(tile.x),
         baseY + height / 2,

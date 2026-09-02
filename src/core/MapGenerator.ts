@@ -80,48 +80,49 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
     buildings.push(rect)
     carveBuilding(grid, rng, rect)
   }
-  // --- Upper Levels, Stairs, and Ladders ----------------------------------
-  // Convert 1-3 buildings into multi-level structures with walkable rooftops,
-  // stairs for gradual access, and ladder walls for quick vertical climbing.
-  // Tune elevated structures so each upper floor chunk has EXACTLY one stair OR ladder.
-  if (buildings.length >= 1) {
-    // Structure 0 gets a Stair
-    const b0 = buildings[0]!
-    if (b0.w >= 4 && b0.h >= 4) {
-      for (let dy = 1; dy < b0.h - 1; dy++) {
-        for (let dx = 1; dx < b0.w - 1; dx++) {
-          grid.setLevel(b0.x + dx, b0.y + dy, 1)
-          grid.setBlock(b0.x + dx, b0.y + dy, Block.None)
-        }
+  // --- Upper storeys, stairs and ladders -----------------------------------
+  // Debug hack, deliberately tame for now: at most one elevated structure per
+  // access kind, so a storey is never served by both a stair and a ladder.
+  const elevate = (rect: Rect): boolean => {
+    if (rect.w < 4 || rect.h < 4) return false
+    for (let dy = 1; dy < rect.h - 1; dy++) {
+      for (let dx = 1; dx < rect.w - 1; dx++) {
+        grid.setBlock(rect.x + dx, rect.y + dy, Block.None)
+        grid.setLevel(rect.x + dx, rect.y + dy, 1)
       }
-      const stairX = b0.x + Math.floor(b0.w / 2)
-      const stairY = b0.y + b0.h - 1
-      grid.setStair(stairX, stairY, StairDirection.North, 0)
-      grid.setLevel(stairX, stairY - 1, 0)
-      grid.setLevel(stairX, stairY + 1, 1)
-      grid.setBlock(stairX, stairY - 1, Block.None)
-      grid.setBlock(stairX, stairY + 1, Block.None)
     }
+    return true
   }
 
-  if (buildings.length >= 2) {
-    // Structure 1 gets a Ladder
-    const b1 = buildings[1]!
-    if (b1.w >= 4 && b1.h >= 4) {
-      for (let dy = 1; dy < b1.h - 1; dy++) {
-        for (let dx = 1; dx < b1.w - 1; dx++) {
-          grid.setLevel(b1.x + dx, b1.y + dy, 1)
-          grid.setBlock(b1.x + dx, b1.y + dy, Block.None)
-        }
-      }
-      const ladX = b1.x
-      const ladY = b1.y + Math.floor(b1.h / 2)
-      grid.setLadder(ladX, ladY, 0)
-      grid.setLevel(ladX - 1, ladY, 0)
-      grid.setLevel(ladX + 1, ladY, 1)
-      grid.setBlock(ladX - 1, ladY, Block.None)
-      grid.setBlock(ladX + 1, ladY, Block.None)
-    }
+  const stairBuilding = buildings[0]
+  if (stairBuilding !== undefined && elevate(stairBuilding)) {
+    // The stair sits in the high-Y wall, so the ground approach is outside at
+    // +Y and the landing is the storey inside at -Y. Facing South puts the
+    // upper side inward; facing North would strand the storey.
+    const stairX = stairBuilding.x + Math.floor(stairBuilding.w / 2)
+    const stairY = stairBuilding.y + stairBuilding.h - 1
+    grid.setStair(stairX, stairY, StairDirection.South, 0)
+
+    // Approach, on the ground outside.
+    grid.setBlock(stairX, stairY + 1, Block.None)
+    grid.setLevel(stairX, stairY + 1, 0)
+    // Landing, on the storey inside. Left at level 1 by `elevate`.
+    grid.setBlock(stairX, stairY - 1, Block.None)
+    grid.setLevel(stairX, stairY - 1, 1)
+  }
+
+  const ladderBuilding = buildings[1]
+  if (ladderBuilding !== undefined && elevate(ladderBuilding)) {
+    // The ladder sits in the low-X wall: ground outside at -X, storey inside
+    // at +X.
+    const ladX = ladderBuilding.x
+    const ladY = ladderBuilding.y + Math.floor(ladderBuilding.h / 2)
+    grid.setLadder(ladX, ladY, 0)
+
+    grid.setBlock(ladX - 1, ladY, Block.None)
+    grid.setLevel(ladX - 1, ladY, 0)
+    grid.setBlock(ladX + 1, ladY, Block.None)
+    grid.setLevel(ladX + 1, ladY, 1)
   }
 
   // --- Free-standing walls --------------------------------------------------

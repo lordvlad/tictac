@@ -1,5 +1,5 @@
 import { Euler, Matrix4, type PerspectiveCamera, Vector2, Vector3 } from 'three'
-import { CAM, EYE_HEIGHT } from '../config'
+import { CAM, EYE_HEIGHT, LEVEL_HEIGHT } from '../config'
 import { clamp, smoothstep } from '../core/math'
 import { clientToNdc } from '../core/screen'
 import { CameraInput, type CameraRigTarget } from './CameraInput'
@@ -122,10 +122,9 @@ export class OrbitRig implements CameraRigTarget {
     this.clampFocus(this.focusTarget)
   }
 
-  /** Smoothly adjust camera focus elevation Y when selecting a level in the UI. */
-  setFocusLevel(level: number | null): void {
-    const targetY = level !== null ? level * 2.0 : 0
-    this.focusTarget.y = targetY
+  /** Smoothly raise or lower the focus plane to the selected storey. */
+  setFocusLevel(level: number): void {
+    this.focusTarget.y = level * LEVEL_HEIGHT
   }
 
   /** Jump the focus point with no easing. */
@@ -336,6 +335,7 @@ export class OrbitRig implements CameraRigTarget {
       this.panStartCamPos,
       this.panStartUnproject,
       this.panGrabPoint,
+      this.panStartFocus.y,
     )
     this.panValid = hit !== null
   }
@@ -348,11 +348,14 @@ export class OrbitRig implements CameraRigTarget {
       this.panStartCamPos,
       this.panStartUnproject,
       this.scratchVec,
+      this.panStartFocus.y,
     )
     if (hit === null) return
 
+    // Drag across the storey the camera is looking at, not the ground plane:
+    // grabbing y = 0 while focused on an upper floor drops the view a storey.
     this.focusTarget.copy(this.panStartFocus).sub(hit).add(this.panGrabPoint)
-    this.focusTarget.y = 0
+    this.focusTarget.y = this.panStartFocus.y
     this.clampFocus(this.focusTarget)
   }
 

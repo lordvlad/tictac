@@ -3,7 +3,8 @@ import { Blocks } from '../src/render/Blocks'
 import { generateMap } from '../src/core/MapGenerator'
 import { Block, Grid, StairDirection } from '../src/core/Grid'
 import { findChainedPath, findPathSegment } from '../src/core/Pathfinding'
-import { RULES } from '../src/config'
+import { Faction, RULES } from '../src/config'
+import type { Tile } from '../src/core/Grid'
 import { World } from '../src/ecs/World'
 import { PositionComponent } from '../src/ecs/components/PositionComponent'
 import { StanceComponent } from '../src/ecs/components/StanceComponent'
@@ -174,5 +175,25 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
 
     expect(level0Opacity).toBe(1.0)
     expect(level1Opacity).toBeCloseTo(0.15)
+  })
+
+  test('a generated upper storey is reachable from the ground', () => {
+    // An elevated floor with no walkable link to the ground is why a proposed
+    // route collapsed to just its target marker: A* found nothing to draw.
+    for (const seed of [1, 42, 1337, 90210, 5150]) {
+      const { grid, spawns } = generateMap(seed)
+
+      const upper: Tile[] = []
+      grid.forEach((x, y) => {
+        if (grid.levelAt(x, y) === 1 && grid.isWalkable(x, y)) upper.push({ x, y })
+      })
+      if (upper.length === 0) continue
+
+      const start = spawns[Faction.Blue][0]!
+      const reached = upper.some(
+        (tile) => findPathSegment(grid, start, tile, new Set()).path.length > 0,
+      )
+      expect(reached).toBe(true)
+    }
   })
 })

@@ -1,5 +1,5 @@
 import { Vector3 } from 'three'
-import { FULL_BLOCK_HEIGHT, GRID_SIZE, HALF_BLOCK_HEIGHT, RULES, TILE } from '../config'
+import { FULL_BLOCK_HEIGHT, GRID_SIZE, HALF_BLOCK_HEIGHT, LEVEL_HEIGHT, RULES, TILE } from '../config'
 
 export const Block = {
   /** Open floor. */
@@ -158,10 +158,14 @@ export class Grid {
   /** Centre of a tile, taking level elevation into account. */
   tileToWorld(tile: Tile, target = new Vector3()): Vector3 {
     const level = this.levelAt(tile.x, tile.y)
-    const block = this.blockAt(tile.x, tile.y)
-    // If it's a stair block, height is halfway between lower and upper
-    const heightOffset = block === Block.Stair ? 1.0 : 0
-    return target.set(this.worldX(tile.x), level * 2.0 + heightOffset, this.worldZ(tile.y))
+    // A stair tile is the ramp itself, so it stands half a storey proud of the
+    // floor it starts from.
+    const rampOffset = this.blockAt(tile.x, tile.y) === Block.Stair ? LEVEL_HEIGHT / 2 : 0
+    return target.set(
+      this.worldX(tile.x),
+      level * LEVEL_HEIGHT + rampOffset,
+      this.worldZ(tile.y),
+    )
   }
   /**
    * Convert a tile path into 3D world points that follow the terrain floor,
@@ -190,8 +194,8 @@ export class Grid {
         // Insert vertical ladder climbing points
         const wx = this.worldX(prev.x)
         const wz = this.worldZ(prev.y)
-        const yStart = prevLevel * 2.0
-        const yEnd = currLevel * 2.0
+        const yStart = prevLevel * LEVEL_HEIGHT
+        const yEnd = currLevel * LEVEL_HEIGHT
         points.push(new Vector3(wx, Math.min(yStart, yEnd), wz))
         points.push(new Vector3(wx, Math.max(yStart, yEnd), wz))
         points.push(this.tileToWorld(curr))
