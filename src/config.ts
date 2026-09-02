@@ -18,7 +18,7 @@ export const SIM = {
 } as const
 
 /** Grid is GRID_SIZE x GRID_SIZE tiles. */
-export const GRID_SIZE = 28
+export const GRID_SIZE = 36
 
 /** Block heights in metres. */
 export const HALF_BLOCK_HEIGHT = 1.0

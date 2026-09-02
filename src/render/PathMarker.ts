@@ -63,6 +63,7 @@ export class PathMarker {
 
     if (path.length >= 2) {
       const points = path.map((p) => new Vector3(p.x, p.y + PATH.hover, p.z))
+      this.group.add(this.line(points, beaconColor, 0.95))
     }
 
     for (const wp of waypoints) {
