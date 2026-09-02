@@ -1,7 +1,7 @@
 import { NetworkManager, type NetworkMessage } from './NetworkManager'
 import { Raycaster, Vector2 } from 'three'
 import type { EngineContext } from '../engine'
-import { Faction, RULES } from '../config'
+import { Faction } from '../config'
 import { clientToNdc } from '../core/screen'
 import type { Tile } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
@@ -22,6 +22,8 @@ import { WallXray } from './WallXray'
 import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
+import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
+import { MovementSystem, CombatSystem, TurnSystem, RenderSystem } from '../ecs/systems'
 
 /**
  * Routes player input to the subsystem that owns the decision, and keeps the
@@ -40,6 +42,10 @@ export class InteractionController {
   private readonly fog: FogOfWar
   private readonly xray: WallXray
   private readonly effects: Effects
+  readonly movementSystem: MovementSystem
+  readonly combatSystem: CombatSystem
+  readonly turnSystem: TurnSystem
+  readonly renderSystem: RenderSystem
   // Hover state (mouse only — touch has no hover phase).
   private hoveredTile: Tile | null = null
   private hoveredEnemy: Soldier | null = null
@@ -51,6 +57,7 @@ export class InteractionController {
   private readonly rightDownPos = new Vector2()
 
   constructor(
+    readonly world: World,
     private readonly battlefield: Battlefield,
     private readonly squads: Squads,
     private readonly turnManager: TurnManager,
@@ -63,10 +70,53 @@ export class InteractionController {
     public network: NetworkManager | null = null,
   ) {
     this.effects = new Effects(engine)
+
+    this.movementSystem = new MovementSystem(battlefield.grid)
+    this.combatSystem = new CombatSystem(battlefield.grid, squads, tracers)
+    this.turnSystem = new TurnSystem()
+    this.renderSystem = new RenderSystem()
+
+    this.world.addSystem(this.movementSystem)
+    this.world.addSystem(this.combatSystem)
+    this.world.addSystem(this.turnSystem)
+    this.world.addSystem(this.renderSystem)
+
+    for (const soldier of squads.soldiers) this.renderSystem.bind(soldier)
+
+    this.movementSystem.onStep = () => {
+      this.recomputeVisibility()
+      this.refreshHud()
+    }
+    this.movementSystem.onArrived = () => {
+      this.recomputeVisibility()
+      this.refreshHud()
+    }
+
+    if (network && network.mode !== 'local') {
+      // Each side owns its own squad; the host additionally owns the shared
+      // rule tables, which live on the global entity.
+      network.bindWorld(this.world, (entityId) => {
+        if (entityId === GLOBAL_ENTITY_ID) return network.mode !== 'join'
+        return squads.byEntityId(entityId)?.faction === network.myFaction
+      })
+      // Peer state landed in components; the view has to catch up with it.
+      network.onComponentUpdate = () => {
+        this.recomputeVisibility()
+        this.renderOverlay()
+        this.battlefield.flush()
+        this.refreshHud()
+        this.debug.refresh()
+      }
+    }
+
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
-    this.shoot = new ShootPlanner(battlefield.grid, squads, tracers, engine)
+    this.shoot = new ShootPlanner(battlefield.grid, squads, this.combatSystem, engine)
+    this.combatSystem.onShotResolved = (_shooter, target, result) => {
+      this.shoot.reportShot(target, result)
+    }
     this.planner.onMovementStarted = (soldier, path) => {
-      if (this.network && this.network.mode !== 'local' && this.network.isMyTurn(soldier.faction)) {
+      this.movementSystem.startMovement(this.world, soldier.entityId, path)
+      if (this.network && this.network.isMyTurn(soldier.faction)) {
         this.network.send({
           type: 'moveUnit',
           faction: soldier.faction,
@@ -75,7 +125,7 @@ export class InteractionController {
         })
       }
     }
-    this.grenade = new GrenadePlanner(battlefield.grid, squads, this.effects, rig, engine)
+    this.grenade = new GrenadePlanner(battlefield.grid, squads, this.combatSystem, this.effects, rig, engine)
     this.debug = new DebugPanel(
       () => {
         // Live edits can change reach, cost and visibility, so everything the
@@ -199,17 +249,13 @@ export class InteractionController {
       }
       case 'reload': {
         const selected = this.turnManager.selectedSoldier
-        if (selected && !selected.isDead && selected.ap >= RULES.reloadApCost) {
-          selected.ap -= RULES.reloadApCost
-          selected.weapon.currentClip = selected.weapon.maxClip
+        if (selected && this.combatSystem.reload(selected)) {
           this.refreshHud()
-          if (this.network && this.network.mode !== 'local') {
-            this.network.send({
-              type: 'reload',
-              faction: selected.faction,
-              squadIndex: selected.squadIndex,
-            })
-          }
+          this.network?.send({
+            type: 'reload',
+            faction: selected.faction,
+            squadIndex: selected.squadIndex,
+          })
         }
         break
       }
@@ -306,85 +352,52 @@ export class InteractionController {
     }
   }
   handleRemoteNetworkMessage(msg: NetworkMessage): void {
-    console.group(`%c[P2P ⚙️ EXECUTE: ${msg.type}]`, 'color: #22c55e; font-weight: bold;')
     switch (msg.type) {
       case 'moveUnit': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (soldier && !soldier.isDead) {
-          console.log(`[P2P 🏃 MOVE] ${soldier.name} (Faction ${msg.faction}) moving along path:`, msg.path)
-          this.planner.startMovePath(soldier, msg.path)
-          this.refreshHud()
-        } else {
-          console.warn(`[P2P ⚠️ MOVE REJECTED] Unit not found or dead (Faction ${msg.faction}, #${msg.squadIndex})`)
-        }
+        if (!soldier || soldier.isDead) break
+        this.planner.clear()
+        this.movementSystem.startMovement(this.world, soldier.entityId, msg.path)
+        this.refreshHud()
         break
       }
       case 'fireShot': {
         const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
         const target = this.squads.byFaction[msg.targetFaction][msg.targetIndex]
-        if (shooter && target) {
-          console.log(`[P2P 💥 SHOT] ${shooter.name} -> ${target.name} (${msg.mode}), rolls:`, msg.rolls)
-          this.shoot.executeShotWithRolls(shooter, target, msg.mode, msg.rolls, true)
-          this.recomputeVisibility()
-          this.renderOverlay()
-          this.refreshHud()
-        } else {
-          console.warn(`[P2P ⚠️ SHOT REJECTED] Shooter or target missing/dead`, { shooter, target })
-        }
+        if (!shooter || !target) break
+        this.combatSystem.fireShot(shooter, target, msg.mode, msg.rolls, true)
+        this.afterCombat()
         break
       }
       case 'throwGrenade': {
         const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
-        if (shooter) {
-          console.log(`[P2P 💣 GRENADE] ${shooter.name} throws ${msg.kind} at`, msg.targetTile)
-          this.grenade.executeThrowAt(shooter, msg.kind, msg.targetTile, true)
-          this.recomputeVisibility()
-          this.renderOverlay()
-          this.refreshHud()
-        } else {
-          console.warn(`[P2P ⚠️ GRENADE REJECTED] Shooter missing/dead`)
-        }
+        if (!shooter) break
+        this.grenade.executeThrowAt(shooter, msg.kind, msg.targetTile, true)
+        this.afterCombat()
         break
       }
       case 'reload': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (soldier && !soldier.isDead) {
-          console.log(`[P2P 🔄 RELOAD] ${soldier.name} reloaded weapon`)
-          soldier.ap = Math.max(0, soldier.ap - RULES.reloadApCost)
-          soldier.weapon.currentClip = soldier.weapon.maxClip
-          this.refreshHud()
-        } else {
-          console.warn(`[P2P ⚠️ RELOAD REJECTED] Unit missing/dead`)
-        }
+        if (!soldier) break
+        this.combatSystem.reload(soldier)
+        this.refreshHud()
         break
       }
       case 'toggleCover': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (soldier && !soldier.isDead) {
-          console.log(`[P2P 🛡 COVER] ${soldier.name} toggled cover`)
-          if (soldier.isCrouching) {
-            soldier.exitCover()
-          } else {
-            soldier.ap = Math.max(0, soldier.ap - RULES.coverApCost)
-            soldier.enterCover()
-          }
-          this.refreshHud()
-        } else {
-          console.warn(`[P2P ⚠️ COVER REJECTED] Unit missing/dead`)
-        }
+        if (!soldier) break
+        this.combatSystem.toggleCover(this.world, soldier.entityId)
+        this.refreshHud()
         break
       }
       case 'endUnitTurn': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (soldier && !soldier.isDead) {
-          console.log(`[P2P ⏹ END-UNIT-TURN] ${soldier.name} ended unit turn`)
-          this.turnManager.finishSoldierTurn(soldier)
-          this.refreshHud()
-        }
+        if (!soldier || soldier.isDead) break
+        this.turnManager.finishSoldierTurn(soldier)
+        this.refreshHud()
         break
       }
       case 'endTurn': {
-        console.log(`[P2P ⏭ TURN SWITCH] Handing over turn from Faction ${msg.faction}`)
         this.turnManager.startNextTurn()
         this.onTurnSwitched()
         this.refreshHud()
@@ -392,16 +405,22 @@ export class InteractionController {
       }
       case 'rightClickFacing': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (soldier && !soldier.isDead) {
-          console.log(`[P2P 🔄 FACING] ${soldier.name} turning to face (${msg.x.toFixed(1)}, ${msg.z.toFixed(1)})`)
-          const dx = msg.x - soldier.position.x
-          const dz = msg.z - soldier.position.z
-          if (Math.hypot(dx, dz) > 0.01) soldier.targetYaw = Math.atan2(dx, dz)
-        }
+        if (!soldier || soldier.isDead) break
+        const dx = msg.x - soldier.position.x
+        const dz = msg.z - soldier.position.z
+        if (Math.hypot(dx, dz) > 0.01) soldier.targetYaw = Math.atan2(dx, dz)
         break
       }
+      case 'init':
+        break
     }
-    console.groupEnd()
+  }
+
+  /** Shared post-combat refresh: damage can reveal, kill, and re-cover. */
+  private afterCombat(): void {
+    this.recomputeVisibility()
+    this.renderOverlay()
+    this.refreshHud()
   }
 
   dispose(): void {
@@ -435,23 +454,14 @@ export class InteractionController {
   /** Hunker into / out of a crouch cover stance. Entering costs AP; standing is free. */
   toggleCover(): void {
     const soldier = this.turnManager.selectedSoldier
-    if (!soldier || soldier.isDead || soldier.isMoving) return
-
-    if (soldier.isCrouching) {
-      soldier.exitCover()
-    } else {
-      if (soldier.ap < RULES.coverApCost) return
-      soldier.ap -= RULES.coverApCost
-      soldier.enterCover()
-    }
+    if (!soldier) return
+    if (!this.combatSystem.toggleCover(this.world, soldier.entityId)) return
     this.refreshHud()
-    if (this.network && this.network.mode !== 'local') {
-      this.network.send({
-        type: 'toggleCover',
-        faction: soldier.faction,
-        squadIndex: soldier.squadIndex,
-      })
-    }
+    this.network?.send({
+      type: 'toggleCover',
+      faction: soldier.faction,
+      squadIndex: soldier.squadIndex,
+    })
   }
 
   toggleWaypointMode(): void {
@@ -680,6 +690,8 @@ export class InteractionController {
   }
 
   update(delta: number): void {
+    // Systems advance the simulation; every mutation lands in a component.
+    this.world.update(delta)
     this.effects.update(delta)
     this.planner.update(delta)
 
@@ -694,26 +706,13 @@ export class InteractionController {
       }
     } else if (selected && !selected.isDead && selected.instance) {
       selected.instance.visible = true
-    }
-
-    for (const soldier of this.squads.soldiers) {
-      if (soldier.isMoving) {
-        const moved = soldier.updateMovement(delta, this.battlefield.grid, () => {
-          this.recomputeVisibility()
-          this.refreshHud()
-        })
-
-        if (soldier === selected && !this.rig.isCharacterViewActive) {
-          this.rig.focusOn(soldier.position)
-        }
-
-        if (!moved) {
-          this.recomputeVisibility()
-          this.refreshHud()
-        }
-      }
+      if (selected.isMoving) this.rig.focusOn(selected.position)
     }
 
     this.xray.update(this.engine.camera.position)
+
+    // One pass at the end: whatever changed this tick — from input, combat,
+    // a system or the debug panel — replicates from here and nowhere else.
+    this.world.syncDirty()
   }
 }

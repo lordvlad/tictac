@@ -7,6 +7,7 @@
     "build:character": "bun scripts/build-character.mjs",
     "build": "tsc --noEmit && bun build ./src/index.html --outdir=dist --sourcemap --target=browser --minify --public-path=./ --define:process.env.NODE_ENV='\"production\"' && bun scripts/copy-public.mjs",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "preview": "NODE_ENV=production bun src/index.ts"
   },
   "dependencies": {

@@ -5,7 +5,7 @@ import type { Soldier } from '../entities/Soldier'
 import { DamageIndicators } from '../render/DamageIndicators'
 import type { Ground } from '../render/Ground'
 import type { Effects } from '../render/Effects'
-import { throwGrenade } from './Combat'
+import type { CombatSystem } from '../ecs/systems/CombatSystem'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
 import { FX } from '../config'
@@ -53,6 +53,7 @@ export class GrenadePlanner {
   constructor(
     private readonly grid: Grid,
     private readonly squads: Squads,
+    private readonly combat: CombatSystem,
     private readonly effects: Effects,
     private readonly rig: { shake(intensity: number, duration: number): void },
     engine: EngineContext,
@@ -122,7 +123,7 @@ export class GrenadePlanner {
 
   executeThrowAt(thrower: Soldier, kind: GrenadeId, targetTile: Tile, force = false): boolean {
     const spec = thrower.grenadeSpecs[kind]
-    const result = throwGrenade(this.grid, thrower, targetTile, kind, this.squads.soldiers, force)
+    const result = this.combat.throwGrenade(thrower, targetTile, kind, force)
     if (!result.thrown) return false
     const worldPos = this.grid.tileToWorld(targetTile)
     this.effects.triggerFlash(kind)

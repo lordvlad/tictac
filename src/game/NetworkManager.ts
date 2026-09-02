@@ -1,9 +1,26 @@
 import { Peer, DataConnection } from 'peerjs'
 import { Faction } from '../config'
 import type { GrenadeId, ShotMode } from '../core/Arsenal'
+import type { World } from '../ecs/World'
+import {
+  type JsonRpcFrame,
+  type JsonRpcNotification,
+  componentUpdateMethod,
+  isJsonRpcFrame,
+  parseComponentUpdateMethod,
+  RpcMethods,
+} from './JsonRpc'
 
 export type NetworkMode = 'local' | 'host' | 'join'
 
+/**
+ * Commands: things one peer asks the other to *do*.
+ *
+ * Everything a command changes is component state, and component state
+ * replicates itself through {@link World.syncDirty}. Commands exist only for
+ * the parts that cannot be inferred from a diff — the dice rolls behind a
+ * shot, and the intent to start walking a particular route.
+ */
 export type NetworkMessage =
   | { type: 'init'; seed: number; seedLabel: string }
   | { type: 'moveUnit'; faction: Faction; squadIndex: number; path: { x: number; y: number }[] }
@@ -25,13 +42,37 @@ export class NetworkManager {
   onMessage: ((msg: NetworkMessage) => void) | null = null
   onConnected: (() => void) | null = null
   onDisconnected: ((reason?: string) => void) | null = null
+  /** Fired after peer state has been written into the world. */
+  onComponentUpdate: (() => void) | null = null
+
+  private world: World | null = null
+  private owns: (entityId: number) => boolean = () => true
+
+  /**
+   * Replicate component mutations for the entities this peer owns.
+   *
+   * Both peers run the same simulation, so without an owner each side would
+   * broadcast its own guess at every unit and the two would overwrite each
+   * other mid-step. `owns` names the authority: its answer is the only state
+   * that travels, and state for anything else is only ever received.
+   */
+  bindWorld(world: World, owns: (entityId: number) => boolean): void {
+    this.world = world
+    this.owns = owns
+    world.onComponentChanged((entityId, componentName, data) => {
+      if (this.mode === 'local' || !this.owns(entityId)) return
+      this.sendRpc({
+        jsonrpc: '2.0',
+        method: componentUpdateMethod(componentName),
+        params: { entityId, ...data },
+      })
+    })
+  }
 
   private setupConn(conn: DataConnection): void {
     this.conn = conn
     conn.on('data', (data) => {
-      const msg = data as NetworkMessage
-      console.info(`%c[P2P 📥 IN: ${msg.type}]`, 'color: #a855f7; font-weight: bold;', msg)
-      this.onMessage?.(msg)
+      if (isJsonRpcFrame(data)) this.handleIncomingRpc(data)
     })
     conn.on('close', () => {
       console.warn('[p2p] Connection closed by remote peer')
@@ -43,20 +84,53 @@ export class NetworkManager {
     })
   }
 
+  private handleIncomingRpc(frame: JsonRpcFrame): void {
+    if (!('method' in frame)) return
+    const { method } = frame
+    const params = (frame as JsonRpcNotification).params as Record<string, unknown>
+
+    const componentName = parseComponentUpdateMethod(method)
+    if (componentName) {
+      if (typeof params.entityId !== 'number') return
+      // A peer never gets to rewrite state this side is authoritative for.
+      if (this.owns(params.entityId)) return
+      if (this.world?.applyRemote(params.entityId, componentName, params)) {
+        this.onComponentUpdate?.()
+      }
+      return
+    }
+
+    const msg = this.rpcToMessage(method, params)
+    if (msg) {
+      console.info(`%c[P2P 📥 IN: ${msg.type}]`, 'color: #a855f7; font-weight: bold;', msg)
+      this.onMessage?.(msg)
+    }
+  }
+
+  private messageToRpc(msg: NetworkMessage): JsonRpcNotification {
+    const params = { ...msg } as Record<string, unknown>
+    delete params.type
+    return { jsonrpc: '2.0', method: RpcMethods[msg.type], params }
+  }
+
+  private rpcToMessage(method: string, params: Record<string, unknown>): NetworkMessage | null {
+    for (const [type, name] of Object.entries(RpcMethods)) {
+      if (name === method) return { ...params, type } as NetworkMessage
+    }
+    return null
+  }
+
   private setupPeer(peer: Peer): void {
     peer.on('error', (err) => {
       console.warn('[p2p] Peer error:', err)
-      if (this.mode !== 'local') {
-        this.onDisconnected?.(err.message || 'Peer error')
-      }
+      if (this.mode !== 'local') this.onDisconnected?.(err.message || 'Peer error')
     })
     peer.on('close', () => {
       console.warn('[p2p] Peer closed')
-      if (this.mode !== 'local') {
-        this.onDisconnected?.('Peer closed')
-      }
+      if (this.mode !== 'local') this.onDisconnected?.('Peer closed')
     })
   }
+
   isMyTurn(activeFaction: Faction): boolean {
     if (this.mode === 'local') return true
     return activeFaction === this.myFaction
@@ -106,9 +180,11 @@ export class NetworkManager {
       })
 
       conn.on('data', (data) => {
-        const msg = data as NetworkMessage
-        if (msg.type === 'init') {
-          resolve({ seed: msg.seed, seedLabel: msg.seedLabel })
+        if (!isJsonRpcFrame(data) || !('method' in data)) return
+        if (data.method !== RpcMethods.init) return
+        const params = (data as JsonRpcNotification).params as Record<string, unknown>
+        if (typeof params.seed === 'number' && typeof params.seedLabel === 'string') {
+          resolve({ seed: params.seed, seedLabel: params.seedLabel })
         }
       })
     })
@@ -116,14 +192,14 @@ export class NetworkManager {
     return promise
   }
 
+  sendRpc(frame: JsonRpcFrame): void {
+    if (this.conn?.open) this.conn.send(frame)
+  }
 
   send(msg: NetworkMessage): void {
-    if (this.conn && this.conn.open) {
-      console.info(`%c[P2P 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
-      this.conn.send(msg)
-    } else {
-      console.warn(`%c[P2P ⚠️ SEND-FAILED: ${msg.type}] Connection not open`, 'color: #ef4444;', msg)
-    }
+    if (this.mode === 'local') return
+    console.info(`%c[P2P 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
+    this.sendRpc(this.messageToRpc(msg))
   }
 
   dispose(): void {

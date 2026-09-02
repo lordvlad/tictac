@@ -109,18 +109,11 @@ export class MovementPlanner {
     this.render(soldier)
   }
 
-  startMovePath(soldier: Soldier, path: Tile[]): boolean {
-    this.clear()
-    if (path.length <= 1) return false
-    soldier.startMovement(path)
-    return true
-  }
-
   private confirm(soldier: Soldier): boolean {
     const path = this.pathValid && this.path.length > 1 ? [...this.path] : null
     this.clear()
     if (!path) return false
-    soldier.startMovement(path)
+    // Execution belongs to MovementSystem; the planner only decides the route.
     this.onMovementStarted?.(soldier, path)
     return true
   }

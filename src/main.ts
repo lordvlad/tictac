@@ -14,6 +14,8 @@ import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
 import './game.css'
 import { NetworkManager } from './game/NetworkManager'
+import { World } from './ecs/World'
+import { createGlobalRules } from './ecs/globals'
 
 const baseUrl = new URL('./', document.baseURI).href
 
@@ -167,8 +169,11 @@ function showMenu(): void {
 function start(seed: number, seedLabel: string, network: NetworkManager): void {
   const engine = createEngineContext(Game.instance())
 
+  const world = new World()
+  createGlobalRules(world)
+
   const battlefield = new Battlefield(seed, engine)
-  const squads = new Squads(battlefield.grid, battlefield.spawns, engine)
+  const squads = new Squads(world, battlefield.grid, battlefield.spawns, engine)
 
   const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,
@@ -186,6 +191,7 @@ function start(seed: number, seedLabel: string, network: NetworkManager): void {
   })
 
   controller = new InteractionController(
+    world,
     battlefield,
     squads,
     turnManager,
@@ -259,7 +265,6 @@ function start(seed: number, seedLabel: string, network: NetworkManager): void {
     accumulator = Math.min(accumulator + delta, SIM.maxCatchUp)
     while (accumulator >= SIM.step) {
       accumulator -= SIM.step
-      squads.renderUpdate(SIM.step)
       tracers.update(SIM.step)
       controller.update(SIM.step)
     }

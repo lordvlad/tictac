@@ -2,7 +2,6 @@ import type { Grid } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import { DamageIndicators } from '../render/DamageIndicators'
 import type { Ground } from '../render/Ground'
-import type { Tracers } from '../render/Tracers'
 import { hasLineOfSight } from '../core/Visibility'
 import { SHOT_MODES, ShotMode } from '../core/Arsenal'
 import {
@@ -10,7 +9,8 @@ import {
   type HitChanceBreakdown,
   resolveDamage,
 } from '../core/Ballistics'
-import { calculateHitChance, canShoot, executeShot, shotApCost, shotBreakdown, type ShotResult } from './Combat'
+import { calculateHitChance, canShoot, shotApCost, shotBreakdown, type ShotResult } from './Combat'
+import type { CombatSystem } from '../ecs/systems/CombatSystem'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
 
@@ -66,7 +66,7 @@ export class ShootPlanner {
   constructor(
     private readonly grid: Grid,
     private readonly squads: Squads,
-    private readonly tracers: Tracers,
+    private readonly combat: CombatSystem,
     engine: EngineContext,
   ) {
     this.damageIndicators = new DamageIndicators(engine)
@@ -173,29 +173,15 @@ export class ShootPlanner {
       rolls.push(Math.random() * 100 <= chance)
     }
 
-    const result = this.executeShotWithRolls(shooter, target, mode, rolls)
+    const result = this.combat.fireShot(shooter, target, mode, rolls)
     return result ? { target, rolls } : null
   }
 
-  executeShotWithRolls(shooter: Soldier, target: Soldier, mode: ShotMode, rolls: boolean[], force = false): ShotResult | null {
-    const consumption = shooter.weapon.bulletConsumption(mode)
-    shooter.weapon.currentClip = Math.max(0, shooter.weapon.currentClip - consumption)
-
-    const result = executeShot(
-      this.grid,
-      shooter,
-      target,
-      this.tracers,
-      this.squads.soldiers,
-      mode,
-      rolls,
-      force,
-    )
-    if (!result.apSpent) return null
+  /** Damage numbers and target bookkeeping, once combat has resolved a shot. */
+  reportShot(target: Soldier, result: ShotResult): void {
     this.damageIndicators.spawn(target.position, result.hit, result.damage)
     if (target.isDead && this.target === target) this.target = null
     this.onShotResolved?.()
-    return result
   }
 
   /** Paint reachable-by-bullet tiles, plus a bright marker on the current target. */

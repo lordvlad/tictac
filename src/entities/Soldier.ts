@@ -2,21 +2,32 @@ import Entity3D from '@mavonengine/core/World/Entity3D'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { LoopOnce, LoopRepeat, Mesh, MeshStandardMaterial, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
-import { Faction, RULES, SOLDIER_HEIGHT } from '../config'
+import { Faction, RULES } from '../config'
 import {
-  AMMO,
   type AmmoSpec,
   AmmoId,
-  GRENADES,
   type GrenadeSpec,
   GrenadeId,
-  WEAPONS,
   Weapon,
   WeaponId,
 } from '../core/Arsenal'
 import type { StatusState } from '../core/Ballistics'
 import type { Grid, Tile } from '../core/Grid'
 import { soldierColor } from './palette'
+import type { World } from '../ecs/World'
+import {
+  ActionPointsComponent,
+  AmmoComponent,
+  ArmorComponent,
+  GrenadeSpecsComponent,
+  HealthComponent,
+  IdentityComponent,
+  InventoryComponent,
+  PositionComponent,
+  StanceComponent,
+  StatusesComponent,
+  WeaponComponent,
+} from '../ecs/components'
 
 /**
  * Ground speed in m/s that each locomotion clip is authored at, measured from
@@ -32,76 +43,37 @@ const CLIP_GROUND_SPEED = {
   crouchWalk: 0.75,
 } as const
 
+/**
+ * A soldier on the field: its 3D asset, its animation state, and typed access
+ * to the components that hold its gameplay state.
+ *
+ * Nothing here stores game state of its own. Every property below reads and
+ * writes the entity's components, so a mutation from combat resolution, the
+ * turn manager or the debug panel lands in exactly one place and is picked up
+ * by {@link World.syncDirty} without the writer having to announce it.
+ */
 export class Soldier extends Entity3D {
   readonly faction: Faction
   readonly squadIndex: number // 0..3
   readonly name: string
+  readonly entityId: number
 
-  hp = RULES.maxHp
-  maxHp = RULES.maxHp
-  ap = RULES.maxAp
-  maxAp = RULES.maxAp
-  /** Armour points. Subtracts flat damage; stripped by shred effects. */
-  armor = RULES.maxArmor
-  maxArmor = RULES.maxArmor
+  private readonly health: HealthComponent
+  private readonly actionPoints: ActionPointsComponent
+  private readonly armorComponent: ArmorComponent
+  private readonly weaponComponent: WeaponComponent
+  private readonly ammoComponent: AmmoComponent
+  private readonly grenadeSpecsComponent: GrenadeSpecsComponent
+  private readonly inventory: InventoryComponent
+  private readonly stance: StanceComponent
+  private readonly statusesComponent: StatusesComponent
+  private readonly positionComponent: PositionComponent
 
-  // --- loadout ---------------------------------------------------------------
-  /**
-   * Own copies of the specs, not references into the shared tables: stats are
-   * per character, so tuning one unit's rifle must not re-arm the whole map.
-   * The tables in {@link Arsenal} are the templates these are stamped from.
-   */
-  weaponId: WeaponId = WeaponId.Rifle
-  weapon: Weapon = WEAPONS[WeaponId.Rifle].clone()
-  ammoId: AmmoId = AmmoId.Standard
-  ammo: AmmoSpec = { ...AMMO[AmmoId.Standard] }
-  /** Per-unit grenade specs, so throw range and blast are tunable per soldier. */
-  grenadeSpecs: Record<GrenadeId, GrenadeSpec> = {
-    [GrenadeId.Frag]: { ...GRENADES[GrenadeId.Frag] },
-    [GrenadeId.Flash]: { ...GRENADES[GrenadeId.Flash] },
-    [GrenadeId.Smoke]: { ...GRENADES[GrenadeId.Smoke] },
-  }
-  /** Grenades still in the pouch, by kind. */
-  readonly grenades: Record<GrenadeId, number> = {
-    [GrenadeId.Frag]: 1,
-    [GrenadeId.Flash]: 1,
-    [GrenadeId.Smoke]: 1,
-  }
-
-  /**
-   * Corner peeking. A unit that peeks also sees from the free tiles beside the
-   * wall it is standing against, so its view reaches around the corner instead
-   * of stopping at it.
-   */
-  peek = false
-
-  /** Live status effects (flashed, smoked, shredded). */
-  statuses: StatusState[] = []
-
-  /** Re-stamp the loadout from the shared templates. */
-  equip(weaponId: WeaponId, ammoId: AmmoId): void {
-    this.weaponId = weaponId
-    this.weapon = WEAPONS[weaponId].clone()
-    this.ammoId = ammoId
-    this.ammo = { ...AMMO[ammoId] }
-  }
-
-  tile: Tile
-
-  /** Logical target position in world space. */
-  readonly targetPos = new Vector3()
-  targetYaw = 0
+  /** Render-only yaw smoothing. Never networked: the peer smooths its own. */
   currentYaw = 0
 
-  // Movement execution
-  movingPath: Tile[] = []
-  movePathIndex = 0
-  isMoving = false
-
-  /** Hunkered-down cover stance. Persists across turns until the unit moves or stands. */
-  isCrouching = false
-
   constructor(
+    world: World,
     faction: Faction,
     squadIndex: number,
     name: string,
@@ -113,18 +85,161 @@ export class Soldier extends Entity3D {
     this.faction = faction
     this.squadIndex = squadIndex
     this.name = name
-    this.tile = { ...initialTile }
 
     grid.tileToWorld(initialTile, this.position)
-    this.targetPos.copy(this.position)
-
     // Blue team faces North (+Z), Red team faces South (-Z)
-    this.targetYaw = faction === Faction.Blue ? 0 : Math.PI
-    this.currentYaw = this.targetYaw
-    this.rotation.y = this.currentYaw
+    const initialYaw = faction === Faction.Blue ? 0 : Math.PI
+    this.currentYaw = initialYaw
+    this.rotation.y = initialYaw
+
+    this.entityId = world.createEntity()
+    world.addComponent(this.entityId, new IdentityComponent(faction, squadIndex, name))
+    this.positionComponent = world.addComponent(
+      this.entityId,
+      new PositionComponent({ ...initialTile }, this.position.clone(), initialYaw),
+    )
+    this.health = world.addComponent(this.entityId, new HealthComponent(RULES.maxHp, RULES.maxHp))
+    this.actionPoints = world.addComponent(
+      this.entityId,
+      new ActionPointsComponent(RULES.maxAp, RULES.maxAp),
+    )
+    this.armorComponent = world.addComponent(
+      this.entityId,
+      new ArmorComponent(RULES.maxArmor, RULES.maxArmor),
+    )
+    this.weaponComponent = world.addComponent(this.entityId, new WeaponComponent())
+    this.ammoComponent = world.addComponent(this.entityId, new AmmoComponent())
+    this.grenadeSpecsComponent = world.addComponent(this.entityId, new GrenadeSpecsComponent())
+    this.inventory = world.addComponent(this.entityId, new InventoryComponent())
+    this.stance = world.addComponent(this.entityId, new StanceComponent())
+    this.statusesComponent = world.addComponent(this.entityId, new StatusesComponent())
 
     this.initGraphics()
   }
+
+  // --- component-backed state -----------------------------------------------
+
+  get hp(): number {
+    return this.health.hp
+  }
+  set hp(value: number) {
+    this.health.hp = value
+  }
+  get maxHp(): number {
+    return this.health.maxHp
+  }
+  set maxHp(value: number) {
+    this.health.maxHp = value
+  }
+
+  get ap(): number {
+    return this.actionPoints.ap
+  }
+  set ap(value: number) {
+    this.actionPoints.ap = value
+  }
+  get maxAp(): number {
+    return this.actionPoints.maxAp
+  }
+  set maxAp(value: number) {
+    this.actionPoints.maxAp = value
+  }
+
+  /** Armour points. Subtracts flat damage; stripped by shred effects. */
+  get armor(): number {
+    return this.armorComponent.armor
+  }
+  set armor(value: number) {
+    this.armorComponent.armor = value
+  }
+  get maxArmor(): number {
+    return this.armorComponent.maxArmor
+  }
+  set maxArmor(value: number) {
+    this.armorComponent.maxArmor = value
+  }
+
+  get weaponId(): WeaponId {
+    return this.weaponComponent.weaponId
+  }
+  get weapon(): Weapon {
+    return this.weaponComponent.weapon
+  }
+  get ammoId(): AmmoId {
+    return this.ammoComponent.ammoId
+  }
+  get ammo(): AmmoSpec {
+    return this.ammoComponent.ammo
+  }
+  get grenadeSpecs(): Record<GrenadeId, GrenadeSpec> {
+    return this.grenadeSpecsComponent.specs
+  }
+  /** Grenades still in the pouch, by kind. */
+  get grenades(): Record<GrenadeId, number> {
+    return this.inventory.grenades
+  }
+
+  /**
+   * Corner peeking. A unit that peeks also sees from the free tiles beside the
+   * wall it is standing against, so its view reaches around the corner instead
+   * of stopping at it.
+   */
+  get peek(): boolean {
+    return this.stance.peek
+  }
+  set peek(value: boolean) {
+    this.stance.peek = value
+  }
+
+  /** Live status effects (flashed, smoked, shredded). */
+  get statuses(): StatusState[] {
+    return this.statusesComponent.list
+  }
+  set statuses(value: StatusState[]) {
+    this.statusesComponent.list = value
+  }
+
+  get tile(): Tile {
+    return this.positionComponent.tile
+  }
+  set tile(value: Tile) {
+    this.positionComponent.tile = value
+  }
+
+  /** Logical target position in world space. */
+  get targetPos(): Vector3 {
+    return this.positionComponent.targetPos
+  }
+
+  get targetYaw(): number {
+    return this.positionComponent.targetYaw
+  }
+  set targetYaw(value: number) {
+    this.positionComponent.targetYaw = value
+  }
+
+  get movingPath(): Tile[] {
+    return this.stance.movingPath
+  }
+  get isMoving(): boolean {
+    return this.stance.isMoving
+  }
+  /** Hunkered-down cover stance. Persists across turns until the unit moves or stands. */
+  get isCrouching(): boolean {
+    return this.stance.isCrouching
+  }
+
+  get isDead(): boolean {
+    return this.health.hp <= 0
+  }
+
+  /** Re-stamp the loadout from the shared templates. */
+  equip(weaponId: WeaponId, ammoId: AmmoId): void {
+    this.weaponComponent.equip(weaponId)
+    this.ammoComponent.load(ammoId)
+  }
+
+  // --- graphics --------------------------------------------------------------
 
   private initGraphics(): void {
     const gltf = this.engine.assets['character'] as GLTF | undefined
@@ -170,9 +285,7 @@ export class Soldier extends Entity3D {
     // The death clip is excluded so the corpse holds its final frame.
     this.animationMixer?.addEventListener('finished', () => {
       if (this.isDead) return
-      if (this.isMoving) this.playLocomotion('run')
-      else if (this.isCrouching) this.playLoop('crouch')
-      else this.playLoop('idle')
+      this.playStanceClip()
     })
   }
 
@@ -191,6 +304,19 @@ export class Soldier extends Entity3D {
   /** Locomotion clip synced so its stride matches MOVE_SPEED (no foot sliding). */
   private playLocomotion(key: 'walk' | 'run' | 'crouchWalk'): void {
     this.playLoop(key, RULES.moveSpeed / CLIP_GROUND_SPEED[key])
+  }
+
+  /**
+   * Play whichever loop the current stance calls for.
+   *
+   * Driven by {@link RenderSystem} on stance changes, so movement and cover are
+   * decided by components and merely reflected here.
+   */
+  playStanceClip(): void {
+    if (this.isDead) return
+    if (this.isMoving) this.playLocomotion('run')
+    else if (this.isCrouching) this.playLoop('crouch')
+    else this.playLoop('idle')
   }
 
   /** Play a clip once and hold its final frame. */
@@ -217,118 +343,23 @@ export class Soldier extends Entity3D {
   /** Hunker down into a crouch cover stance. */
   enterCover(): void {
     if (this.isDead || this.isMoving) return
-    this.isCrouching = true
-    this.playLoop('crouch')
+    this.stance.isCrouching = true
   }
 
   /** Stand back up out of cover. */
   exitCover(): void {
     if (!this.isCrouching) return
-    this.isCrouching = false
-    if (!this.isDead && !this.isMoving) this.playLoop('idle')
+    this.stance.isCrouching = false
   }
 
   /**
-   * Collapse and stay down. Halts movement without the idle fade that
-   * stopMovement() would apply, so the death clip is not immediately replaced.
+   * Collapse and stay down. Halts movement without the idle fade, so the death
+   * clip is not immediately replaced.
    */
   playDeath(): void {
-    this.isMoving = false
-    this.movingPath = []
-    this.movePathIndex = 0
+    this.stance.isMoving = false
+    this.stance.movingPath = []
     this.playOnce('death')
-  }
-
-  get isDead(): boolean {
-    return this.hp <= 0
-  }
-
-  startMovement(path: Tile[]): void {
-    if (path.length <= 1) return
-    this.movingPath = path
-    this.movePathIndex = 1
-    // Moving breaks cover — stand up to run.
-    this.isCrouching = false
-    this.isMoving = true
-
-    this.playLocomotion('run')
-  }
-
-  /** Halt on the current tile and fall back to the idle clip. */
-  stopMovement(): void {
-    if (!this.isMoving) return
-    this.isMoving = false
-    this.movingPath = []
-    this.movePathIndex = 0
-    const idleAction = this.animationsMap.get('idle')
-    if (idleAction) this.fadeToAction(idleAction, 0.15)
-  }
-
-  updateMovement(delta: number, grid: Grid, onStep?: (tile: Tile) => void): boolean {
-    if (!this.isMoving || this.movePathIndex >= this.movingPath.length) {
-      this.stopMovement()
-      return false
-    }
-
-    // Distance budget for this tick. Leftover carries across tile boundaries,
-    // otherwise the remainder is discarded on every arrival and the unit
-    // travels measurably slower than MOVE_SPEED.
-    let budget = RULES.moveSpeed * delta
-
-    while (budget > 0) {
-      if (this.movePathIndex >= this.movingPath.length) {
-        this.stopMovement()
-        return false
-      }
-
-      const nextTile = this.movingPath[this.movePathIndex]!
-
-      // Safety net: never enter a tile the unit cannot pay for. Movement always
-      // halts on a tile boundary, so stopping here leaves a valid grid position.
-      const prev = this.movingPath[this.movePathIndex - 1]!
-      const stepCost =
-        prev.x !== nextTile.x && prev.y !== nextTile.y ? RULES.stepDiagonal : RULES.stepOrthogonal
-      if (this.ap < stepCost) {
-        this.stopMovement()
-        return false
-      }
-
-      const targetWorld = grid.tileToWorld(nextTile)
-
-      // Measured against targetPos (the logical position), not position, which
-      // renderUpdate lags behind by design for smoothing. Testing arrival
-      // against the lagging value made every tile cost an extra ~50 ms.
-      const dx = targetWorld.x - this.targetPos.x
-      const dz = targetWorld.z - this.targetPos.z
-      const dist = Math.hypot(dx, dz)
-
-      if (dist > 0.001) {
-        this.targetYaw = Math.atan2(dx, dz)
-      }
-
-      if (dist > budget) {
-        this.targetPos.x += (dx / dist) * budget
-        this.targetPos.z += (dz / dist) * budget
-        break
-      }
-
-      // Arrived. Only the logical position snaps; the mesh keeps lerping.
-      this.targetPos.copy(targetWorld)
-      budget -= dist
-
-      this.tile = { ...nextTile }
-      this.ap = Math.max(0, this.ap - stepCost)
-
-      onStep?.(nextTile)
-
-      this.movePathIndex++
-      if (this.movePathIndex >= this.movingPath.length) {
-        this.stopMovement()
-        return false
-      }
-    }
-
-    return true
   }
 
   /**

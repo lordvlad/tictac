@@ -169,7 +169,7 @@ export class DebugPanel {
             ${
               this.soldier.statuses.length === 0
                 ? '<em>none</em>'
-                : this.soldier.statuses.map((s) => `${s.kind}:${s.turnsLeft}`).join(', ')
+                : this.soldier.statuses.map((s: { kind: string; turnsLeft: number }) => `${s.kind}:${s.turnsLeft}`).join(', ')
             }
           </span>
         </div>
@@ -286,8 +286,6 @@ export class DebugPanel {
   private readonly onInput = (event: Event): void => {
     const el = event.target
     if (el instanceof HTMLSelectElement && el.dataset.loadout && this.soldier) {
-      // Switching kit re-stamps this unit's own copy from the template, so
-      // per-character tuning starts from a clean baseline.
       if (el.dataset.loadout === 'weaponId') {
         this.soldier.equip(el.value as WeaponId, this.soldier.ammoId)
       } else {
@@ -302,15 +300,11 @@ export class DebugPanel {
     const target = this.resolve(el.dataset.path)
     if (!target) return
 
-    if (el.type === 'checkbox') {
-      target[el.dataset.key] = el.checked
-      this.onChange()
-      return
-    }
+    const key = el.dataset.key
+    const value: number | boolean = el.type === 'checkbox' ? el.checked : Number(el.value)
+    if (el.type !== 'checkbox' && !Number.isFinite(value as number)) return
 
-    const value = Number(el.value)
-    if (!Number.isFinite(value)) return
-    target[el.dataset.key] = value
+    target[key] = value
     this.onChange()
   }
 
@@ -329,9 +323,6 @@ export class DebugPanel {
       const delta = el.dataset.grenadePlus ? 1 : -1
       const next = Math.max(0, (this.soldier.grenades[kind] ?? 0) + delta)
       this.soldier.grenades[kind] = next
-      // Patch the field in place instead of re-rendering: a full re-render
-      // replaces the button under the cursor, and the next click of a repeated
-      // press lands on a detached node and is lost.
       const field = this.root.querySelector<HTMLInputElement>(
         `input[data-path="grenades"][data-key="${kind}"]`,
       )
@@ -343,15 +334,18 @@ export class DebugPanel {
     if (el.dataset.applyStatus) {
       const kind = el.dataset.applyStatus as keyof typeof STATUSES
       const spec = STATUSES[kind]
-      const existing = this.soldier.statuses.find((s) => s.kind === spec.kind)
+      const existing = this.soldier.statuses.find((s: { kind: string; turnsLeft: number }) => s.kind === spec.kind)
       if (existing) existing.turnsLeft = spec.turns
       else this.soldier.statuses.push({ kind: spec.kind, turnsLeft: spec.turns })
+      // fallthrough
     } else if (el.dataset.clearStatuses) {
       this.soldier.statuses = []
+      // fallthrough
     } else if (el.dataset.heal) {
       this.soldier.hp = this.soldier.maxHp
       this.soldier.ap = this.soldier.maxAp
       this.soldier.armor = this.soldier.maxArmor
+      // fallthrough
     } else {
       return
     }
