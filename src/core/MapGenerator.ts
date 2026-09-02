@@ -1,5 +1,5 @@
 import { Faction, GRID_SIZE, SQUAD_SIZE } from '../config'
-import { Block, Grid, ORTHOGONAL, StairDirection, type Tile } from './Grid'
+import { Block, faceToward, Grid, LadderFace, ORTHOGONAL, StairDirection, type Tile } from './Grid'
 import { clamp } from './math'
 import { Rng } from './rng'
 
@@ -83,6 +83,15 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   // --- Upper storeys, stairs and ladders -----------------------------------
   // Debug hack, deliberately tame for now: at most one elevated structure per
   // access kind, so a storey is never served by both a stair and a ladder.
+  //
+  // Tiles a vertical link depends on are reserved, because the crate and
+  // corridor passes that follow would otherwise seal a stair off at both ends
+  // and strand the storey behind it.
+  const reserved = new Set<number>()
+  const reserve = (x: number, y: number): void => {
+    reserved.add(grid.index(x, y))
+  }
+
   const elevate = (rect: Rect): boolean => {
     if (rect.w < 4 || rect.h < 4) return false
     for (let dy = 1; dy < rect.h - 1; dy++) {
@@ -109,22 +118,33 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
     // Landing, on the storey inside. Left at level 1 by `elevate`.
     grid.setBlock(stairX, stairY - 1, Block.None)
     grid.setLevel(stairX, stairY - 1, 1)
+
+    reserve(stairX, stairY)
+    reserve(stairX, stairY + 1)
+    reserve(stairX, stairY - 1)
   }
 
   const ladderBuilding = buildings[1]
   if (ladderBuilding !== undefined && elevate(ladderBuilding)) {
-    // The ladder sits in the low-X wall: ground outside at -X, storey inside
-    // at +X.
-    const ladX = ladderBuilding.x
+    // Punch the low-X wall into a ground-level alcove, then hang a ladder off
+    // the storey's exposed face above it. The ladder eats no floor: the alcove
+    // stays walkable and the storey tile stays walkable.
+    const alcoveX = ladderBuilding.x
     const ladY = ladderBuilding.y + Math.floor(ladderBuilding.h / 2)
-    grid.setLadder(ladX, ladY, 0)
 
-    grid.setBlock(ladX - 1, ladY, Block.None)
-    grid.setLevel(ladX - 1, ladY, 0)
-    grid.setBlock(ladX + 1, ladY, Block.None)
-    grid.setLevel(ladX + 1, ladY, 1)
+    grid.setBlock(alcoveX, ladY, Block.None)
+    grid.setLevel(alcoveX, ladY, 0)
+    grid.setBlock(alcoveX - 1, ladY, Block.None)
+    grid.setLevel(alcoveX - 1, ladY, 0)
+
+    // Storey tile just inside, one level up, ladder on the face looking out.
+    grid.setLevel(alcoveX + 1, ladY, 1)
+    grid.setLadderFace(alcoveX + 1, ladY, LadderFace.West)
+
+    reserve(alcoveX, ladY)
+    reserve(alcoveX - 1, ladY)
+    reserve(alcoveX + 1, ladY)
   }
-
   // --- Free-standing walls --------------------------------------------------
   const wallCount = rng.int(4, 8)
   for (let i = 0; i < wallCount; i++) {
@@ -157,6 +177,7 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
       const y = cy + rng.int(-1, 1)
       if (x < 2 || y < 2 || x >= size - 2 || y >= size - 2) continue
       if (zones.some((z) => inRect(z, x, y))) continue
+      if (reserved.has(grid.index(x, y))) continue
       if (grid.blockAt(x, y) !== Block.None) continue
       grid.setBlock(x, y, Block.Half)
     }
@@ -172,7 +193,7 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   }
 
   // --- Guarantee a single connected walkable region -------------------------
-  repairConnectivity(grid)
+  repairConnectivity(grid, reserved)
 
   // --- Pick spawn tiles -----------------------------------------------------
   const spawns: Record<Faction, Tile[]> = {
@@ -210,42 +231,91 @@ function carveBuilding(grid: Grid, rng: Rng, rect: Rect): void {
 }
 
 /**
- * Split the walkable tiles into connected components and carve straight
- * corridors from every satellite component into the largest one, until a
- * single component remains. Never touches the map border.
+ * Reduce the map to a single region a unit can actually walk around.
+ *
+ * Components are grown through {@link Grid.canTraverse}, so a raised storey is
+ * only "connected" when a stair or ladder truly joins it. Judging adjacency by
+ * walkability alone reports storeys as connected that nothing can reach, and
+ * then carves ground corridors that cannot possibly help.
+ *
+ * Two repairs are available: carve a corridor between components on the same
+ * storey, or — where a stranded region merely sits above its neighbour — bolt
+ * on a ladder.
  */
-function repairConnectivity(grid: Grid): void {
+function repairConnectivity(grid: Grid, reserved: Set<number>): void {
   const size = grid.size
+  const tileOf = (idx: number): Tile => ({ x: idx % size, y: (idx / size) | 0 })
 
   for (let guard = 0; guard < 64; guard++) {
     const components = labelComponents(grid)
     if (components.length <= 1) return
 
-    // Largest component is the mainland.
     let main = components[0]!
     for (const c of components) if (c.count > main.count) main = c
 
-    // Take one satellite per pass, carve it into the mainland, then re-label.
     const satellite = components.find((c) => c !== main)
     if (satellite === undefined) return
 
-    const from: Tile = { x: satellite.tiles[0]! % size, y: (satellite.tiles[0]! / size) | 0 }
+    if (linkByLadder(grid, satellite, main, tileOf)) continue
 
+    // Corridor carving is a ground-plane operation, so pick the closest pair
+    // of tiles that share a storey.
+    let from: Tile | null = null
     let to: Tile | null = null
     let bestDist = Infinity
-    for (const mIdx of main.tiles) {
-      const mx = mIdx % size
-      const my = (mIdx / size) | 0
-      const d = Math.abs(from.x - mx) + Math.abs(from.y - my)
-      if (d < bestDist) {
-        bestDist = d
-        to = { x: mx, y: my }
+    for (const sIdx of satellite.tiles) {
+      const s = tileOf(sIdx)
+      const sLevel = grid.levelAt(s.x, s.y)
+      for (const mIdx of main.tiles) {
+        const m = tileOf(mIdx)
+        if (grid.levelAt(m.x, m.y) !== sLevel) continue
+        const d = Math.abs(s.x - m.x) + Math.abs(s.y - m.y)
+        if (d < bestDist) {
+          bestDist = d
+          from = s
+          to = m
+        }
       }
     }
 
-    if (to === null) return
-    carveCorridor(grid, from, to)
+    if (from === null || to === null) return
+    carveCorridor(grid, from, to, grid.levelAt(from.x, from.y), reserved)
   }
+}
+
+/**
+ * Join two components with a ladder where one sits exactly one storey above a
+ * neighbouring tile of the other.
+ */
+function linkByLadder(
+  grid: Grid,
+  satellite: Component,
+  main: Component,
+  tileOf: (idx: number) => Tile,
+): boolean {
+  const inMain = new Set(main.tiles)
+
+  for (const sIdx of satellite.tiles) {
+    const s = tileOf(sIdx)
+    const sLevel = grid.levelAt(s.x, s.y)
+    for (const [dx, dy] of ORTHOGONAL) {
+      const n = { x: s.x + dx, y: s.y + dy }
+      if (!grid.isWalkable(n.x, n.y)) continue
+      if (!inMain.has(grid.index(n.x, n.y))) continue
+
+      const nLevel = grid.levelAt(n.x, n.y)
+      if (Math.abs(sLevel - nLevel) !== 1) continue
+
+      const upper = sLevel > nLevel ? s : n
+      const lower = sLevel > nLevel ? n : s
+      const face = faceToward(upper, lower)
+      if (face === 0) continue
+
+      grid.setLadderFace(upper.x, upper.y, face)
+      return true
+    }
+  }
+  return false
 }
 
 interface Component {
@@ -270,15 +340,13 @@ function labelComponents(grid: Grid): Component[] {
       labels[start] = label
 
       for (let head = 0; head < tiles.length; head++) {
-        const idx = tiles[head]!
-        const cx = idx % size
-        const cy = (idx / size) | 0
+        const from = { x: tiles[head]! % size, y: (tiles[head]! / size) | 0 }
         for (const [dx, dy] of ORTHOGONAL) {
-          const nx = cx + dx
-          const ny = cy + dy
-          if (!grid.isWalkable(nx, ny)) continue
-          const nIdx = grid.index(nx, ny)
+          const to = { x: from.x + dx, y: from.y + dy }
+          if (!grid.inBounds(to.x, to.y)) continue
+          const nIdx = grid.index(to.x, to.y)
           if (labels[nIdx] !== -1) continue
+          if (!grid.canTraverse(from, to)) continue
           labels[nIdx] = label
           tiles.push(nIdx)
         }
@@ -291,12 +359,26 @@ function labelComponents(grid: Grid): Component[] {
   return components
 }
 
-/** Clear an L-shaped corridor between two tiles, leaving the border intact. */
-function carveCorridor(grid: Grid, from: Tile, to: Tile): void {
+/**
+ * Clear an L-shaped corridor between two tiles, leaving the border intact.
+ *
+ * Corridor tiles are flattened to `level`, or the run would be cut by the very
+ * storey change it is meant to bypass. Tiles a vertical link depends on are
+ * left alone: flattening a stair landing would undo the link.
+ */
+function carveCorridor(
+  grid: Grid,
+  from: Tile,
+  to: Tile,
+  level: number,
+  reserved: Set<number>,
+): void {
   const size = grid.size
   const clear = (x: number, y: number) => {
     if (x <= 0 || y <= 0 || x >= size - 1 || y >= size - 1) return
+    if (reserved.has(grid.index(x, y))) return
     grid.setBlock(x, y, Block.None)
+    grid.setLevel(x, y, level)
   }
 
   const stepX = Math.sign(to.x - from.x)

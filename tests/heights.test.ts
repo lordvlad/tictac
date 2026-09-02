@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Blocks } from '../src/render/Blocks'
+import { LadderFace } from '../src/core/Grid'
 import { generateMap } from '../src/core/MapGenerator'
 import { Block, Grid, StairDirection } from '../src/core/Grid'
 import { findChainedPath, findPathSegment } from '../src/core/Pathfinding'
@@ -48,19 +49,58 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     expect(grid.canTraverse({ x: 6, y: 6 }, { x: 5, y: 5 })).toBe(false)
   })
 
-  test('ladder climbing and AP costs', () => {
+  test('a ladder joins two storeys without occupying a tile', () => {
     const grid = new Grid(10)
-    // Ladder at (3, 3) connecting level 0 at (3, 2) to level 1 at (3, 3)
+    // Ground at (3, 2); the storey above it at (3, 3) carries a ladder on the
+    // face looking back at the ground tile.
     grid.setLevel(3, 2, 0)
-    grid.setLadder(3, 3, 0)
     grid.setLevel(3, 3, 1)
+    grid.setLadderFace(3, 3, LadderFace.North)
 
-    // Valid ladder climb
+    // Both tiles remain floor: the ladder is an edge, not an occupant.
+    expect(grid.isWalkable(3, 2)).toBe(true)
+    expect(grid.isWalkable(3, 3)).toBe(true)
+    expect(grid.blockAt(3, 3)).toBe(Block.None)
+
+    expect(grid.ladderBetween({ x: 3, y: 2 }, { x: 3, y: 3 })).toBe(true)
     expect(grid.canTraverse({ x: 3, y: 2 }, { x: 3, y: 3 })).toBe(true)
+    expect(grid.canTraverse({ x: 3, y: 3 }, { x: 3, y: 2 })).toBe(true)
     expect(grid.getStepCost({ x: 3, y: 2 }, { x: 3, y: 3 })).toBe(RULES.ladderStepCost)
     expect(RULES.ladderStepCost).toBe(3)
+  })
 
-    // Direct level jump without stair or ladder is FORBIDDEN
+  test('a ladder only serves the face it is mounted on', () => {
+    const grid = new Grid(10)
+    grid.setLevel(5, 5, 1)
+    grid.setLadderFace(5, 5, LadderFace.North)
+    // Ground on all four sides of the raised tile.
+    for (const [dx, dy] of [[0, -1], [0, 1], [1, 0], [-1, 0]]) {
+      grid.setLevel(5 + dx!, 5 + dy!, 0)
+    }
+
+    // Only the mounted face climbs.
+    expect(grid.canTraverse({ x: 5, y: 4 }, { x: 5, y: 5 })).toBe(true)
+    expect(grid.canTraverse({ x: 5, y: 6 }, { x: 5, y: 5 })).toBe(false)
+    expect(grid.canTraverse({ x: 4, y: 5 }, { x: 5, y: 5 })).toBe(false)
+    expect(grid.canTraverse({ x: 6, y: 5 }, { x: 5, y: 5 })).toBe(false)
+  })
+
+  test('a ladder spans one storey only, and never cornerwise', () => {
+    const grid = new Grid(10)
+    grid.setLevel(2, 2, 0)
+    grid.setLevel(2, 3, 2) // two storeys up
+    grid.setLadderFace(2, 3, LadderFace.North)
+    expect(grid.canTraverse({ x: 2, y: 2 }, { x: 2, y: 3 })).toBe(false)
+
+    // Diagonal neighbours are not edges, so they carry no ladder.
+    grid.setLevel(7, 7, 0)
+    grid.setLevel(8, 8, 1)
+    grid.setLadderFace(8, 8, LadderFace.North)
+    expect(grid.canTraverse({ x: 7, y: 7 }, { x: 8, y: 8 })).toBe(false)
+  })
+
+  test('a storey change with no stair or ladder is refused', () => {
+    const grid = new Grid(10)
     grid.setLevel(8, 8, 0)
     grid.setLevel(8, 9, 1)
     expect(grid.canTraverse({ x: 8, y: 8 }, { x: 8, y: 9 })).toBe(false)
@@ -77,17 +117,29 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     expect(res.path.length).toBe(3)
     expect(res.path).toEqual([{ x: 2, y: 2 }, { x: 2, y: 3 }, { x: 2, y: 4 }])
   })
-  test('pathfinding specifically picks up ladder route to reach an upper level', () => {
+  test('pathfinding climbs a ladder to reach an upper storey', () => {
     const grid = new Grid(10)
-    // Level 0 at (3, 2). Ladder at (3, 3). Level 1 at (3, 4).
+    // Ground at (3, 2); storey at (3, 3) and (3, 4), reachable only by the
+    // ladder on the (3, 3) north face.
     grid.setLevel(3, 2, 0)
-    grid.setLadder(3, 3, 0)
+    grid.setLevel(3, 3, 1)
+    grid.setLevel(3, 4, 1)
+    grid.setLadderFace(3, 3, LadderFace.North)
+
+    const res = findPathSegment(grid, { x: 3, y: 2 }, { x: 3, y: 4 }, new Set())
+    expect(res.path).toEqual([{ x: 3, y: 2 }, { x: 3, y: 3 }, { x: 3, y: 4 }])
+    // One climb, then one step along the storey.
+    expect(res.cost).toBe(RULES.ladderStepCost + RULES.stepOrthogonal)
+  })
+
+  test('without its ladder the same storey is unreachable', () => {
+    const grid = new Grid(10)
+    grid.setLevel(3, 2, 0)
+    grid.setLevel(3, 3, 1)
     grid.setLevel(3, 4, 1)
 
     const res = findPathSegment(grid, { x: 3, y: 2 }, { x: 3, y: 4 }, new Set())
-    expect(res.path.length).toBe(3)
-    expect(res.path).toEqual([{ x: 3, y: 2 }, { x: 3, y: 3 }, { x: 3, y: 4 }])
-    expect(res.cost).toBe(RULES.ladderStepCost * 2)
+    expect(res.path).toEqual([])
   })
 
   test('pathfinding routes around to valid stair entrance when approaching from side', () => {
@@ -109,8 +161,8 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
   test('MovementSystem advances unit across levels and charges correct ladder AP', () => {
     const grid = new Grid(10)
     grid.setLevel(3, 2, 0)
-    grid.setLadder(3, 3, 0)
     grid.setLevel(3, 3, 1)
+    grid.setLadderFace(3, 3, LadderFace.North)
 
     const world = new World()
     const moveSystem = new MovementSystem(grid)
@@ -141,7 +193,7 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
 
     map.grid.forEach((x, y, block) => {
       if (block === Block.Stair) stairCount++
-      if (block === Block.Ladder) ladderCount++
+      if (map.grid.ladderFacesAt(x, y) !== 0) ladderCount++
       if (map.grid.levelAt(x, y) > 0) upperLevelCount++
     })
 
@@ -178,8 +230,8 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
   })
 
   test('a generated upper storey is reachable from the ground', () => {
-    // An elevated floor with no walkable link to the ground is why a proposed
-    // route collapsed to just its target marker: A* found nothing to draw.
+    // A storey with no walkable link to the ground is why a proposed route
+    // collapsed to just its target marker: A* had nothing to draw.
     for (const seed of [1, 42, 1337, 90210, 5150]) {
       const { grid, spawns } = generateMap(seed)
 
@@ -194,6 +246,22 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
         (tile) => findPathSegment(grid, start, tile, new Set()).path.length > 0,
       )
       expect(reached).toBe(true)
+    }
+  })
+
+  test('every walkable tile of a generated map can be walked to', () => {
+    // What connectivity repair promises. Judging adjacency by walkability
+    // alone let it certify storeys that no unit could actually enter.
+    for (const seed of [1, 42, 1337, 90210, 5150, 24601]) {
+      const { grid, spawns } = generateMap(seed)
+      const mask = grid.reachableMask(spawns[Faction.Blue][0]!)
+
+      const stranded: Tile[] = []
+      grid.forEach((x, y) => {
+        if (grid.isWalkable(x, y) && !mask[grid.index(x, y)]) stranded.push({ x, y })
+      })
+
+      expect(stranded).toEqual([])
     }
   })
 })

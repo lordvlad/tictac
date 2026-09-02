@@ -12,7 +12,7 @@ import {
   type Vector3,
 } from 'three'
 import { LEVEL_HEIGHT, TILE } from '../config'
-import { Block, blockHeight, type Grid } from '../core/Grid'
+import { Block, blockHeight, type Grid, LadderFace } from '../core/Grid'
 import { markOccludedTiles } from '../core/Occlusion'
 import { VIS_BRIGHTNESS, VisState } from '../core/Visibility'
 
@@ -23,8 +23,68 @@ const FADE_ATTRIBUTE = 'aFade'
 const BLOCK_COLORS: Record<Exclude<Block, typeof Block.None>, number> = {
   [Block.Half]: 0x9a7c4f,
   [Block.Full]: 0x8b8f96,
-  [Block.Stair]: 0x00d2ff, // Distinct cyan stair highlight
-  [Block.Ladder]: 0xff8800, // Distinct orange ladder highlight
+  [Block.Stair]: 0x00d2ff,
+}
+
+/** Ladders are edges, not tiles, so they get their own colour and layer. */
+const LADDER_COLOR = 0xff8800
+
+/** Face bits in a stable order, so instances and their offsets stay paired. */
+const LADDER_FACE_ORDER: readonly number[] = [
+  LadderFace.North,
+  LadderFace.East,
+  LadderFace.South,
+  LadderFace.West,
+]
+
+/** Grid-space step from a tile centre toward each face, as [dx, dy]. */
+const LADDER_FACE_OFFSET: Record<number, readonly [number, number]> = {
+  [LadderFace.North]: [0, -1],
+  [LadderFace.East]: [1, 0],
+  [LadderFace.South]: [0, 1],
+  [LadderFace.West]: [-1, 0],
+}
+
+/**
+ * A lit material carrying the two per-instance channels every layer needs:
+ * instance colour for fog dimming, and `aFade` for the wall x-ray and the
+ * level filter.
+ *
+ * `transparent` so per-instance alpha blends; depth write stays on so opaque
+ * walls still occlude normally.
+ */
+function createFadedMaterial(roughness: number, metalness: number): MeshStandardMaterial {
+  const material = new MeshStandardMaterial({
+    color: 0xffffff,
+    roughness,
+    metalness,
+    transparent: true,
+  })
+
+  // Multiply lit output by instance colour so unexplored tiles (black) go to
+  // pure black instead of leaving a lit silhouette.
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nattribute float aFade;\nvarying float vFade;',
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFade = aFade;')
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vFade;')
+      .replace(
+        '#include <dithering_fragment>',
+        /* glsl */ `
+        #include <dithering_fragment>
+        #ifdef USE_INSTANCING_COLOR
+          gl_FragColor.rgb *= vColor.rgb;
+        #endif
+        gl_FragColor.a *= vFade;
+        `,
+      )
+  }
+  material.customProgramCacheKey = () => 'tictac-block'
+  return material
 }
 
 /**
@@ -117,45 +177,40 @@ export function createSteppedStairGeometry(steps = 4): BufferGeometry {
   return geometry
 }
 /**
- * A climbable ladder: two rails and their rungs, standing in the plane of the
- * wall it is bolted to rather than filling the tile. A ladder is the vertical
- * link between two floors, not a floor of its own.
+ * A ladder: two rails and their rungs, lying flat in the plane of the wall it
+ * is bolted to and spanning exactly one storey.
+ *
+ * Built around the origin in the XY plane and thin in Z, so the caller can
+ * park it on a tile edge and turn local +Z to face the drop.
  */
 export function createLadderWallGeometry(rungs = 5): BufferGeometry {
-  const railW = 0.05
+  const railW = 0.06
   const railH = LEVEL_HEIGHT
-  const railD = 0.08
-  const railOffsetX = 0.28
+  const railD = 0.05
+  const railOffsetX = 0.26
   const rungW = railOffsetX * 2 - railW
   const rungH = 0.04
-  const rungD = 0.05
+  const rungD = 0.07
 
   const pos: number[] = []
 
-  // Helper to push a box into pos array
+  /** An axis-aligned box, every face wound outward. */
   const addBox = (cx: number, cy: number, cz: number, bw: number, bh: number, bd: number) => {
     const x0 = cx - bw / 2, x1 = cx + bw / 2
     const y0 = cy - bh / 2, y1 = cy + bh / 2
     const z0 = cz - bd / 2, z1 = cz + bd / 2
 
-    // Front (z1)
     pos.push(x0, y0, z1,  x1, y0, z1,  x1, y1, z1,   x0, y0, z1,  x1, y1, z1,  x0, y1, z1)
-    // Back (z0)
     pos.push(x1, y0, z0,  x0, y0, z0,  x0, y1, z0,   x1, y0, z0,  x0, y1, z0,  x1, y1, z0)
-    // Left (x0)
     pos.push(x0, y0, z0,  x0, y0, z1,  x0, y1, z1,   x0, y0, z0,  x0, y1, z1,  x0, y1, z0)
-    // Right (x1)
     pos.push(x1, y0, z1,  x1, y0, z0,  x1, y1, z0,   x1, y0, z1,  x1, y1, z0,  x1, y1, z1)
-    // Top (y1)
     pos.push(x0, y1, z1,  x1, y1, z1,  x1, y1, z0,   x0, y1, z1,  x1, y1, z0,  x0, y1, z0)
-    // Bottom (y0)
     pos.push(x0, y0, z0,  x1, y0, z0,  x1, y0, z1,   x0, y0, z0,  x1, y0, z1,  x0, y0, z1)
   }
 
   addBox(railOffsetX * -1, 0, 0, railW, railH, railD)
   addBox(railOffsetX, 0, 0, railW, railH, railD)
 
-  // Rungs spaced evenly between the rail ends.
   const spacing = railH / (rungs + 1)
   for (let i = 0; i < rungs; i++) {
     addBox(0, railH / -2 + spacing * (i + 1), 0, rungW, rungH, rungD)
@@ -226,10 +281,10 @@ export class Blocks {
     this.group.name = 'blocks'
     this.occlusionMask = new Uint8Array(grid.size * grid.size)
 
-    const upperFloorLayer = this.buildUpperFloors()
-    if (upperFloorLayer) {
-      this.layers.push(upperFloorLayer)
-      this.group.add(upperFloorLayer.mesh)
+    for (const extra of [this.buildUpperFloors(), this.buildLadders()]) {
+      if (extra === null) continue
+      this.layers.push(extra)
+      this.group.add(extra.mesh)
     }
   }
 
@@ -239,47 +294,13 @@ export class Blocks {
     const geometry =
       kind === Block.Stair
         ? createSteppedStairGeometry()
-        : kind === Block.Ladder
-          ? createLadderWallGeometry()
-          : new BoxGeometry(TILE * 0.98, height, TILE * 0.98)
+        : new BoxGeometry(TILE * 0.98, height, TILE * 0.98)
     // Per-instance x-ray opacity. Starts fully opaque; Float32Array zero-inits,
     // so the fill(1) is required.
     const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
     geometry.setAttribute(FADE_ATTRIBUTE, fade)
 
-    // `transparent` so per-instance alpha actually blends; depth write stays on
-    // so opaque walls still occlude normally.
-    const material = new MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.85,
-      metalness: 0.02,
-      transparent: true,
-    })
-
-    // Multiply final lit output by instance colour so unexplored blocks (black)
-    // go to pure black instead of leaving a lit silhouette. `aFade` carries the
-    // per-instance x-ray opacity.
-    material.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          '#include <common>\nattribute float aFade;\nvarying float vFade;',
-        )
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFade = aFade;')
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vFade;')
-        .replace(
-          '#include <dithering_fragment>',
-          /* glsl */ `
-          #include <dithering_fragment>
-          #ifdef USE_INSTANCING_COLOR
-            gl_FragColor.rgb *= vColor.rgb;
-          #endif
-          gl_FragColor.a *= vFade;
-          `,
-        )
-    }
-    material.customProgramCacheKey = () => 'tictac-block'
+    const material = createFadedMaterial(0.85, 0.02)
 
     const mesh = new InstancedMesh(geometry, material, capacity)
     mesh.instanceMatrix.setUsage(DynamicDrawUsage)
@@ -311,24 +332,7 @@ export class Blocks {
     const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
     geometry.setAttribute(FADE_ATTRIBUTE, fade)
 
-    const material = new MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.8,
-      metalness: 0.1,
-      transparent: true,
-    })
-
-    material.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float aFade;\nvarying float vFade;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFade = aFade;')
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vFade;')
-        .replace(
-          '#include <dithering_fragment>',
-          `#include <dithering_fragment>\n#ifdef USE_INSTANCING_COLOR\n  gl_FragColor.rgb *= vColor.rgb;\n#endif\ngl_FragColor.a *= vFade;`
-        )
-    }
+    const material = createFadedMaterial(0.8, 0.1)
 
     const mesh = new InstancedMesh(geometry, material, capacity)
     mesh.instanceMatrix.setUsage(DynamicDrawUsage)
@@ -353,6 +357,64 @@ export class Blocks {
       layer.mesh.setMatrixAt(tile.index, this.dummy.matrix)
       layer.mesh.setColorAt(tile.index, baseColor)
     }
+    layer.mesh.instanceMatrix.needsUpdate = true
+    if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
+
+    return layer
+  }
+
+  /**
+   * One ladder per mounted face.
+   *
+   * Placed on the shared edge between the raised tile and the tile below, so a
+   * ladder takes up no floor: both tiles stay walkable.
+   */
+  private buildLadders(): BlockLayer | null {
+    const instances: BlockInstance[] = []
+    const faces: number[] = []
+
+    this.grid.forEach((x, y) => {
+      const mounted = this.grid.ladderFacesAt(x, y)
+      for (const face of LADDER_FACE_ORDER) {
+        if ((mounted & face) === 0) continue
+        instances.push({ x, y, index: instances.length })
+        faces.push(face)
+      }
+    })
+    if (instances.length === 0) return null
+
+    const capacity = instances.length
+    const geometry = createLadderWallGeometry()
+    const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
+    geometry.setAttribute(FADE_ATTRIBUTE, fade)
+
+    const mesh = new InstancedMesh(geometry, createFadedMaterial(0.7, 0.25), capacity)
+    mesh.instanceMatrix.setUsage(DynamicDrawUsage)
+    mesh.count = capacity
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    mesh.userData.type = 'ladder'
+    mesh.frustumCulled = false
+
+    const baseColor = new Color(LADDER_COLOR)
+    const layer: BlockLayer = { mesh, instances, baseColor, fade }
+
+    instances.forEach((tile, i) => {
+      const [dx, dz] = LADDER_FACE_OFFSET[faces[i]!]!
+      const level = this.grid.levelAt(tile.x, tile.y)
+
+      this.dummy.position.set(
+        this.grid.worldX(tile.x) + (dx * TILE) / 2,
+        (level - 0.5) * LEVEL_HEIGHT,
+        this.grid.worldZ(tile.y) + (dz * TILE) / 2,
+      )
+      // Turn local +Z to look out over the drop.
+      this.dummy.rotation.y = Math.atan2(dx, dz)
+      this.dummy.updateMatrix()
+      layer.mesh.setMatrixAt(tile.index, this.dummy.matrix)
+      layer.mesh.setColorAt(tile.index, baseColor)
+    })
+
     layer.mesh.instanceMatrix.needsUpdate = true
     if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
 

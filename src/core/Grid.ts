@@ -8,10 +8,8 @@ export const Block = {
   Half: 1,
   /** 2 m wall/building — blocks movement AND line of sight, grants full cover. */
   Full: 2,
-  /** Stair block — transitions between lower level and upper level (2-side access only). */
+  /** A flight of steps. Enterable from its foot and its head only. */
   Stair: 3,
-  /** Ladder wall — allows climbing up and down at increased AP cost. */
-  Ladder: 4,
 } as const
 export type Block = (typeof Block)[keyof typeof Block]
 
@@ -22,6 +20,32 @@ export const StairDirection = {
   West: 3,  // Lower at (x+1, y), Upper at (x-1, y)
 } as const
 export type StairDirection = (typeof StairDirection)[keyof typeof StairDirection]
+
+/**
+ * Which vertical face of a tile carries a ladder, as bit flags.
+ *
+ * A ladder is bolted to the face of a raised tile and links it to the tile one
+ * storey below on that side. It is an edge between two tiles, not a tile of
+ * its own: it costs no floor space and nothing stands "on" it.
+ */
+export const LadderFace = {
+  North: 1 << 0, // face toward y - 1
+  East: 1 << 1,  // face toward x + 1
+  South: 1 << 2, // face toward y + 1
+  West: 1 << 3,  // face toward x - 1
+} as const
+export type LadderFace = (typeof LadderFace)[keyof typeof LadderFace]
+
+/** The face of `from` that looks at `to`, or 0 when they are not orthogonal neighbours. */
+export function faceToward(from: Tile, to: Tile): LadderFace | 0 {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  if (dx === 0 && dy === -1) return LadderFace.North
+  if (dx === 0 && dy === 1) return LadderFace.South
+  if (dx === 1 && dy === 0) return LadderFace.East
+  if (dx === -1 && dy === 0) return LadderFace.West
+  return 0
+}
 
 export function blockHeight(block: Block): number {
   if (block === Block.Half) return HALF_BLOCK_HEIGHT
@@ -68,12 +92,15 @@ export class Grid {
   readonly blocks: Uint8Array
   readonly levels: Uint8Array
   readonly stairDirections: Uint8Array
+  /** Ladder faces per tile, as a {@link LadderFace} bitmask. */
+  readonly ladderFaces: Uint8Array
 
   constructor(size: number = GRID_SIZE) {
     this.size = size
     this.blocks = new Uint8Array(size * size)
     this.levels = new Uint8Array(size * size)
     this.stairDirections = new Uint8Array(size * size)
+    this.ladderFaces = new Uint8Array(size * size)
   }
 
   index(x: number, y: number): number {
@@ -118,18 +145,49 @@ export class Grid {
     this.levels[idx] = lowerLevel
   }
 
-  setLadder(x: number, y: number, lowerLevel = 0): void {
+  /**
+   * Bolt a ladder to one face of a raised tile.
+   *
+   * `x, y` is the *upper* tile: the ladder hangs from its edge down to the
+   * tile one storey below on that side.
+   */
+  setLadderFace(x: number, y: number, face: LadderFace): void {
     if (!this.inBounds(x, y)) return
     const idx = y * this.size + x
-    this.blocks[idx] = Block.Ladder
-    this.levels[idx] = lowerLevel
+    this.ladderFaces[idx] = this.ladderFaces[idx]! | face
   }
 
-  /** Can a unit stand here / enter this tile? */
+  ladderFacesAt(x: number, y: number): number {
+    if (!this.inBounds(x, y)) return 0
+    return this.ladderFaces[y * this.size + x]!
+  }
+
+  hasLadderFace(x: number, y: number, face: number): boolean {
+    return (this.ladderFacesAt(x, y) & face) !== 0
+  }
+
+  /**
+   * Is there a ladder joining these two tiles?
+   *
+   * One storey apart, orthogonally adjacent, and the higher tile carries a
+   * ladder on the face looking at the lower one.
+   */
+  ladderBetween(a: Tile, b: Tile): boolean {
+    const levelA = this.levelAt(a.x, a.y)
+    const levelB = this.levelAt(b.x, b.y)
+    if (Math.abs(levelA - levelB) !== 1) return false
+
+    const upper = levelA > levelB ? a : b
+    const lower = levelA > levelB ? b : a
+    const face = faceToward(upper, lower)
+    return face !== 0 && this.hasLadderFace(upper.x, upper.y, face)
+  }
+
+  /** Can a unit stand here (terrain only)? */
   isWalkable(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false
     const block = this.blocks[y * this.size + x]
-    return block === Block.None || block === Block.Stair || block === Block.Ladder
+    return block === Block.None || block === Block.Stair
   }
 
   /** Does terrain here stop a line of sight ray? Only full-height blocks do. */
@@ -168,40 +226,31 @@ export class Grid {
     )
   }
   /**
-   * Convert a tile path into 3D world points that follow the terrain floor,
-   * slope up along stairs, and climb vertically up/down ladder walls.
+   * A tile path as world points that follow the floor: level with the ground,
+   * sloping over stairs, and climbing straight up at a ladder.
+   *
+   * The climb is drawn at the shared edge, because that is where the ladder
+   * is: the route walks to the wall, goes up it, then steps off.
    */
   pathToWorldPoints(path: Tile[]): Vector3[] {
     const points: Vector3[] = []
-    if (path.length === 0) return points
 
     for (let i = 0; i < path.length; i++) {
       const curr = path[i]!
-      const currLevel = this.levelAt(curr.x, curr.y)
-      const currBlock = this.blockAt(curr.x, curr.y)
 
-      if (i === 0) {
-        points.push(this.tileToWorld(curr))
-        continue
+      if (i > 0) {
+        const prev = path[i - 1]!
+        if (this.ladderBetween(prev, curr)) {
+          const edgeX = (this.worldX(prev.x) + this.worldX(curr.x)) / 2
+          const edgeZ = (this.worldZ(prev.y) + this.worldZ(curr.y)) / 2
+          points.push(
+            new Vector3(edgeX, this.levelAt(prev.x, prev.y) * LEVEL_HEIGHT, edgeZ),
+            new Vector3(edgeX, this.levelAt(curr.x, curr.y) * LEVEL_HEIGHT, edgeZ),
+          )
+        }
       }
 
-      const prev = path[i - 1]!
-      const prevLevel = this.levelAt(prev.x, prev.y)
-      const prevBlock = this.blockAt(prev.x, prev.y)
-
-      const isLadderStep = currBlock === Block.Ladder || prevBlock === Block.Ladder
-      if (isLadderStep && prevLevel !== currLevel) {
-        // Insert vertical ladder climbing points
-        const wx = this.worldX(prev.x)
-        const wz = this.worldZ(prev.y)
-        const yStart = prevLevel * LEVEL_HEIGHT
-        const yEnd = currLevel * LEVEL_HEIGHT
-        points.push(new Vector3(wx, Math.min(yStart, yEnd), wz))
-        points.push(new Vector3(wx, Math.max(yStart, yEnd), wz))
-        points.push(this.tileToWorld(curr))
-      } else {
-        points.push(this.tileToWorld(curr))
-      }
+      points.push(this.tileToWorld(curr))
     }
 
     return points
@@ -223,26 +272,25 @@ export class Grid {
 
   /**
    * Can a unit step directly from `from` to `to`?
-   * Enforces terrain walkability, stair 2-side access, ladder vertical access,
-   * level matching, and diagonal rules.
+   *
+   * Enforces walkability, the stair's two-sided access, ladder edges, level
+   * matching and the no-diagonal rule on vertical links.
    */
   canTraverse(from: Tile, to: Tile): boolean {
     if (!this.isWalkable(from.x, from.y) || !this.isWalkable(to.x, to.y)) return false
+
     const dx = to.x - from.x
     const dy = to.y - from.y
-
     if (dx === 0 && dy === 0) return false
-    const isDiagonal = dx !== 0 && dy !== 0
 
+    const isDiagonal = dx !== 0 && dy !== 0
     const fromBlock = this.blockAt(from.x, from.y)
     const toBlock = this.blockAt(to.x, to.y)
 
-    // Diagonal movement is strictly forbidden on stairs and ladders
-    if (isDiagonal && (fromBlock === Block.Stair || toBlock === Block.Stair || fromBlock === Block.Ladder || toBlock === Block.Ladder)) {
-      return false
-    }
+    // Stairs are only ever walked along, never cut across.
+    if (isDiagonal && (fromBlock === Block.Stair || toBlock === Block.Stair)) return false
 
-    // Check stair access constraints (stairs only allow access from two sides: upper and lower)
+    // A stair is entered at its foot or its head, not from the side.
     if (toBlock === Block.Stair) {
       const access = this.getStairAccessTiles(to.x, to.y)
       if (!tileEquals(from, access.lower) && !tileEquals(from, access.upper)) return false
@@ -252,35 +300,25 @@ export class Grid {
       if (!tileEquals(to, access.lower) && !tileEquals(to, access.upper)) return false
     }
 
-    const fromLevel = this.levelAt(from.x, from.y)
-    const toLevel = this.levelAt(to.x, to.y)
+    if (this.levelAt(from.x, from.y) === this.levelAt(to.x, to.y)) return true
 
-    // Level transitions
-    if (fromLevel !== toLevel) {
-      // Must be via stair or ladder
-      const isStairStep = fromBlock === Block.Stair || toBlock === Block.Stair
-      const isLadderStep = fromBlock === Block.Ladder || toBlock === Block.Ladder
-      if (!isStairStep && !isLadderStep) return false
-    }
-
-    return true
+    // Changing storey needs a stair or a ladder, and cannot be done cornerwise.
+    if (isDiagonal) return false
+    if (fromBlock === Block.Stair || toBlock === Block.Stair) return true
+    return this.ladderBetween(from, to)
   }
 
-  /**
-   * Calculate action points required to move between `from` and `to`.
-   */
+  /** Action points to step from `from` to `to`. */
   getStepCost(from: Tile, to: Tile): number {
-    const fromBlock = this.blockAt(from.x, from.y)
-    const toBlock = this.blockAt(to.x, to.y)
-    const isLadder = fromBlock === Block.Ladder || toBlock === Block.Ladder
-    if (isLadder) return RULES.ladderStepCost
+    // Hauling yourself up a ladder costs more than walking the same distance.
+    if (this.ladderBetween(from, to)) return RULES.ladderStepCost
 
-    const isStair = fromBlock === Block.Stair || toBlock === Block.Stair
-    if (isStair) return RULES.stairStepCost
+    if (this.blockAt(from.x, from.y) === Block.Stair || this.blockAt(to.x, to.y) === Block.Stair) {
+      return RULES.stairStepCost
+    }
 
-    const dx = to.x - from.x
-    const dy = to.y - from.y
-    return dx !== 0 && dy !== 0 ? RULES.stepDiagonal : RULES.stepOrthogonal
+    const isDiagonal = to.x !== from.x && to.y !== from.y
+    return isDiagonal ? RULES.stepDiagonal : RULES.stepOrthogonal
   }
   /** Which tile contains this world position? May be out of bounds. */
   worldToTile(x: number, z: number): Tile {
@@ -304,8 +342,11 @@ export class Grid {
   }
 
   /**
-   * Flood fill of walkable tiles from `origin`.
-   * Returns a boolean mask; used to verify (and repair) map connectivity.
+   * Flood fill from `origin` over tiles a unit could actually walk to.
+   *
+   * Steps through {@link canTraverse}, so a raised floor counts as reached
+   * only when a stair or ladder genuinely joins it. Testing walkability alone
+   * reports storeys as connected that no unit can get to.
    */
   reachableMask(origin: Tile): Uint8Array {
     const mask = new Uint8Array(this.size * this.size)
@@ -316,14 +357,13 @@ export class Grid {
 
     for (let head = 0; head < queue.length; head++) {
       const idx = queue[head]!
-      const cx = idx % this.size
-      const cy = (idx / this.size) | 0
+      const from = { x: idx % this.size, y: (idx / this.size) | 0 }
       for (const [dx, dy] of ORTHOGONAL) {
-        const nx = cx + dx
-        const ny = cy + dy
-        if (!this.isWalkable(nx, ny)) continue
-        const nIdx = this.index(nx, ny)
+        const to = { x: from.x + dx, y: from.y + dy }
+        if (!this.inBounds(to.x, to.y)) continue
+        const nIdx = this.index(to.x, to.y)
         if (mask[nIdx]) continue
+        if (!this.canTraverse(from, to)) continue
         mask[nIdx] = 1
         queue.push(nIdx)
       }
@@ -333,7 +373,9 @@ export class Grid {
 
   countWalkable(): number {
     let n = 0
-    for (let i = 0; i < this.blocks.length; i++) if (this.blocks[i] === Block.None) n++
+    for (let y = 0; y < this.size; y++) {
+      for (let x = 0; x < this.size; x++) if (this.isWalkable(x, y)) n++
+    }
     return n
   }
 }
