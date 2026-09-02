@@ -1,5 +1,5 @@
 import { Vector3 } from 'three'
-import { FULL_BLOCK_HEIGHT, GRID_SIZE, HALF_BLOCK_HEIGHT, TILE } from '../config'
+import { FULL_BLOCK_HEIGHT, GRID_SIZE, HALF_BLOCK_HEIGHT, RULES, TILE } from '../config'
 
 export const Block = {
   /** Open floor. */
@@ -8,8 +8,20 @@ export const Block = {
   Half: 1,
   /** 2 m wall/building — blocks movement AND line of sight, grants full cover. */
   Full: 2,
+  /** Stair block — transitions between lower level and upper level (2-side access only). */
+  Stair: 3,
+  /** Ladder wall — allows climbing up and down at increased AP cost. */
+  Ladder: 4,
 } as const
 export type Block = (typeof Block)[keyof typeof Block]
+
+export const StairDirection = {
+  North: 0, // Lower at (x, y-1), Upper at (x, y+1)
+  East: 1,  // Lower at (x-1, y), Upper at (x+1, y)
+  South: 2, // Lower at (x, y+1), Upper at (x, y-1)
+  West: 3,  // Lower at (x+1, y), Upper at (x-1, y)
+} as const
+export type StairDirection = (typeof StairDirection)[keyof typeof StairDirection]
 
 export function blockHeight(block: Block): number {
   if (block === Block.Half) return HALF_BLOCK_HEIGHT
@@ -54,10 +66,14 @@ export const ORTHOGONAL: readonly (readonly [number, number])[] = [
 export class Grid {
   readonly size: number
   readonly blocks: Uint8Array
+  readonly levels: Uint8Array
+  readonly stairDirections: Uint8Array
 
   constructor(size: number = GRID_SIZE) {
     this.size = size
     this.blocks = new Uint8Array(size * size)
+    this.levels = new Uint8Array(size * size)
+    this.stairDirections = new Uint8Array(size * size)
   }
 
   index(x: number, y: number): number {
@@ -78,9 +94,42 @@ export class Grid {
     this.blocks[y * this.size + x] = block
   }
 
-  /** Can a unit stand here (terrain only)? */
+  /** Level / elevation index at tile (0 = ground, 1 = upper level, etc.). */
+  levelAt(x: number, y: number): number {
+    if (!this.inBounds(x, y)) return 0
+    return this.levels[y * this.size + x]!
+  }
+
+  setLevel(x: number, y: number, level: number): void {
+    if (!this.inBounds(x, y)) return
+    this.levels[y * this.size + x] = level
+  }
+
+  stairDirectionAt(x: number, y: number): StairDirection {
+    if (!this.inBounds(x, y)) return StairDirection.North
+    return this.stairDirections[y * this.size + x] as StairDirection
+  }
+
+  setStair(x: number, y: number, direction: StairDirection, lowerLevel = 0): void {
+    if (!this.inBounds(x, y)) return
+    const idx = y * this.size + x
+    this.blocks[idx] = Block.Stair
+    this.stairDirections[idx] = direction
+    this.levels[idx] = lowerLevel
+  }
+
+  setLadder(x: number, y: number, lowerLevel = 0): void {
+    if (!this.inBounds(x, y)) return
+    const idx = y * this.size + x
+    this.blocks[idx] = Block.Ladder
+    this.levels[idx] = lowerLevel
+  }
+
+  /** Can a unit stand here / enter this tile? */
   isWalkable(x: number, y: number): boolean {
-    return this.inBounds(x, y) && this.blocks[y * this.size + x] === Block.None
+    if (!this.inBounds(x, y)) return false
+    const block = this.blocks[y * this.size + x]
+    return block === Block.None || block === Block.Stair || block === Block.Ladder
   }
 
   /** Does terrain here stop a line of sight ray? Only full-height blocks do. */
@@ -106,11 +155,90 @@ export class Grid {
     return (tileY + 0.5) * TILE - this.halfExtent
   }
 
-  /** Centre of a tile, at floor level. */
+  /** Centre of a tile, taking level elevation into account. */
   tileToWorld(tile: Tile, target = new Vector3()): Vector3 {
-    return target.set(this.worldX(tile.x), 0, this.worldZ(tile.y))
+    const level = this.levelAt(tile.x, tile.y)
+    const block = this.blockAt(tile.x, tile.y)
+    // If it's a stair block, height is halfway between lower and upper
+    const heightOffset = block === Block.Stair ? 1.0 : 0
+    return target.set(this.worldX(tile.x), level * 2.0 + heightOffset, this.worldZ(tile.y))
+  }
+  /** Get allowed entrance and exit tiles for a stair block at (x, y). */
+  getStairAccessTiles(x: number, y: number): { lower: Tile; upper: Tile } {
+    const dir = this.stairDirectionAt(x, y)
+    switch (dir) {
+      case StairDirection.North:
+        return { lower: { x, y: y - 1 }, upper: { x, y: y + 1 } }
+      case StairDirection.South:
+        return { lower: { x, y: y + 1 }, upper: { x, y: y - 1 } }
+      case StairDirection.East:
+        return { lower: { x: x - 1, y }, upper: { x: x + 1, y } }
+      case StairDirection.West:
+        return { lower: { x: x + 1, y }, upper: { x: x - 1, y } }
+    }
   }
 
+  /**
+   * Can a unit step directly from `from` to `to`?
+   * Enforces terrain walkability, stair 2-side access, ladder vertical access,
+   * level matching, and diagonal rules.
+   */
+  canTraverse(from: Tile, to: Tile): boolean {
+    if (!this.isWalkable(from.x, from.y) || !this.isWalkable(to.x, to.y)) return false
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+
+    if (dx === 0 && dy === 0) return false
+    const isDiagonal = dx !== 0 && dy !== 0
+
+    const fromBlock = this.blockAt(from.x, from.y)
+    const toBlock = this.blockAt(to.x, to.y)
+
+    // Diagonal movement is strictly forbidden on stairs and ladders
+    if (isDiagonal && (fromBlock === Block.Stair || toBlock === Block.Stair || fromBlock === Block.Ladder || toBlock === Block.Ladder)) {
+      return false
+    }
+
+    // Check stair access constraints (stairs only allow access from two sides: upper and lower)
+    if (toBlock === Block.Stair) {
+      const access = this.getStairAccessTiles(to.x, to.y)
+      if (!tileEquals(from, access.lower) && !tileEquals(from, access.upper)) return false
+    }
+    if (fromBlock === Block.Stair) {
+      const access = this.getStairAccessTiles(from.x, from.y)
+      if (!tileEquals(to, access.lower) && !tileEquals(to, access.upper)) return false
+    }
+
+    const fromLevel = this.levelAt(from.x, from.y)
+    const toLevel = this.levelAt(to.x, to.y)
+
+    // Level transitions
+    if (fromLevel !== toLevel) {
+      // Must be via stair or ladder
+      const isStairStep = fromBlock === Block.Stair || toBlock === Block.Stair
+      const isLadderStep = fromBlock === Block.Ladder || toBlock === Block.Ladder
+      if (!isStairStep && !isLadderStep) return false
+    }
+
+    return true
+  }
+
+  /**
+   * Calculate action points required to move between `from` and `to`.
+   */
+  getStepCost(from: Tile, to: Tile): number {
+    const fromBlock = this.blockAt(from.x, from.y)
+    const toBlock = this.blockAt(to.x, to.y)
+    const isLadder = fromBlock === Block.Ladder || toBlock === Block.Ladder
+    if (isLadder) return RULES.ladderStepCost
+
+    const isStair = fromBlock === Block.Stair || toBlock === Block.Stair
+    if (isStair) return RULES.stairStepCost
+
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    return dx !== 0 && dy !== 0 ? RULES.stepDiagonal : RULES.stepOrthogonal
+  }
   /** Which tile contains this world position? May be out of bounds. */
   worldToTile(x: number, z: number): Tile {
     return {

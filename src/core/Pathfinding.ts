@@ -65,7 +65,7 @@ export function findPathSegment(
       const nx = cx + dx
       const ny = cy + dy
 
-      if (!grid.isWalkable(nx, ny)) continue
+      if (!grid.canTraverse({ x: cx, y: cy }, { x: nx, y: ny })) continue
 
       const nIdx = grid.index(nx, ny)
       // Blocked by another unit (unless it's the start or goal tile)
@@ -77,9 +77,8 @@ export function findPathSegment(
         if (occupiedTiles.has(grid.index(cx + dx, cy)) || occupiedTiles.has(grid.index(cx, cy + dy))) continue
       }
 
-      const stepCost = isDiagonal ? RULES.stepDiagonal : RULES.stepOrthogonal
+      const stepCost = grid.getStepCost({ x: cx, y: cy }, { x: nx, y: ny })
       const tentativeG = gScore[current]! + stepCost
-
       if (tentativeG < gScore[nIdx]!) {
         cameFrom[nIdx] = current
         gScore[nIdx] = tentativeG

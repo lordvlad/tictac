@@ -20,7 +20,8 @@ export class PositionComponent extends Component {
   constructor(
     public tile: Tile = { x: 0, y: 0 },
     targetPos: Vector3 = new Vector3(),
-    public targetYaw: number = 0
+    public targetYaw: number = 0,
+    public level: number = 0
   ) {
     super()
     this.targetPos = targetPos
@@ -31,6 +32,7 @@ export class PositionComponent extends Component {
       tile: { x: this.tile.x, y: this.tile.y },
       targetPos: { x: this.targetPos.x, y: this.targetPos.y, z: this.targetPos.z },
       targetYaw: this.targetYaw,
+      level: this.level,
     }
   }
 
@@ -46,5 +48,6 @@ export class PositionComponent extends Component {
       }
     }
     if (typeof data.targetYaw === 'number') this.targetYaw = data.targetYaw
+    if (typeof data.level === 'number') this.level = data.level
   }
 }

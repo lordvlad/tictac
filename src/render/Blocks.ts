@@ -21,6 +21,8 @@ const FADE_ATTRIBUTE = 'aFade'
 const BLOCK_COLORS: Record<Exclude<Block, typeof Block.None>, number> = {
   [Block.Half]: 0x9a7c4f,
   [Block.Full]: 0x8b8f96,
+  [Block.Stair]: 0x00d2ff, // Distinct cyan stair highlight
+  [Block.Ladder]: 0xff8800, // Distinct orange ladder highlight
 }
 
 interface BlockInstance {
@@ -83,7 +85,7 @@ export class Blocks {
   }
 
   private buildLayer(kind: Exclude<Block, typeof Block.None>, instances: BlockInstance[]): BlockLayer {
-    const height = blockHeight(kind)
+    const height = blockHeight(kind) || 2.0
     const capacity = Math.max(1, instances.length)
 
     // Slight inset so adjacent blocks read as separate volumes.
@@ -143,7 +145,24 @@ export class Blocks {
 
   private placeAll(layer: BlockLayer, height: number): void {
     for (const tile of layer.instances) {
-      this.dummy.position.set(this.grid.worldX(tile.x), height / 2, this.grid.worldZ(tile.y))
+      const level = this.grid.levelAt(tile.x, tile.y)
+      const baseY = level * 2.0
+      this.dummy.position.set(
+        this.grid.worldX(tile.x),
+        baseY + height / 2,
+        this.grid.worldZ(tile.y)
+      )
+
+      // Apply stair rotation if this is a stair block
+      const block = this.grid.blockAt(tile.x, tile.y)
+      if (block === Block.Stair) {
+        const dir = this.grid.stairDirectionAt(tile.x, tile.y)
+        // Rotate around Y axis based on StairDirection (0: North, 1: East, 2: South, 3: West)
+        this.dummy.rotation.y = -(dir * Math.PI) / 2
+      } else {
+        this.dummy.rotation.y = 0
+      }
+
       this.dummy.updateMatrix()
       layer.mesh.setMatrixAt(tile.index, this.dummy.matrix)
       layer.mesh.setColorAt(tile.index, layer.baseColor)

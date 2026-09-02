@@ -36,13 +36,14 @@ export class GroundPicker {
     origin: Vector3,
     unproject: Matrix4,
     target: Vector3 = new Vec3(),
+    planeY = 0
   ): Vector3 | null {
     this.direction.set(ndc.x, ndc.y, 0.5).applyMatrix4(unproject).sub(origin)
     if (this.direction.lengthSq() === 0) return null
     this.direction.normalize()
-    // Reject rays that are parallel to or pointing away from the floor.
+    // Reject rays that are parallel to or pointing away from the target plane.
     if (this.direction.y > -1e-4) return null
-    const t = -origin.y / this.direction.y
+    const t = (planeY - origin.y) / this.direction.y
     return target.copy(origin).addScaledVector(this.direction, t)
   }
 }

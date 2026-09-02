@@ -23,6 +23,7 @@ export const GRID_SIZE = 28
 /** Block heights in metres. */
 export const HALF_BLOCK_HEIGHT = 1.0
 export const FULL_BLOCK_HEIGHT = 2.0
+export const LEVEL_HEIGHT = 2.0
 
 /** A soldier is "just shy of 2 units" tall. Models are rescaled to this at load. */
 export const SOLDIER_HEIGHT = 1.85
@@ -128,6 +129,9 @@ export const RULES = {
   /** AP per tile of movement. */
   stepOrthogonal: 1,
   stepDiagonal: 1.5,
+  stairStepCost: 1.5,
+  /** Climbing a ladder costs more AP than standard walking. */
+  ladderStepCost: 3,
   /**
    * Metres per second while moving. Tuned to sit close to the natural pace of
    * the `run` (Jog_Fwd_Loop) clip so the feet do not visibly slide.

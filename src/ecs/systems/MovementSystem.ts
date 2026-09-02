@@ -84,8 +84,7 @@ export class MovementSystem extends System {
         // Never enter a tile the unit cannot pay for. Movement always halts on
         // a tile boundary, so stopping here leaves a valid grid position.
         const prev = stance.movingPath[index - 1] ?? pos.tile
-        const stepCost =
-          prev.x !== nextTile.x && prev.y !== nextTile.y ? RULES.stepDiagonal : RULES.stepOrthogonal
+        const stepCost = this.grid.getStepCost(prev, nextTile)
         if (ap.ap < stepCost) {
           this.stopMovement(world, entityId)
           break
@@ -96,13 +95,15 @@ export class MovementSystem extends System {
         // Measured against targetPos (the logical position), not the mesh,
         // which lags behind by design for smoothing.
         const dx = targetWorld.x - pos.targetPos.x
+        const dy = targetWorld.y - pos.targetPos.y
         const dz = targetWorld.z - pos.targetPos.z
-        const dist = Math.hypot(dx, dz)
+        const dist = Math.hypot(dx, dy, dz)
 
-        if (dist > 0.001) pos.targetYaw = Math.atan2(dx, dz)
+        if (Math.hypot(dx, dz) > 0.001) pos.targetYaw = Math.atan2(dx, dz)
 
         if (dist > budget) {
           pos.targetPos.x += (dx / dist) * budget
+          pos.targetPos.y += (dy / dist) * budget
           pos.targetPos.z += (dz / dist) * budget
           break
         }
@@ -112,6 +113,7 @@ export class MovementSystem extends System {
         budget -= dist
 
         pos.tile = { x: nextTile.x, y: nextTile.y }
+        pos.level = this.grid.levelAt(nextTile.x, nextTile.y)
         ap.ap = Math.max(0, ap.ap - stepCost)
 
         this.onStep?.(entityId, nextTile)
