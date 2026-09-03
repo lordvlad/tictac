@@ -247,6 +247,8 @@ interface BlockInstance {
   index: number
   side?: Side
   edge?: number
+  /** Storey this instance is filtered with, when it is not its tile's floor. */
+  filterLevel?: number
 }
 
 /**
@@ -307,7 +309,7 @@ export class Blocks {
       edges: new Uint8Array(grid.edgeCount),
     }
 
-    for (const extra of [this.buildUpperFloors(), this.buildLadders()]) {
+    for (const extra of [this.buildUpperFloors(), this.buildRoofs(), this.buildLadders()]) {
       if (extra === null) continue
       this.layers.push(extra)
       this.group.add(extra.mesh)
@@ -371,11 +373,11 @@ export class Blocks {
     kind: Exclude<WallKind, typeof WallKind.None>,
     instances: BlockInstance[],
   ): BlockLayer {
-    const { height } = WALLS[kind]
     const style = WALL_STYLE[kind]
     const capacity = instances.length
 
-    const geometry = new BoxGeometry(TILE, height, WALL_THICKNESS)
+    // Unit height: each instance scales it to its own column height.
+    const geometry = new BoxGeometry(TILE, 1, WALL_THICKNESS)
     const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
     geometry.setAttribute(FADE_ATTRIBUTE, fade)
 
@@ -392,26 +394,26 @@ export class Blocks {
     const baseColor = new Color(style.color)
     const layer: BlockLayer = { mesh, instances, baseColor, fade, isWall: true }
 
+    // A unit-height box scaled per instance: a wall is a column of masonry
+    // from the ground up to its top, so a wall bounding an upper storey is one
+    // tall wall rather than a slab hanging in mid-air above nothing.
     for (const inst of instances) {
       const [dx, dz] = FACE_OFFSET[inst.side!]!
-      const neighbour = { x: inst.x + dx, y: inst.y + dz }
-      // A wall stands on the lower of the two floors it divides.
-      const level = Math.max(
-        this.grid.levelAt(inst.x, inst.y),
-        this.grid.levelAt(neighbour.x, neighbour.y),
-      )
+      const top = this.grid.wallTop(inst.x, inst.y, inst.side!)
 
       this.dummy.position.set(
         this.grid.worldX(inst.x) + (dx * TILE) / 2,
-        level * LEVEL_HEIGHT + height / 2,
+        top / 2,
         this.grid.worldZ(inst.y) + (dz * TILE) / 2,
       )
+      this.dummy.scale.set(1, top, 1)
       // Geometry runs along X; a wall on an east/west face runs along Z.
       this.dummy.rotation.y = dx !== 0 ? Math.PI / 2 : 0
       this.dummy.updateMatrix()
       mesh.setMatrixAt(inst.index, this.dummy.matrix)
       mesh.setColorAt(inst.index, baseColor)
     }
+    this.dummy.scale.set(1, 1, 1)
 
     mesh.instanceMatrix.needsUpdate = true
     if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true
@@ -481,6 +483,58 @@ export class Blocks {
         this.grid.worldX(tile.x),
         level * LEVEL_HEIGHT - height / 2,
         this.grid.worldZ(tile.y)
+      )
+      this.dummy.rotation.y = 0
+      this.dummy.updateMatrix()
+      layer.mesh.setMatrixAt(tile.index, this.dummy.matrix)
+      layer.mesh.setColorAt(tile.index, baseColor)
+    }
+    layer.mesh.instanceMatrix.needsUpdate = true
+    if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
+
+    return layer
+  }
+
+  /**
+   * A slab over every roofed tile.
+   *
+   * A roof is not a floor — nothing stands on it — so it carries the storey it
+   * covers as its filter level. Looking at the ground floor lifts the roofs
+   * away and the rooms below become visible, which is the whole point of
+   * roofing them in the first place.
+   */
+  private buildRoofs(): BlockLayer | null {
+    const instances: BlockInstance[] = []
+    this.grid.forEach((x, y) => {
+      const roof = this.grid.roofAt(x, y)
+      if (roof > 0) instances.push({ x, y, index: instances.length, filterLevel: roof })
+    })
+    if (instances.length === 0) return null
+
+    const height = 0.12
+    const capacity = instances.length
+    const geometry = new BoxGeometry(TILE, height, TILE)
+    const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
+    geometry.setAttribute(FADE_ATTRIBUTE, fade)
+
+    const material = createFadedMaterial(0.9, 0.05)
+
+    const mesh = new InstancedMesh(geometry, material, capacity)
+    mesh.instanceMatrix.setUsage(DynamicDrawUsage)
+    mesh.count = instances.length
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    mesh.userData.type = 'roof'
+    mesh.frustumCulled = false
+
+    const baseColor = new Color(0x55606e)
+    const layer: BlockLayer = { mesh, instances, baseColor, fade }
+
+    for (const tile of layer.instances) {
+      this.dummy.position.set(
+        this.grid.worldX(tile.x),
+        tile.filterLevel! * LEVEL_HEIGHT + height / 2,
+        this.grid.worldZ(tile.y),
       )
       this.dummy.rotation.y = 0
       this.dummy.updateMatrix()
@@ -660,12 +714,12 @@ export class Blocks {
     const values = layer.fade.array as Float32Array
     let dirty = false
     for (const inst of layer.instances) {
-      // A wall belongs to the lower of the floors it divides, so it is only
-      // dimmed by the level filter once both of them are above the view.
-      let instLevel = this.grid.levelAt(inst.x, inst.y)
+      // A wall is masonry from the ground up, so it belongs to the lower of the
+      // floors it divides: it stays solid while that floor is the one in view.
+      let instLevel = inst.filterLevel ?? this.grid.levelAt(inst.x, inst.y)
       if (inst.side !== undefined) {
         const [dx, dz] = FACE_OFFSET[inst.side]!
-        instLevel = Math.max(instLevel, this.grid.levelAt(inst.x + dx, inst.y + dz))
+        instLevel = Math.min(instLevel, this.grid.levelAt(inst.x + dx, inst.y + dz))
       }
 
       let levelOpacity = 1.0

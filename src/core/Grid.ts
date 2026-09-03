@@ -98,6 +98,14 @@ export class Grid {
   readonly stairDirections: Uint8Array
   /** Ladder faces per tile, as a {@link Side} bitmask. */
   readonly ladderFaces: Uint8Array
+  /**
+   * Storey a roof slab covers this tile at, or 0 for open sky.
+   *
+   * A roof is not a floor: nothing stands on it and it is not walkable. It
+   * exists so an enclosed room reads as enclosed from outside, and it is
+   * filtered away with its own storey when the player looks inside.
+   */
+  readonly roofs: Uint8Array
 
   /**
    * Wall kinds on the edges running north-south, one slot per edge.
@@ -116,8 +124,19 @@ export class Grid {
     this.levels = new Uint8Array(size * size)
     this.stairDirections = new Uint8Array(size * size)
     this.ladderFaces = new Uint8Array(size * size)
+    this.roofs = new Uint8Array(size * size)
     this.wallsV = new Uint8Array((size + 1) * size)
     this.wallsH = new Uint8Array(size * (size + 1))
+  }
+
+  roofAt(x: number, y: number): number {
+    if (!this.inBounds(x, y)) return 0
+    return this.roofs[y * this.size + x]!
+  }
+
+  setRoof(x: number, y: number, level: number): void {
+    if (!this.inBounds(x, y)) return
+    this.roofs[y * this.size + x] = level
   }
 
   // -------------------------------------------------------------------------
@@ -314,6 +333,12 @@ export class Grid {
     this.blocks[idx] = Block.Stair
     this.stairDirections[idx] = direction
     this.levels[idx] = lowerLevel
+  }
+
+  /** Strip every ladder off a tile's edges. */
+  clearLadderFaces(x: number, y: number): void {
+    if (!this.inBounds(x, y)) return
+    this.ladderFaces[y * this.size + x] = 0
   }
 
   /**

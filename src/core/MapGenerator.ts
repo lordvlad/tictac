@@ -1,5 +1,13 @@
 import { Faction, GRID_SIZE, SQUAD_SIZE } from '../config'
-import { Block, faceToward, Grid, ORTHOGONAL, Side, StairDirection, type Tile } from './Grid'
+import {
+  Block,
+  faceToward,
+  Grid,
+  ORTHOGONAL,
+  Side,
+  StairDirection,
+  type Tile,
+} from './Grid'
 import { WallKind } from './Walls'
 import { clamp } from './math'
 import { Rng } from './rng'
@@ -7,13 +15,46 @@ import { Rng } from './rng'
 export interface GeneratedMap {
   grid: Grid
   spawns: Record<Faction, Tile[]>
+  /** Building footprints, so callers can ask what is indoors. */
+  buildings: readonly Rect[]
 }
 
-interface Rect {
+export interface Rect {
   x: number
   y: number
   w: number
   h: number
+}
+/** Smallest room side. Below this a "room" is a cupboard nobody can fight in. */
+const MIN_ROOM_SIDE = 3
+
+/** Grid-space step from a tile toward each of its faces. */
+const SIDE_OFFSET: Record<Side, readonly [number, number]> = {
+  [Side.North]: [0, -1],
+  [Side.East]: [1, 0],
+  [Side.South]: [0, 1],
+  [Side.West]: [-1, 0],
+}
+
+/** Storeys above the ground a building may reach. */
+const MAX_EXTRA_STOREYS = 2
+
+/**
+ * One storey of one building: the rooms it is divided into.
+ *
+ * A storey above the ground is always made of *whole rooms of the storey
+ * below*, never an arbitrary region. That is what keeps a wall standing on a
+ * wall — the outline of an upper storey is, by construction, a set of edges
+ * that already carry walls from the storey underneath.
+ */
+interface Storey {
+  level: number
+  rooms: Rect[]
+}
+
+interface Building {
+  footprint: Rect
+  storeys: Storey[]
 }
 
 function rectsOverlap(a: Rect, b: Rect, padding: number): boolean {
@@ -29,13 +70,17 @@ function inRect(r: Rect, x: number, y: number): boolean {
   return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
 }
 
+function rectArea(r: Rect): number {
+  return r.w * r.h
+}
+
 /**
- * Procedural urban-ish battlefield:
- *   - rectangular buildings — walls on their boundary edges, open interiors,
- *     doorways and the odd glazed frontage
- *   - free-standing wall runs for mid-map cover
- *   - crate clusters (half-height, shootable over)
- *   - two opposing deployment zones, guaranteed clear and mutually reachable
+ * Procedural urban battlefield, generated one storey at a time.
+ *
+ * Each storey is laid out in three rounds — outer walls, then rooms, then
+ * openings — and each storey above the ground takes the storey below as its
+ * constraint. Vertical access is fitted last, once there is a finished
+ * building to fit it into, because a stair needs to know what it lands on.
  *
  * No border pass: the map edge is solid by construction, so there is nothing
  * to draw and no ring of tiles lost to it.
@@ -49,8 +94,8 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   // with a random lateral jitter so games do not always look identical.
   const zoneW = SQUAD_SIZE + 3
   const zoneH = 3
-  const blueX = Math.round(size / 2 - zoneW / 2 + rng.range(-3, 3))
-  const redX = Math.round(size / 2 - zoneW / 2 + rng.range(-3, 3))
+  const blueX = Math.round(size / 2 - zoneW / 2 + rng.range(-4, 4))
+  const redX = Math.round(size / 2 - zoneW / 2 + rng.range(-4, 4))
   const blueZone: Rect = { x: clamp(blueX, 2, size - 2 - zoneW), y: 2, w: zoneW, h: zoneH }
   const redZone: Rect = {
     x: clamp(redX, 2, size - 2 - zoneW),
@@ -60,92 +105,86 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   }
   const zones = [blueZone, redZone]
 
-  // --- Buildings ------------------------------------------------------------
-  const buildings: Rect[] = []
-  const buildingTarget = rng.int(5, 7)
-  for (let attempt = 0; attempt < 400 && buildings.length < buildingTarget; attempt++) {
-    const w = rng.int(6, 12)
-    const h = rng.int(6, 12)
-    const x = rng.int(2, size - 2 - w)
-    const y = rng.int(2, size - 2 - h)
-    const rect: Rect = { x, y, w, h }
+  // --- Building footprints --------------------------------------------------
+  const buildings: Building[] = []
+  const target = rng.int(5, 8)
+  for (let attempt = 0; attempt < 500 && buildings.length < target; attempt++) {
+    const w = rng.int(7, 13)
+    const h = rng.int(7, 13)
+    const footprint: Rect = {
+      x: rng.int(2, size - 2 - w),
+      y: rng.int(2, size - 2 - h),
+      w,
+      h,
+    }
 
-    if (zones.some((z) => rectsOverlap(rect, z, 2))) continue
-    if (buildings.some((b) => rectsOverlap(rect, b, 2))) continue
+    if (zones.some((z) => rectsOverlap(footprint, z, 2))) continue
+    if (buildings.some((b) => rectsOverlap(footprint, b.footprint, 2))) continue
 
-    buildings.push(rect)
-    carveBuilding(grid, rng, rect)
+    buildings.push(planBuilding(footprint, rng))
   }
 
-  // --- Upper storeys, stairs and ladders (2-storey buildings) ---------------
-  // Level 1 rooms are strictly built on top of / attached to Level 0 rooms.
+  // --- Raise the storeys ----------------------------------------------------
+  // Ascending, so a tile ends up at the level of the highest storey covering
+  // it: the ground floor is the part of the footprint nothing was raised over.
+  for (const building of buildings) {
+    for (const storey of building.storeys) {
+      for (const room of storey.rooms) {
+        forEachTile(room, (x, y) => {
+          grid.setBlock(x, y, Block.None)
+          grid.setLevel(x, y, storey.level)
+        })
+      }
+    }
+  }
+
+  // Tiles that later passes must leave alone. A crate dropped on the far side
+  // of a building's only door seals the whole ground floor, and a stair whose
+  // landing gets flattened stops being a stair.
   const reserved = new Set<number>()
   const reserve = (x: number, y: number): void => {
     reserved.add(grid.index(x, y))
   }
 
-  // Stair building (buildings[0]): ground wing (level 0) + upper wing (level 1)
-  const stairBuilding = buildings[0]
-  if (stairBuilding !== undefined) {
-    const { x, y, w, h } = stairBuilding
-    const splitY = h >= 6 ? Math.floor(h / 2) : 2
-
-    // Elevate upper wing to level 1 (ground wing at y..y+splitY-1 stays level 0)
-    for (let dy = splitY; dy < h; dy++) {
-      for (let dx = 0; dx < w; dx++) {
-        grid.setLevel(x + dx, y + dy, 1)
-      }
+  // --- Build each storey, in three rounds -----------------------------------
+  for (const building of buildings) {
+    for (const storey of building.storeys) {
+      raiseOuterWalls(grid, storey)
+      raisePartitions(grid, storey)
+      openDoorsAndWindows(grid, rng, storey, buildings, reserve)
     }
-
-    const stairX = x + Math.floor(w / 2)
-    const stairY = y + splitY
-
-    // Stair connects ground room at (stairX, stairY - 1) to upper room at (stairX, stairY + 1)
-    grid.setStair(stairX, stairY, StairDirection.North, 0)
-    grid.setWall(stairX, stairY, Side.North, WallKind.None)
-    grid.setWall(stairX, stairY, Side.South, WallKind.None)
-
-    reserve(stairX, stairY)
-    reserve(stairX, stairY - 1)
-    reserve(stairX, stairY + 1)
   }
 
-  // Ladder building (buildings[1]): ground wing (level 0) + upper wing (level 1)
-  const ladderBuilding = buildings[1]
-  if (ladderBuilding !== undefined && buildings.length > 1) {
-    const { x, y, w, h } = ladderBuilding
-    const splitX = w >= 6 ? Math.floor(w / 2) : 2
-
-    // Elevate east wing to level 1 (west wing at x..x+splitX-1 stays level 0)
-    for (let dy = 0; dy < h; dy++) {
-      for (let dx = splitX; dx < w; dx++) {
-        grid.setLevel(x + dx, y + dy, 1)
-      }
-    }
-
-    const ladX = x + splitX
-    const ladY = y + Math.floor(h / 2)
-
-    // Ladder on interior partition facing West (connecting ground room to upper room)
-    grid.setLadderFace(ladX, ladY, Side.West)
-
-    reserve(ladX - 1, ladY)
-    reserve(ladX, ladY)
+  // --- Roof every room ------------------------------------------------------
+  // One storey above its own floor, so a room reads as enclosed from outside
+  // and the level filter lifts it away when the player looks inside.
+  for (const building of buildings) {
+    forEachTile(building.footprint, (x, y) => {
+      grid.setRoof(x, y, grid.levelAt(x, y) + 1)
+    })
   }
+
+  // --- Vertical access ------------------------------------------------------
+  for (const building of buildings) {
+    fitStairs(grid, rng, building, reserve)
+    fitLadders(grid, building, buildings, reserve)
+  }
+
+  // --- Free-standing wall runs ---------------------------------------------
   // A run lies along one lattice line: a horizontal run is a row of north-side
   // edges, a vertical run a column of west-side edges. It costs no floor, so
   // both sides of it stay playable.
-  const wallCount = rng.int(4, 8)
-  for (let i = 0; i < wallCount; i++) {
+  const runCount = rng.int(5, 10)
+  for (let i = 0; i < runCount; i++) {
     const horizontal = rng.chance(0.5)
-    const length = rng.int(3, 8)
+    const length = rng.int(3, 9)
     const w = horizontal ? length : 1
     const h = horizontal ? 1 : length
     const x = rng.int(2, Math.max(2, size - 2 - w))
     const y = rng.int(2, Math.max(2, size - 2 - h))
     const rect: Rect = { x, y, w, h }
     if (zones.some((z) => rectsOverlap(rect, z, 2))) continue
-    if (buildings.some((b) => rectsOverlap(rect, b, 1))) continue
+    if (buildings.some((b) => rectsOverlap(rect, b.footprint, 1))) continue
 
     const side = horizontal ? Side.North : Side.West
     const kind = rng.chance(0.35) ? WallKind.Parapet : WallKind.Solid
@@ -158,7 +197,7 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   }
 
   // --- Crate clusters (half cover) -----------------------------------------
-  const clusterCount = rng.int(8, 14)
+  const clusterCount = rng.int(10, 18)
   for (let i = 0; i < clusterCount; i++) {
     const cx = rng.int(2, size - 3)
     const cy = rng.int(2, size - 3)
@@ -179,131 +218,598 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   // Both the floor and every edge around it: a squad that starts walled in has
   // nowhere to deploy to.
   for (const zone of zones) {
-    for (let dy = 0; dy < zone.h; dy++) {
-      for (let dx = 0; dx < zone.w; dx++) {
-        const tx = zone.x + dx
-        const ty = zone.y + dy
-        grid.setBlock(tx, ty, Block.None)
-        for (const face of [Side.North, Side.East, Side.South, Side.West]) {
-          grid.setWall(tx, ty, face, WallKind.None)
-        }
+    forEachTile(zone, (x, y) => {
+      grid.setBlock(x, y, Block.None)
+      grid.setLevel(x, y, 0)
+      grid.setRoof(x, y, 0)
+      for (const face of [Side.North, Side.East, Side.South, Side.West]) {
+        grid.setWall(x, y, face, WallKind.None)
       }
-    }
+    })
   }
 
-  // --- Guarantee a single connected walkable region -------------------------
-  repairConnectivity(grid, reserved)
+  // --- Settle the structure, then guarantee connectivity -------------------
+  // The repairs below are deliberately crude — they flatten tiles, demote
+  // storeys and knock walls through. Settling afterwards puts the invariants
+  // back, and the two alternate until both hold.
+  const footprints = buildings.map((b) => b.footprint)
+  for (let pass = 0; pass < 3; pass++) {
+    settleStructures(grid, footprints)
+    repairConnectivity(grid, reserved)
+  }
+  settleStructures(grid, footprints)
 
-  // --- Pick spawn tiles -----------------------------------------------------
   const spawns: Record<Faction, Tile[]> = {
     [Faction.Blue]: pickSpawns(grid, rng, blueZone),
     [Faction.Red]: pickSpawns(grid, rng, redZone),
   }
 
-  return { grid, spawns }
+  return { grid, spawns, buildings: footprints }
 }
 
 /**
- * A multi-room building: perimeter walls, interior partition walls dividing it
- * into connected rooms, exterior doors, windows, and interior clutter.
+ * Restore the structural invariants after the connectivity repairs have had
+ * their way with the map.
+ *
+ * Three things have to hold however the repairs left it. A floor that steps
+ * down has masonry on the step, or it is a floor hanging in the air. A stair
+ * spans exactly one storey and is enterable from both ends, or it is a ramp to
+ * nowhere that also severs the floor it stands on. And every tile indoors is
+ * roofed.
  */
-function carveBuilding(grid: Grid, rng: Rng, rect: Rect): void {
-  const { x, y, w, h } = rect
+function settleStructures(grid: Grid, footprints: readonly Rect[]): void {
+  // Masonry first. Validating access before the walls are final would approve
+  // a stair that this very pass then seals.
+  grid.forEach((x, y) => {
+    const level = grid.levelAt(x, y)
+    if (level === 0) return
+    if (grid.blockAt(x, y) === Block.Stair) return
+    for (const [dx, dy] of ORTHOGONAL) {
+      const n = { x: x + dx, y: y + dy }
+      if (!grid.inBounds(n.x, n.y)) continue
+      if (grid.levelAt(n.x, n.y) >= level) continue
+      if (grid.blockAt(n.x, n.y) === Block.Stair) continue
+      const side = faceToward({ x, y }, n)
+      if (side === 0) continue
+      // A ladder edge is walled like any other: the climb goes *over* the wall,
+      // so the masonry and the access coexist.
+      if (grid.wallAt(x, y, side) === WallKind.None) {
+        grid.setWall(x, y, side, WallKind.Solid)
+      }
+    }
+  })
 
-  // 1. Clear floor at level 0 throughout
-  for (let dy = 0; dy < h; dy++) {
-    for (let dx = 0; dx < w; dx++) {
-      grid.setBlock(x + dx, y + dy, Block.None)
-      grid.setLevel(x + dx, y + dy, 0)
+  // A stair that no longer spans one step, or whose ends are now pockets, is
+  // worse than no stair: it severs the floor it stands on. Give the tile back.
+  grid.forEach((x, y, block) => {
+    if (block !== Block.Stair) return
+    const access = grid.getStairAccessTiles(x, y)
+    const lower = grid.levelAt(access.lower.x, access.lower.y)
+    const upper = grid.levelAt(access.upper.x, access.upper.y)
+    const usable =
+      upper - lower === 1 &&
+      grid.levelAt(x, y) === lower &&
+      grid.canTraverse({ x, y }, access.lower) &&
+      grid.canTraverse({ x, y }, access.upper) &&
+      leadsOnward(grid, access.lower, { x, y }) &&
+      leadsOnward(grid, access.upper, { x, y })
+    if (!usable) grid.setBlock(x, y, Block.None)
+  })
+
+  // A ladder whose footing went away is no longer a ladder.
+  grid.forEach((x, y) => {
+    const faces = grid.ladderFacesAt(x, y)
+    if (faces === 0) return
+    for (const side of [Side.North, Side.East, Side.South, Side.West]) {
+      if ((faces & side) === 0) continue
+      const [dx, dy] = SIDE_OFFSET[side]!
+      const foot = { x: x + dx, y: y + dy }
+      const drop = grid.levelAt(x, y) - grid.levelAt(foot.x, foot.y)
+      if (drop !== 1 || !grid.isWalkable(foot.x, foot.y)) grid.clearLadderFaces(x, y)
+    }
+  })
+
+  // Everything indoors is covered.
+  for (const footprint of footprints) {
+    forEachTile(footprint, (x, y) => {
+      grid.setRoof(x, y, grid.levelAt(x, y) + 1)
+    })
+  }
+}
+
+/** Can a unit on `tile` step anywhere except back to `from`? */
+function leadsOnward(grid: Grid, tile: Tile, from: Tile): boolean {
+  for (const [dx, dy] of ORTHOGONAL) {
+    const n = { x: tile.x + dx, y: tile.y + dy }
+    if (n.x === from.x && n.y === from.y) continue
+    if (grid.canTraverse(tile, n)) return true
+  }
+  return false
+}
+/** The room of `building` covering a tile on `level`, or null. */
+function roomAt(building: Building, level: number, x: number, y: number): Rect | null {
+  const storey = building.storeys.find((s) => s.level === level)
+  if (storey === undefined) return null
+  return storey.rooms.find((room) => inRect(room, x, y)) ?? null
+}
+
+
+function forEachTile(rect: Rect, fn: (x: number, y: number) => void): void {
+  for (let dy = 0; dy < rect.h; dy++) {
+    for (let dx = 0; dx < rect.w; dx++) fn(rect.x + dx, rect.y + dy)
+  }
+}
+
+/**
+ * Plan a building bottom-up.
+ *
+ * The footprint is cut into rooms once, as a tree. A storey is then a *node*
+ * of that tree: level 0 owns the root, level 1 owns one of the root's two
+ * halves, level 2 one half of that. Each storey keeps the rooms of its own
+ * node that the storey above did not take.
+ *
+ * Working from the tree has two properties worth the indirection. Every
+ * storey's outline runs along cuts that already carry walls, so a wall always
+ * stands on a wall. And every storey's region is a rectangle minus a
+ * sub-rectangle — an L, a U or a ring — which is always in one piece, so no
+ * storey can strand part of itself.
+ */
+function planBuilding(footprint: Rect, rng: Rng): Building {
+  const root = subdivide(footprint, rng)
+
+  // The nested regions each storey is drawn from, narrowing as they rise.
+  const regions: BspNode[] = [root]
+  for (let level = 1; level <= MAX_EXTRA_STOREYS; level++) {
+    const below = regions[level - 1]!
+    if (below.children === undefined) break
+    if (!rng.chance(level === 1 ? 0.85 : 0.45)) break
+    regions.push(rng.pick(below.children))
+  }
+
+  const storeys: Storey[] = []
+  for (let level = 0; level < regions.length; level++) {
+    const mine = leavesOf(regions[level]!)
+    const above = regions[level + 1]
+    const rooms =
+      above === undefined
+        ? mine
+        : mine.filter((room) => !leavesOf(above).some((r) => r === room))
+    if (rooms.length === 0) continue
+    storeys.push({ level, rooms })
+  }
+
+  return { footprint, storeys }
+}
+
+interface BspNode {
+  rect: Rect
+  children?: readonly [BspNode, BspNode]
+}
+
+function leavesOf(node: BspNode): Rect[] {
+  if (node.children === undefined) return [node.rect]
+  return [...leavesOf(node.children[0]), ...leavesOf(node.children[1])]
+}
+
+/** Recursively halve `rect` until every part is a plausible room. */
+function subdivide(rect: Rect, rng: Rng): BspNode {
+  const canSplitX = rect.w >= MIN_ROOM_SIDE * 2
+  const canSplitY = rect.h >= MIN_ROOM_SIDE * 2
+  if (!canSplitX && !canSplitY) return { rect }
+
+  // Stop early now and then, so a building has the odd hall among its cells.
+  if (rectArea(rect) <= MIN_ROOM_SIDE * MIN_ROOM_SIDE * 2 && rng.chance(0.35)) return { rect }
+
+  const splitX =
+    canSplitX && (!canSplitY || (rect.w >= rect.h ? rng.chance(0.75) : rng.chance(0.25)))
+
+  if (splitX) {
+    const cut = rng.int(MIN_ROOM_SIDE, rect.w - MIN_ROOM_SIDE)
+    return {
+      rect,
+      children: [
+        subdivide({ x: rect.x, y: rect.y, w: cut, h: rect.h }, rng),
+        subdivide({ x: rect.x + cut, y: rect.y, w: rect.w - cut, h: rect.h }, rng),
+      ],
     }
   }
 
-  // 2. Outer perimeter walls
-  for (let dx = 0; dx < w; dx++) {
-    grid.setWall(x + dx, y, Side.North, WallKind.Solid)
-    grid.setWall(x + dx, y + h - 1, Side.South, WallKind.Solid)
+  const cut = rng.int(MIN_ROOM_SIDE, rect.h - MIN_ROOM_SIDE)
+  return {
+    rect,
+    children: [
+      subdivide({ x: rect.x, y: rect.y, w: rect.w, h: cut }, rng),
+      subdivide({ x: rect.x, y: rect.y + cut, w: rect.w, h: rect.h - cut }, rng),
+    ],
   }
-  for (let dy = 0; dy < h; dy++) {
-    grid.setWall(x, y + dy, Side.West, WallKind.Solid)
-    grid.setWall(x + w - 1, y + dy, Side.East, WallKind.Solid)
-  }
+}
 
-  // 3. Multi-room interior partition walls
-  const splitX = w >= 7 ? Math.floor(w / 2) : 0
-  const splitY = h >= 7 ? Math.floor(h / 2) : 0
+// ---------------------------------------------------------------------------
+// Round 1 & 2 — walls
+// ---------------------------------------------------------------------------
 
-  if (splitX > 0) {
-    for (let dy = 1; dy < h - 1; dy++) {
-      grid.setWall(x + splitX, y + dy, Side.West, WallKind.Solid)
-    }
-    // Doorway in vertical partition
-    const doorY1 = y + rng.int(1, Math.max(1, splitY > 0 ? splitY - 1 : h - 2))
-    grid.setWall(x + splitX, doorY1, Side.West, WallKind.None)
-    if (splitY > 0 && h - 1 - splitY > 2) {
-      const doorY2 = y + rng.int(splitY + 1, h - 2)
-      grid.setWall(x + splitX, doorY2, Side.West, WallKind.None)
-    }
-  }
-
-  if (splitY > 0) {
-    for (let dx = 1; dx < w - 1; dx++) {
-      grid.setWall(x + dx, y + splitY, Side.North, WallKind.Solid)
-    }
-    // Doorway in horizontal partition
-    const doorX1 = x + rng.int(1, Math.max(1, splitX > 0 ? splitX - 1 : w - 2))
-    grid.setWall(doorX1, y + splitY, Side.North, WallKind.None)
-    if (splitX > 0 && w - 1 - splitX > 2) {
-      const doorX2 = x + rng.int(splitX + 1, w - 2)
-      grid.setWall(doorX2, y + splitY, Side.North, WallKind.None)
-    }
-  }
-
-  // 4. Exterior doorways: 2-3 doors on frontages
-  const frontage = (which: number): { x: number; y: number; side: Side } => {
-    if (which === 0) return { x: x + rng.int(1, w - 2), y, side: Side.North }
-    if (which === 1) return { x: x + rng.int(1, w - 2), y: y + h - 1, side: Side.South }
-    if (which === 2) return { x, y: y + rng.int(1, h - 2), side: Side.West }
-    return { x: x + w - 1, y: y + rng.int(1, h - 2), side: Side.East }
-  }
-
-  const doors = rng.int(2, 3)
-  for (let d = 0; d < doors; d++) {
-    const spot = frontage(rng.int(0, 3))
-    grid.setWall(spot.x, spot.y, spot.side, WallKind.None)
-  }
-
-  // 5. Exterior glazing
-  if (rng.chance(0.6)) {
-    const spot = frontage(rng.int(0, 3))
-    if (grid.wallAt(spot.x, spot.y, spot.side) === WallKind.Solid) {
-      grid.setWall(spot.x, spot.y, spot.side, WallKind.Glass)
-    }
-  }
-
-  // 6. Interior clutter (crates or low parapet partitions inside rooms)
-  if (w > 4 && h > 4) {
-    if (rng.chance(0.4)) {
-      grid.setBlock(x + rng.int(1, w - 2), y + rng.int(1, h - 2), Block.Half)
+/** Round 1: the outer wall of a storey, around the union of its rooms. */
+function raiseOuterWalls(grid: Grid, storey: Storey): void {
+  for (const room of storey.rooms) {
+    for (const [dx, dy] of ORTHOGONAL) {
+      const side = faceToward({ x: 0, y: 0 }, { x: dx, y: dy })
+      if (side === 0) continue
+      walkBoundary(room, dx, dy, (x, y) => {
+        // An edge shared with another room of this storey is interior; it is
+        // round 2's business.
+        if (storey.rooms.some((other) => other !== room && inRect(other, x + dx, y + dy))) return
+        grid.setWall(x, y, side, WallKind.Solid)
+      })
     }
   }
 }
+
+/**
+ * Round 2: the walls between rooms, each spanning its shared edge end to end.
+ *
+ * A partition that stops short of the outer wall leaves a gap that reads as a
+ * doorway nobody placed, which is how rooms ended up joined at a corner.
+ */
+function raisePartitions(grid: Grid, storey: Storey): void {
+  for (let i = 0; i < storey.rooms.length; i++) {
+    for (let j = i + 1; j < storey.rooms.length; j++) {
+      const shared = sharedEdge(storey.rooms[i]!, storey.rooms[j]!)
+      if (shared === null) continue
+      for (const { x, y, side } of shared.edges) grid.setWall(x, y, side, WallKind.Solid)
+    }
+  }
+}
+
+/** Every tile of `rect` on the side facing `(dx, dy)`. */
+function walkBoundary(
+  rect: Rect,
+  dx: number,
+  dy: number,
+  fn: (x: number, y: number) => void,
+): void {
+  if (dx !== 0) {
+    const x = dx > 0 ? rect.x + rect.w - 1 : rect.x
+    for (let y = rect.y; y < rect.y + rect.h; y++) fn(x, y)
+    return
+  }
+  const y = dy > 0 ? rect.y + rect.h - 1 : rect.y
+  for (let x = rect.x; x < rect.x + rect.w; x++) fn(x, y)
+}
+
+interface SharedEdge {
+  edges: { x: number; y: number; side: Side }[]
+}
+
+/** The run of edges two rooms share, or null when they do not touch. */
+function sharedEdge(a: Rect, b: Rect): SharedEdge | null {
+  const edges: { x: number; y: number; side: Side }[] = []
+
+  // Vertical seam: `a` ends where `b` begins on X, with overlapping rows.
+  for (const [left, right] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    if (left.x + left.w !== right.x) continue
+    const y0 = Math.max(left.y, right.y)
+    const y1 = Math.min(left.y + left.h, right.y + right.h)
+    for (let y = y0; y < y1; y++) edges.push({ x: right.x, y, side: Side.West })
+  }
+
+  // Horizontal seam.
+  for (const [top, bottom] of [
+    [a, b],
+    [b, a],
+  ] as const) {
+    if (top.y + top.h !== bottom.y) continue
+    const x0 = Math.max(top.x, bottom.x)
+    const x1 = Math.min(top.x + top.w, bottom.x + bottom.w)
+    for (let x = x0; x < x1; x++) edges.push({ x, y: bottom.y, side: Side.North })
+  }
+
+  return edges.length === 0 ? null : { edges }
+}
+
+// ---------------------------------------------------------------------------
+// Round 3 — doors and windows
+// ---------------------------------------------------------------------------
+
+/**
+ * Round 3: openings.
+ *
+ * Interior doors first, along a spanning tree over the rooms, so every room
+ * connects to at least one other and the whole storey is one space. Then
+ * exterior doors, scaled to how many rooms there are to serve. Then windows,
+ * scaled to how big each room is — a storage cupboard gets none, a hall gets
+ * several.
+ */
+function openDoorsAndWindows(
+  grid: Grid,
+  rng: Rng,
+  storey: Storey,
+  all: readonly Building[],
+  reserve: (x: number, y: number) => void,
+): void {
+  const rooms = storey.rooms
+
+  // --- interior doors: spanning tree over the room adjacency graph ---------
+  const parent = rooms.map((_, i) => i)
+  const find = (i: number): number => {
+    let root = i
+    while (parent[root] !== root) root = parent[root]!
+    while (parent[i] !== root) {
+      const next = parent[i]!
+      parent[i] = root
+      i = next
+    }
+    return root
+  }
+
+  const pairs: { i: number; j: number; shared: SharedEdge }[] = []
+  for (let i = 0; i < rooms.length; i++) {
+    for (let j = i + 1; j < rooms.length; j++) {
+      const shared = sharedEdge(rooms[i]!, rooms[j]!)
+      if (shared !== null) pairs.push({ i, j, shared })
+    }
+  }
+  rng.shuffle(pairs)
+
+  for (const pair of pairs) {
+    const ri = find(pair.i)
+    const rj = find(pair.j)
+    // One door per tree edge joins the rooms; a few extra make the plan less
+    // of a corridor crawl.
+    const joinsNewRooms = ri !== rj
+    if (!joinsNewRooms && !rng.chance(0.25)) continue
+    if (joinsNewRooms) parent[ri] = rj
+
+    const spot = rng.pick(pair.shared.edges)
+    grid.setWall(spot.x, spot.y, spot.side, WallKind.None)
+  }
+
+  // --- exterior doors: one per four rooms, give or take --------------------
+  const outer = exteriorEdges(grid, storey, all)
+  if (outer.length > 0) {
+    const min = Math.max(1, Math.floor(rooms.length / 4))
+    const doors = Math.min(outer.length, rng.int(min, min + 1))
+    rng.shuffle(outer)
+    for (let i = 0; i < doors; i++) {
+      const spot = outer[i]!
+      grid.setWall(spot.x, spot.y, spot.side, WallKind.None)
+      // A door is no use if the next pass drops a crate against it.
+      const [dx, dy] = SIDE_OFFSET[spot.side]!
+      reserve(spot.x, spot.y)
+      reserve(spot.x + dx, spot.y + dy)
+    }
+  }
+
+  // --- windows: by room size, on that room's own outside walls ------------
+  for (const room of rooms) {
+    const mine = outer.filter((e) => inRect(room, e.x, e.y))
+    if (mine.length === 0) continue
+
+    // A cupboard can do without; a hall wants a couple.
+    const target = Math.floor(rectArea(room) / 9)
+    const count = Math.min(mine.length, Math.max(0, target + (rng.chance(0.5) ? 1 : 0)))
+    rng.shuffle(mine)
+    let placed = 0
+    for (const spot of mine) {
+      if (placed >= count) break
+      // Never glaze over a doorway that was just cut.
+      if (grid.wallAt(spot.x, spot.y, spot.side) !== WallKind.Solid) continue
+      grid.setWall(spot.x, spot.y, spot.side, WallKind.Glass)
+      placed++
+    }
+  }
+}
+
+/**
+ * Edges of a storey that face the open air.
+ *
+ * "Open" means the tile beyond belongs to no building at all — a seam against
+ * a neighbouring structure is not a frontage and must not be glazed or holed.
+ */
+function exteriorEdges(
+  grid: Grid,
+  storey: Storey,
+  all: readonly Building[],
+): { x: number; y: number; side: Side }[] {
+  const result: { x: number; y: number; side: Side }[] = []
+
+  for (const room of storey.rooms) {
+    for (const [dx, dy] of ORTHOGONAL) {
+      const side = faceToward({ x: 0, y: 0 }, { x: dx, y: dy })
+      if (side === 0) continue
+      walkBoundary(room, dx, dy, (x, y) => {
+        const ox = x + dx
+        const oy = y + dy
+        if (!grid.inBounds(ox, oy)) return
+        // Interior to this storey, so not a frontage.
+        if (storey.rooms.some((other) => inRect(other, ox, oy))) return
+        // Frontage is open air only: a seam against any building — including a
+        // storey step in this one — is not somewhere to cut a door or a window.
+        if (all.some((b) => inRect(b.footprint, ox, oy))) return
+        result.push({ x, y, side })
+      })
+    }
+  }
+
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// Vertical access
+// ---------------------------------------------------------------------------
+
+/**
+ * Fit a stair inside a building for every storey step it has.
+ *
+ * A stair needs a straight run of three tiles: the floor it leaves, the ramp
+ * itself, and the floor it arrives on. Both ends must be somewhere a unit can
+ * actually stand and move on from, or the stair is a hole in a cupboard.
+ *
+ * One per step, not one per building: a three-storey block needs a way from
+ * the ground to the first floor *and* from there to the second.
+ */
+function fitStairs(
+  grid: Grid,
+  rng: Rng,
+  building: Building,
+  reserve: (x: number, y: number) => void,
+): void {
+  const { footprint } = building
+  const topLevel = building.storeys.reduce((top, s) => Math.max(top, s.level), 0)
+
+  for (let level = 0; level < topLevel; level++) {
+    const candidates: { stair: Tile; dir: StairDirection; lower: Tile; upper: Tile }[] = []
+
+    forEachTile(footprint, (x, y) => {
+      if (grid.levelAt(x, y) !== level) return
+      for (const [dx, dy] of ORTHOGONAL) {
+        const lower = { x: x - dx, y: y - dy }
+        const upper = { x: x + dx, y: y + dy }
+        if (!inRect(footprint, lower.x, lower.y)) continue
+        if (!inRect(footprint, upper.x, upper.y)) continue
+        if (grid.levelAt(lower.x, lower.y) !== level) continue
+        if (grid.levelAt(upper.x, upper.y) !== level + 1) continue
+
+        // A stair may only be entered along its own axis, so a ramp dropped on
+        // a doorway severs the route through it. Open floor inside a room is
+        // fine — a room has parallel paths — but a gap in a wall is not.
+        const flanks = [
+          { x: dy, y: dx },
+          { x: -dy, y: -dx },
+        ]
+        const onDoorway = flanks.some((off) => {
+          const side = faceToward({ x: 0, y: 0 }, off)
+          if (side === 0) return false
+          if (grid.wallAt(x, y, side) !== WallKind.None) return false
+          // The face is open: only a problem when it leads out of this room.
+          return roomAt(building, level, x, y) !== roomAt(building, level, x + off.x, y + off.y)
+        })
+        if (onDoorway) continue
+
+        const dir = stairDirectionFor(dx, dy)
+        if (dir === null) continue
+        candidates.push({ stair: { x, y }, dir, lower, upper })
+      }
+    })
+
+    rng.shuffle(candidates)
+
+    for (const option of candidates) {
+      if (!hasRoomToMove(grid, option.lower, option.stair)) continue
+      if (!hasRoomToMove(grid, option.upper, option.stair)) continue
+
+      grid.setStair(option.stair.x, option.stair.y, option.dir, level)
+      // The ramp's two ends are doorways: the walls it needs through.
+      const toLower = faceToward(option.stair, option.lower)
+      const toUpper = faceToward(option.stair, option.upper)
+      if (toLower !== 0) grid.setWall(option.stair.x, option.stair.y, toLower, WallKind.None)
+      if (toUpper !== 0) grid.setWall(option.stair.x, option.stair.y, toUpper, WallKind.None)
+
+      reserve(option.stair.x, option.stair.y)
+      reserve(option.lower.x, option.lower.y)
+      reserve(option.upper.x, option.upper.y)
+      break
+    }
+  }
+}
+
+/**
+ * The direction whose *upper* access lies at `(dx, dy)` from the ramp.
+ *
+ * {@link Grid.getStairAccessTiles} names a stair by where its head points, so
+ * these read inverted next to a plain offset: North's head is at `+y`.
+ */
+function stairDirectionFor(dx: number, dy: number): StairDirection | null {
+  if (dx === 0 && dy === 1) return StairDirection.North
+  if (dx === 0 && dy === -1) return StairDirection.South
+  if (dx === 1 && dy === 0) return StairDirection.East
+  if (dx === -1 && dy === 0) return StairDirection.West
+  return null
+}
+
+/**
+ * Can a unit stand on `tile` and go somewhere other than back down the stair?
+ *
+ * Checks the tile itself and demands at least one onward step, so a stair
+ * never lands in a pocket a unit cannot leave.
+ */
+function hasRoomToMove(grid: Grid, tile: Tile, from: Tile): boolean {
+  if (!grid.isWalkable(tile.x, tile.y)) return false
+  for (const [dx, dy] of ORTHOGONAL) {
+    const onward = { x: tile.x + dx, y: tile.y + dy }
+    if (onward.x === from.x && onward.y === from.y) continue
+    if (grid.canTraverse(tile, onward)) return true
+  }
+  return false
+}
+
+/**
+ * Bolt ladders to a building's outside walls.
+ *
+ * A ladder is only useful where it has somewhere to stand at the bottom, so it
+ * goes on an outside face whose upper storey opens onto the air and whose
+ * ground below is open, walkable and one storey down.
+ */
+function fitLadders(
+  grid: Grid,
+  building: Building,
+  all: readonly Building[],
+  reserve: (x: number, y: number) => void,
+): void {
+  for (const storey of building.storeys) {
+    if (storey.level === 0) continue
+
+    for (const room of storey.rooms) {
+      for (const [dx, dy] of ORTHOGONAL) {
+        const side = faceToward({ x: 0, y: 0 }, { x: dx, y: dy })
+        if (side === 0) continue
+
+        let placed = false
+        walkBoundary(room, dx, dy, (x, y) => {
+          if (placed) return
+          const ox = x + dx
+          const oy = y + dy
+          if (!grid.inBounds(ox, oy)) return
+          // The foot has to be open ground, not another building's floor.
+          if (all.some((b) => inRect(b.footprint, ox, oy))) return
+          if (!grid.isWalkable(ox, oy)) return
+          if (grid.levelAt(ox, oy) !== storey.level - 1) return
+          // Only where the storey actually opens onto the air.
+          if (grid.wallAt(x, y, side) !== WallKind.None) return
+
+          grid.setLadderFace(x, y, side)
+          reserve(x, y)
+          reserve(ox, oy)
+          placed = true
+        })
+        if (placed) return
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity
+// ---------------------------------------------------------------------------
+
 /**
  * Reduce the map to a single region a unit can actually walk around.
  *
  * Components are grown through {@link Grid.canTraverse}, so a raised storey is
  * only "connected" when a stair or ladder truly joins it. Judging adjacency by
- * walkability alone reports storeys as connected that nothing can reach, and
- * then carves ground corridors that cannot possibly help.
+ * walkability alone reports storeys as connected that nothing can reach.
  *
- * Two repairs are available: carve a corridor between components on the same
- * storey, or — where a stranded region merely sits above its neighbour — bolt
- * on a ladder.
+ * Three repairs, cheapest first: cut a door between two regions that already
+ * touch; lower a raised region nothing can climb to, rather than inventing an
+ * access it should not have; and only then carve a corridor across open ground.
  */
 function repairConnectivity(grid: Grid, reserved: Set<number>): void {
   const size = grid.size
   const tileOf = (idx: number): Tile => ({ x: idx % size, y: (idx / size) | 0 })
 
-  for (let guard = 0; guard < 64; guard++) {
+  for (let guard = 0; guard < 128; guard++) {
     const components = labelComponents(grid)
     if (components.length <= 1) return
 
@@ -313,7 +819,10 @@ function repairConnectivity(grid: Grid, reserved: Set<number>): void {
     const satellite = components.find((c) => c !== main)
     if (satellite === undefined) return
 
-    if (linkByLadder(grid, satellite, main, tileOf)) continue
+    const inMain = new Set(main.tiles)
+    if (cutDoorInto(grid, satellite, inMain, tileOf)) continue
+    if (clearBlockingStair(grid, satellite, inMain, tileOf)) continue
+    if (dropUnreachableStorey(grid, satellite, inMain, tileOf)) continue
 
     // Corridor carving is a ground-plane operation, so pick the closest pair
     // of tiles that share a storey.
@@ -322,10 +831,9 @@ function repairConnectivity(grid: Grid, reserved: Set<number>): void {
     let bestDist = Infinity
     for (const sIdx of satellite.tiles) {
       const s = tileOf(sIdx)
-      const sLevel = grid.levelAt(s.x, s.y)
       for (const mIdx of main.tiles) {
         const m = tileOf(mIdx)
-        if (grid.levelAt(m.x, m.y) !== sLevel) continue
+        if (grid.levelAt(s.x, s.y) !== grid.levelAt(m.x, m.y)) continue
         const d = Math.abs(s.x - m.x) + Math.abs(s.y - m.y)
         if (d < bestDist) {
           bestDist = d
@@ -341,38 +849,98 @@ function repairConnectivity(grid: Grid, reserved: Set<number>): void {
 }
 
 /**
- * Join two components with a ladder where one sits exactly one storey above a
- * neighbouring tile of the other.
+ * Open a doorway where a cut-off region already touches the main one on the
+ * same storey. A sealed room only ever needed a door.
  */
-function linkByLadder(
+function cutDoorInto(
   grid: Grid,
   satellite: Component,
-  main: Component,
+  inMain: ReadonlySet<number>,
   tileOf: (idx: number) => Tile,
 ): boolean {
-  const inMain = new Set(main.tiles)
-
-  for (const sIdx of satellite.tiles) {
-    const s = tileOf(sIdx)
-    const sLevel = grid.levelAt(s.x, s.y)
+  for (const idx of satellite.tiles) {
+    const s = tileOf(idx)
     for (const [dx, dy] of ORTHOGONAL) {
       const n = { x: s.x + dx, y: s.y + dy }
-      if (!grid.isWalkable(n.x, n.y)) continue
+      if (!grid.inBounds(n.x, n.y)) continue
       if (!inMain.has(grid.index(n.x, n.y))) continue
-
-      const nLevel = grid.levelAt(n.x, n.y)
-      if (Math.abs(sLevel - nLevel) !== 1) continue
-
-      const upper = sLevel > nLevel ? s : n
-      const lower = sLevel > nLevel ? n : s
-      const face = faceToward(upper, lower)
-      if (face === 0) continue
-
-      grid.setLadderFace(upper.x, upper.y, face)
+      if (grid.levelAt(s.x, s.y) !== grid.levelAt(n.x, n.y)) continue
+      const side = faceToward(s, n)
+      if (side === 0 || grid.wallAt(s.x, s.y, side) === WallKind.None) continue
+      grid.setWall(s.x, s.y, side, WallKind.None)
       return true
     }
   }
   return false
+}
+
+/**
+ * Demote a ramp that is severing the floor it stands on.
+ *
+ * A stair is only enterable along its axis, so one sitting where a route
+ * crosses it sideways cuts that route — and the edge is already open, so no
+ * door will fix it. The floor matters more than the stair: turn the ramp back
+ * into plain floor and let the storey it served be re-judged, and demoted if
+ * nothing else reaches it.
+ */
+function clearBlockingStair(
+  grid: Grid,
+  satellite: Component,
+  inMain: ReadonlySet<number>,
+  tileOf: (idx: number) => Tile,
+): boolean {
+  for (const idx of satellite.tiles) {
+    const s = tileOf(idx)
+    for (const [dx, dy] of ORTHOGONAL) {
+      const n = { x: s.x + dx, y: s.y + dy }
+      if (!grid.inBounds(n.x, n.y)) continue
+      if (!inMain.has(grid.index(n.x, n.y))) continue
+      if (grid.levelAt(s.x, s.y) !== grid.levelAt(n.x, n.y)) continue
+      if (grid.blockAt(n.x, n.y) !== Block.Stair) continue
+      if (grid.canTraverse(s, n)) continue
+      grid.setBlock(n.x, n.y, Block.None)
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Lower a raised region that nothing can climb to.
+ *
+ * A storey with no stair and no ladder is exactly the floating room this
+ * generator exists to avoid; putting it back on the ground is honest, where
+ * bolting on an access it was never planned to have is not.
+ */
+function dropUnreachableStorey(
+  grid: Grid,
+  satellite: Component,
+  inMain: ReadonlySet<number>,
+  tileOf: (idx: number) => Tile,
+): boolean {
+  let target: number | null = null
+  for (const idx of satellite.tiles) {
+    const s = tileOf(idx)
+    for (const [dx, dy] of ORTHOGONAL) {
+      const n = { x: s.x + dx, y: s.y + dy }
+      if (!grid.inBounds(n.x, n.y)) continue
+      if (!inMain.has(grid.index(n.x, n.y))) continue
+      const below = grid.levelAt(n.x, n.y)
+      if (below >= grid.levelAt(s.x, s.y)) continue
+      target = below
+      break
+    }
+    if (target !== null) break
+  }
+  if (target === null) return false
+
+  for (const idx of satellite.tiles) {
+    const s = tileOf(idx)
+    grid.setLevel(s.x, s.y, target)
+    grid.setRoof(s.x, s.y, target + 1)
+    grid.clearLadderFaces(s.x, s.y)
+  }
+  return true
 }
 
 interface Component {
@@ -465,13 +1033,9 @@ function carveCorridor(
 /** Pick `SQUAD_SIZE` distinct walkable tiles inside a deployment zone. */
 function pickSpawns(grid: Grid, rng: Rng, zone: Rect): Tile[] {
   const candidates: Tile[] = []
-  for (let dy = 0; dy < zone.h; dy++) {
-    for (let dx = 0; dx < zone.w; dx++) {
-      const x = zone.x + dx
-      const y = zone.y + dy
-      if (grid.isWalkable(x, y)) candidates.push({ x, y })
-    }
-  }
+  forEachTile(zone, (x, y) => {
+    if (grid.isWalkable(x, y)) candidates.push({ x, y })
+  })
   rng.shuffle(candidates)
 
   const chosen: Tile[] = []
