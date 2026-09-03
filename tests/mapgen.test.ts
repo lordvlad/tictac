@@ -95,6 +95,25 @@ describe('Map generation is layered', () => {
     expect(withUpper).toBe(SEEDS.length)
     expect(withSecond).toBeGreaterThan(0)
   })
+
+  test('maxLevel reports the tallest storey, which the level selector offers', () => {
+    const empty = new Grid(8)
+    expect(empty.maxLevel).toBe(0)
+
+    empty.setLevel(3, 3, 2)
+    expect(empty.maxLevel).toBe(2)
+
+    // On a generated map it must match the highest floor actually present, or
+    // the top storey has no button to reach it by.
+    for (const seed of SEEDS) {
+      const { grid } = generateMap(seed)
+      let observed = 0
+      grid.forEach((x, y) => {
+        observed = Math.max(observed, grid.levelAt(x, y))
+      })
+      expect(grid.maxLevel).toBe(observed)
+    }
+  })
 })
 
 describe('Rooms, doors and windows', () => {

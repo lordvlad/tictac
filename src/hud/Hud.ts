@@ -190,26 +190,26 @@ export class Hud {
     `
   }
 
+  /**
+   * One button per storey the map actually has, highest first.
+   *
+   * Derived rather than listed: a map that generates three floors has to offer
+   * three, or the top one is unreachable from the UI.
+   */
   private renderLevelSelector(model: HudModel): void {
-    const levels = [
-      { label: 'L1', level: 1 },
-      { label: 'L0', level: 0 },
-    ]
+    const buttons: string[] = []
+    for (let level = model.topLevel; level >= 0; level--) {
+      buttons.push(`
+        <button class="hud-btn interactive ${model.selectedLevelFilter === level ? 'active' : ''}"
+                title="View Floor ${level}"
+                ${Hud.intentAttr({ type: 'selectLevel', level })}>
+          L${level}
+        </button>`)
+    }
 
     this.levelSelectorEl.innerHTML = `
       <div class="hud-level-title">LEVEL</div>
-      <div class="hud-level-buttons">
-        ${levels
-          .map(
-            (item) => `
-          <button class="hud-btn interactive ${model.selectedLevelFilter === item.level ? 'active' : ''}"
-                  title="View Floor ${item.level}"
-                  ${Hud.intentAttr({ type: 'selectLevel', level: item.level })}>
-            ${item.label}
-          </button>`,
-          )
-          .join('')}
-      </div>
+      <div class="hud-level-buttons">${buttons.join('')}</div>
     `
   }
 

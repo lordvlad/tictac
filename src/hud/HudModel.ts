@@ -136,6 +136,8 @@ export interface HudModel {
   freelookActive: boolean
   unitViewActive: boolean
   selectedLevelFilter: number
+  /** Highest storey the map has, so the selector can offer one button each. */
+  topLevel: number
   waypointActive: boolean
   unitViewEnabled: boolean
   nextFactionName: string
@@ -158,6 +160,7 @@ export interface HudModelSources {
   unitViewRequested: boolean
   myFaction?: Faction
   selectedLevelFilter: number
+  topLevel: number
 }
 
 /** What the model builder needs from the shoot planner. */
@@ -305,6 +308,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     selectedName: selected && !selected.isDead ? selected.name : null,
     actions,
     selectedLevelFilter: sources.selectedLevelFilter,
+    topLevel: sources.topLevel,
     targets,
     shotPanel: shoot?.pending ? shotPanelOf(shoot.pending) : null,
     throwPanel: sources.grenade.pending ? throwPanelOf(sources.grenade.pending) : null,

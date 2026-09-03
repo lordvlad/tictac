@@ -1,7 +1,7 @@
 import { NetworkManager, type NetworkMessage } from './NetworkManager'
 import { Raycaster, Vector2, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
-import { CAM, Faction } from '../config'
+import { CAM, Faction, LEVEL_HEIGHT } from '../config'
 import { clientToNdc } from '../core/screen'
 import type { Tile } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
@@ -58,8 +58,12 @@ export class InteractionController {
   /** The player asked for unit view. Aiming borrows the same camera on its own. */
   private unitViewRequested = false
   private selectedLevelFilter: number = 0
+  /** Highest storey this map has; the level selector offers one button each. */
+  private readonly topLevel: number
   /** Scratch aim point for the shoulder camera, to avoid a per-frame allocation. */
   private readonly aimPoint = new Vector3()
+  /** Scratch for tile picking, to avoid a per-event allocation. */
+  private readonly pickPoint = new Vector3()
   /** Where the right button went down, to tell a facing click from an orbit drag. */
   private readonly rightDownPos = new Vector2()
 
@@ -77,6 +81,7 @@ export class InteractionController {
     public network: NetworkManager | null = null,
   ) {
     this.effects = new Effects(engine)
+    this.topLevel = battlefield.grid.maxLevel
 
     this.movementSystem = new MovementSystem(battlefield.grid)
     this.combatSystem = new CombatSystem(battlefield.grid, squads, tracers)
@@ -218,6 +223,7 @@ export class InteractionController {
         shootActive: this.shoot.active,
         waypointActive: this.planner.waypointMode,
         selectedLevelFilter: this.selectedLevelFilter,
+        topLevel: this.topLevel,
         shoot:
           this.shoot.active && shooter
             ? {
@@ -698,13 +704,31 @@ export class InteractionController {
    * `hoveredTile` is mouse-only: `pointermove` never fires before a tap on
    * touch (and is suppressed mid-drag anyway), so a tap must project its own
    * coordinates or it hits nothing.
+   *
+   * Storeys are tried from the one being viewed downwards, and a hit only
+   * counts when the tile it lands on really sits at that height. Projecting
+   * everything onto the ground would put an upper-floor tap a tile or two from
+   * where the player aimed, because a tilted camera sees a raised floor offset
+   * from the ground beneath it.
    */
   private tileFromEvent(event: MouseEvent | PointerEvent): Tile | null {
     clientToNdc(this.engine.canvas, event.clientX, event.clientY, this.ndc)
-    const groundPt = this.picker.fromNdc(this.ndc)
-    if (!groundPt) return null
-    const tile = this.battlefield.grid.worldToTile(groundPt.x, groundPt.z)
-    return this.battlefield.grid.inBounds(tile.x, tile.y) ? tile : null
+    const grid = this.battlefield.grid
+
+    for (let level = this.selectedLevelFilter; level >= 0; level--) {
+      const hit = this.picker.fromNdc(this.ndc, this.pickPoint, level * LEVEL_HEIGHT)
+      if (hit === null) continue
+      const tile = grid.worldToTile(hit.x, hit.z)
+      if (!grid.inBounds(tile.x, tile.y)) continue
+      if (grid.levelAt(tile.x, tile.y) === level) return tile
+    }
+
+    // Nothing at any storey lined up — fall back to the ground so a tap on a
+    // roof or a wall still resolves to somewhere rather than nowhere.
+    const ground = this.picker.fromNdc(this.ndc, this.pickPoint)
+    if (ground === null) return null
+    const tile = grid.worldToTile(ground.x, ground.z)
+    return grid.inBounds(tile.x, tile.y) ? tile : null
   }
 
   private pickSoldierUnderCursor(

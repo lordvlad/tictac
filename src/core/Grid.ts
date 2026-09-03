@@ -139,6 +139,16 @@ export class Grid {
     this.roofs[y * this.size + x] = level
   }
 
+
+  /** Highest storey any tile sits on. */
+  get maxLevel(): number {
+    let top = 0
+    for (let i = 0; i < this.levels.length; i++) {
+      const level = this.levels[i]!
+      if (level > top) top = level
+    }
+    return top
+  }
   // -------------------------------------------------------------------------
   // Wall edges
   //

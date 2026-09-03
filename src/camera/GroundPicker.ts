@@ -2,7 +2,7 @@ import type { Matrix4, PerspectiveCamera, Vector2, Vector3 } from 'three'
 import { Matrix4 as Mat4, Vector3 as Vec3 } from 'three'
 
 /**
- * Projects screen positions onto the floor plane (y = 0).
+ * Projects screen positions onto a horizontal plane.
  *
  * Shared by the camera (drag panning) and gameplay picking (which tile did the
  * player tap), so the unprojection exists once instead of the camera rig
@@ -15,13 +15,17 @@ export class GroundPicker {
   constructor(private readonly camera: PerspectiveCamera) {}
 
   /**
-   * Project `ndc` onto the floor using the camera as it is right now. Returns
-   * null when the ray points at or above the horizon.
+   * Project `ndc` onto the plane at `planeY` using the camera as it is right
+   * now. Returns null when the ray points at or above the horizon.
+   *
+   * `planeY` matters as soon as the map has storeys: a tilted camera sees a
+   * tile 2 m up at a different screen position from the ground beneath it, so
+   * picking an upper floor against y = 0 lands a tile or two away.
    */
-  fromNdc(ndc: Vector2, target: Vector3 = new Vec3()): Vector3 | null {
+  fromNdc(ndc: Vector2, target: Vector3 = new Vec3(), planeY = 0): Vector3 | null {
     this.camera.updateMatrixWorld()
     this.unproject.multiplyMatrices(this.camera.matrixWorld, this.camera.projectionMatrixInverse)
-    return this.throughBasis(ndc, this.camera.position, this.unproject, target)
+    return this.throughBasis(ndc, this.camera.position, this.unproject, target, planeY)
   }
 
   /**
