@@ -15,15 +15,56 @@ installCanvasStub()
 function unit(tile: Tile, ap = 12): Soldier {
   return { tile, ap, isDead: false } as unknown as Soldier
 }
+interface ShowCall {
+  goal: { x: number; y: number; z: number }
+  valid: boolean
+  cover: readonly number[] | undefined
+  apCost: number | undefined
+  routeEnd: { x: number; y: number; z: number } | undefined
+}
 
-function harness(soldiers: Soldier[]): { planner: MovementPlanner; moves: Tile[][] } {
+function harness(soldiers: Soldier[]): {
+  planner: MovementPlanner
+  moves: Tile[][]
+  shown: ShowCall[]
+  grid: Grid
+} {
   const grid = new Grid(12)
   const squads = { soldiers } as unknown as Squads
   const engine = { scene: new Scene() } as unknown as EngineContext
   const planner = new MovementPlanner(grid, squads, engine)
+
   const moves: Tile[][] = []
   planner.onMovementStarted = (_s, path) => moves.push(path)
-  return { planner, moves }
+
+  // What the player is actually shown. Captured rather than inferred, because
+  // "the preview gives nothing away" is a statement about these arguments.
+  const shown: ShowCall[] = []
+  const marker = (planner as unknown as {
+    marker: {
+      show: (
+        path: { x: number; y: number; z: number }[],
+        waypoints: unknown,
+        goal: { x: number; y: number; z: number },
+        valid: boolean,
+        cover?: readonly number[],
+        apCost?: number,
+      ) => void
+    }
+  }).marker
+  const original = marker.show.bind(marker)
+  marker.show = (path, waypoints, goal, valid, cover, apCost) => {
+    shown.push({
+      goal: { x: goal.x, y: goal.y, z: goal.z },
+      valid,
+      cover: cover === undefined ? undefined : [...cover],
+      apCost,
+      routeEnd: path[path.length - 1],
+    })
+    original(path, waypoints, goal, valid, cover, apCost)
+  }
+
+  return { planner, moves, shown, grid }
 }
 
 describe('Movement never shares a tile', () => {
@@ -68,15 +109,18 @@ describe('Movement never shares a tile', () => {
     expect(clear.planner.plan.path.length - blocked.planner.plan.path.length).toBe(1)
   })
 
-  test('an occupant right next door leaves nothing to walk', () => {
+  test('an occupant right next door leaves nothing to walk, and still says nothing', () => {
     const mover = unit({ x: 1, y: 1 })
     const enemy = unit({ x: 2, y: 1 })
-    const { planner, moves } = harness([mover, enemy])
+    const { planner, moves, shown } = harness([mover, enemy])
 
     planner.handleClick(mover, enemy.tile, false)
-    expect(planner.plan.valid).toBe(false)
 
-    // And confirming it does nothing rather than stepping onto the occupant.
+    // The preview reads exactly as a one-step move onto an empty tile.
+    expect(shown[shown.length - 1]!.valid).toBe(true)
+    expect(shown[shown.length - 1]!.apCost).toBe(RULES.stepOrthogonal)
+
+    // Confirming does nothing rather than stepping onto the occupant.
     planner.handleClick(mover, enemy.tile, false)
     expect(moves).toEqual([])
   })
@@ -93,17 +137,39 @@ describe('Movement never shares a tile', () => {
     expect(valid).toBe(true)
   })
 
-  test('a route that only fits without its last step becomes affordable', () => {
-    // Exactly enough AP to reach the tile before the occupant, not the
-    // occupant's own tile. Trimming has to be reflected in affordability.
-    const ap = 3 * RULES.stepOrthogonal
-    const mover = unit({ x: 1, y: 1 }, ap)
-    const enemy = unit({ x: 5, y: 1 })
-    const { planner } = harness([mover, enemy])
+  test('the preview is identical whether or not the target is occupied', () => {
+    // The whole point of accepting the tap silently: a marker that described
+    // the trimmed route would announce an enemy the player has not spotted.
+    const target = { x: 5, y: 1 }
 
-    planner.handleClick(mover, enemy.tile, false)
-    expect(planner.plan.valid).toBe(true)
-    expect(planner.plan.path[planner.plan.path.length - 1]).toEqual({ x: 4, y: 1 })
+    const empty = harness([unit({ x: 1, y: 1 })])
+    empty.planner.handleClick(unit({ x: 1, y: 1 }), target, false)
+
+    const held = harness([unit({ x: 1, y: 1 }), unit(target)])
+    held.planner.handleClick(unit({ x: 1, y: 1 }), target, false)
+
+    const a = empty.shown[empty.shown.length - 1]!
+    const b = held.shown[held.shown.length - 1]!
+
+    expect(b.goal).toEqual(a.goal)
+    expect(b.routeEnd).toEqual(a.routeEnd)
+    expect(b.apCost).toEqual(a.apCost)
+    expect(b.cover).toEqual(a.cover)
+    expect(b.valid).toEqual(a.valid)
+  })
+
+  test('affordability ignores the occupant, so cost never gives one away', () => {
+    // Three AP does not reach (5,1); it reaches (4,1). Were the trimmed route
+    // judged instead, an unaffordable target would turn affordable purely
+    // because someone was standing on it.
+    const ap = 3 * RULES.stepOrthogonal
+    const enemy = unit({ x: 5, y: 1 })
+    const { planner, shown } = harness([unit({ x: 1, y: 1 }, ap), enemy])
+
+    planner.handleClick(unit({ x: 1, y: 1 }, ap), enemy.tile, false)
+
+    expect(shown[shown.length - 1]!.valid).toBe(false)
+    expect(planner.plan.valid).toBe(false)
   })
 
   test('an unreachable target yields no route at all', () => {

@@ -39,7 +39,14 @@ export class MovementPlanner {
     return this.waypointModeOn
   }
 
-  /** Current plan, for callers that need to inspect it (tests, debug overlay). */
+  /**
+   * Current plan, for callers that need to inspect it (tests, debug overlay).
+   *
+   * `path` is the route that will be *executed*, so it stops short of an
+   * occupied tile. `valid` describes the move as *shown* — judged on the full
+   * route to the tile the player named — because the preview must not betray
+   * that anything is standing there.
+   */
   get plan(): { goal: Tile | null; waypoints: readonly Tile[]; path: readonly Tile[]; valid: boolean } {
     return { goal: this.goal, waypoints: this.waypoints, path: this.path, valid: this.pathValid }
   }
@@ -165,51 +172,46 @@ export class MovementPlanner {
       this.occupied,
     )
 
-    // Two units never share a tile, but A* is allowed to finish on an occupied
-    // goal so a target can be named at all — including one whose occupant the
-    // player cannot see yet. Accept the tap and stop the route a tile short of
-    // it instead, which is where the unit was always going to end up.
-    const plan = this.stopShortOfOccupant(result.path, result.totalCost)
-    const affordable = plan.path.length > 1 && plan.cost <= soldier.ap
+    // The preview describes the tile the player actually named — route drawn
+    // all the way to it, its cover, its full cost. It has to: a marker that
+    // visibly stopped short would announce that something is standing there,
+    // and a hidden enemy's position is exactly what must not leak. Affordability
+    // is judged on that same full route, so a target costs what it looks like
+    // it costs whether or not it happens to be occupied.
+    const affordable = result.path.length > 1 && result.valid
 
     // A provisional endpoint is not a target: no tap may confirm it.
-    this.path = provisional ? [] : plan.path
     this.pathValid = provisional ? false : affordable
-
-    // The marker belongs on the tile the unit will actually stand on.
-    const shown = plan.path[plan.path.length - 1] ?? endpoint
+    // Only the executed route is trimmed. Two units never share a tile, so the
+    // unit walks to the last free tile before the occupant — which is where it
+    // was always going to end up.
+    this.path = provisional ? [] : this.stopShortOfOccupant(result.path)
 
     this.marker.show(
-      this.grid.pathToWorldPoints(plan.path),
+      this.grid.pathToWorldPoints(result.path),
       (provisional ? this.waypoints : via).map((t) => this.grid.tileToWorld(t)),
-      this.grid.tileToWorld(shown),
+      this.grid.tileToWorld(endpoint),
       affordable,
-      provisional ? undefined : directionalCover(this.grid, shown),
+      provisional ? undefined : directionalCover(this.grid, endpoint),
       // Unreachable routes report Infinity; showing the walkable prefix's cost
       // would be a lie, so the label is left off entirely.
-      Number.isFinite(plan.cost) ? plan.cost : undefined,
+      Number.isFinite(result.totalCost) ? result.totalCost : undefined,
     )
   }
 
   /**
-   * Trim a route that ends on a tile someone else is standing on.
+   * Drop the last step of a route that ends on a tile someone else occupies.
    *
-   * Returns the route unchanged when its last tile is free. The cost of the
-   * dropped step comes off with it, so the AP label and the affordability test
-   * describe the move that would actually happen.
+   * A* is allowed to finish on an occupied goal — otherwise an occupied tile
+   * could not be named at all, and naming one is how a player probes ground
+   * they cannot see. Trimming happens here, on the way to execution, and
+   * deliberately not in the preview.
    */
-  private stopShortOfOccupant(
-    path: readonly Tile[],
-    cost: number,
-  ): { path: Tile[]; cost: number } {
+  private stopShortOfOccupant(path: readonly Tile[]): Tile[] {
     const last = path[path.length - 1]
-    if (last === undefined) return { path: [], cost }
-    if (!this.occupied.has(this.grid.index(last.x, last.y))) return { path: [...path], cost }
-
-    const trimmed = path.slice(0, -1)
-    const prev = trimmed[trimmed.length - 1]
-    if (prev === undefined) return { path: [], cost: Infinity }
-    return { path: trimmed, cost: cost - this.grid.getStepCost(prev, last) }
+    if (last === undefined) return []
+    if (!this.occupied.has(this.grid.index(last.x, last.y))) return [...path]
+    return path.slice(0, -1)
   }
 
   update(delta: number): void {
