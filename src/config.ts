@@ -196,6 +196,8 @@ export const PATH = {
   waypointRadius: 0.35,
   /** Radius of the selected-unit foot circle. */
   selectionRadius: 0.42,
+  /** Height of the directional cover shields above the goal's own floor. */
+  shieldHeight: 0.55,
   /** How far above the goal pole the AP cost plate floats. */
   labelRise: 0.42,
   /** World height of the AP cost plate. */

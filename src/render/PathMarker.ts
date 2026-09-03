@@ -128,7 +128,12 @@ export class PathMarker {
     return material
   }
 
-  /** Camera-facing cover shield sprite on one side of the goal tile. */
+  /**
+   * Camera-facing cover shield sprite on one side of the goal tile.
+   *
+   * Heights are measured from the goal's own floor, not from the ground: a
+   * target on an upper storey has its markers up there with it.
+   */
   private shield(goal: Vector3, dx: number, dy: number, filled: boolean): void {
     const texture = shieldTexture(filled)
     this.textures.push(texture)
@@ -141,7 +146,7 @@ export class PathMarker {
     })
     this.materials.push(mat)
     const sprite = new Sprite(mat)
-    sprite.position.set(goal.x + dx * 0.5, 0.55, goal.z + dy * 0.5)
+    sprite.position.set(goal.x + dx * 0.5, goal.y + PATH.shieldHeight, goal.z + dy * 0.5)
     sprite.scale.set(0.5, 0.5, 1)
     sprite.renderOrder = 11
     this.group.add(sprite)
@@ -160,7 +165,7 @@ export class PathMarker {
     })
     this.materials.push(mat)
     const sprite = new Sprite(mat)
-    sprite.position.set(goal.x, PATH.goalHeight + PATH.labelRise, goal.z)
+    sprite.position.set(goal.x, goal.y + PATH.goalHeight + PATH.labelRise, goal.z)
     sprite.scale.set(PATH.labelScale * LABEL_ASPECT, PATH.labelScale, 1)
     sprite.renderOrder = 12
     this.group.add(sprite)
