@@ -33,7 +33,7 @@ export type HudIntent =
   | { type: 'toggleUnitView' }
   | { type: 'openDebug' }
   | { type: 'selectLevel'; level: number }
-
+  | { type: 'toggleDebugMap' }
 /** One button in the selected unit's action panel. */
 export interface HudAction {
   id: string
@@ -141,6 +141,7 @@ export interface HudModel {
   waypointActive: boolean
   unitViewEnabled: boolean
   nextFactionName: string
+  debugMapOpen: boolean
 }
 
 export interface HudModelSources {
@@ -161,6 +162,7 @@ export interface HudModelSources {
   myFaction?: Faction
   selectedLevelFilter: number
   topLevel: number
+  debugMapOpen: boolean
 }
 
 /** What the model builder needs from the shoot planner. */
@@ -309,6 +311,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     actions,
     selectedLevelFilter: sources.selectedLevelFilter,
     topLevel: sources.topLevel,
+    debugMapOpen: sources.debugMapOpen,
     targets,
     shotPanel: shoot?.pending ? shotPanelOf(shoot.pending) : null,
     throwPanel: sources.grenade.pending ? throwPanelOf(sources.grenade.pending) : null,

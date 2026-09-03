@@ -15,6 +15,7 @@ import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
 import { MovementPlanner } from './MovementPlanner'
 import { DebugPanel } from '../hud/DebugPanel'
+import { DebugMap } from '../hud/DebugMap'
 import { GrenadePlanner } from './GrenadePlanner'
 import { ShootPlanner } from './ShootPlanner'
 import { Effects } from '../render/Effects'
@@ -40,6 +41,7 @@ export class InteractionController {
   private readonly shoot: ShootPlanner
   private readonly grenade: GrenadePlanner
   private readonly debug: DebugPanel
+  private readonly debugMap = new DebugMap()
   private readonly fog: FogOfWar
   private readonly xray: WallXray
   private readonly effects: Effects
@@ -224,6 +226,7 @@ export class InteractionController {
         waypointActive: this.planner.waypointMode,
         selectedLevelFilter: this.selectedLevelFilter,
         topLevel: this.topLevel,
+        debugMapOpen: this.debugMap.isOpen,
         shoot:
           this.shoot.active && shooter
             ? {
@@ -324,6 +327,11 @@ export class InteractionController {
       case 'openDebug':
         this.debug.toggle()
         break
+      case 'toggleDebugMap':
+        this.debugMap.toggle()
+        this.debugMap.refresh(this.battlefield.grid, this.squads, this.selectedLevelFilter, this.seedLabel)
+        this.refreshHud()
+        break
       case 'toggleCover':
         this.toggleCover()
         break
@@ -369,6 +377,7 @@ export class InteractionController {
         this.battlefield.blocks.setLevelFilter(intent.level)
         this.rig.setFocusLevel(intent.level)
         this.renderOverlay()
+        if (this.debugMap.isOpen) this.debugMap.refresh(this.battlefield.grid, this.squads, this.selectedLevelFilter, this.seedLabel)
         this.refreshHud()
         break
       case 'toggleFreelook':
@@ -474,6 +483,7 @@ export class InteractionController {
     this.shoot.dispose()
     this.grenade.dispose()
     this.debug.dispose()
+    this.debugMap.dispose()
     this.effects.dispose()
   }
   enterShootMode(): void {

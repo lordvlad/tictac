@@ -210,6 +210,13 @@ export class Hud {
     this.levelSelectorEl.innerHTML = `
       <div class="hud-level-title">LEVEL</div>
       <div class="hud-level-buttons">${buttons.join('')}</div>
+      <div class="hud-level-map">
+        <button class="hud-btn interactive ${model.debugMapOpen ? 'active' : ''}"
+                title="Toggle 2D Debug Minimap"
+                ${Hud.intentAttr({ type: 'toggleDebugMap' })}>
+          MAP
+        </button>
+      </div>
     `
   }
 

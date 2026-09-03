@@ -614,12 +614,14 @@ export class Blocks {
         this.grid.worldZ(tile.y)
       )
 
-      // Apply stair rotation if this is a stair block
+      // Apply stair rotation if this is a stair block.
+      // Base geometry rises from -Z (North foot) to +Z (South head).
+      // +Y axis rotation turns the head toward +Z (North: 0), +X (East: PI/2),
+      // -Z (South: PI), -X (West: 3PI/2).
       const block = this.grid.blockAt(tile.x, tile.y)
       if (block === Block.Stair) {
         const dir = this.grid.stairDirectionAt(tile.x, tile.y)
-        // Rotate around Y axis based on StairDirection (0: North, 1: East, 2: South, 3: West)
-        this.dummy.rotation.y = -(dir * Math.PI) / 2
+        this.dummy.rotation.y = (dir * Math.PI) / 2
       } else {
         this.dummy.rotation.y = 0
       }
