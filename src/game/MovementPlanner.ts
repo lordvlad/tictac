@@ -165,20 +165,51 @@ export class MovementPlanner {
       this.occupied,
     )
 
+    // Two units never share a tile, but A* is allowed to finish on an occupied
+    // goal so a target can be named at all — including one whose occupant the
+    // player cannot see yet. Accept the tap and stop the route a tile short of
+    // it instead, which is where the unit was always going to end up.
+    const plan = this.stopShortOfOccupant(result.path, result.totalCost)
+    const affordable = plan.path.length > 1 && plan.cost <= soldier.ap
+
     // A provisional endpoint is not a target: no tap may confirm it.
-    this.path = provisional ? [] : result.path
-    this.pathValid = provisional ? false : result.valid
+    this.path = provisional ? [] : plan.path
+    this.pathValid = provisional ? false : affordable
+
+    // The marker belongs on the tile the unit will actually stand on.
+    const shown = plan.path[plan.path.length - 1] ?? endpoint
 
     this.marker.show(
-      this.grid.pathToWorldPoints(result.path),
+      this.grid.pathToWorldPoints(plan.path),
       (provisional ? this.waypoints : via).map((t) => this.grid.tileToWorld(t)),
-      this.grid.tileToWorld(endpoint),
-      result.valid,
-      provisional ? undefined : directionalCover(this.grid, endpoint),
+      this.grid.tileToWorld(shown),
+      affordable,
+      provisional ? undefined : directionalCover(this.grid, shown),
       // Unreachable routes report Infinity; showing the walkable prefix's cost
       // would be a lie, so the label is left off entirely.
-      Number.isFinite(result.totalCost) ? result.totalCost : undefined,
+      Number.isFinite(plan.cost) ? plan.cost : undefined,
     )
+  }
+
+  /**
+   * Trim a route that ends on a tile someone else is standing on.
+   *
+   * Returns the route unchanged when its last tile is free. The cost of the
+   * dropped step comes off with it, so the AP label and the affordability test
+   * describe the move that would actually happen.
+   */
+  private stopShortOfOccupant(
+    path: readonly Tile[],
+    cost: number,
+  ): { path: Tile[]; cost: number } {
+    const last = path[path.length - 1]
+    if (last === undefined) return { path: [], cost }
+    if (!this.occupied.has(this.grid.index(last.x, last.y))) return { path: [...path], cost }
+
+    const trimmed = path.slice(0, -1)
+    const prev = trimmed[trimmed.length - 1]
+    if (prev === undefined) return { path: [], cost: Infinity }
+    return { path: trimmed, cost: cost - this.grid.getStepCost(prev, last) }
   }
 
   update(delta: number): void {

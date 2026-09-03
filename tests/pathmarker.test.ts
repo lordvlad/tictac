@@ -3,73 +3,9 @@ import { Line, LineLoop, Scene, Sprite, Vector3 } from 'three'
 import { PATH } from '../src/config'
 import { CoverLevel } from '../src/core/Walls'
 import { PathMarker } from '../src/render/PathMarker'
+import { installCanvasStub } from './support/dom'
 
-// PathMarker draws its cover shields and AP plate onto canvas textures, so it
-// needs just enough DOM to build them. Only the texture helpers touch
-// `document`, and they run at call time, so installing this here is early
-// enough.
-//
-// Another test file may already have installed a `document` of its own, so
-// only `createElement('canvas')` is taken over and everything else delegates.
-// Guarding on `document === undefined` instead would leave this file depending
-// on which test ran first.
-{
-  const ctx = {
-    clearRect: () => {},
-    fillRect: () => {},
-    strokeRect: () => {},
-    beginPath: () => {},
-    closePath: () => {},
-    moveTo: () => {},
-    lineTo: () => {},
-    arc: () => {},
-    arcTo: () => {},
-    quadraticCurveTo: () => {},
-    fill: () => {},
-    stroke: () => {},
-    save: () => {},
-    restore: () => {},
-    rect: () => {},
-    clip: () => {},
-    translate: () => {},
-    scale: () => {},
-    measureText: () => ({ width: 10 }),
-    fillText: () => {},
-    strokeText: () => {},
-    createLinearGradient: () => ({ addColorStop: () => {} }),
-    set fillStyle(_v: unknown) {},
-    set strokeStyle(_v: unknown) {},
-    set lineWidth(_v: unknown) {},
-    set font(_v: unknown) {},
-    set textAlign(_v: unknown) {},
-    set textBaseline(_v: unknown) {},
-    set lineJoin(_v: unknown) {},
-  }
-  const canvas = { width: 0, height: 0, getContext: () => ctx }
-  const existing = globalThis.document as Document | undefined
-  const createElement = (tag: string): unknown =>
-    tag === 'canvas' ? canvas : existing?.createElement.call(existing, tag)
-
-  if (existing === undefined) {
-    globalThis.document = { createElement } as unknown as Document
-  } else {
-    Object.defineProperty(existing, 'createElement', { value: createElement, configurable: true })
-  }
-}
-
-if (typeof globalThis.Path2D === 'undefined') {
-  class Path2DStub {
-    moveTo(): void {}
-    lineTo(): void {}
-    quadraticCurveTo(): void {}
-    bezierCurveTo(): void {}
-    arc(): void {}
-    arcTo(): void {}
-    closePath(): void {}
-    rect(): void {}
-  }
-  globalThis.Path2D = Path2DStub as unknown as typeof Path2D
-}
+installCanvasStub()
 
 interface Probe {
   /** Y of every sprite (AP plate, cover shields). */

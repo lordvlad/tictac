@@ -114,6 +114,14 @@ export class PathMarker {
     return new Line(geometry, this.material(color, peak))
   }
 
+  /**
+   * Additive line material for the route and the beacons.
+   *
+   * `depthTest` is off to match the sprites and the group's `renderOrder`: the
+   * marker is drawn last on purpose, and a roof or an upper floor faded to
+   * near-nothing by the level filter still writes depth, so testing against it
+   * hides the very route the player is trying to read.
+   */
   private material(color: number, peak: number): LineBasicMaterial {
     const material = new LineBasicMaterial({
       color,
@@ -121,6 +129,7 @@ export class PathMarker {
       opacity: peak,
       blending: AdditiveBlending,
       depthWrite: false,
+      depthTest: false,
       toneMapped: false,
     })
     this.materials.push(material)
