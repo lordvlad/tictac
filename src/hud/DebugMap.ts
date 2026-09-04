@@ -4,11 +4,11 @@ import { WallKind } from '../core/Walls'
 import type { Squads } from '../game/Squads'
 import { Faction } from '../config'
 
-const TILE_PX = 10
+const TILE_PX = 11
 const WALL_PX = 3
 
 /**
- * 2D Debug Minimap showing all levels side by side.
+ * 2D Debug Minimap showing all map levels with crisp pixel-perfect rendering.
  *
  * Marks every terrain feature, room boundary, crate, roof, and squad unit,
  * and explicitly draws stair orientation arrows from lower to upper access.
@@ -16,12 +16,19 @@ const WALL_PX = 3
 export class DebugMap {
   private readonly root: HTMLElement
   private visible = false
+  private selectedLevelView: number | 'all' = 'all'
+  private keyListenerAttached = false
 
   constructor() {
     this.root = document.createElement('div')
     this.root.className = 'debug-map-panel'
     this.root.style.display = 'none'
     document.body.appendChild(this.root)
+
+    // Close on backdrop click (outside cards)
+    this.root.addEventListener('click', (e) => {
+      if (e.target === this.root) this.close()
+    })
   }
 
   get isOpen(): boolean {
@@ -29,9 +36,18 @@ export class DebugMap {
   }
 
   toggle(): boolean {
-    this.visible = !this.visible
-    this.root.style.display = this.visible ? 'flex' : 'none'
+    if (this.visible) {
+      this.close()
+    } else {
+      this.open()
+    }
     return this.visible
+  }
+
+  open(): void {
+    this.visible = true
+    this.root.style.display = 'flex'
+    this.attachKeyListener()
   }
 
   close(): void {
@@ -40,7 +56,28 @@ export class DebugMap {
   }
 
   dispose(): void {
+    this.detachKeyListener()
     this.root.remove()
+  }
+
+  private attachKeyListener(): void {
+    if (this.keyListenerAttached) return
+    globalThis.addEventListener('keydown', this.onKeyDown as EventListener)
+    this.keyListenerAttached = true
+  }
+
+  private detachKeyListener(): void {
+    if (!this.keyListenerAttached) return
+    globalThis.removeEventListener('keydown', this.onKeyDown as EventListener)
+    this.keyListenerAttached = false
+  }
+
+  private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape' && this.visible) {
+      e.preventDefault()
+      e.stopPropagation()
+      this.close()
+    }
   }
 
   refresh(grid: Grid, squads: Squads, activeLevelFilter: number, seedLabel: string): void {
@@ -48,46 +85,76 @@ export class DebugMap {
 
     const maxLevel = grid.maxLevel
     const size = grid.size
-    const canvasPx = size * TILE_PX
+    const dpr = Math.max(1, (typeof globalThis.devicePixelRatio === 'number' && globalThis.devicePixelRatio) || 1)
 
     this.root.innerHTML = ''
 
     // --- Header -------------------------------------------------------------
     const header = document.createElement('div')
     header.className = 'debug-map-header'
+
+    const levelTabs = [`<button class="debug-map-tab ${this.selectedLevelView === 'all' ? 'active' : ''}" data-view="all">ALL LEVELS</button>`]
+    for (let l = 0; l <= maxLevel; l++) {
+      levelTabs.push(
+        `<button class="debug-map-tab ${this.selectedLevelView === l ? 'active' : ''}" data-view="${l}">L${l}</button>`,
+      )
+    }
+
     header.innerHTML = `
       <div class="debug-map-title">
         <span>DEBUG MINIMAP</span>
         <span class="debug-map-seed">Seed: ${seedLabel}</span>
       </div>
-      <button class="debug-map-close" title="Close Minimap">&times;</button>
+      <div class="debug-map-tabs">${levelTabs.join('')}</div>
+      <button class="debug-map-close-btn" title="Close Minimap (Esc)">CLOSE &times;</button>
     `
-    header.querySelector('.debug-map-close')?.addEventListener('click', () => this.close())
+
+    header.querySelector('.debug-map-close-btn')?.addEventListener('click', () => this.close())
+    header.querySelectorAll('.debug-map-tab').forEach((tab) => {
+      tab.addEventListener('click', (e) => {
+        const val = (e.currentTarget as HTMLElement).getAttribute('data-view')
+        this.selectedLevelView = val === 'all' ? 'all' : Number(val)
+        this.refresh(grid, squads, activeLevelFilter, seedLabel)
+      })
+    })
     this.root.appendChild(header)
 
     // --- Level Canvases Container -------------------------------------------
     const container = document.createElement('div')
     container.className = 'debug-map-levels'
 
-    for (let level = 0; level <= maxLevel; level++) {
+    const levelsToDraw =
+      this.selectedLevelView === 'all'
+        ? Array.from({ length: maxLevel + 1 }, (_, i) => i)
+        : [this.selectedLevelView as number]
+
+    for (const level of levelsToDraw) {
       const card = document.createElement('div')
       card.className = `debug-map-card ${level === activeLevelFilter ? 'active' : ''}`
 
       const title = document.createElement('div')
       title.className = 'debug-map-card-title'
-      title.innerHTML = `LEVEL ${level} ${level === 0 ? '(Ground)' : level === maxLevel ? '(Top)' : ''} ${
-        level === activeLevelFilter ? '<span class="active-badge">VIEWING</span>' : ''
-      }`
+      title.innerHTML = `
+        <span>LEVEL ${level} ${level === 0 ? '(Ground)' : level === maxLevel ? '(Top)' : ''}</span>
+        ${level === activeLevelFilter ? '<span class="active-badge">VIEWING IN 3D</span>' : ''}
+      `
       card.appendChild(title)
 
       const canvas = document.createElement('canvas')
-      canvas.width = canvasPx
-      canvas.height = canvasPx
+      const cssPx = size * TILE_PX
+      canvas.width = cssPx * dpr
+      canvas.height = cssPx * dpr
+      canvas.style.width = `${cssPx}px`
+      canvas.style.height = `${cssPx}px`
       canvas.className = 'debug-map-canvas'
       card.appendChild(canvas)
 
       const ctx = canvas.getContext('2d')
-      if (ctx) this.drawLevel(ctx, grid, squads, level, size)
+      if (ctx) {
+        ctx.scale(dpr, dpr)
+        ctx.imageSmoothingEnabled = false
+        this.drawLevel(ctx, grid, squads, level, size)
+      }
 
       container.appendChild(card)
     }
@@ -129,18 +196,18 @@ export class DebugMap {
         const walkable = grid.isWalkable(x, y)
 
         if (!walkable && block !== Block.Stair) {
-          ctx.fillStyle = '#111318'
+          ctx.fillStyle = '#0f172a'
         } else if (tileLevel === level) {
-          ctx.fillStyle = '#2d3748'
+          ctx.fillStyle = '#334155'
         } else if (tileLevel < level) {
-          ctx.fillStyle = '#1a202c'
+          ctx.fillStyle = '#1e293b'
         } else {
-          ctx.fillStyle = '#4a5568'
+          ctx.fillStyle = '#475569'
         }
         ctx.fillRect(px, py, TILE_PX, TILE_PX)
 
-        // Grid lines
-        ctx.strokeStyle = '#262d3a'
+        // Faint tile grid lines
+        ctx.strokeStyle = '#1e293b'
         ctx.lineWidth = 0.5
         ctx.strokeRect(px, py, TILE_PX, TILE_PX)
 
@@ -152,7 +219,7 @@ export class DebugMap {
 
         // Roof overlay
         if (grid.roofAt(x, y) === level + 1) {
-          ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)'
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.3)'
           ctx.lineWidth = 1
           ctx.beginPath()
           ctx.moveTo(px, py + TILE_PX)
@@ -170,13 +237,11 @@ export class DebugMap {
         const dir = grid.stairDirectionAt(x, y)
         const access = grid.getStairAccessTiles(x, y)
 
-        // Highlight stair tile if on this level or lower
         if (stairLevel === level) {
           ctx.fillStyle = '#0284c7'
           ctx.fillRect(x * TILE_PX + 1, y * TILE_PX + 1, TILE_PX - 2, TILE_PX - 2)
         }
 
-        // Draw stair access badges and arrow if either end touches this level
         if (stairLevel === level || grid.levelAt(access.upper.x, access.upper.y) === level) {
           this.drawStairArrow(ctx, grid, { x, y }, dir, access)
         }
@@ -189,13 +254,11 @@ export class DebugMap {
         const px = x * TILE_PX
         const py = y * TILE_PX
 
-        // North wall
         const northWall = grid.wallAt(x, y, Side.North)
         if (northWall !== WallKind.None && this.wallTouchesLevel(grid, x, y, Side.North, level)) {
           this.drawWallLine(ctx, px, py, px + TILE_PX, py, northWall)
         }
 
-        // West wall
         const westWall = grid.wallAt(x, y, Side.West)
         if (westWall !== WallKind.None && this.wallTouchesLevel(grid, x, y, Side.West, level)) {
           this.drawWallLine(ctx, px, py, px, py + TILE_PX, westWall)

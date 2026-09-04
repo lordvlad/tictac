@@ -1191,17 +1191,50 @@ canvas {
   color: #94a3b8;
 }
 
-.debug-map-close {
-  background: transparent;
-  border: none;
-  color: #94a3b8;
-  font-size: 22px;
+.debug-map-close-btn {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 6px;
   cursor: pointer;
-  line-height: 1;
-  padding: 0 4px;
+  transition: all 0.15s ease;
 }
-.debug-map-close:hover {
+
+.debug-map-close-btn:hover {
+  background: rgba(239, 68, 68, 0.4);
+  color: #ffffff;
+}
+
+.debug-map-tabs {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.debug-map-tab {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.debug-map-tab:hover {
+  background: rgba(51, 65, 85, 0.9);
   color: #f8fafc;
+}
+
+.debug-map-tab.active {
+  background: #0284c7;
+  border-color: #38bdf8;
+  color: #ffffff;
 }
 
 .debug-map-levels {
@@ -1223,6 +1256,7 @@ canvas {
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 8px;
   padding: 12px;
+  flex-shrink: 0;
 }
 
 .debug-map-card.active {
@@ -1251,6 +1285,11 @@ canvas {
   border: 1px solid #334155;
   border-radius: 4px;
   background: #0f172a;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: block;
 }
 
 .debug-map-legend {

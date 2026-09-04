@@ -1,14 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { CameraInput, type CameraRigTarget } from '../src/camera/CameraInput'
+import { installCanvasStub } from './support/dom'
 
-if (typeof globalThis.window === 'undefined') {
-  const dummyTarget = {
-    addEventListener: () => {},
-    removeEventListener: () => {},
-  }
-  globalThis.window = dummyTarget as unknown as Window & typeof globalThis
-  globalThis.document = dummyTarget as unknown as Document & typeof globalThis
-}
+installCanvasStub()
 
 if (typeof globalThis.PointerEvent === 'undefined') {
   class MockPointerEvent extends Event {
