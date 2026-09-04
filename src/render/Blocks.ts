@@ -43,7 +43,7 @@ const WALL_THICKNESS = 0.12
 const LADDER_COLOR = 0xff8800
 
 /** Face bits in a stable order, so instances and their offsets stay paired. */
-const LADDER_FACE_ORDER: readonly number[] = [Side.North, Side.East, Side.South, Side.West]
+const LADDER_FACE_ORDER: readonly Side[] = [Side.North, Side.East, Side.South, Side.West]
 
 /** Grid-space step from a tile centre toward each face, as [dx, dy]. */
 const FACE_OFFSET: Record<number, readonly [number, number]> = {
@@ -561,7 +561,7 @@ export class Blocks {
       const mounted = this.grid.ladderFacesAt(x, y)
       for (const face of LADDER_FACE_ORDER) {
         if ((mounted & face) === 0) continue
-        instances.push({ x, y, index: instances.length })
+        instances.push({ x, y, side: face, index: instances.length })
         faces.push(face)
       }
     })
@@ -647,6 +647,8 @@ export class Blocks {
    */
   applyVisibility(values: Uint8Array): void {
     for (const layer of this.layers) {
+      const fadeArray = layer.fade.array as Float32Array
+      let fadeDirty = false
       for (const inst of layer.instances) {
         let state = (values[this.grid.index(inst.x, inst.y)] ?? VisState.Unknown) as VisState
         if (inst.side !== undefined) {
@@ -658,8 +660,16 @@ export class Blocks {
         }
         this.scratch.copy(layer.baseColor).multiplyScalar(VIS_BRIGHTNESS[state])
         layer.mesh.setColorAt(inst.index, this.scratch)
+
+        // Unexplored instances must be hidden so they do not draw black cutout stencils
+        const targetFade = state === VisState.Unknown ? 0 : 1
+        if (fadeArray[inst.index] !== targetFade) {
+          fadeArray[inst.index] = targetFade
+          fadeDirty = true
+        }
       }
       if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
+      if (fadeDirty) layer.fade.needsUpdate = true
     }
   }
 

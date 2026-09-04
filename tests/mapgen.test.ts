@@ -257,12 +257,19 @@ describe('Vertical access', () => {
       expect(ladders).toBeGreaterThan(0)
     }
   })
-  test('Blocks positions ladders offset past the wall thickness onto the outer face', () => {
+  test('Blocks carries side on ladder instances and sets aFade=0 for unexplored fog', () => {
     const { grid } = generateMap(42)
     const blocks = new Blocks(grid)
-    const layers = (blocks as unknown as { layers: Array<{ mesh: { userData: { type: string } }; instances: unknown[] }> }).layers
+    const layers = (blocks as unknown as { layers: Array<{ mesh: { userData: { type: string } }; instances: Array<{ side?: Side }>; fade: { array: Float32Array } }> }).layers
     const ladderLayer = layers.find((l) => l.mesh.userData.type === 'ladder')
     expect(ladderLayer).toBeDefined()
     expect(ladderLayer!.instances.length).toBeGreaterThan(0)
+    for (const inst of ladderLayer!.instances) {
+      expect(inst.side).toBeDefined()
+    }
+
+    const vis = new Uint8Array(grid.size * grid.size) // All Unknown (0)
+    blocks.applyVisibility(vis)
+    expect(ladderLayer!.fade.array[0]).toBe(0)
   })
 })
