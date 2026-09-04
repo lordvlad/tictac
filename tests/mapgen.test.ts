@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { generateMap } from '../src/core/MapGenerator'
+import { Blocks } from '../src/render/Blocks'
 import { Block, Grid, ORTHOGONAL, Side, faceToward, type Tile } from '../src/core/Grid'
 import { WallKind } from '../src/core/Walls'
 import { Faction, LEVEL_HEIGHT } from '../src/config'
@@ -255,5 +256,13 @@ describe('Vertical access', () => {
 
       expect(ladders).toBeGreaterThan(0)
     }
+  })
+  test('Blocks positions ladders offset past the wall thickness onto the outer face', () => {
+    const { grid } = generateMap(42)
+    const blocks = new Blocks(grid)
+    const layers = (blocks as unknown as { layers: Array<{ mesh: { userData: { type: string } }; instances: unknown[] }> }).layers
+    const ladderLayer = layers.find((l) => l.mesh.userData.type === 'ladder')
+    expect(ladderLayer).toBeDefined()
+    expect(ladderLayer!.instances.length).toBeGreaterThan(0)
   })
 })

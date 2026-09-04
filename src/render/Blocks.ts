@@ -586,11 +586,14 @@ export class Blocks {
     instances.forEach((tile, i) => {
       const [dx, dz] = FACE_OFFSET[faces[i]!]!
       const level = this.grid.levelAt(tile.x, tile.y)
+      // Offset past the wall's thickness (WALL_THICKNESS / 2) so the ladder
+      // stands on the wall's outer face rather than embedded inside the masonry.
+      const ladderOffset = WALL_THICKNESS / 2 + 0.035
 
       this.dummy.position.set(
-        this.grid.worldX(tile.x) + (dx * TILE) / 2,
+        this.grid.worldX(tile.x) + dx * (TILE / 2 + ladderOffset),
         (level - 0.5) * LEVEL_HEIGHT,
-        this.grid.worldZ(tile.y) + (dz * TILE) / 2,
+        this.grid.worldZ(tile.y) + dz * (TILE / 2 + ladderOffset),
       )
       // Turn local +Z to look out over the drop.
       this.dummy.rotation.y = Math.atan2(dx, dz)
