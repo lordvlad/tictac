@@ -43,6 +43,8 @@ describe('Map generation is layered', () => {
           if (grid.blockAt(tile.x, tile.y) === Block.Stair) continue
           const side = faceToward(tile, n)
           if (side === 0) continue
+          // Stairs and ladders are sanctioned exceptions: they are the vertical links.
+          if ((grid.ladderFacesAt(tile.x, tile.y) & side) !== 0) continue
           if (grid.wallAt(tile.x, tile.y, side) === WallKind.None) {
             unsupported.push(`seed ${seed} (${tile.x},${tile.y}) open to (${n.x},${n.y})`)
           }
@@ -127,6 +129,18 @@ describe('Rooms, doors and windows', () => {
         for (let y = b.y; y < b.y + b.h; y++) {
           for (let x = b.x; x < b.x + b.w; x++) {
             roomTiles++
+            // Stairs and upper stair landings have ceiling cutouts for head clearance.
+            if (grid.blockAt(x, y) === Block.Stair) continue
+            let isStairLanding = false
+            for (const [dx, dy] of ORTHOGONAL) {
+              const n = { x: x + dx, y: y + dy }
+              if (grid.inBounds(n.x, n.y) && grid.blockAt(n.x, n.y) === Block.Stair) {
+                const access = grid.getStairAccessTiles(n.x, n.y)
+                if (access.upper.x === x && access.upper.y === y) isStairLanding = true
+              }
+            }
+            if (isStairLanding) continue
+
             if (grid.roofAt(x, y) <= grid.levelAt(x, y)) unroofed++
           }
         }

@@ -271,8 +271,8 @@ function settleStructures(grid: Grid, footprints: readonly Rect[]): void {
       if (grid.blockAt(n.x, n.y) === Block.Stair) continue
       const side = faceToward({ x, y }, n)
       if (side === 0) continue
-      // A ladder edge is walled like any other: the climb goes *over* the wall,
-      // so the masonry and the access coexist.
+      // A ladder face is an open cutout in the wall — do not seal it with masonry.
+      if ((grid.ladderFacesAt(x, y) & side) !== 0) continue
       if (grid.wallAt(x, y, side) === WallKind.None) {
         grid.setWall(x, y, side, WallKind.Solid)
       }
@@ -297,6 +297,7 @@ function settleStructures(grid: Grid, footprints: readonly Rect[]): void {
   })
 
   // A ladder whose footing went away is no longer a ladder.
+  // Active ladders require wall segments to be removed (wall cutout).
   grid.forEach((x, y) => {
     const faces = grid.ladderFacesAt(x, y)
     if (faces === 0) return
@@ -305,16 +306,28 @@ function settleStructures(grid: Grid, footprints: readonly Rect[]): void {
       const [dx, dy] = SIDE_OFFSET[side]!
       const foot = { x: x + dx, y: y + dy }
       const drop = grid.levelAt(x, y) - grid.levelAt(foot.x, foot.y)
-      if (drop !== 1 || !grid.isWalkable(foot.x, foot.y)) grid.clearLadderFaces(x, y)
+      if (drop !== 1 || !grid.isWalkable(foot.x, foot.y)) {
+        grid.clearLadderFaces(x, y)
+      } else {
+        grid.setWall(x, y, side, WallKind.None)
+      }
     }
   })
 
-  // Everything indoors is covered.
+  // Everything indoors is covered...
   for (const footprint of footprints) {
     forEachTile(footprint, (x, y) => {
       grid.setRoof(x, y, grid.levelAt(x, y) + 1)
     })
   }
+
+  // ...except stairs and their upper landings, which require ceiling tiles to be removed (stairwell cutout).
+  grid.forEach((x, y, block) => {
+    if (block !== Block.Stair) return
+    const access = grid.getStairAccessTiles(x, y)
+    grid.setRoof(x, y, 0)
+    grid.setRoof(access.upper.x, access.upper.y, 0)
+  })
 }
 
 /** Can a unit on `tile` step anywhere except back to `from`? */
@@ -707,6 +720,10 @@ function fitStairs(
       if (toLower !== 0) grid.setWall(option.stair.x, option.stair.y, toLower, WallKind.None)
       if (toUpper !== 0) grid.setWall(option.stair.x, option.stair.y, toUpper, WallKind.None)
 
+      // Stairs require ceiling tiles to be removed (stairwell cutout).
+      grid.setRoof(option.stair.x, option.stair.y, 0)
+      grid.setRoof(option.upper.x, option.upper.y, 0)
+
       reserve(option.stair.x, option.stair.y)
       reserve(option.lower.x, option.lower.y)
       reserve(option.upper.x, option.upper.y)
@@ -714,7 +731,6 @@ function fitStairs(
     }
   }
 }
-
 /**
  * The direction whose *upper* access lies at `(dx, dy)` from the ramp.
  *
@@ -780,6 +796,8 @@ function fitLadders(
           if (grid.wallAt(x, y, side) !== WallKind.None) return
 
           grid.setLadderFace(x, y, side)
+          // Ladders require wall segments to be removed (wall cutout).
+          grid.setWall(x, y, side, WallKind.None)
           reserve(x, y)
           reserve(ox, oy)
           placed = true
