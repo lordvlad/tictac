@@ -149,7 +149,7 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   // --- Build each storey, in three rounds -----------------------------------
   for (const building of buildings) {
     for (const storey of building.storeys) {
-      raiseOuterWalls(grid, storey)
+      raiseOuterWalls(grid, storey, rng)
       raisePartitions(grid, storey)
       openDoorsAndWindows(grid, rng, storey, buildings, reserve)
     }
@@ -372,7 +372,7 @@ function planBuilding(footprint: Rect, rng: Rng): Building {
   for (let level = 1; level <= MAX_EXTRA_STOREYS; level++) {
     const below = regions[level - 1]!
     if (below.children === undefined) break
-    if (!rng.chance(level === 1 ? 0.85 : 0.45)) break
+    if (!rng.chance(level === 1 ? 0.95 : 0.75)) break
     regions.push(rng.pick(below.children))
   }
 
@@ -439,16 +439,17 @@ function subdivide(rect: Rect, rng: Rng): BspNode {
 // ---------------------------------------------------------------------------
 
 /** Round 1: the outer wall of a storey, around the union of its rooms. */
-function raiseOuterWalls(grid: Grid, storey: Storey): void {
+function raiseOuterWalls(grid: Grid, storey: Storey, rng: Rng): void {
   for (const room of storey.rooms) {
     for (const [dx, dy] of ORTHOGONAL) {
       const side = faceToward({ x: 0, y: 0 }, { x: dx, y: dy })
       if (side === 0) continue
+      const kind = storey.level > 0 && rng.chance(0.35) ? WallKind.Parapet : WallKind.Solid
       walkBoundary(room, dx, dy, (x, y) => {
         // An edge shared with another room of this storey is interior; it is
         // round 2's business.
         if (storey.rooms.some((other) => other !== room && inRect(other, x + dx, y + dy))) return
-        grid.setWall(x, y, side, WallKind.Solid)
+        grid.setWall(x, y, side, kind)
       })
     }
   }

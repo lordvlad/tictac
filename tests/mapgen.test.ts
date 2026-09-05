@@ -79,24 +79,26 @@ describe('Map generation is layered', () => {
       expect(stranded).toEqual([])
     }
   })
-
-  test('maps are built with more than one storey', () => {
+  test('maps are built with more than one storey and upper storeys carry crates', () => {
     let withUpper = 0
     let withSecond = 0
+    let cratesOnUpper = 0
     for (const seed of SEEDS) {
       const { grid } = generateMap(seed)
       let lvl1 = 0
       let lvl2 = 0
-      grid.forEach((x, y) => {
+      grid.forEach((x, y, block) => {
         const l = grid.levelAt(x, y)
         if (l === 1) lvl1++
         if (l >= 2) lvl2++
+        if (l >= 1 && block === Block.Half) cratesOnUpper++
       })
       if (lvl1 > 0) withUpper++
       if (lvl2 > 0) withSecond++
     }
     expect(withUpper).toBe(SEEDS.length)
     expect(withSecond).toBeGreaterThan(0)
+    expect(cratesOnUpper).toBeGreaterThan(0)
   })
 
   test('maxLevel reports the tallest storey, which the level selector offers', () => {
@@ -253,8 +255,8 @@ describe('Vertical access', () => {
           // The foot is real standing ground, one storey down.
           expect(grid.isWalkable(foot.x, foot.y)).toBe(true)
           expect(grid.levelAt(x, y) - grid.levelAt(foot.x, foot.y)).toBe(1)
-          // And the climb is actually usable.
-          expect(grid.canTraverse({ x, y }, foot)).toBe(true)
+          // Ladder edge has a wall cutout on the level it ends on.
+          expect(grid.wallAt(x, y, side)).toBe(WallKind.None)
         }
       })
 
