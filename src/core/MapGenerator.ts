@@ -321,12 +321,9 @@ function settleStructures(grid: Grid, footprints: readonly Rect[]): void {
     })
   }
 
-  // ...except stairs and their upper landings, which require ceiling tiles to be removed (stairwell cutout).
+  // ...except stairs, which require ceiling tiles over the ramp to be removed (stairwell cutout).
   grid.forEach((x, y, block) => {
-    if (block !== Block.Stair) return
-    const access = grid.getStairAccessTiles(x, y)
-    grid.setRoof(x, y, 0)
-    grid.setRoof(access.upper.x, access.upper.y, 0)
+    if (block === Block.Stair) grid.setRoof(x, y, 0)
   })
 }
 
@@ -720,9 +717,8 @@ function fitStairs(
       if (toLower !== 0) grid.setWall(option.stair.x, option.stair.y, toLower, WallKind.None)
       if (toUpper !== 0) grid.setWall(option.stair.x, option.stair.y, toUpper, WallKind.None)
 
-      // Stairs require ceiling tiles to be removed (stairwell cutout).
+      // Stairs require ceiling tiles over the ramp to be removed (stairwell cutout).
       grid.setRoof(option.stair.x, option.stair.y, 0)
-      grid.setRoof(option.upper.x, option.upper.y, 0)
 
       reserve(option.stair.x, option.stair.y)
       reserve(option.lower.x, option.lower.y)

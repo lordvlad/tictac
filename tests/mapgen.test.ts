@@ -129,18 +129,8 @@ describe('Rooms, doors and windows', () => {
         for (let y = b.y; y < b.y + b.h; y++) {
           for (let x = b.x; x < b.x + b.w; x++) {
             roomTiles++
-            // Stairs and upper stair landings have ceiling cutouts for head clearance.
+            // Stair ramps have ceiling cutouts for head clearance. Upper landings are normal roofed tiles.
             if (grid.blockAt(x, y) === Block.Stair) continue
-            let isStairLanding = false
-            for (const [dx, dy] of ORTHOGONAL) {
-              const n = { x: x + dx, y: y + dy }
-              if (grid.inBounds(n.x, n.y) && grid.blockAt(n.x, n.y) === Block.Stair) {
-                const access = grid.getStairAccessTiles(n.x, n.y)
-                if (access.upper.x === x && access.upper.y === y) isStairLanding = true
-              }
-            }
-            if (isStairLanding) continue
-
             if (grid.roofAt(x, y) <= grid.levelAt(x, y)) unroofed++
           }
         }
