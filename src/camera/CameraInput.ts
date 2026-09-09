@@ -271,13 +271,12 @@ export class CameraInput {
     event.preventDefault()
 
     // Exponential zoom keeps the perceived step size constant at every scale.
-    this.rig.zoom = clamp(
-      this.rig.zoom * Math.exp(event.deltaY * CAM.zoomSpeed),
-      CAM.distMin,
-      CAM.distMax,
-    )
-    // Zooming re-derives tilt, so free-look must yield.
-    this.rig.resetFreeLook()
+    // The rig clamps: the shoulder boom and the tactical orbit have different
+    // ranges, and only the rig knows which one is up.
+    this.rig.zoom = this.rig.zoom * Math.exp(event.deltaY * CAM.zoomSpeed)
+    // Zooming re-derives tilt on the tactical arc, so free-look must yield —
+    // but in shoulder view free-look is the aim, and must survive a scroll.
+    if (!this.rig.shoulderView) this.rig.resetFreeLook()
   }
 
   private readonly onEdgeTrack = (event: PointerEvent): void => {

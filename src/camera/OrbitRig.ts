@@ -1,5 +1,5 @@
 import { Euler, Matrix4, type PerspectiveCamera, Vector2, Vector3 } from 'three'
-import { CAM, EYE_HEIGHT, LEVEL_HEIGHT } from '../config'
+import { CAM, LEVEL_HEIGHT } from '../config'
 import { clamp, smoothstep } from '../core/math'
 import { clientToNdc } from '../core/screen'
 import { CameraInput, type CameraRigTarget } from './CameraInput'
@@ -11,21 +11,33 @@ export interface OrbitRigOptions {
 }
 
 /**
- * Free-orbiting tactical camera.
+ * Tilt as a function of zoom distance. Smoothstep gives a curved arc rather
+ * than a linear ramp, so the camera "swings" up as you pull back.
+ */
+function pitchForDistance(dist: number): number {
+  const eased = smoothstep((dist - CAM.distMin) / (CAM.distMax - CAM.distMin))
+  return CAM.pitchMin + (CAM.pitchMax - CAM.pitchMin) * eased
+}
+
+/**
+ * Free-orbiting tactical camera, and the over-the-shoulder view.
  *
- * The rig is fully described by a focus point on the floor plane, an orbit
- * distance and an azimuth. Tilt is NOT independent: it is a pure function of
- * zoom distance, tracing a curved arc that is flat when zoomed in and steep
- * when zoomed out.
+ * Both views are the same boom: a pivot point, an arm length, an azimuth, a
+ * pitch and a sideways offset. Tactical uses a floor pivot, no side offset and
+ * a pitch tied to zoom distance (the arc: flat when zoomed in, steep when
+ * zoomed out); shoulder view moves the pivot up to the unit's shoulders,
+ * shortens the arm and frees the pitch. Because it is one formula driven by
+ * smoothed state, entering and leaving shoulder view is a dolly, not a cut.
  *
  * This class is camera state and camera math only. Which button or gesture
  * means "orbit" is {@link CameraInput}'s business, and it drives the rig through
  * the {@link CameraRigTarget} commands.
  *
- * Free-look is stored as an additive offset on top of the orbit orientation.
- * Any pan / orbit / zoom drives that offset back to zero, which is what
- * "resets camera angle to the angle along the zoom tilt path" means in
- * practice: the camera eases back onto the arc instead of snapping.
+ * Free-look is stored as an additive offset on top of the boom orientation. In
+ * tactical view it turns the camera in place and any pan / orbit / zoom drives
+ * it back to zero, which is what "resets camera angle to the angle along the
+ * zoom tilt path" means in practice. In shoulder view it also swings the boom,
+ * so dragging walks the camera all the way around the unit.
  *
  * This runs on its own requestAnimationFrame loop. The engine's simulation
  * update() is a 30 Hz setInterval, which is far too coarse for camera motion.
@@ -37,13 +49,18 @@ export class OrbitRig implements CameraRigTarget {
   private readonly input: CameraInput
   private readonly picker: GroundPicker
 
-  // --- orbit state: target (input) and current (smoothed, rendered) ---------
+  // --- boom state: target (input) and current (smoothed, rendered) ---------
   private readonly focusTarget = new Vector3()
   private readonly focusCurrent = new Vector3()
   private distTarget: number = CAM.distStart
   private distCurrent: number = CAM.distStart
   private azimuthTarget: number = CAM.azimuthStart
   private azimuthCurrent: number = CAM.azimuthStart
+  private pitchTarget: number = pitchForDistance(CAM.distStart)
+  private pitchCurrent: number = pitchForDistance(CAM.distStart)
+  /** Sideways offset of the boom: 0 on the tactical orbit, CAM.shoulderSide behind a unit. */
+  private sideTarget = 0
+  private sideCurrent = 0
 
   // --- additive free-look offset & mode ------------------------------------
   private freeYawTarget = 0
@@ -54,12 +71,6 @@ export class OrbitRig implements CameraRigTarget {
 
   // --- over-the-shoulder view mode ------------------------------------------
   private isShoulderView = false
-  /** Unit eye anchor position that camera rotates and tilts around. */
-  private readonly eyeAnchorTarget = new Vector3()
-  private readonly eyeAnchorCurrent = new Vector3()
-  /** Downward tilt for this shot, on top of the free-look offset. */
-  private shoulderPitchTarget = CAM.shoulderPitch
-  private shoulderPitchCurrent = CAM.shoulderPitch
 
   /** Tactical camera state preserved when entering shoulder view, restored on exit. */
   private preShoulderDist: number = CAM.distStart
@@ -156,12 +167,11 @@ export class OrbitRig implements CameraRigTarget {
 
   /**
    * Current downward tilt of the camera below the horizon, in radians.
-   * Combines the zoom-tilt arc with the additive free-look pitch offset;
-   * character view sits at ~0 (horizontal). Used by the wall x-ray fade.
+   * Combines the boom pitch with the additive free-look offset; character view
+   * sits near 0 (horizontal). Used by the wall x-ray fade.
    */
   get tilt(): number {
-    const base = this.isShoulderView ? this.shoulderPitchCurrent : this.pitchForDistance(this.distCurrent)
-    return base - this.freePitchCurrent
+    return this.pitchCurrent - this.freePitchCurrent
   }
 
   /**
@@ -175,19 +185,16 @@ export class OrbitRig implements CameraRigTarget {
     if (!this.isShoulderView) {
       this.preShoulderDist = this.distTarget
       this.preShoulderAzimuth = this.azimuthTarget
+      // A tactical free-look offset is not an aim: fold it into the boom so the
+      // camera keeps pointing where it points, then start the view from zero.
+      this.foldFreeLookIntoBoom()
     }
     this.isShoulderView = true
     this.freeLookToggleActive = true
 
-    this.aimShoulderView(position, yaw, lookAt)
-    // Ease in from wherever the tactical camera happened to be.
-    this.eyeAnchorCurrent.copy(this.eyeAnchorTarget)
-    this.azimuthCurrent = this.azimuthTarget
-    this.shoulderPitchCurrent = this.shoulderPitchTarget
-    this.freeYawTarget = 0
-    this.freeYawCurrent = 0
-    this.freePitchTarget = 0
-    this.freePitchCurrent = 0
+    this.distTarget = CAM.shoulderBack
+    this.sideTarget = CAM.shoulderSide
+    this.aimShoulder(position, yaw, lookAt)
   }
 
   /**
@@ -195,12 +202,24 @@ export class OrbitRig implements CameraRigTarget {
    * Resets free yaw/pitch, azimuth, zoom distance and tilt to arc defaults.
    */
   exitShoulderView(): void {
+    if (!this.isShoulderView) return
     this.isShoulderView = false
     this.freeLookToggleActive = false
+    // Whatever the player orbited round the unit becomes plain azimuth, so the
+    // camera unwinds from where it is instead of spinning back through it.
+    this.foldFreeLookIntoBoom()
     this.resetFreeLook()
-    this.azimuthTarget = this.preShoulderAzimuth
+
     this.distTarget = this.preShoulderDist
-    this.focusTarget.set(this.eyeAnchorCurrent.x, 0, this.eyeAnchorCurrent.z)
+    this.sideTarget = 0
+    this.setAzimuthTarget(this.preShoulderAzimuth)
+    // The shoulder pivot sits at shoulder height above the unit's feet; the
+    // tactical focus belongs on the storey the unit is standing on.
+    this.focusTarget.set(
+      this.focusCurrent.x,
+      this.focusCurrent.y - CAM.shoulderPivotHeight,
+      this.focusCurrent.z,
+    )
     this.clampFocus(this.focusTarget)
   }
 
@@ -213,25 +232,7 @@ export class OrbitRig implements CameraRigTarget {
    */
   updateShoulderView(position: Vector3, yaw: number, lookAt?: Vector3): void {
     if (!this.isShoulderView) return
-    this.aimShoulderView(position, yaw, lookAt)
-  }
-
-  private aimShoulderView(position: Vector3, yaw: number, lookAt?: Vector3): void {
-    this.eyeAnchorTarget.set(position.x, position.y + EYE_HEIGHT, position.z)
-
-    if (!lookAt) {
-      this.azimuthTarget = yaw + Math.PI
-      this.shoulderPitchTarget = CAM.shoulderPitch
-      return
-    }
-
-    // Aim from where the camera sits relative to unit's eyes anchor point
-    const dx = lookAt.x - this.eyeAnchorTarget.x
-    const dy = this.eyeAnchorTarget.y - lookAt.y
-    const dz = lookAt.z - this.eyeAnchorTarget.z
-    const flat = Math.hypot(dx, dz)
-    this.azimuthTarget = Math.atan2(dx, dz) + Math.PI
-    this.shoulderPitchTarget = flat > 0.001 ? Math.atan2(dy, flat) : CAM.shoulderPitch
+    this.aimShoulder(position, yaw, lookAt)
   }
 
   get isShoulderViewActive(): boolean {
@@ -279,7 +280,11 @@ export class OrbitRig implements CameraRigTarget {
   }
 
   set zoom(distance: number) {
-    this.distTarget = clamp(distance, CAM.distMin, CAM.distMax)
+    // In shoulder view the wheel shortens or lengthens the boom instead of
+    // running the tactical zoom range, which the arm could never reach.
+    this.distTarget = this.isShoulderView
+      ? clamp(distance, CAM.shoulderBackMin, CAM.shoulderBackMax)
+      : clamp(distance, CAM.distMin, CAM.distMax)
   }
 
   get azimuth(): number {
@@ -291,18 +296,30 @@ export class OrbitRig implements CameraRigTarget {
   }
 
   freeLookBy(dxPixels: number, dyPixels: number): void {
-    const yawLimit = this.isShoulderView ? Math.PI : CAM.freeYawLimit
-    const pitchLimit = this.isShoulderView ? (82 * Math.PI) / 180 : CAM.freePitchLimit
+    if (this.isShoulderView) {
+      // Yaw is deliberately unclamped: the whole point of the view is being
+      // able to walk the camera the full way round the unit, past its face and
+      // back again, across as many drags as that takes.
+      this.freeYawTarget -= dxPixels * CAM.shoulderLookSpeed
+      // Pitch is clamped on the *resulting* tilt, not on the offset, so the
+      // limits hold no matter what the shot aim did to the base pitch.
+      this.freePitchTarget = clamp(
+        this.freePitchTarget - dyPixels * CAM.shoulderLookSpeed,
+        this.pitchTarget - CAM.shoulderPitchMax,
+        this.pitchTarget - CAM.shoulderPitchMin,
+      )
+      return
+    }
 
     this.freeYawTarget = clamp(
       this.freeYawTarget - dxPixels * CAM.freeLookSpeed,
-      -yawLimit,
-      yawLimit,
+      -CAM.freeYawLimit,
+      CAM.freeYawLimit,
     )
     this.freePitchTarget = clamp(
       this.freePitchTarget - dyPixels * CAM.freeLookSpeed,
-      -pitchLimit,
-      pitchLimit,
+      -CAM.freePitchLimit,
+      CAM.freePitchLimit,
     )
   }
 
@@ -364,17 +381,87 @@ export class OrbitRig implements CameraRigTarget {
   }
 
   // ===========================================================================
-  // Tilt arc & frame loop
+  // Shoulder aiming
   // ===========================================================================
 
   /**
-   * Tilt as a function of zoom distance. Smoothstep gives a curved arc rather
-   * than a linear ramp, so the camera "swings" up as you pull back.
+   * Point the boom for this frame's shoulder shot.
+   *
+   * With no `lookAt` the camera simply sits behind the unit's facing. With one,
+   * the angles are solved from the pivot and then re-solved from where the boom
+   * actually seats the camera. An arm metres long and offset to one side sees
+   * the target several degrees off the pivot's bearing; each pass shaves that
+   * parallax by roughly the side-to-arm ratio, so two land it on the reticle.
    */
-  private pitchForDistance(dist: number): number {
-    const eased = smoothstep((dist - CAM.distMin) / (CAM.distMax - CAM.distMin))
-    return CAM.pitchMin + (CAM.pitchMax - CAM.pitchMin) * eased
+  private aimShoulder(position: Vector3, yaw: number, lookAt?: Vector3): void {
+    this.focusTarget.set(position.x, position.y + CAM.shoulderPivotHeight, position.z)
+    this.clampFocus(this.focusTarget)
+
+    if (!lookAt) {
+      this.setAzimuthTarget(yaw + Math.PI)
+      this.pitchTarget = CAM.shoulderPitch
+      return
+    }
+
+    this.solveAim(lookAt, this.focusTarget)
+    for (let pass = 0; pass < 2; pass++) {
+      this.boomPosition(
+        this.scratchVec,
+        this.focusTarget,
+        this.azimuthTarget,
+        this.pitchTarget,
+        this.distTarget,
+        this.sideTarget,
+      )
+      this.solveAim(lookAt, this.scratchVec)
+    }
   }
+
+  /** Angles that make a camera at `from` look straight at `lookAt`. */
+  private solveAim(lookAt: Vector3, from: Vector3): void {
+    const dx = from.x - lookAt.x
+    const dy = from.y - lookAt.y
+    const dz = from.z - lookAt.z
+    const flat = Math.hypot(dx, dz)
+    if (flat < 0.001) {
+      this.pitchTarget = CAM.shoulderPitch
+      return
+    }
+    this.setAzimuthTarget(Math.atan2(dx, dz))
+    this.pitchTarget = clamp(
+      Math.atan2(dy, flat),
+      CAM.shoulderPitchMin,
+      CAM.shoulderPitchMax,
+    )
+  }
+
+  /**
+   * Set the azimuth the camera eases towards, taking the short way round. A
+   * unit facing that crosses +/-pi would otherwise spin the camera a full turn.
+   */
+  private setAzimuthTarget(radians: number): void {
+    const delta = radians - this.azimuthCurrent
+    this.azimuthTarget = this.azimuthCurrent + Math.atan2(Math.sin(delta), Math.cos(delta))
+  }
+
+  /**
+   * Absorb the free-look offset into the boom angles, leaving the rendered
+   * pose untouched. Used on every mode change so nothing whips round.
+   */
+  private foldFreeLookIntoBoom(): void {
+    this.azimuthCurrent += this.freeYawCurrent
+    this.azimuthTarget += this.freeYawCurrent
+    this.pitchCurrent -= this.freePitchCurrent
+    this.pitchTarget -= this.freePitchCurrent
+    this.freeYawCurrent = 0
+    this.freeYawTarget = 0
+    this.freePitchCurrent = 0
+    this.freePitchTarget = 0
+  }
+
+  // ===========================================================================
+  // Frame loop
+  // ===========================================================================
 
   private clampFocus(v: Vector3): void {
     v.x = clamp(v.x, -this.bounds, this.bounds)
@@ -416,7 +503,6 @@ export class OrbitRig implements CameraRigTarget {
 
   private update(delta: number): void {
     const k = 1 - Math.exp(-CAM.smoothing * delta)
-    const kReset = 1 - Math.exp(-CAM.resetSmoothing * delta)
 
     // Decay screen shake over time.
     if (this.shakeTime < this.shakeDuration) {
@@ -436,20 +522,24 @@ export class OrbitRig implements CameraRigTarget {
     }
 
     if (this.isShoulderView) {
-      this.eyeAnchorCurrent.lerp(this.eyeAnchorTarget, k)
-      this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k
-      this.shoulderPitchCurrent += (this.shoulderPitchTarget - this.shoulderPitchCurrent) * k
+      // Free-look IS the aim here, so it tracks at the normal rate and never
+      // decays: letting go of the drag must not swing the view back.
       this.freeYawCurrent += (this.freeYawTarget - this.freeYawCurrent) * k
       this.freePitchCurrent += (this.freePitchTarget - this.freePitchCurrent) * k
-      this.focusCurrent.set(this.eyeAnchorCurrent.x, 0, this.eyeAnchorCurrent.z)
     } else {
       this.applyEdgePan(delta)
-      this.focusCurrent.lerp(this.focusTarget, k)
-      this.distCurrent += (this.distTarget - this.distCurrent) * k
-      this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k
+      // Tactical tilt rides the zoom arc.
+      this.pitchTarget = pitchForDistance(this.distTarget)
+      const kReset = 1 - Math.exp(-CAM.resetSmoothing * delta)
       this.freeYawCurrent += (this.freeYawTarget - this.freeYawCurrent) * kReset
       this.freePitchCurrent += (this.freePitchTarget - this.freePitchCurrent) * kReset
     }
+
+    this.focusCurrent.lerp(this.focusTarget, k)
+    this.distCurrent += (this.distTarget - this.distCurrent) * k
+    this.azimuthCurrent += (this.azimuthTarget - this.azimuthCurrent) * k
+    this.pitchCurrent += (this.pitchTarget - this.pitchCurrent) * k
+    this.sideCurrent += (this.sideTarget - this.sideCurrent) * k
 
     this.applyTransform()
   }
@@ -458,43 +548,67 @@ export class OrbitRig implements CameraRigTarget {
     this.focusCurrent.copy(this.focusTarget)
     this.distCurrent = this.distTarget
     this.azimuthCurrent = this.azimuthTarget
+    this.pitchCurrent = this.pitchTarget
+    this.sideCurrent = this.sideTarget
     this.freeYawCurrent = this.freeYawTarget
     this.freePitchCurrent = this.freePitchTarget
     this.applyTransform()
   }
 
-  private applyTransform(): void {
-    if (this.isShoulderView) {
-      const pitch = -this.shoulderPitchCurrent + this.freePitchCurrent
-      const yaw = this.azimuthCurrent + this.freeYawCurrent
-      this.euler.set(pitch, yaw, 0, 'YXZ')
-
-      // Camera offset relative to the unit's eyes anchor point
-      this.scratchVec.set(CAM.shoulderSide, CAM.shoulderHeight - EYE_HEIGHT, -CAM.shoulderBack)
-      this.scratchVec.applyEuler(this.euler)
-
-      this.camera.position.copy(this.eyeAnchorCurrent).add(this.scratchVec).add(this.shakeOffset)
-      this.camera.quaternion.setFromEuler(this.euler)
-      this.camera.updateMatrixWorld()
-      return
-    }
-
-    const pitch = this.pitchForDistance(this.distCurrent)
-    const az = this.azimuthCurrent
-    const cosP = Math.cos(pitch)
+  /**
+   * Place a camera on the boom: `dist` behind `pivot` along (`yaw`, `pitch`),
+   * shifted `side` metres along the camera's right. Looking back down the same
+   * angles from there frames the pivot, offset to one side by `side`.
+   */
+  private boomPosition(
+    out: Vector3,
+    pivot: Vector3,
+    yaw: number,
+    pitch: number,
+    dist: number,
+    side: number,
+  ): Vector3 {
     const sinP = Math.sin(pitch)
+    const cosP = Math.cos(pitch)
+    let arm = dist
+    if (sinP < 0) {
+      // Spring arm: looking up from behind would drive the camera through the
+      // floor, so the arm shortens rather than sinking.
+      arm = Math.min(arm, (CAM.shoulderPivotHeight - CAM.shoulderMinHeight) / -sinP)
+    }
+    // Keep the framing proportional as the arm shortens, or the unit swings
+    // off screen exactly when the camera is closest to it.
+    const lateral = side * (arm / dist)
+    const sinY = Math.sin(yaw)
+    const cosY = Math.cos(yaw)
+    return out.set(
+      pivot.x + sinY * cosP * arm + cosY * lateral,
+      pivot.y + sinP * arm,
+      pivot.z + cosY * cosP * arm - sinY * lateral,
+    )
+  }
 
-    // Orbit position on the sphere around the focus point.
-    this.camera.position.set(
-      this.focusCurrent.x + Math.sin(az) * cosP * this.distCurrent,
-      this.focusCurrent.y + sinP * this.distCurrent,
-      this.focusCurrent.z + Math.cos(az) * cosP * this.distCurrent,
+  private applyTransform(): void {
+    const lookYaw = this.azimuthCurrent + this.freeYawCurrent
+    const lookPitch = this.pitchCurrent - this.freePitchCurrent
+    // Tactical free-look turns the camera on the spot; shoulder free-look
+    // swings the boom, orbiting the unit instead of looking away from it.
+    const boomYaw = this.isShoulderView ? lookYaw : this.azimuthCurrent
+    const boomPitch = this.isShoulderView ? lookPitch : this.pitchCurrent
+
+    this.boomPosition(
+      this.camera.position,
+      this.focusCurrent,
+      boomYaw,
+      boomPitch,
+      this.distCurrent,
+      this.sideCurrent,
     )
     this.camera.position.add(this.shakeOffset)
 
     // With YXZ order, yaw = azimuth and pitch = -tilt reproduces lookAt(focus)
     // exactly, which lets the free-look offsets compose additively.
-    this.euler.set(-pitch + this.freePitchCurrent, az + this.freeYawCurrent, 0, 'YXZ')
+    this.euler.set(-lookPitch, lookYaw, 0, 'YXZ')
     this.camera.quaternion.setFromEuler(this.euler)
     this.camera.updateMatrixWorld()
   }

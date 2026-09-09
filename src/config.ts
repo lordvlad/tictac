@@ -65,6 +65,8 @@ export const CAM = {
   rotateSpeed: 0.006,
   /** Radians per pixel for middle-drag free look. */
   freeLookSpeed: 0.004,
+  /** Radians per pixel for the over-the-shoulder look drag. */
+  shoulderLookSpeed: 0.006,
   /** Free-look pitch clamp. */
   freePitchLimit: (60 * Math.PI) / 180,
   /** Free-look yaw clamp. */
@@ -79,14 +81,28 @@ export const CAM = {
   edgePanSpeed: 0.5,
 
   // --- over-the-shoulder view (unit view, and shot aiming) -----------------
-  /** How far behind the unit the camera sits, in metres. */
-  shoulderBack: 3.4,
-  /** Camera height above the unit's feet — above the head, looking over it. */
-  shoulderHeight: 2.35,
-  /** Sideways offset, so the unit sits off-centre and does not mask the target. */
+  /** Boom length: how far behind the unit the camera sits, in metres. */
+  shoulderBack: 3.8,
+  /** Boom length clamps while the wheel adjusts it in shoulder view. */
+  shoulderBackMin: 1.6,
+  shoulderBackMax: 6.0,
+  /**
+   * Height above the unit's feet of the point the boom orbits and looks at —
+   * roughly the shoulders, so the unit's back fills the lower middle of frame.
+   */
+  shoulderPivotHeight: 1.55,
+  /** Sideways offset of the boom, so the unit sits off-centre. */
   shoulderSide: 0.9,
-  /** Downward tilt of the shoulder camera. */
-  shoulderPitch: (12 * Math.PI) / 180,
+  /** Resting downward tilt of the shoulder camera. */
+  shoulderPitch: (10 * Math.PI) / 180,
+  /** Tilt clamps in shoulder view: negative looks up, positive looks down. */
+  shoulderPitchMin: (-45 * Math.PI) / 180,
+  shoulderPitchMax: (75 * Math.PI) / 180,
+  /**
+   * Lowest the shoulder camera may sit above the unit's feet. Looking up
+   * shortens the boom instead of burying the camera in the floor.
+   */
+  shoulderMinHeight: 0.45,
   /** Height above the target's feet the aim camera points at. */
   shoulderAimHeight: 1.2,
 } as const
