@@ -178,10 +178,26 @@ export class ShootPlanner {
   }
 
   /** Damage numbers and target bookkeeping, once combat has resolved a shot. */
-  reportShot(target: Soldier, result: ShotResult): void {
+  reportShot(shooter: Soldier, target: Soldier, result: ShotResult): void {
     this.damageIndicators.spawn(target.position, result.hit, result.damage)
-    if (target.isDead && this.target === target) this.target = null
+    this.settle(shooter, target)
     this.onShotResolved?.()
+  }
+
+  /**
+   * Shoot mode outlives a shot only while another shot is possible.
+   *
+   * A killed target used to leave the mode aimed at a corpse: the aim camera
+   * dropped out, but the panel stayed on shoot until the player cancelled it
+   * by hand. Re-entering re-picks the best remaining target exactly the way
+   * the first entry did, and refuses when the shooter can no longer afford a
+   * shot — which, with nothing left to shoot at, is when the mode is over.
+   */
+  private settle(shooter: Soldier, target: Soldier): void {
+    // Someone else's shot says nothing about the shot being lined up here.
+    if (!this.activeOn || this.target !== target) return
+    if (!target.isDead && shooter.ap >= shotApCost(shooter)) return
+    if (!this.enter(shooter) || this.target === null) this.exit()
   }
 
   /** Paint reachable-by-bullet tiles, plus a bright marker on the current target. */

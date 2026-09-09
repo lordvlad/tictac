@@ -149,8 +149,8 @@ export class InteractionController {
 
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
     this.shoot = new ShootPlanner(battlefield.grid, squads, this.combatSystem, engine)
-    this.combatSystem.onShotResolved = (_shooter, target, result) => {
-      this.shoot.reportShot(target, result)
+    this.combatSystem.onShotResolved = (shooter, target, result) => {
+      this.shoot.reportShot(shooter, target, result)
     }
     this.planner.onMovementStarted = (soldier, path) => {
       this.movementSystem.startMovement(this.world, soldier.entityId, path)

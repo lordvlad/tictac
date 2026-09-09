@@ -264,5 +264,12 @@ export function installCanvasStub(): void {
   }
   globalThis.Path2D = Path2DStub as unknown as typeof Path2D
 
+  // Render loops drive themselves off rAF. Under `bun test` there are no
+  // frames: the loop must never start, and tests step the object by hand.
+  if (typeof globalThis.requestAnimationFrame === 'undefined') {
+    globalThis.requestAnimationFrame = (() => 0) as unknown as typeof requestAnimationFrame
+    globalThis.cancelAnimationFrame = (() => {}) as unknown as typeof cancelAnimationFrame
+  }
+
   globalThis.window = globalThis as unknown as Window & typeof globalThis
 }

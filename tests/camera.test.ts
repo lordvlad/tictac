@@ -5,12 +5,6 @@ import { OrbitRig } from '../src/camera/OrbitRig'
 import { CAM } from '../src/config'
 import { installCanvasStub } from './support/dom'
 
-if (typeof globalThis.requestAnimationFrame === 'undefined') {
-  // The rig drives itself off rAF; the tests step it by hand instead.
-  globalThis.requestAnimationFrame = (() => 0) as unknown as typeof requestAnimationFrame
-  globalThis.cancelAnimationFrame = (() => {}) as unknown as typeof cancelAnimationFrame
-}
-
 installCanvasStub()
 
 if (typeof globalThis.PointerEvent === 'undefined') {
