@@ -1,10 +1,31 @@
-Icons from https://game-icons.net — Creative Commons 3.0 BY.
+Icons from game-icons.net, licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).
+Collection pinned at vendor/game-icons (82d948812bfe).
 
-sbed: rifle (weapon-rifle).
-delapouite: sawed-off-shotgun (weapon-shotgun), heavy-bullets (ammo-ap),
-  shotgun-rounds (ammo-hollow), first-aid-kit (item-firstAid),
-  backpack (ui-pool), check-mark (ui-deploy).
-skoll: winchester-rifle (weapon-sniper).
-lorc: minigun (weapon-gatling), bullets (ammo-standard), grenade (grenade-frag),
-  flash-grenade (grenade-flash), syringe (item-stim).
-darkzaitzev: smoke-bomb (grenade-smoke).
+weapon-rifle: rifle by sbed
+weapon-shotgun: shotgun by sbed
+weapon-sniper: winchester-rifle by skoll
+weapon-gatling: minigun by lorc
+ammo-standard: bullets by lorc
+ammo-ap: heavy-bullets by delapouite
+ammo-hollow: bullet-impacts by delapouite
+grenade-frag: grenade by sbed
+grenade-flash: flash-grenade by lorc
+grenade-smoke: smoke-bomb by darkzaitzev
+item-stim: syringe by sbed
+item-firstAid: first-aid-kit by delapouite
+ui-pool: cargo-crate by delapouite
+ui-deploy: check-mark by delapouite
+ui-shoot: targeting by lorc
+ui-cover: shield by sbed
+ui-reload: reload-gun-barrel by delapouite
+ui-unit-turn: hourglass by lorc
+ui-end-turn: player-next by delapouite
+ui-freelook: video-camera by delapouite
+ui-unit-view: eye-target by delapouite
+ui-waypoints: path-distance by delapouite
+ui-map: treasure-map by lorc
+ui-debug: gears by lorc
+ui-lethal: skull-crossed-bones by lorc
+ui-hazard: hazard-sign by lorc
+ui-cancel: cancel by sbed
+ui-continue: next-button by delapouite

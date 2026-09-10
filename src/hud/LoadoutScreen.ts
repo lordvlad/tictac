@@ -17,6 +17,7 @@ import {
   removeItem,
   type SquadLoadout,
 } from '../game/Loadout'
+import { icon } from './icons'
 import { LoadoutScene } from '../render/LoadoutScene'
 import type { OffscreenPortraits } from '../render/Portraits'
 
@@ -129,17 +130,6 @@ export class LoadoutScreen {
     return `data-action='${JSON.stringify(action)}'`
   }
 
-  /**
-   * A game-icons glyph, masked so it takes the surrounding text colour.
-   *
-   * The URL is absolute on purpose: a relative one inside a custom property is
-   * resolved against the stylesheet that substitutes it — game.css, which the
-   * dev server serves from a different directory — not against this document.
-   */
-  private static icon(file: string, extra = ''): string {
-    const href = new URL(`./icons/${file}.svg`, document.baseURI).href
-    return `<span class="gi ${extra}" style="--gi: url('${href}');"></span>`
-  }
 
   // ---------------------------------------------------------------------------
   // Panels
@@ -158,7 +148,7 @@ export class LoadoutScreen {
       ${
         this.waitingLabel === null
           ? `<button class="hud-btn hud-btn-danger loadout-deploy interactive" ${LoadoutScreen.actionAttr({ kind: 'deploy' })}>
-        ${LoadoutScreen.icon('ui-deploy')} Deploy
+        ${icon('ui-deploy')} Deploy
       </button>`
           : `<div class="loadout-waiting">${this.waitingLabel}</div>`
       }
@@ -169,14 +159,14 @@ export class LoadoutScreen {
     const left = remaining(this.loadout)
     const row = (file: string, name: string, count: number): string => `
       <div class="loadout-pool-row ${count === 0 ? 'depleted' : ''}">
-        ${LoadoutScreen.icon(file)}
+        ${icon(file)}
         <span class="loadout-pool-name">${name}</span>
         <span class="loadout-pool-count">${count}</span>
       </div>`
 
     return `
       <div class="loadout-pool">
-        <div class="loadout-pool-head">${LoadoutScreen.icon('ui-pool')} Squad crate</div>
+        <div class="loadout-pool-head">${icon('ui-pool')} Squad crate</div>
         ${Object.values(WeaponId)
           .map((id) => row(`weapon-${id}`, WEAPONS[id].name, left.weapons[id]))
           .join('')}
@@ -198,12 +188,12 @@ export class LoadoutScreen {
 
     const pick = (file: string, label: string, active: boolean, enabled: boolean, action: LoadoutAction): string => `
       <button class="action-btn interactive ${active ? 'active' : ''}" ${enabled ? '' : 'disabled'} ${LoadoutScreen.actionAttr(action)}>
-        ${LoadoutScreen.icon(file)}<span class="loadout-pick-name">${label}</span>
+        ${icon(file)}<span class="loadout-pick-name">${label}</span>
       </button>`
 
     const stepper = (file: string, label: string, count: number, canAdd: boolean, minus: LoadoutAction, plus: LoadoutAction): string => `
       <div class="loadout-stepper">
-        ${LoadoutScreen.icon(file)}
+        ${icon(file)}
         <span class="loadout-pick-name">${label}</span>
         <button class="loadout-step interactive" ${count > 0 ? '' : 'disabled'} ${LoadoutScreen.actionAttr(minus)}>−</button>
         <span class="loadout-count">${count}</span>
@@ -291,10 +281,10 @@ export class LoadoutScreen {
           <img class="squad-portrait" src="${this.portraits.getPortrait(this.faction, index)}" alt="${name}" />
           <div class="squad-name">${name}</div>
           <div class="loadout-card-kit">
-            ${LoadoutScreen.icon(`weapon-${unit.weaponId}`, 'big')}
-            ${LoadoutScreen.icon(`ammo-${unit.ammoId}`, 'big')}
+            ${icon(`weapon-${unit.weaponId}`, 'big')}
+            ${icon(`ammo-${unit.ammoId}`, 'big')}
             ${carried
-              .map((entry) => `<span class="loadout-carried">${LoadoutScreen.icon(entry.file)}${entry.count}</span>`)
+              .map((entry) => `<span class="loadout-carried">${icon(entry.file)}${entry.count}</span>`)
               .join('')}
           </div>
         </div>`)

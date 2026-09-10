@@ -6,6 +6,7 @@ import type {
   HudShotPanel,
   HudThrowPanel,
 } from './HudModel'
+import { icon } from './icons'
 
 export interface ContextMenuItem {
   label: string
@@ -140,30 +141,34 @@ export class Hud {
 
   private renderTopRight(model: HudModel): void {
     const isMyTurn = model.isMyTurn || model.networkMode === 'local'
-    const buttons: { label: string; title: string; classes: string; disabled: boolean; intent: HudIntent }[] = [
+    const buttons: { label: string; icon: string; title: string; classes: string; disabled: boolean; intent: HudIntent }[] = [
       {
-        label: '🎥 Freelook',
+        label: 'Freelook',
+        icon: 'ui-freelook',
         title: 'Toggle Orbit Freelook Mode',
         classes: model.freelookActive ? 'active' : '',
         disabled: false,
         intent: { type: 'toggleFreelook' },
       },
       {
-        label: '👁 Unit View',
+        label: 'Unit View',
+        icon: 'ui-unit-view',
         title: "View from Selected Unit's Eyes",
         classes: model.unitViewActive ? 'active' : '',
         disabled: !model.unitViewEnabled,
         intent: { type: 'toggleUnitView' },
       },
       {
-        label: '⛳ Waypoints',
+        label: 'Waypoints',
+        icon: 'ui-waypoints',
         title: 'Plan a multi-leg route, one tap per leg',
         classes: model.waypointActive ? 'active' : '',
         disabled: false,
         intent: { type: 'toggleWaypoints' },
       },
       {
-        label: 'End Turn ⏭',
+        label: 'End Turn',
+        icon: 'ui-end-turn',
         title: isMyTurn ? 'Hand over to the other faction' : "Opponent's Turn",
         classes: isMyTurn ? 'hud-btn-danger' : '',
         disabled: !isMyTurn,
@@ -182,7 +187,7 @@ export class Hud {
           .map(
             (b) => `
           <button class="hud-btn interactive ${b.classes}" title="${b.title}" ${b.disabled ? 'disabled' : ''} ${Hud.intentAttr(b.intent)}>
-            ${b.label}
+            ${icon(b.icon)} ${b.label}
           </button>`,
           )
           .join('')}
@@ -214,7 +219,7 @@ export class Hud {
         <button class="hud-btn interactive ${model.debugMapOpen ? 'active' : ''}"
                 title="Toggle 2D Debug Minimap"
                 ${Hud.intentAttr({ type: 'toggleDebugMap' })}>
-          MAP
+          ${icon('ui-map')} MAP
         </button>
       </div>
     `
@@ -285,7 +290,7 @@ export class Hud {
       this.actionPanelEl.innerHTML = `
         <div class="action-header" style="color: #cbd5e1;">Opponent's Turn</div>
         <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 8px; padding: 24px 16px; text-align: center; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);">
-          <div style="font-size: 28px; margin-bottom: 8px; animation: pulse 2s infinite;">⏳</div>
+          <div class="hud-waiting-glyph">${icon('ui-unit-turn', 'huge')}</div>
           <div style="font-size: 14px; font-weight: 600; color: #38bdf8; margin-bottom: 6px; letter-spacing: 0.5px;">OPPONENT'S TURN</div>
           <div style="font-size: 12px; color: #94a3b8; line-height: 1.4;">Waiting for opponent to complete their actions...</div>
         </div>
@@ -325,7 +330,7 @@ export class Hud {
       <div class="shot-target">${shot.weaponName} (${shot.currentClip}/${shot.maxClip} ammo) · ${shot.ammoName} — target ${shot.targetHp} HP · ${shot.targetArmor} AR</div>
       ${shot.cards.map((card) => this.shotOptionCard(card)).join('')}
       <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelShoot' })}>
-        <span>Cancel</span>
+        <span class="action-label">${icon('ui-cancel')} Cancel</span>
         <span class="action-tag">Esc</span>
       </button>
     `
@@ -376,7 +381,7 @@ export class Hud {
                 .map(
                   (c) => `
               <div class="shot-row ${c.friendly ? 'penalty' : ''}">
-                <span>${c.friendly ? '⚠ ' : ''}${c.name}${c.lethal ? ' ☠' : ''}</span>
+                <span>${c.friendly ? icon('ui-hazard') : ''}${c.name}${c.lethal ? icon('ui-lethal') : ''}</span>
                 <span>${c.damage > 0 ? `-${c.damage} HP` : ''}${c.armorShred > 0 ? ` -${c.armorShred} AR` : ''}${c.damage === 0 && c.armorShred === 0 ? 'effect only' : ''}</span>
               </div>`,
                 )
@@ -386,11 +391,11 @@ export class Hud {
       </div>
       <button class="action-btn action-fire interactive" ${blocked ? 'disabled' : ''}
               ${Hud.intentAttr({ type: 'confirmThrow' })}>
-        <span>${shot.inRange ? 'THROW' : 'Too far'}</span>
+        <span class="action-label">${icon(`grenade-${shot.kind}`)} ${shot.inRange ? 'THROW' : 'Too far'}</span>
         <span class="action-tag">${shot.apCost} AP</span>
       </button>
       <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelGrenade' })}>
-        <span>Cancel</span>
+        <span class="action-label">${icon('ui-cancel')} Cancel</span>
         <span class="action-tag">Esc</span>
       </button>
     `
@@ -400,7 +405,7 @@ export class Hud {
     return `
       <button class="action-btn interactive ${action.active ? 'active' : ''}"
               ${action.disabled ? 'disabled' : ''} ${Hud.intentAttr(action.intent)}>
-        <span>${action.label}</span>
+        <span class="action-label">${icon(action.icon)} ${action.label}</span>
         <span class="action-tag">${action.tag}</span>
       </button>
     `
@@ -411,7 +416,7 @@ export class Hud {
       <div class="turn-title ${model.factionIsBlue ? 'red' : 'blue'}">${model.nextFactionName} TEAM'S TURN</div>
       <div class="turn-subtitle">Pass control to the active faction</div>
       <button class="turn-continue-btn interactive" ${Hud.intentAttr({ type: 'confirmTurnSwitch' })}>
-        CONTINUE ➔
+        CONTINUE ${icon('ui-continue')}
       </button>
     `
   }

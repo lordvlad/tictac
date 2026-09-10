@@ -1475,6 +1475,26 @@ canvas {
   height: 22px;
 }
 
+.gi.huge {
+  width: 34px;
+  height: 34px;
+}
+
+/* Icon and text as one unit, so the AP tag stays pinned to the far edge. */
+.action-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-waiting-glyph {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+  color: #38bdf8;
+  animation: pulse 2s infinite;
+}
+
 .loadout-title {
   position: absolute;
   top: 18px;

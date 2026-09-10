@@ -38,6 +38,8 @@ export type HudIntent =
 export interface HudAction {
   id: string
   label: string
+  /** Icon name under public/icons, without the extension. */
+  icon: string
   tag: string
   active: boolean
   disabled: boolean
@@ -106,6 +108,8 @@ export interface HudShotPanel {
 /** The throw lined up and awaiting confirmation. */
 export interface HudThrowPanel {
   name: string
+  /** Which grenade, so the panel can show its icon. */
+  kind: GrenadeId
   apCost: number
   radius: number
   remaining: number
@@ -209,7 +213,8 @@ export function buildHudModel(sources: HudModelSources): HudModel {
   if (selected && !selected.isDead) {
     actions.push({
       id: 'shoot',
-      label: shootActive ? 'Cancel Shoot ✕' : 'Shoot',
+      label: shootActive ? 'Cancel Shoot' : 'Shoot',
+      icon: shootActive ? 'ui-cancel' : 'ui-shoot',
       tag: `${shootApCost} AP`,
       active: shootActive,
       disabled: selected.ap < shootApCost,
@@ -218,6 +223,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     actions.push({
       id: 'cover',
       label: selected.isCrouching ? 'Stand Up' : 'Take Cover',
+      icon: 'ui-cover',
       tag: selected.isCrouching ? 'Free' : `${RULES.coverApCost} AP`,
       active: selected.isCrouching,
       disabled: !selected.isCrouching && selected.ap < RULES.coverApCost,
@@ -229,6 +235,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       actions.push({
         id: `grenade-${kind}`,
         label: spec.name,
+        icon: `grenade-${kind}`,
         tag: count > 0 ? `${spec.apCost} AP · x${count}` : 'none left',
         active: sources.grenade.armed === kind,
         disabled: count <= 0 || selected.ap < spec.apCost,
@@ -241,6 +248,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       actions.push({
         id: `item-${id}`,
         label: spec.name,
+        icon: `item-${id}`,
         tag: count > 0 ? `${spec.apCost} AP · x${count}` : 'none left',
         active: false,
         disabled: count <= 0 || selected.ap < spec.apCost,
@@ -250,6 +258,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     actions.push({
       id: 'reload',
       label: 'Reload',
+      icon: 'ui-reload',
       tag: `${RULES.reloadApCost} AP · ${selected.weapon.currentClip}/${selected.weapon.maxClip}`,
       active: false,
       disabled: selected.weapon.currentClip === selected.weapon.maxClip || selected.ap < RULES.reloadApCost,
@@ -258,6 +267,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     actions.push({
       id: 'endUnitTurn',
       label: 'End Unit Turn',
+      icon: 'ui-unit-turn',
       tag: '0 AP',
       active: false,
       disabled: false,
@@ -266,6 +276,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     actions.push({
       id: 'debug',
       label: 'Debug…',
+      icon: 'ui-debug',
       tag: 'Dev',
       active: false,
       disabled: false,
@@ -377,6 +388,7 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
 function throwPanelOf(pending: PendingThrow): HudThrowPanel {
   return {
     name: pending.name,
+    kind: pending.kind,
     apCost: pending.apCost,
     radius: pending.radius,
     remaining: pending.remaining,

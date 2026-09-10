@@ -1,0 +1,3 @@
+[submodule "vendor/game-icons"]
+	path = vendor/game-icons
+	url = https://github.com/game-icons/icons.git
