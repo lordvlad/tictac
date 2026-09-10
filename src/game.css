@@ -717,32 +717,41 @@ canvas {
   }
 
   .hud-squad-bar {
-    gap: 6px;
+    gap: 4px;
   }
 
+  /* Roughly half size. 44px is the floor: narrower and the bars' `100/100`
+     readout no longer fits, and it is also the smallest comfortable tap. */
   .squad-card {
-    width: 78px;
-    padding: 6px;
-    gap: 5px;
-    border-radius: 6px;
-  }
-
-  .squad-portrait {
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    padding: 3px;
+    gap: 3px;
     border-radius: 4px;
   }
 
+  .squad-portrait {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+  }
+
   .squad-name {
-    font-size: 9px;
+    font-size: 8px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .squad-bars {
+    gap: 2px;
   }
 
   .bar-container {
-    height: 4px;
+    height: 3px;
   }
 
   .bar-label {
-    font-size: 8px;
+    font-size: 7px;
   }
 
   .hud-action-panel {
@@ -1585,4 +1594,32 @@ canvas {
   font-size: 13px;
   padding: 10px 18px;
   color: var(--hud-dim);
+}
+
+/* The staging screen's cards shrink with the combat ones; what is left is the
+   kit strip, which has no counterpart there. */
+@media (max-width: 820px) {
+  .loadout-cards {
+    gap: 6px;
+  }
+
+  .loadout-card-kit {
+    gap: 3px;
+    min-height: 11px;
+  }
+
+  .loadout-card-kit .gi.big {
+    width: 11px;
+    height: 11px;
+  }
+
+  .loadout-card-kit .gi {
+    width: 8px;
+    height: 8px;
+  }
+
+  .loadout-carried {
+    font-size: 8px;
+    gap: 1px;
+  }
 }
