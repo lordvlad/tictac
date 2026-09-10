@@ -1126,21 +1126,28 @@ canvas {
 }
 
 /* ---------------------------------------------------------------------------
-   Fullscreen prompt
+   Bottom-left corner: fullscreen prompt, frame counter
 
-   Above the start menu (z 10000) and the loadout screen (z 200): the first tap
-   of a session lands on one of those, and a fullscreen request is only granted
-   inside a gesture.
+   One column, so the two cannot overlap whatever either of them measures.
+   Above the start menu (z 10000) and the loadout screen (z 200): the session's
+   first tap lands on one of those, and fullscreen is only granted in a gesture.
    --------------------------------------------------------------------------- */
-.fs-prompt {
+.hud-corner-bl {
   position: fixed;
   left: calc(12px + env(safe-area-inset-left));
   bottom: calc(12px + env(safe-area-inset-bottom));
   z-index: 10001;
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-family: inherit;
+}
+
+.fs-prompt {
+  display: flex;
   align-items: stretch;
   gap: 1px;
-  font-family: inherit;
 }
 
 .fs-prompt[hidden] {
@@ -1186,6 +1193,30 @@ canvas {
 .fs-prompt-cta:active,
 .fs-prompt-close:active {
   border-color: var(--hud-accent);
+}
+
+/* Reads as instrumentation, not chrome: dim until the number is worth noticing. */
+.fps-counter {
+  padding: 4px 8px;
+  border: 1px solid var(--hud-border);
+  border-radius: 5px;
+  background: var(--hud-bg);
+  backdrop-filter: blur(8px);
+  color: var(--hud-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.fps-counter[data-rate='fair'] {
+  color: var(--hud-text);
+}
+
+.fps-counter[data-rate='rough'] {
+  color: var(--hud-danger);
+  border-color: var(--hud-danger);
 }
 
 /* ---------------------------------------------------------------------------

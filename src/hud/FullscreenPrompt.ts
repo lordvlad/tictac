@@ -1,3 +1,5 @@
+import { bottomLeftStack } from './CornerStack'
+
 /**
  * The same condition the compact HUD uses: whichever viewport axis is smaller
  * decides, so a phone counts whichever way it is held.
@@ -37,7 +39,7 @@ export class FullscreenPrompt {
       <button class="fs-prompt-close interactive" type="button" data-fs="dismiss" aria-label="Dismiss">×</button>
     `
     this.root.addEventListener('click', this.onClick)
-    document.body.appendChild(this.root)
+    bottomLeftStack().appendChild(this.root)
 
     this.media.addEventListener('change', this.sync)
     document.addEventListener('fullscreenchange', this.sync)

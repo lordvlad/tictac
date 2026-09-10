@@ -14,6 +14,7 @@ import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
 import { LoadoutScreen } from './hud/LoadoutScreen'
 import { FullscreenPrompt } from './hud/FullscreenPrompt'
+import { FpsCounter } from './hud/FpsCounter'
 import type { SquadLoadout } from './game/Loadout'
 import './game.css'
 import { NetworkManager } from './game/NetworkManager'
@@ -41,8 +42,10 @@ game.on('documentReady', () => {
 
 game.resources.on('loaded', () => {
   document.getElementById('bootLabel')?.classList.add('ended')
-  // Outlives every screen: it hides itself in fullscreen and comes back on exit.
+  // Both outlive every screen: the prompt hides itself in fullscreen and comes
+  // back on exit, and the counter measures frames wherever the game is drawing.
   new FullscreenPrompt()
+  new FpsCounter()
   showMenu()
 })
 
