@@ -15,8 +15,10 @@ export class Squads {
 
   /**
    * `loadout` is what the player put together on the pre-combat screen, one
-   * entry per squad index. It only ever kits out Blue — the player equips
-   * their own team — and Red keeps the stock spread.
+   * entry per squad index, and `loadoutFaction` names the squad it belongs to —
+   * each peer equips the team it commands. The other squad keeps the stock
+   * spread; nothing ever resolves damage from it, because a peer's attacks
+   * arrive with their numbers already resolved.
    */
   constructor(
     world: World,
@@ -24,6 +26,7 @@ export class Squads {
     spawns: Record<Faction, Tile[]>,
     engine: EngineContext,
     loadout?: SquadLoadout,
+    loadoutFaction: Faction = Faction.Blue,
   ) {
     const blueNames = FACTION_INFO[Faction.Blue].squadNames
     const redNames = FACTION_INFO[Faction.Red].squadNames
@@ -31,17 +34,19 @@ export class Squads {
     const weapons = [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun] as const
 
     for (let i = 0; i < SQUAD_SIZE; i++) {
+      const unit = loadout?.[i]
+
       const tileB = spawns[Faction.Blue][i] ?? { x: 2 + i * 2, y: 2 }
       const solB = new Soldier(world, Faction.Blue, i, blueNames[i]!, tileB, grid, engine)
-      const unit = loadout?.[i]
-      if (unit) applyUnitLoadout(solB, unit)
+      if (unit && loadoutFaction === Faction.Blue) applyUnitLoadout(solB, unit)
       else solB.equip(weapons[i]!, AmmoId.Standard)
       this.soldiers.push(solB)
       this.byFaction[Faction.Blue].push(solB)
 
       const tileR = spawns[Faction.Red][i] ?? { x: 2 + i * 2, y: grid.size - 3 }
       const solR = new Soldier(world, Faction.Red, i, redNames[i]!, tileR, grid, engine)
-      solR.equip(weapons[i]!, AmmoId.Standard)
+      if (unit && loadoutFaction === Faction.Red) applyUnitLoadout(solR, unit)
+      else solR.equip(weapons[i]!, AmmoId.Standard)
       this.soldiers.push(solR)
       this.byFaction[Faction.Red].push(solR)
       // Register into MavonEngine BaseWorld entity map

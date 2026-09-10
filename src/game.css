@@ -1573,3 +1573,16 @@ canvas {
   font-size: 13px;
   padding: 10px 18px;
 }
+
+/* Stands where the Deploy button did, once the kit is locked in. */
+.loadout-waiting {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 10px 18px;
+  color: var(--hud-dim);
+}

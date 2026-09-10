@@ -21,10 +21,12 @@ export interface ShotResult {
   killed: boolean
   hitChance: number
   apSpent: number
+  /** Per-victim breakdown, so a peer can replay this shot without recomputing. */
+  hits: ResolvedHit[]
 }
 
-/** One unit caught by an area effect. */
-export interface BlastHit {
+/** One unit's share of an attack, already resolved: a bullet hit or a blast hit. */
+export interface ResolvedHit {
   soldier: Soldier
   damage: number
   armorShred: number
@@ -35,7 +37,7 @@ export interface BlastHit {
 export interface GrenadeResult {
   thrown: boolean
   apSpent: number
-  hits: BlastHit[]
+  hits: ResolvedHit[]
 }
 
 /** Hit chance plus every term that produced it, for the HUD to explain. */
@@ -96,11 +98,10 @@ export function executeShot(
   soldiers: readonly Soldier[],
   mode: ShotMode = ShotMode.Snap,
   overrideRolls?: boolean[],
-  force = false,
 ): ShotResult {
   const eff = effectiveWeapon(shooter, mode)
-  if (!force && !canShoot(grid, shooter, target, mode)) {
-    return { hit: false, damage: 0, armorShred: 0, killed: false, hitChance: 0, apSpent: 0 }
+  if (!canShoot(grid, shooter, target, mode)) {
+    return { hit: false, damage: 0, armorShred: 0, killed: false, hitChance: 0, apSpent: 0, hits: [] }
   }
 
   shooter.ap = Math.max(0, shooter.ap - eff.apCost)
@@ -115,6 +116,7 @@ export function executeShot(
   if (Math.hypot(dx, dz) > 0.01) shooter.targetYaw = Math.atan2(dx, dz)
 
   const bullets = eff.weapon.bulletConsumption(mode)
+  const hits: ResolvedHit[] = []
   let totalDamage = 0
   let totalArmorShred = 0
   let anyHit = false
@@ -130,6 +132,7 @@ export function executeShot(
 
     if (hit) {
       const primary = applyWeaponDamage(eff, target)
+      hits.push(primary)
       totalDamage += primary.damage
       totalArmorShred += primary.armorShred
       if (target.isDead) killed = true
@@ -140,6 +143,7 @@ export function executeShot(
           const distance = grid.distance(target.tile, other.tile)
           if (distance > eff.areaRadius) continue
           const area = applyWeaponDamage(eff, other, 1 - distance / (eff.areaRadius + 1))
+          hits.push(area)
           totalDamage += area.damage
           totalArmorShred += area.armorShred
           if (other.isDead) killed = true
@@ -155,20 +159,40 @@ export function executeShot(
     killed,
     hitChance: chance,
     apSpent: eff.apCost,
+    hits,
   }
 }
 
-function applyWeaponDamage(
-  eff: EffectiveWeapon,
+/**
+ * Apply an already-resolved hit. Takes numbers, never recomputes them.
+ *
+ * The one copy of the clamp-and-animate rule, shared by the local paths and by
+ * a peer's replay — where the numbers arrive off the wire and the weapon that
+ * produced them does not exist on this side.
+ */
+export function applyHitEffects(
   target: Soldier,
-  falloff = 1,
-): { damage: number; armorShred: number } {
-  const result = resolveDamage(eff, target, falloff)
-  target.armor = Math.max(0, target.armor - result.armorShred)
-  target.hp = Math.max(0, target.hp - result.damage)
+  damage: number,
+  armorShred: number,
+  status: StatusKind | null,
+): void {
+  target.armor = Math.max(0, target.armor - armorShred)
+  if (damage > 0) target.hp = Math.max(0, target.hp - damage)
+  if (status) applyStatus(target, status)
   if (target.isDead) target.playDeath()
-  else target.playHit()
-  return { damage: result.damage, armorShred: result.armorShred }
+  else if (damage > 0) target.playHit()
+}
+
+function applyWeaponDamage(eff: EffectiveWeapon, target: Soldier, falloff = 1): ResolvedHit {
+  const result = resolveDamage(eff, target, falloff)
+  applyHitEffects(target, result.damage, result.armorShred, null)
+  return {
+    soldier: target,
+    damage: result.damage,
+    armorShred: result.armorShred,
+    killed: target.isDead,
+    status: null,
+  }
 }
 
 /**
@@ -184,33 +208,24 @@ export function throwGrenade(
   at: Tile,
   kind: GrenadeId,
   soldiers: readonly Soldier[],
-  force = false,
 ): GrenadeResult {
   const spec = thrower.grenadeSpecs[kind]
-  if (!force) {
-    if (thrower.isDead || thrower.ap < spec.apCost) return { thrown: false, apSpent: 0, hits: [] }
-    if ((thrower.grenades[kind] ?? 0) <= 0) return { thrown: false, apSpent: 0, hits: [] }
-    if (grid.distance(thrower.tile, at) > spec.throwRange) return { thrown: false, apSpent: 0, hits: [] }
-  }
+  if (thrower.isDead || thrower.ap < spec.apCost) return { thrown: false, apSpent: 0, hits: [] }
+  if ((thrower.grenades[kind] ?? 0) <= 0) return { thrown: false, apSpent: 0, hits: [] }
+  if (grid.distance(thrower.tile, at) > spec.throwRange) return { thrown: false, apSpent: 0, hits: [] }
 
   thrower.ap = Math.max(0, thrower.ap - spec.apCost)
   thrower.grenades[kind] -= 1
   thrower.playShoot()
 
-  const hits: BlastHit[] = []
+  const hits: ResolvedHit[] = []
   for (const soldier of soldiers) {
     if (soldier.isDead) continue
     const distance = grid.distance(at, soldier.tile)
     if (distance > spec.areaRadius) continue
 
     const result = grenadeDamageAt(spec, distance, soldier)
-    soldier.armor = Math.max(0, soldier.armor - result.armorShred)
-    if (result.damage > 0) {
-      soldier.hp = Math.max(0, soldier.hp - result.damage)
-      if (soldier.isDead) soldier.playDeath()
-      else soldier.playHit()
-    }
-    if (spec.applies) applyStatus(soldier, spec.applies)
+    applyHitEffects(soldier, result.damage, result.armorShred, spec.applies)
 
     hits.push({
       soldier,

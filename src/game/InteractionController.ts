@@ -1,4 +1,4 @@
-import { NetworkManager, type NetworkMessage } from './NetworkManager'
+import { NetworkManager, type NetworkMessage, type WireHit } from './NetworkManager'
 import { Raycaster, Vector2, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
 import { CAM, Faction, LEVEL_HEIGHT } from '../config'
@@ -9,7 +9,7 @@ import type { OrbitRig } from '../camera/OrbitRig'
 import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
 import { buildHudModel, type HudIntent } from '../hud/HudModel'
-import { calculateHitChance, tickStatuses } from './Combat'
+import { applyHitEffects, calculateHitChance, type ResolvedHit, tickStatuses } from './Combat'
 import type { OffscreenPortraits } from '../render/Portraits'
 import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
@@ -286,6 +286,7 @@ export class InteractionController {
               targetIndex: shotData.target.squadIndex,
               mode: intent.mode,
               rolls: shotData.rolls,
+              hits: InteractionController.toWireHits(shotData.result.hits),
             })
           }
         }
@@ -407,21 +408,26 @@ export class InteractionController {
         const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
         const target = this.squads.byFaction[msg.targetFaction][msg.targetIndex]
         if (!shooter || !target) break
-        this.combatSystem.fireShot(shooter, target, msg.mode, msg.rolls, true)
+        this.combatSystem.replayShot(shooter, target, msg.rolls, this.fromWireHits(msg.hits))
         this.afterCombat()
         break
       }
       case 'throwGrenade': {
-        const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
-        if (!shooter) break
-        this.grenade.executeThrowAt(shooter, msg.kind, msg.targetTile, true)
+        const thrower = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
+        if (!thrower) break
+        const hits = this.fromWireHits(msg.hits)
+        // Applied before the FX so a death animation is not overwritten by a
+        // flinch; the indicators read their numbers from the message either way.
+        for (const hit of hits) {
+          applyHitEffects(hit.soldier, hit.damage, hit.armorShred, hit.status)
+        }
+        this.grenade.replayThrow(msg.kind, msg.targetTile, msg.areaRadius, hits)
         this.afterCombat()
         break
       }
       case 'reload': {
-        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (!soldier) break
-        this.combatSystem.reload(soldier)
+        // Nothing to recompute: `maxClip` is the peer's weapon, not this side's
+        // stock copy of it, and the clip it filled arrives by replication.
         this.refreshHud()
         break
       }
@@ -454,15 +460,45 @@ export class InteractionController {
         break
       }
       case 'useItem': {
-        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (!soldier) break
-        this.itemSystem.use(soldier, msg.itemId, true)
+        // The peer already spent the item and applied its effect; HP, AP,
+        // armour, statuses and the item counts all replicate from its side.
         this.refreshHud()
         break
       }
       case 'init':
         break
     }
+  }
+
+  /** An attack's resolved effects, addressed by faction and squad index. */
+  private static toWireHits(hits: readonly ResolvedHit[]): WireHit[] {
+    return hits.map((hit) => ({
+      faction: hit.soldier.faction,
+      index: hit.soldier.squadIndex,
+      damage: hit.damage,
+      armorShred: hit.armorShred,
+      status: hit.status,
+    }))
+  }
+
+  /**
+   * Wire hits back to local soldiers. Anything missing or already dead on this
+   * side is dropped: a unit this side has buried must not replay a death.
+   */
+  private fromWireHits(hits: readonly WireHit[]): ResolvedHit[] {
+    const resolved: ResolvedHit[] = []
+    for (const hit of hits) {
+      const soldier = this.squads.byFaction[hit.faction][hit.index]
+      if (!soldier || soldier.isDead) continue
+      resolved.push({
+        soldier,
+        damage: hit.damage,
+        armorShred: hit.armorShred,
+        killed: false,
+        status: hit.status,
+      })
+    }
+    return resolved
   }
 
   /** Shared post-combat refresh: damage can reveal, kill, and re-cover. */
@@ -513,6 +549,8 @@ export class InteractionController {
       shooterIndex: thrower.squadIndex,
       kind: thrown.kind,
       targetTile: thrown.targetTile,
+      areaRadius: thrower.grenadeSpecs[thrown.kind].areaRadius,
+      hits: InteractionController.toWireHits(thrown.result.hits),
     })
   }
 

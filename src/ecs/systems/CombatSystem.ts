@@ -9,9 +9,11 @@ import type { Soldier } from '../../entities/Soldier'
 import type { Squads } from '../../game/Squads'
 import type { Tracers } from '../../render/Tracers'
 import {
+  applyHitEffects,
   canShoot,
   executeShot,
   type GrenadeResult,
+  type ResolvedHit,
   type ShotResult,
   throwGrenade,
 } from '../../game/Combat'
@@ -44,18 +46,14 @@ export class CombatSystem extends System {
   onShotResolved?: (shooter: Soldier, target: Soldier, result: ShotResult) => void
 
   /**
-   * Fire at a target. `rolls` replays the shooter's dice on the other peer, so
-   * both sides resolve the identical outcome; `force` skips the legality check
-   * for a shot the originating peer already validated.
+   * Fire at a target this side owns. `rolls` are the shooter's dice, pre-rolled
+   * by the planner so the HUD and the resolution agree on the same outcome.
+   *
+   * A peer's shot never comes through here — it arrives already resolved and
+   * goes to {@link replayShot}.
    */
-  fireShot(
-    shooter: Soldier,
-    target: Soldier,
-    mode: ShotMode,
-    rolls?: boolean[],
-    force = false,
-  ): ShotResult | null {
-    if (!force && !canShoot(this.grid, shooter, target, mode)) return null
+  fireShot(shooter: Soldier, target: Soldier, mode: ShotMode, rolls?: boolean[]): ShotResult | null {
+    if (!canShoot(this.grid, shooter, target, mode)) return null
 
     const consumption = shooter.weapon.bulletConsumption(mode)
     shooter.weapon.currentClip = Math.max(0, shooter.weapon.currentClip - consumption)
@@ -68,14 +66,57 @@ export class CombatSystem extends System {
       this.squads.soldiers,
       mode,
       rolls,
-      force,
     )
     if (!result.apSpent) return null
     this.onShotResolved?.(shooter, target, result)
     return result
   }
-  throwGrenade(thrower: Soldier, at: Tile, kind: GrenadeId, force = false): GrenadeResult {
-    return throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, force)
+
+  /**
+   * Replay a peer's shot.
+   *
+   * The peer resolved it against its own loadout and sent the outcome, so
+   * nothing here is recomputed: this side holds only the stock copy of that
+   * weapon and must not consult it. The shooter's clip and AP arrive by
+   * component replication, not from these numbers.
+   */
+  replayShot(
+    shooter: Soldier,
+    target: Soldier,
+    rolls: readonly boolean[],
+    hits: readonly ResolvedHit[],
+  ): ShotResult {
+    const from = this.grid.tileToWorld(shooter.tile)
+    const to = this.grid.tileToWorld(target.tile)
+
+    for (let i = 0; i < rolls.length; i++) {
+      this.tracers.spawnTracer(from, to, rolls[i] ?? false)
+      if (i === 0) shooter.playShoot()
+    }
+
+    let damage = 0
+    let armorShred = 0
+    for (const hit of hits) {
+      applyHitEffects(hit.soldier, hit.damage, hit.armorShred, hit.status)
+      damage += hit.damage
+      armorShred += hit.armorShred
+    }
+
+    const result: ShotResult = {
+      hit: rolls.some(Boolean),
+      damage,
+      armorShred,
+      killed: hits.some((hit) => hit.soldier.isDead),
+      hitChance: 0,
+      apSpent: 0,
+      hits: [...hits],
+    }
+    // Same door as a local shot, so damage numbers and the HUD refresh follow.
+    this.onShotResolved?.(shooter, target, result)
+    return result
+  }
+  throwGrenade(thrower: Soldier, at: Tile, kind: GrenadeId): GrenadeResult {
+    return throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers)
   }
 
   reload(soldier: Soldier): boolean {

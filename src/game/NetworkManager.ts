@@ -1,6 +1,6 @@
 import { Peer, DataConnection } from 'peerjs'
 import { Faction } from '../config'
-import type { GrenadeId, ShotMode } from '../core/Arsenal'
+import type { GrenadeId, ShotMode, StatusKind } from '../core/Arsenal'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
 import {
@@ -15,6 +15,21 @@ import {
 export type NetworkMode = 'local' | 'host' | 'join'
 
 /**
+ * One unit's share of an attack, exactly as the acting peer resolved it.
+ *
+ * The receiving peer holds only the *stock* copy of the sender's weapons and
+ * grenades — the chosen loadout is stamped before replication starts — so an
+ * attack's numbers travel with it and are applied verbatim.
+ */
+export interface WireHit {
+  faction: Faction
+  index: number
+  damage: number
+  armorShred: number
+  status: StatusKind | null
+}
+
+/**
  * Commands: things one peer asks the other to *do*.
  *
  * Everything a command changes is component state, and component state
@@ -25,14 +40,15 @@ export type NetworkMode = 'local' | 'host' | 'join'
 export type NetworkMessage =
   | { type: 'init'; seed: number; seedLabel: string }
   | { type: 'moveUnit'; faction: Faction; squadIndex: number; path: { x: number; y: number }[] }
-  | { type: 'fireShot'; shooterFaction: Faction; shooterIndex: number; targetFaction: Faction; targetIndex: number; mode: ShotMode; rolls: boolean[] }
-  | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number } }
+  | { type: 'fireShot'; shooterFaction: Faction; shooterIndex: number; targetFaction: Faction; targetIndex: number; mode: ShotMode; rolls: boolean[]; hits: WireHit[] }
+  | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number }; areaRadius: number; hits: WireHit[] }
   | { type: 'reload'; faction: Faction; squadIndex: number }
   | { type: 'toggleCover'; faction: Faction; squadIndex: number }
   | { type: 'endUnitTurn'; faction: Faction; squadIndex: number }
   | { type: 'useItem'; faction: Faction; squadIndex: number; itemId: ItemId }
   | { type: 'endTurn'; faction: Faction }
   | { type: 'rightClickFacing'; faction: Faction; squadIndex: number; x: number; z: number }
+  | { type: 'ready' }
 
 export class NetworkManager {
   peer: Peer | null = null
@@ -49,6 +65,7 @@ export class NetworkManager {
 
   private world: World | null = null
   private owns: (entityId: number) => boolean = () => true
+  private readonly peerReady = Promise.withResolvers<void>()
 
   /**
    * Replicate component mutations for the entities this peer owns.
@@ -99,6 +116,13 @@ export class NetworkManager {
       if (this.world?.applyRemote(params.entityId, componentName, params)) {
         this.onComponentUpdate?.()
       }
+      return
+    }
+
+    // Never forwarded as a command: `ready` can land before this side has left
+    // its loadout screen, when there is no `onMessage` to receive it.
+    if (method === RpcMethods.ready) {
+      this.peerReady.resolve()
       return
     }
 
@@ -202,6 +226,17 @@ export class NetworkManager {
     if (this.mode === 'local') return
     console.info(`%c[P2P 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
     this.sendRpc(this.messageToRpc(msg))
+  }
+
+  /**
+   * Resolves once the peer has sent its `ready`. Immediate in local play.
+   *
+   * Blue moves first and the host is Blue, so without this barrier the host
+   * could fire while the joiner is still on the loadout screen — and with no
+   * `onMessage` attached yet, those commands would be dropped outright.
+   */
+  waitForPeerReady(): Promise<void> {
+    return this.mode === 'local' ? Promise.resolve() : this.peerReady.promise
   }
 
   dispose(): void {

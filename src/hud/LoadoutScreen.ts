@@ -47,6 +47,7 @@ export class LoadoutScreen {
   private readonly scene: LoadoutScene
   private readonly loadout: SquadLoadout = defaultLoadout()
   private selected = 0
+  private waitingLabel: string | null = null
   private readonly deployed = Promise.withResolvers<SquadLoadout>()
   private disposed = false
 
@@ -54,8 +55,9 @@ export class LoadoutScreen {
     engine: EngineContext,
     private readonly portraits: OffscreenPortraits,
     seed: number,
+    private readonly faction: Faction,
   ) {
-    this.scene = new LoadoutScene(engine, seed)
+    this.scene = new LoadoutScene(engine, seed, faction)
 
     this.root = document.createElement('div')
     this.root.className = 'loadout-root'
@@ -68,6 +70,12 @@ export class LoadoutScreen {
   /** Resolves with the squad's kit once the player presses Deploy. */
   show(): Promise<SquadLoadout> {
     return this.deployed.promise
+  }
+
+  /** Swap the Deploy button for a status line while the peer finishes. */
+  markWaiting(label: string): void {
+    this.waitingLabel = label
+    this.render()
   }
 
   dispose(): void {
@@ -141,15 +149,19 @@ export class LoadoutScreen {
     this.root.innerHTML = `
       <div class="loadout-title">
         <div class="loadout-heading">LOADOUT</div>
-        <div class="loadout-sub">${FACTION_INFO[Faction.Blue].label} — share out the crate, then deploy</div>
+        <div class="loadout-sub">${FACTION_INFO[this.faction].label} — share out the crate, then deploy</div>
         <div class="loadout-credit">Icons by game-icons.net (CC BY 3.0)</div>
       </div>
       ${this.renderPool()}
       ${this.renderPanel()}
       ${this.renderCards()}
-      <button class="hud-btn hud-btn-danger loadout-deploy interactive" ${LoadoutScreen.actionAttr({ kind: 'deploy' })}>
+      ${
+        this.waitingLabel === null
+          ? `<button class="hud-btn hud-btn-danger loadout-deploy interactive" ${LoadoutScreen.actionAttr({ kind: 'deploy' })}>
         ${LoadoutScreen.icon('ui-deploy')} Deploy
-      </button>
+      </button>`
+          : `<div class="loadout-waiting">${this.waitingLabel}</div>`
+      }
     `
   }
 
@@ -182,7 +194,7 @@ export class LoadoutScreen {
 
   private renderPanel(): string {
     const unit = this.loadout[this.selected]!
-    const name = FACTION_INFO[Faction.Blue].squadNames[this.selected] ?? ''
+    const name = FACTION_INFO[this.faction].squadNames[this.selected] ?? ''
 
     const pick = (file: string, label: string, active: boolean, enabled: boolean, action: LoadoutAction): string => `
       <button class="action-btn interactive ${active ? 'active' : ''}" ${enabled ? '' : 'disabled'} ${LoadoutScreen.actionAttr(action)}>
@@ -267,7 +279,7 @@ export class LoadoutScreen {
     const cards: string[] = []
     for (let index = 0; index < SQUAD_SIZE; index++) {
       const unit = this.loadout[index]!
-      const name = FACTION_INFO[Faction.Blue].squadNames[index] ?? ''
+      const name = FACTION_INFO[this.faction].squadNames[index] ?? ''
       const carried = [
         ...Object.values(GrenadeId).map((id) => ({ file: `grenade-${id}`, count: unit.grenades[id] })),
         ...Object.values(ItemId).map((id) => ({ file: `item-${id}`, count: unit.items[id] })),
@@ -276,7 +288,7 @@ export class LoadoutScreen {
       cards.push(`
         <div class="squad-card interactive ${index === this.selected ? 'selected' : ''}"
              ${LoadoutScreen.actionAttr({ kind: 'select', index })}>
-          <img class="squad-portrait" src="${this.portraits.getPortrait(Faction.Blue, index)}" alt="${name}" />
+          <img class="squad-portrait" src="${this.portraits.getPortrait(this.faction, index)}" alt="${name}" />
           <div class="squad-name">${name}</div>
           <div class="loadout-card-kit">
             ${LoadoutScreen.icon(`weapon-${unit.weaponId}`, 'big')}

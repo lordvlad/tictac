@@ -3,7 +3,7 @@ import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
 import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { Faction, RULES } from '../src/config'
-import { ShotMode } from '../src/core/Arsenal'
+import { GrenadeId, ShotMode, StatusKind } from '../src/core/Arsenal'
 import { HealthComponent, MatchRulesComponent } from '../src/ecs/components'
 import {
   componentUpdateMethod,
@@ -67,6 +67,7 @@ describe('JSON-RPC framing', () => {
       'endTurn',
       'rightClickFacing',
       'useItem',
+      'ready',
     ]
     for (const type of types) expect(RpcMethods[type]).toBeTruthy()
     expect(new Set(Object.values(RpcMethods)).size).toBe(types.length)
@@ -84,6 +85,10 @@ describe('Command transport', () => {
       targetIndex: 2,
       mode: ShotMode.Aimed,
       rolls: [true, false],
+      hits: [
+        { faction: Faction.Red, index: 2, damage: 34, armorShred: 5, status: null },
+        { faction: Faction.Red, index: 3, damage: 12, armorShred: 0, status: StatusKind.Shredded },
+      ],
     }
 
     net.send(original)
@@ -121,6 +126,55 @@ describe('Command transport', () => {
     receive(net, { jsonrpc: '2.0', method: 'tictac/system/nope', params: {} })
 
     expect(received).toBeNull()
+  })
+
+  test("a grenade's resolved effects survive the round trip", () => {
+    const { net, sent } = harness()
+    const original: NetworkMessage = {
+      type: 'throwGrenade',
+      shooterFaction: Faction.Red,
+      shooterIndex: 1,
+      kind: GrenadeId.Frag,
+      targetTile: { x: 4, y: 7 },
+      areaRadius: 2.5,
+      hits: [
+        { faction: Faction.Blue, index: 0, damage: 40, armorShred: 10, status: StatusKind.Shredded },
+        { faction: Faction.Red, index: 1, damage: 0, armorShred: 0, status: null },
+      ],
+    }
+
+    net.send(original)
+    expect(sent[0]?.method).toBe(RpcMethods.throwGrenade)
+
+    const receiver = new NetworkManager()
+    receiver.mode = 'join'
+    const received: NetworkMessage[] = []
+    receiver.onMessage = (msg) => {
+      received.push(msg)
+    }
+    receive(receiver, sent[0])
+
+    expect(received[0]).toEqual(original)
+  })
+
+  test('a ready frame is recorded even before a match is listening', async () => {
+    const net = new NetworkManager()
+    net.mode = 'join'
+    const received: NetworkMessage[] = []
+
+    // No `onMessage` yet: this side is still on its own loadout screen.
+    receive(net, { jsonrpc: '2.0', method: RpcMethods.ready, params: {} })
+    net.onMessage = (msg) => {
+      received.push(msg)
+    }
+
+    await net.waitForPeerReady()
+    expect(received).toEqual([])
+  })
+
+  test('local play never waits for a peer', async () => {
+    const net = new NetworkManager()
+    await net.waitForPeerReady()
   })
 })
 

@@ -1,5 +1,6 @@
 import { type GrenadeId, STATUSES } from '../core/Arsenal'
 import { blastFalloff, grenadeDamageAt } from '../core/Ballistics'
+import type { GrenadeResult, ResolvedHit } from './Combat'
 import { type Grid, type Tile, tileEquals } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import { DamageIndicators } from '../render/DamageIndicators'
@@ -129,39 +130,61 @@ export class GrenadePlanner {
     }
   }
 
-  executeThrowAt(thrower: Soldier, kind: GrenadeId, targetTile: Tile, force = false): boolean {
+  /**
+   * Resolve a throw and show it. Returns null when the throw was illegal.
+   *
+   * The FX half is {@link replayThrow}, which a peer's throw goes through
+   * directly with the numbers that peer already resolved.
+   */
+  executeThrowAt(thrower: Soldier, kind: GrenadeId, targetTile: Tile): GrenadeResult | null {
     const spec = thrower.grenadeSpecs[kind]
-    const result = this.combat.throwGrenade(thrower, targetTile, kind, force)
-    if (!result.thrown) return false
+    const result = this.combat.throwGrenade(thrower, targetTile, kind)
+    if (!result.thrown) return null
+    this.replayThrow(kind, targetTile, spec.areaRadius, result.hits)
+    return result
+  }
+
+  /**
+   * Blast FX, indicators and the post-throw refresh. No rules, no damage.
+   *
+   * `areaRadius` is a parameter rather than a lookup because a peer's throw is
+   * sized by *its* copy of the grenade — per-soldier state the debug panel can
+   * edit — and this side's copy would size the blast wrongly.
+   */
+  replayThrow(
+    kind: GrenadeId,
+    targetTile: Tile,
+    areaRadius: number,
+    hits: readonly ResolvedHit[],
+  ): void {
     const worldPos = this.grid.tileToWorld(targetTile)
     this.effects.triggerFlash(kind)
 
     if (kind === 'frag') {
       this.rig.shake(FX.shakeIntensityFrag, FX.shakeDurationFrag)
-      this.effects.spawnBlastPuffs(worldPos, spec.areaRadius)
+      this.effects.spawnBlastPuffs(worldPos, areaRadius)
     } else if (kind === 'smoke') {
       const tileIdx = this.grid.index(targetTile.x, targetTile.y)
-      this.effects.spawnPersistentSmoke(tileIdx, worldPos, spec.areaRadius)
+      this.effects.spawnPersistentSmoke(tileIdx, worldPos, areaRadius)
     }
 
-    for (const hit of result.hits) {
+    for (const hit of hits) {
       if (hit.damage > 0) this.damageIndicators.spawn(hit.soldier.position, true, hit.damage)
     }
 
     this.exit()
     this.onThrowResolved?.()
-    return true
   }
 
   /** Throw the armed grenade at the aimed tile. Returns thrown data for P2P sync. */
-  confirm(thrower: Soldier): { kind: GrenadeId; targetTile: Tile } | null {
+  confirm(thrower: Soldier): { kind: GrenadeId; targetTile: Tile; result: GrenadeResult } | null {
     const pending = this.pending(thrower)
     if (!pending || !pending.affordable || !pending.inRange) return null
 
     const kind = pending.kind
     const targetTile = pending.at
-    const success = this.executeThrowAt(thrower, kind, targetTile)
-    return success ? { kind, targetTile } : null
+    const result = this.executeThrowAt(thrower, kind, targetTile)
+    return result ? { kind, targetTile, result } : null
   }
 
   /** Paint the blast footprint, brightest at the centre. */

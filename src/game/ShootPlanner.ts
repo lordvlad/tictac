@@ -158,8 +158,8 @@ export class ShootPlanner {
       options,
     }
   }
-  /** Take the shot in `mode`. Returns target and hit rolls for P2P sync. */
-  fire(shooter: Soldier, mode: ShotMode): { target: Soldier; rolls: boolean[] } | null {
+  /** Take the shot in `mode`. Returns target, rolls and resolved effects for P2P sync. */
+  fire(shooter: Soldier, mode: ShotMode): { target: Soldier; rolls: boolean[]; result: ShotResult } | null {
     const pending = this.pending(shooter)
     if (!pending) return null
     const option = pending.options.find((o) => o.mode === mode)
@@ -174,7 +174,7 @@ export class ShootPlanner {
     }
 
     const result = this.combat.fireShot(shooter, target, mode, rolls)
-    return result ? { target, rolls } : null
+    return result ? { target, rolls, result } : null
   }
 
   /** Damage numbers and target bookkeeping, once combat has resolved a shot. */

@@ -83,20 +83,12 @@ function showMenu(): void {
   const actionsEl = container.querySelector('#menu-actions') as HTMLElement
   const detailsEl = container.querySelector('#menu-details') as HTMLElement
 
-  // Local Mode. The loadout screen stages the squad first, then hands the kit
-  // to the match. P2P skips it: the two peers replay each other's shot rolls
-  // but resolve damage locally, so squads equipped differently would desync.
+  // Both peers equip before the match: every attack travels with the numbers
+  // the acting peer resolved, so the two squads may be kitted out differently.
   container.querySelector('#btn-local')?.addEventListener('click', () => {
     container.remove()
     const { seed, label } = resolveSeed()
-    const network = new NetworkManager()
-
-    const engine = createEngineContext(Game.instance())
-    const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine), seed)
-    void screen.show().then((loadout) => {
-      screen.dispose()
-      start(seed, label, network, loadout)
-    })
+    equipThenStart(seed, label, new NetworkManager())
   })
 
   // Host Mode
@@ -130,7 +122,8 @@ function showMenu(): void {
 
     network.onConnected = () => {
       container.remove()
-      start(seed, label, network)
+      // Only once a peer is attached, which is what makes `ready` deliverable.
+      equipThenStart(seed, label, network)
     }
   })
 
@@ -168,12 +161,43 @@ function showMenu(): void {
         const network = new NetworkManager()
         const initData = await network.initJoin(hostId)
         container.remove()
-        start(initData.seed, initData.seedLabel, network)
+        equipThenStart(initData.seed, initData.seedLabel, network)
       } catch (err) {
         statusEl.style.color = '#ef4444'
         statusEl.textContent = 'Failed to connect. Verify Peer ID.'
       }
     })
+  })
+}
+
+/**
+ * Equip the squad this player commands, then start the match once the peer has
+ * equipped too.
+ *
+ * The barrier matters because Blue moves first and the host is Blue: without it
+ * the host could fire while the joiner is still choosing kit, and with no
+ * `onMessage` attached yet those commands would be dropped outright.
+ */
+function equipThenStart(seed: number, label: string, network: NetworkManager): void {
+  const engine = createEngineContext(Game.instance())
+  const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
+  const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine), seed, faction)
+
+  // A peer that drops while the player is still equipping would otherwise hang
+  // the screen: there is no controller yet to show the usual overlay. `start`
+  // reassigns this to the in-match overlay rather than adding a second handler.
+  network.onDisconnected = () => {
+    screen.dispose()
+    network.dispose()
+    showMenu()
+  }
+
+  void screen.show().then(async (loadout) => {
+    network.send({ type: 'ready' })
+    if (network.mode !== 'local') screen.markWaiting('Waiting for opponent to deploy…')
+    await network.waitForPeerReady()
+    screen.dispose()
+    start(seed, label, network, loadout)
   })
 }
 
@@ -189,7 +213,8 @@ function start(
   createGlobalRules(world)
 
   const battlefield = new Battlefield(seed, engine)
-  const squads = new Squads(world, battlefield.grid, battlefield.spawns, engine, loadout)
+  const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
+  const squads = new Squads(world, battlefield.grid, battlefield.spawns, engine, loadout, myFaction)
 
   const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,
@@ -265,7 +290,6 @@ function start(
       showMenu()
     })
   }
-  const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
   const commander = squads.byFaction[myFaction][0]
   if (commander) {
     rig.snapTo(commander.position)

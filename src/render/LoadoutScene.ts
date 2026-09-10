@@ -20,10 +20,10 @@ import { Rng } from '../core/rng'
 import { soldierColor } from '../entities/palette'
 
 /** Radius of the arc the squad stands on. Wide enough that neighbours read as
- *  a line-up rather than a huddle: 50 degrees apart is 2.7 m of daylight. */
+ *  a line-up rather than a huddle: 36 degrees apart is 2 m of daylight. */
 const RING_RADIUS = 3.2
-/** Angle between neighbouring members. Four of them span 150 degrees. */
-const SPOKE_STEP = (50 * Math.PI) / 180
+/** Angle between neighbouring members. Four of them span 108 degrees. */
+const SPOKE_STEP = (36 * Math.PI) / 180
 /** Gap between the member on the arc and the camera in front of them. */
 const CAMERA_GAP = 6.5
 /** Camera height: a person's eye line. */
@@ -62,6 +62,7 @@ export class LoadoutScene {
   constructor(
     private readonly engine: EngineContext,
     seed: number,
+    private readonly faction: Faction,
   ) {
     const scene = this.engine.scene
     const sky = new Color(0x05070a)
@@ -179,7 +180,7 @@ export class LoadoutScene {
       model.rotation.y = angle
       model.scale.set(1, 1, 1)
 
-      const tint = soldierColor(Faction.Blue, index)
+      const tint = soldierColor(this.faction, index)
       model.traverse((child) => {
         if (child instanceof Mesh && child.material) {
           const material = (child.material as MeshStandardMaterial).clone()
