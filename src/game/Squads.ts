@@ -1,8 +1,9 @@
 import type { EngineContext } from '../engine'
-import { Faction, SQUAD_SIZE } from '../config'
+import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
 import { AmmoId, WeaponId } from '../core/Arsenal'
 import type { Grid, Tile } from '../core/Grid'
 import { Soldier } from '../entities/Soldier'
+import { applyUnitLoadout, type SquadLoadout } from './Loadout'
 import type { World } from '../ecs/World'
 
 export class Squads {
@@ -12,21 +13,29 @@ export class Squads {
     [Faction.Red]: [],
   }
 
+  /**
+   * `loadout` is what the player put together on the pre-combat screen, one
+   * entry per squad index. It only ever kits out Blue — the player equips
+   * their own team — and Red keeps the stock spread.
+   */
   constructor(
     world: World,
     grid: Grid,
     spawns: Record<Faction, Tile[]>,
     engine: EngineContext,
+    loadout?: SquadLoadout,
   ) {
-    const blueNames = ['Cobalt', 'Azure', 'Sapphire', 'Indigo']
-    const redNames = ['Crimson', 'Scarlet', 'Ruby', 'Garnet']
+    const blueNames = FACTION_INFO[Faction.Blue].squadNames
+    const redNames = FACTION_INFO[Faction.Red].squadNames
 
     const weapons = [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun] as const
 
     for (let i = 0; i < SQUAD_SIZE; i++) {
       const tileB = spawns[Faction.Blue][i] ?? { x: 2 + i * 2, y: 2 }
       const solB = new Soldier(world, Faction.Blue, i, blueNames[i]!, tileB, grid, engine)
-      solB.equip(weapons[i]!, AmmoId.Standard)
+      const unit = loadout?.[i]
+      if (unit) applyUnitLoadout(solB, unit)
+      else solB.equip(weapons[i]!, AmmoId.Standard)
       this.soldiers.push(solB)
       this.byFaction[Faction.Blue].push(solB)
 

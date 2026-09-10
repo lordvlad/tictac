@@ -14,6 +14,7 @@ const server = serve({
   routes: {
     '/character.glb': () => new Response(Bun.file(new URL('character.glb', publicDir))),
     '/draco/:file': (req) => new Response(Bun.file(new URL(`draco/${req.params.file}`, publicDir))),
+    '/icons/:file': (req) => new Response(Bun.file(new URL(`icons/${req.params.file}`, publicDir))),
     '/*': index,
   },
 })

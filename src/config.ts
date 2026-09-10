@@ -240,6 +240,8 @@ export const FACTION_INFO: Record<Faction, {
   label: string
   color: number
   cssColor: string
+  /** Call signs, one per squad index. */
+  squadNames: readonly string[]
 }> = {
   [Faction.Blue]: {
     name: 'BLUE',
@@ -247,12 +249,14 @@ export const FACTION_INFO: Record<Faction, {
     /** Body tint. */
     color: 0x4a7fd4,
     cssColor: '#5b95ef',
+    squadNames: ['Cobalt', 'Azure', 'Sapphire', 'Indigo'],
   },
   [Faction.Red]: {
     name: 'RED',
     label: 'Red Team',
     color: 0xc4453a,
     cssColor: '#e05c4f',
+    squadNames: ['Crimson', 'Scarlet', 'Ruby', 'Garnet'],
   },
 } as const
 

@@ -12,6 +12,8 @@ import { TurnManager } from './game/TurnManager'
 import { Hud } from './hud/Hud'
 import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
+import { LoadoutScreen } from './hud/LoadoutScreen'
+import type { SquadLoadout } from './game/Loadout'
 import './game.css'
 import { NetworkManager } from './game/NetworkManager'
 import { World } from './ecs/World'
@@ -81,12 +83,20 @@ function showMenu(): void {
   const actionsEl = container.querySelector('#menu-actions') as HTMLElement
   const detailsEl = container.querySelector('#menu-details') as HTMLElement
 
-  // Local Mode
+  // Local Mode. The loadout screen stages the squad first, then hands the kit
+  // to the match. P2P skips it: the two peers replay each other's shot rolls
+  // but resolve damage locally, so squads equipped differently would desync.
   container.querySelector('#btn-local')?.addEventListener('click', () => {
     container.remove()
     const { seed, label } = resolveSeed()
     const network = new NetworkManager()
-    start(seed, label, network)
+
+    const engine = createEngineContext(Game.instance())
+    const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine), seed)
+    void screen.show().then((loadout) => {
+      screen.dispose()
+      start(seed, label, network, loadout)
+    })
   })
 
   // Host Mode
@@ -167,14 +177,19 @@ function showMenu(): void {
   })
 }
 
-function start(seed: number, seedLabel: string, network: NetworkManager): void {
+function start(
+  seed: number,
+  seedLabel: string,
+  network: NetworkManager,
+  loadout?: SquadLoadout,
+): void {
   const engine = createEngineContext(Game.instance())
 
   const world = new World()
   createGlobalRules(world)
 
   const battlefield = new Battlefield(seed, engine)
-  const squads = new Squads(world, battlefield.grid, battlefield.spawns, engine)
+  const squads = new Squads(world, battlefield.grid, battlefield.spawns, engine, loadout)
 
   const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,

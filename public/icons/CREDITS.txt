@@ -1,0 +1,10 @@
+Icons from https://game-icons.net — Creative Commons 3.0 BY.
+
+sbed: rifle (weapon-rifle).
+delapouite: sawed-off-shotgun (weapon-shotgun), heavy-bullets (ammo-ap),
+  shotgun-rounds (ammo-hollow), first-aid-kit (item-firstAid),
+  backpack (ui-pool), check-mark (ui-deploy).
+skoll: winchester-rifle (weapon-sniper).
+lorc: minigun (weapon-gatling), bullets (ammo-standard), grenade (grenade-frag),
+  flash-grenade (grenade-flash), syringe (item-stim).
+darkzaitzev: smoke-bomb (grenade-smoke).
