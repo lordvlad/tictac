@@ -92,7 +92,11 @@ export function markOccluders(
       if (spec.height > 0) {
         const base =
           Math.min(grid.levelAt(cx, cy), grid.levelAt(nextX, nextY)) * LEVEL_HEIGHT
-        if (from.y + dy * tExit < base + spec.height) {
+        const yCross = from.y + dy * tExit
+        // A ladder's landing, or a window, leaves one storey of this wall
+        // open: a segment passing through at that storey has nothing to clear.
+        const storey = Math.max(0, Math.floor(yCross / LEVEL_HEIGHT))
+        if (yCross < base + spec.height && !grid.wallOpenAt(cx, cy, side, storey)) {
           masks.edges[grid.edgeId(cx, cy, side)] = 1
         }
       }

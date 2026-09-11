@@ -117,6 +117,17 @@ export class Grid {
   private readonly wallsV: Uint8Array
   /** Wall kinds on the edges running east-west. */
   private readonly wallsH: Uint8Array
+  /**
+   * Storeys at which a wall has a hole, as a bitmask per edge: bit L set means
+   * the masonry is missing at storey L.
+   *
+   * A ladder's landing is exactly this. The wall itself stays — a ladder up the
+   * outside of a building leaves the storeys it passes walled, and opens only
+   * the one it arrives at, which is what you climb in through.
+   */
+  private readonly openingsV: Uint8Array
+  /** Wall openings on the edges running east-west. */
+  private readonly openingsH: Uint8Array
 
   constructor(size: number = GRID_SIZE) {
     this.size = size
@@ -127,6 +138,8 @@ export class Grid {
     this.roofs = new Uint8Array(size * size)
     this.wallsV = new Uint8Array((size + 1) * size)
     this.wallsH = new Uint8Array(size * (size + 1))
+    this.openingsV = new Uint8Array((size + 1) * size)
+    this.openingsH = new Uint8Array(size * (size + 1))
   }
 
   roofAt(x: number, y: number): number {
@@ -219,6 +232,65 @@ export class Grid {
   }
 
   /**
+   * Storeys where this wall has a hole, as a {@link Side}-style bitmask over
+   * storeys: bit L set means no masonry at storey L.
+   *
+   * The border carries none: it is the one wall nothing may breach.
+   */
+  wallOpeningsAt(x: number, y: number, side: Side): number {
+    if (side === Side.West || side === Side.East) {
+      const lattice = side === Side.East ? x + 1 : x
+      if (y < 0 || y >= this.size) return 0
+      if (lattice <= 0 || lattice >= this.size) return 0
+      return this.openingsV[y * (this.size + 1) + lattice]!
+    }
+    const lattice = side === Side.South ? y + 1 : y
+    if (x < 0 || x >= this.size) return 0
+    if (lattice <= 0 || lattice >= this.size) return 0
+    return this.openingsH[lattice * this.size + x]!
+  }
+
+  /** Is the masonry missing at `level`? */
+  wallOpenAt(x: number, y: number, side: Side, level: number): boolean {
+    if (level < 0 || level > 7) return false
+    return (this.wallOpeningsAt(x, y, side) & (1 << level)) !== 0
+  }
+
+  /** Punch a hole at `level` — a ladder's landing, or a window. */
+  setWallOpening(x: number, y: number, side: Side, level: number): void {
+    if (level < 0 || level > 7) return
+    const bit = 1 << level
+    if (side === Side.West || side === Side.East) {
+      const lattice = side === Side.East ? x + 1 : x
+      if (y < 0 || y >= this.size) return
+      if (lattice <= 0 || lattice >= this.size) return
+      const idx = y * (this.size + 1) + lattice
+      this.openingsV[idx] = this.openingsV[idx]! | bit
+      return
+    }
+    const lattice = side === Side.South ? y + 1 : y
+    if (x < 0 || x >= this.size) return
+    if (lattice <= 0 || lattice >= this.size) return
+    const idx = lattice * this.size + x
+    this.openingsH[idx] = this.openingsH[idx]! | bit
+  }
+
+  /** Seal every hole in this wall. */
+  clearWallOpenings(x: number, y: number, side: Side): void {
+    if (side === Side.West || side === Side.East) {
+      const lattice = side === Side.East ? x + 1 : x
+      if (y < 0 || y >= this.size) return
+      if (lattice <= 0 || lattice >= this.size) return
+      this.openingsV[y * (this.size + 1) + lattice] = 0
+      return
+    }
+    const lattice = side === Side.South ? y + 1 : y
+    if (x < 0 || x >= this.size) return
+    if (lattice <= 0 || lattice >= this.size) return
+    this.openingsH[lattice * this.size + x] = 0
+  }
+
+  /**
    * The wall standing between two orthogonally adjacent tiles.
    *
    * Returns {@link WallKind.None} for anything that is not a shared edge, so a
@@ -271,10 +343,19 @@ export class Grid {
     return level * LEVEL_HEIGHT + WALLS[kind].height
   }
 
-  /** Is one edge passable? `observerFloorY` names the eye floor for sight, or `null` for a body. */
+  /**
+   * Is one edge passable? `observerFloorY` names the eye floor for sight, or
+   * `null` for a body.
+   *
+   * A hole at the observer's own storey is a view straight through: it is the
+   * gap a ladder lands in. It is not a way *through* for a body — the climb is
+   * the ladder's business, and walking sideways into the hole would be a step
+   * into the air.
+   */
   private edgeOpen(x: number, y: number, side: Side, observerFloorY: number | null): boolean {
     const kind = this.wallAt(x, y, side)
     if (observerFloorY === null) return kind === WallKind.None
+    if (this.wallOpenAt(x, y, side, Math.round(observerFloorY / LEVEL_HEIGHT))) return true
     const top = this.wallTop(x, y, side)
     return !wallHidesSight(kind, top, observerFloorY)
   }
@@ -375,18 +456,38 @@ export class Grid {
   /**
    * Is there a ladder joining these two tiles?
    *
-   * One storey apart, orthogonally adjacent, and the higher tile carries a
-   * ladder on the face looking at the lower one.
+   * Orthogonally adjacent, on different storeys, with the higher tile carrying
+   * a ladder on the face looking at the lower one. The drop may be more than
+   * one storey: a ladder bolted to a three-storey wall is climbed in one go,
+   * and the masonry it passes stays shut except at the landing.
    */
   ladderBetween(a: Tile, b: Tile): boolean {
     const levelA = this.levelAt(a.x, a.y)
     const levelB = this.levelAt(b.x, b.y)
-    if (Math.abs(levelA - levelB) !== 1) return false
+    if (levelA === levelB) return false
 
     const upper = levelA > levelB ? a : b
     const lower = levelA > levelB ? b : a
     const face = faceToward(upper, lower)
     return face !== 0 && this.hasLadderFace(upper.x, upper.y, face)
+  }
+
+  /**
+   * How many storeys a ladder on this face climbs, or 0 where there is none.
+   *
+   * Measured against the tile the face looks at, which is where the foot
+   * stands — the renderer needs the span to know how long to draw the rails.
+   */
+  ladderSpanAt(x: number, y: number, face: Side): number {
+    if (!this.hasLadderFace(x, y, face)) return 0
+    let nx = x
+    let ny = y
+    if (face === Side.East) nx += 1
+    else if (face === Side.West) nx -= 1
+    else if (face === Side.South) ny += 1
+    else if (face === Side.North) ny -= 1
+    if (!this.inBounds(nx, ny)) return 0
+    return Math.max(0, this.levelAt(x, y) - this.levelAt(nx, ny))
   }
 
   /** Can a unit stand here (terrain only)? */
@@ -399,21 +500,16 @@ export class Grid {
   /**
    * Does the wall between two adjacent tiles stop a line of sight ray?
    *
-   * Sight is now purely a question about boundaries: nothing standing on a
-   * tile is tall enough to block a view, so there is no per-tile answer left
-   * to give.
-   */
-  /**
-   * Does the wall between two adjacent tiles stop a line of sight ray?
-   *
-   * Evaluated relative to `observerFloorY` in metres: a wall whose top sits
-   * at or below the observer's feet does not block their view.
+   * Evaluated relative to `observerFloorY` in metres: a wall whose top sits at
+   * or below the observer's feet does not block their view, and neither does
+   * one with a hole at the observer's own storey.
    */
   blocksSightBetween(a: Tile, b: Tile, observerFloorY = 0): boolean {
     const side = faceToward(a, b)
     if (side === 0) return false
     const kind = this.wallAt(a.x, a.y, side)
     if (kind === WallKind.None) return false
+    if (this.wallOpenAt(a.x, a.y, side, Math.round(observerFloorY / LEVEL_HEIGHT))) return false
     return wallHidesSight(kind, this.wallTop(a.x, a.y, side), observerFloorY)
   }
 

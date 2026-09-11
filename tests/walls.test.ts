@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Block, Grid, Side } from '../src/core/Grid'
+import { LEVEL_HEIGHT } from '../src/config'
 import { CoverLevel, WallKind } from '../src/core/Walls'
 import { coverLevelInDir, shotCoverLevel } from '../src/core/Cover'
 import { hasLineOfSight, peekOrigins } from '../src/core/Visibility'
@@ -92,6 +93,68 @@ describe('Walls as edges', () => {
     expect(grid.canTraverse({ x: 4, y: 4 }, { x: 4, y: 3 })).toBe(false)
     expect(hasLineOfSight(grid, { x: 4, y: 4 }, { x: 4, y: 1 })).toBe(true)
     expect(coverLevelInDir(grid, { x: 4, y: 4 }, 0, -1)).toBe(CoverLevel.Low)
+  })
+
+  test("a ladder's wall keeps its masonry and opens only at the landing", () => {
+    const grid = new Grid(10)
+    // Ground outside at (4,4); a two-storey building floor at (4,3).
+    grid.setLevel(4, 3, 2)
+    grid.setWall(4, 3, Side.South, WallKind.Solid)
+    grid.setLadderFace(4, 3, Side.South)
+    grid.setWallOpening(4, 3, Side.South, 2)
+
+    // The masonry the ladder passes stays shut; only the landing is open.
+    expect(grid.wallAt(4, 3, Side.South)).toBe(WallKind.Solid)
+    expect(grid.wallOpenAt(4, 3, Side.South, 0)).toBe(false)
+    expect(grid.wallOpenAt(4, 3, Side.South, 1)).toBe(false)
+    expect(grid.wallOpenAt(4, 3, Side.South, 2)).toBe(true)
+
+    // The climb is the ladder's business, not the wall's.
+    expect(grid.canTraverse({ x: 4, y: 4 }, { x: 4, y: 3 })).toBe(true)
+    expect(grid.ladderSpanAt(4, 3, Side.South)).toBe(2)
+  })
+
+  test('an opening lets sight through at its own storey only', () => {
+    const grid = new Grid(10)
+    grid.setLevel(5, 4, 1)
+    grid.setWall(5, 4, Side.South, WallKind.Solid)
+
+    const groundFloor = 0
+    const upperFloor = LEVEL_HEIGHT
+
+    // Solid to begin with, from either storey.
+    expect(grid.blocksSightBetween({ x: 5, y: 4 }, { x: 5, y: 5 }, groundFloor)).toBe(true)
+    expect(grid.blocksSightBetween({ x: 5, y: 4 }, { x: 5, y: 5 }, upperFloor)).toBe(true)
+
+    grid.setWallOpening(5, 4, Side.South, 1)
+
+    // The hole is at storey 1, so only an eye on that floor sees through it.
+    expect(grid.blocksSightBetween({ x: 5, y: 4 }, { x: 5, y: 5 }, groundFloor)).toBe(true)
+    expect(grid.blocksSightBetween({ x: 5, y: 4 }, { x: 5, y: 5 }, upperFloor)).toBe(false)
+  })
+
+  test('sealing a wall takes its openings with it', () => {
+    const grid = new Grid(10)
+    grid.setWall(6, 6, Side.North, WallKind.Solid)
+    grid.setWallOpening(6, 6, Side.North, 0)
+    expect(grid.wallOpenAt(6, 6, Side.North, 0)).toBe(true)
+
+    grid.clearWallOpenings(6, 6, Side.North)
+
+    expect(grid.wallOpeningsAt(6, 6, Side.North)).toBe(0)
+    expect(grid.blocksSightBetween({ x: 6, y: 6 }, { x: 6, y: 5 }, 0)).toBe(true)
+  })
+
+  test('an opening gives no cover to the unit standing in it', () => {
+    const grid = new Grid(10)
+    grid.setLevel(7, 4, 1)
+    grid.setWall(7, 4, Side.South, WallKind.Solid)
+
+    expect(coverLevelInDir(grid, { x: 7, y: 4 }, 0, 1)).toBe(CoverLevel.Tall)
+
+    grid.setWallOpening(7, 4, Side.South, 1)
+
+    expect(coverLevelInDir(grid, { x: 7, y: 4 }, 0, 1)).toBe(CoverLevel.None)
   })
 })
 

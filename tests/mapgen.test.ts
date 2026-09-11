@@ -238,10 +238,11 @@ describe('Vertical access', () => {
     }
   })
 
-  test('a ladder hangs over open ground one storey below', () => {
+  test('a ladder hangs over open ground, walled all the way bar its landing', () => {
     for (const seed of SEEDS) {
       const { grid } = generateMap(seed)
       let ladders = 0
+      let longest = 0
 
       grid.forEach((x, y) => {
         const faces = grid.ladderFacesAt(x, y)
@@ -252,15 +253,21 @@ describe('Vertical access', () => {
           const [dx, dy] = SIDE_STEP[side]
           const foot = { x: x + dx, y: y + dy }
 
-          // The foot is real standing ground, one storey down.
+          // The foot is real standing ground, at least one storey down.
           expect(grid.isWalkable(foot.x, foot.y)).toBe(true)
-          expect(grid.levelAt(x, y) - grid.levelAt(foot.x, foot.y)).toBe(1)
-          // Ladder edge has a wall cutout on the level it ends on.
-          expect(grid.wallAt(x, y, side)).toBe(WallKind.None)
+          const drop = grid.levelAt(x, y) - grid.levelAt(foot.x, foot.y)
+          expect(drop).toBeGreaterThanOrEqual(1)
+          longest = Math.max(longest, drop)
+
+          // The masonry the ladder passes stays put; only the landing opens, so
+          // a ladder no longer knocks a hole through the storeys underneath it.
+          expect(grid.wallAt(x, y, side)).not.toBe(WallKind.None)
+          expect(grid.wallOpeningsAt(x, y, side)).toBe(1 << grid.levelAt(x, y))
         }
       })
 
       expect(ladders).toBeGreaterThan(0)
+      expect(longest).toBeGreaterThanOrEqual(1)
     }
   })
   test('Blocks carries side on ladder instances and sets aFade=0 for unexplored fog', () => {

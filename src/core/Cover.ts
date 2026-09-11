@@ -14,10 +14,13 @@ export const COVER_DIRS = ORTHOGONAL
  */
 export function coverLevelInDir(grid: Grid, tile: Tile, dx: number, dy: number): CoverLevel {
   const neighbour = { x: tile.x + dx, y: tile.y + dy }
-  const floorY = grid.levelAt(tile.x, tile.y) * LEVEL_HEIGHT
+  const level = grid.levelAt(tile.x, tile.y)
+  const floorY = level * LEVEL_HEIGHT
   const side = faceToward(tile, neighbour)
+  // A hole at the unit's own storey — a ladder's landing — shelters nothing:
+  // standing in the opening is standing in the open.
   const fromWall =
-    side === 0
+    side === 0 || grid.wallOpenAt(tile.x, tile.y, side, level)
       ? CoverLevel.None
       : wallCover(grid.wallAt(tile.x, tile.y, side), grid.wallTop(tile.x, tile.y, side), floorY)
 

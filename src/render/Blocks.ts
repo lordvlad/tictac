@@ -413,15 +413,50 @@ export class Blocks {
    * The face is a slab as long as a tile and only {@link WALL_THICKNESS} deep,
    * placed on the shared edge and turned to lie in it, so it consumes no floor
    * on either side.
+   *
+   * An edge contributes one instance per *solid* run of storeys rather than one
+   * per edge, so a ladder's landing or a window is a gap in the masonry. A wall
+   * with an opening used to be dropped from the mesh entirely, which took the
+   * masonry away on every storey the ladder merely passed.
    */
   private buildWallLayer(
     kind: Exclude<WallKind, typeof WallKind.None>,
-    instances: BlockInstance[],
+    edges: BlockInstance[],
   ): BlockLayer {
     const style = WALL_STYLE[kind]
-    const capacity = instances.length
 
-    // Unit height: each instance scales it to its own column height.
+    // Spans keep their edge's id and side: the occlusion mask, the fog and the
+    // level filter all address instances by edge and tile, so several
+    // instances per edge need no further bookkeeping.
+    const instances: BlockInstance[] = []
+    const bases: number[] = []
+    const tops: number[] = []
+    for (const edge of edges) {
+      const top = this.grid.wallTop(edge.x, edge.y, edge.side!)
+      const storeys = Math.ceil(top / LEVEL_HEIGHT)
+      for (let level = 0; level < storeys; level++) {
+        if (this.grid.wallOpenAt(edge.x, edge.y, edge.side!, level)) continue
+        const base = level * LEVEL_HEIGHT
+        // Consecutive solid storeys are one slab, not one box per storey.
+        while (
+          level + 1 < storeys &&
+          !this.grid.wallOpenAt(edge.x, edge.y, edge.side!, level + 1)
+        ) {
+          level++
+        }
+        instances.push({ ...edge, index: instances.length })
+        bases.push(base)
+        // The last storey is only as tall as the wall kind, so the top span is
+        // cut to the masonry's own top instead of the storey boundary.
+        tops.push(Math.min(top, (level + 1) * LEVEL_HEIGHT))
+      }
+    }
+
+    // Buffers are sized by instances, not edges. One is kept even when every
+    // storey is open, since a zero-length instance buffer has nothing to hold.
+    const capacity = Math.max(1, instances.length)
+
+    // Unit height: each instance scales it to its own span.
     const geometry = new BoxGeometry(TILE, 1, WALL_THICKNESS)
     const fade = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
     geometry.setAttribute(FADE_ATTRIBUTE, fade)
@@ -430,7 +465,7 @@ export class Blocks {
 
     const mesh = new InstancedMesh(geometry, material, capacity)
     mesh.instanceMatrix.setUsage(DynamicDrawUsage)
-    mesh.count = capacity
+    mesh.count = instances.length
     mesh.castShadow = true
     mesh.receiveShadow = true
     mesh.userData.type = 'wall'
@@ -447,25 +482,23 @@ export class Blocks {
       isWall: true,
     }
 
-    // A unit-height box scaled per instance: a wall is a column of masonry
-    // from the ground up to its top, so a wall bounding an upper storey is one
-    // tall wall rather than a slab hanging in mid-air above nothing.
-    for (const inst of instances) {
+    instances.forEach((inst, i) => {
       const [dx, dz] = FACE_OFFSET[inst.side!]!
-      const top = this.grid.wallTop(inst.x, inst.y, inst.side!)
+      const base = bases[i]!
+      const top = tops[i]!
 
       this.dummy.position.set(
         this.grid.worldX(inst.x) + (dx * TILE) / 2,
-        top / 2,
+        (base + top) / 2,
         this.grid.worldZ(inst.y) + (dz * TILE) / 2,
       )
-      this.dummy.scale.set(1, top, 1)
+      this.dummy.scale.set(1, top - base, 1)
       // Geometry runs along X; a wall on an east/west face runs along Z.
       this.dummy.rotation.y = dx !== 0 ? Math.PI / 2 : 0
       this.dummy.updateMatrix()
       mesh.setMatrixAt(inst.index, this.dummy.matrix)
       mesh.setColorAt(inst.index, baseColor)
-    }
+    })
     this.dummy.scale.set(1, 1, 1)
 
     mesh.instanceMatrix.needsUpdate = true
@@ -623,21 +656,32 @@ export class Blocks {
   }
 
   /**
-   * One ladder per mounted face.
+   * One ladder per mounted face, drawn over every storey it climbs.
    *
    * Placed on the shared edge between the raised tile and the tile below, so a
    * ladder takes up no floor: both tiles stay walkable.
+   *
+   * A ladder may drop several storeys while its geometry is one storey tall, so
+   * a span is drawn as a stack of sections: the rung spacing stays constant
+   * however far the ladder reaches, and the rails run from the foot tile's
+   * floor up to the landing.
    */
   private buildLadders(): BlockLayer | null {
     const instances: BlockInstance[] = []
-    const faces: number[] = []
+    /** Storey each section tops out at, counted down from the landing. */
+    const storeys: number[] = []
 
     this.grid.forEach((x, y) => {
       const mounted = this.grid.ladderFacesAt(x, y)
       for (const face of LADDER_FACE_ORDER) {
         if ((mounted & face) === 0) continue
-        instances.push({ x, y, side: face, index: instances.length })
-        faces.push(face)
+        const level = this.grid.levelAt(x, y)
+        // A face with no drop below it still gets its one section, as before.
+        const span = Math.max(1, this.grid.ladderSpanAt(x, y, face))
+        for (let section = 0; section < span; section++) {
+          instances.push({ x, y, side: face, index: instances.length })
+          storeys.push(level - section)
+        }
       }
     })
     if (instances.length === 0) return null
@@ -665,23 +709,22 @@ export class Blocks {
       levels: new Uint8Array(capacity),
     }
 
-    instances.forEach((tile, i) => {
-      const [dx, dz] = FACE_OFFSET[faces[i]!]!
-      const level = this.grid.levelAt(tile.x, tile.y)
+    instances.forEach((inst, i) => {
+      const [dx, dz] = FACE_OFFSET[inst.side!]!
       // Offset past the wall's thickness (WALL_THICKNESS / 2) so the ladder
       // stands on the wall's outer face rather than embedded inside the masonry.
       const ladderOffset = WALL_THICKNESS / 2 + 0.035
 
       this.dummy.position.set(
-        this.grid.worldX(tile.x) + dx * (TILE / 2 + ladderOffset),
-        (level - 0.5) * LEVEL_HEIGHT,
-        this.grid.worldZ(tile.y) + dz * (TILE / 2 + ladderOffset),
+        this.grid.worldX(inst.x) + dx * (TILE / 2 + ladderOffset),
+        (storeys[i]! - 0.5) * LEVEL_HEIGHT,
+        this.grid.worldZ(inst.y) + dz * (TILE / 2 + ladderOffset),
       )
       // Turn local +Z to look out over the drop.
       this.dummy.rotation.y = Math.atan2(dx, dz)
       this.dummy.updateMatrix()
-      layer.mesh.setMatrixAt(tile.index, this.dummy.matrix)
-      layer.mesh.setColorAt(tile.index, baseColor)
+      layer.mesh.setMatrixAt(inst.index, this.dummy.matrix)
+      layer.mesh.setColorAt(inst.index, baseColor)
     })
 
     layer.mesh.instanceMatrix.needsUpdate = true

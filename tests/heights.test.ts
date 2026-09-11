@@ -83,12 +83,14 @@ describe('Level Heights, Stairs, and Ladders in ECS & Core Engine', () => {
     expect(grid.canTraverse({ x: 6, y: 5 }, { x: 5, y: 5 })).toBe(false)
   })
 
-  test('a ladder spans one storey only, and never cornerwise', () => {
+  test('a ladder climbs as many storeys as it is long, but never cornerwise', () => {
     const grid = new Grid(10)
     grid.setLevel(2, 2, 0)
     grid.setLevel(2, 3, 2) // two storeys up
     grid.setLadderFace(2, 3, Side.North)
-    expect(grid.canTraverse({ x: 2, y: 2 }, { x: 2, y: 3 })).toBe(false)
+    // A ladder is bolted to the whole wall, so it is climbed in one go.
+    expect(grid.canTraverse({ x: 2, y: 2 }, { x: 2, y: 3 })).toBe(true)
+    expect(grid.ladderSpanAt(2, 3, Side.North)).toBe(2)
 
     // Diagonal neighbours are not edges, so they carry no ladder.
     grid.setLevel(7, 7, 0)

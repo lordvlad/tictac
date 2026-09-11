@@ -271,8 +271,6 @@ function settleStructures(grid: Grid, footprints: readonly Rect[]): void {
       if (grid.blockAt(n.x, n.y) === Block.Stair) continue
       const side = faceToward({ x, y }, n)
       if (side === 0) continue
-      // A ladder face is an open cutout in the wall — do not seal it with masonry.
-      if ((grid.ladderFacesAt(x, y) & side) !== 0) continue
       if (grid.wallAt(x, y, side) === WallKind.None) {
         grid.setWall(x, y, side, WallKind.Solid)
       }
@@ -296,21 +294,35 @@ function settleStructures(grid: Grid, footprints: readonly Rect[]): void {
     if (!usable) grid.setBlock(x, y, Block.None)
   })
 
-  // A ladder whose footing went away is no longer a ladder.
-  // Active ladders require wall segments to be removed (wall cutout).
+  // A ladder whose footing went away is no longer a ladder. The ones that keep
+  // their footing keep their masonry too: the climb passes through a single
+  // opening, at the storey it lands on.
   grid.forEach((x, y) => {
     const faces = grid.ladderFacesAt(x, y)
     if (faces === 0) return
+    const level = grid.levelAt(x, y)
+    const kept: Side[] = []
     for (const side of [Side.North, Side.East, Side.South, Side.West]) {
       if ((faces & side) === 0) continue
       const [dx, dy] = SIDE_OFFSET[side]!
       const foot = { x: x + dx, y: y + dy }
-      const drop = grid.levelAt(x, y) - grid.levelAt(foot.x, foot.y)
-      if (drop !== 1 || !grid.isWalkable(foot.x, foot.y)) {
-        grid.clearLadderFaces(x, y)
+      // Any drop will do — a ladder is climbed in one go however tall it is —
+      // but there has to be somewhere to stand at the bottom.
+      const drop = level - grid.levelAt(foot.x, foot.y)
+      if (drop >= 1 && grid.isWalkable(foot.x, foot.y)) {
+        kept.push(side)
       } else {
-        grid.setWall(x, y, side, WallKind.None)
+        // No ladder, no hole: the opening would be a gap onto nothing.
+        grid.clearWallOpenings(x, y, side)
       }
+    }
+    // Faces are only clearable as a set, so drop them all and put back those
+    // that still have a footing.
+    grid.clearLadderFaces(x, y)
+    for (const side of kept) {
+      grid.setLadderFace(x, y, side)
+      if (grid.wallAt(x, y, side) === WallKind.None) grid.setWall(x, y, side, WallKind.Solid)
+      grid.setWallOpening(x, y, side, level)
     }
   })
 
@@ -759,11 +771,17 @@ function hasRoomToMove(grid: Grid, tile: Tile, from: Tile): boolean {
 }
 
 /**
- * Bolt ladders to a building's outside walls.
+ * Bolt a ladder to a building's outside wall.
  *
  * A ladder is only useful where it has somewhere to stand at the bottom, so it
  * goes on an outside face whose upper storey opens onto the air and whose
- * ground below is open, walkable and one storey down.
+ * ground below is open, walkable and at least one storey down. The masonry
+ * stays where it is: the climb shows through a single opening, at the storey
+ * the ladder lands on.
+ *
+ * The drop need not be a single storey, and where several faces qualify the
+ * tallest climb wins — a building whose upper storeys reach its own outline
+ * carries a ladder to the roof, not a stub onto the first floor.
  */
 function fitLadders(
   grid: Grid,
@@ -771,6 +789,9 @@ function fitLadders(
   all: readonly Building[],
   reserve: (x: number, y: number) => void,
 ): void {
+  // drop 0 means nothing qualified: a real candidate always climbs a storey.
+  const best = { x: 0, y: 0, side: Side.North as Side, level: 0, drop: 0 }
+
   for (const storey of building.storeys) {
     if (storey.level === 0) continue
 
@@ -779,30 +800,35 @@ function fitLadders(
         const side = faceToward({ x: 0, y: 0 }, { x: dx, y: dy })
         if (side === 0) continue
 
-        let placed = false
         walkBoundary(room, dx, dy, (x, y) => {
-          if (placed) return
           const ox = x + dx
           const oy = y + dy
           if (!grid.inBounds(ox, oy)) return
           // The foot has to be open ground, not another building's floor.
           if (all.some((b) => inRect(b.footprint, ox, oy))) return
           if (!grid.isWalkable(ox, oy)) return
-          if (grid.levelAt(ox, oy) !== storey.level - 1) return
+          const level = grid.levelAt(x, y)
+          const drop = level - grid.levelAt(ox, oy)
+          if (drop < 1 || drop <= best.drop) return
           // Only where the storey actually opens onto the air.
           if (grid.wallAt(x, y, side) !== WallKind.None) return
 
-          grid.setLadderFace(x, y, side)
-          // Ladders require wall segments to be removed (wall cutout).
-          grid.setWall(x, y, side, WallKind.None)
-          reserve(x, y)
-          reserve(ox, oy)
-          placed = true
+          best.x = x
+          best.y = y
+          best.side = side
+          best.level = level
+          best.drop = drop
         })
-        if (placed) return
       }
     }
   }
+
+  if (best.drop === 0) return
+  grid.setLadderFace(best.x, best.y, best.side)
+  grid.setWallOpening(best.x, best.y, best.side, best.level)
+  const [dx, dy] = SIDE_OFFSET[best.side]!
+  reserve(best.x, best.y)
+  reserve(best.x + dx, best.y + dy)
 }
 
 // ---------------------------------------------------------------------------
@@ -954,6 +980,11 @@ function dropUnreachableStorey(
     grid.setLevel(s.x, s.y, target)
     grid.setRoof(s.x, s.y, target + 1)
     grid.clearLadderFaces(s.x, s.y)
+    // The ladder is gone with the storey, so its landing hole goes too — the
+    // settling pass only revisits faces that still carry a ladder.
+    for (const side of [Side.North, Side.East, Side.South, Side.West]) {
+      grid.clearWallOpenings(s.x, s.y, side)
+    }
   }
   return true
 }
