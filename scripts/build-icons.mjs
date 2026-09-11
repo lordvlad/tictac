@@ -2,7 +2,10 @@
 // vendor/game-icons, into public/icons/<app name>.svg.
 //
 // Adding an icon is one line in scripts/icons.json plus `bun run icons`; the
-// output is committed so a plain clone runs without initialising the submodule.
+// output is committed so a plain clone — and the deploy build — runs without
+// initialising the submodule. Deliberately NOT part of `bun run build`: a
+// checkout without submodules would fail the build, which is exactly how the
+// Pages deploy broke for six commits.
 //
 // game-icons.net artwork is CC BY 3.0, which asks for the author to be named,
 // so the run also writes public/icons/CREDITS.txt from the manifest.
@@ -16,9 +19,10 @@ const outDir = new URL('public/icons/', root)
 const manifest = JSON.parse(await readFile(new URL('icons.json', import.meta.url), 'utf8'))
 const entries = Object.entries(manifest).filter(([name]) => !name.startsWith('$'))
 
-try {
-  await readdir(fileURLToPath(vendorDir))
-} catch {
+// A submodule that was never initialised is an empty directory, not a missing
+// one, so the count is what has to be checked.
+const vendored = await readdir(fileURLToPath(vendorDir)).catch(() => [])
+if (vendored.length === 0) {
   console.error('[icons] vendor/game-icons is empty — run: git submodule update --init')
   process.exit(1)
 }
