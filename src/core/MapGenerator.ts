@@ -238,6 +238,9 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   }
   settleStructures(grid, footprints)
 
+  // Last, because settling is what strips a roof back to a bare deck.
+  dressRooftops(grid, footprints, rng)
+
   const spawns: Record<Faction, Tile[]> = {
     [Faction.Blue]: pickSpawns(grid, rng, blueZone),
     [Faction.Red]: pickSpawns(grid, rng, redZone),
@@ -378,12 +381,126 @@ function openDeckEdges(grid: Grid, footprint: Rect, deck: number): void {
     for (const [dx, dy] of ORTHOGONAL) {
       const side = faceToward({ x: 0, y: 0 }, { x: dx, y: dy })
       if (side === 0) continue
-      // Only the rim: a face onto another deck tile is not an edge at all.
-      if (grid.levelAt(x + dx, y + dy) === deck && inRect(footprint, x + dx, y + dy)) continue
+      // The rim is where the roof runs out, which means a drop. A face onto
+      // ground at the same height is a step across, not an edge, and opening
+      // it would be opening the wall between two things you can walk between.
+      if (grid.levelAt(x + dx, y + dy) >= deck) continue
       if (grid.wallAt(x, y, side) === WallKind.None) continue
       grid.setWallOpening(x, y, side, deck)
     }
   })
+}
+
+/**
+ * Give a roof something to fight over.
+ *
+ * A deck stripped to a bare slab is a shooting gallery, so a few stretches of
+ * rim keep their parapet and the odd hoarding stands on the roof itself. Run
+ * after settling, which is the pass that strips a rim back to bare.
+ */
+function dressRooftops(grid: Grid, footprints: readonly Rect[], rng: Rng): void {
+  for (const footprint of footprints) {
+    let deck = 0
+    forEachTile(footprint, (x, y) => {
+      deck = Math.max(deck, grid.levelAt(x, y))
+    })
+    if (deck === 0) continue
+
+    keepSomeParapets(grid, footprint, deck, rng)
+    raiseHoardings(grid, footprint, deck, rng)
+  }
+}
+
+/**
+ * Let a few stretches of rim keep their wall, as a chest-high parapet.
+ *
+ * Parapet rather than the facade's own masonry: at roof height solid walling
+ * tops out over the eye of anyone up there, and a rim you can neither see nor
+ * shoot over is just a smaller roof. A face a ladder lands at is always left
+ * open — that gap is how the climb arrives.
+ */
+function keepSomeParapets(grid: Grid, footprint: Rect, deck: number, rng: Rng): void {
+  forEachTile(footprint, (x, y) => {
+    if (grid.levelAt(x, y) !== deck) return
+    for (const [dx, dy] of ORTHOGONAL) {
+      const side = faceToward({ x: 0, y: 0 }, { x: dx, y: dy })
+      if (side === 0) continue
+      if (!grid.wallOpenAt(x, y, side, deck)) continue
+      if (grid.hasLadderFace(x, y, side)) continue
+      if (!rng.chance(0.08)) continue
+
+      // A run, not a single tile: one metre of parapet on its own reads as
+      // rubble rather than as the edge of a roof.
+      const length = rng.int(2, 5)
+      for (let step = 0; step < length; step++) {
+        // Along the rim, which is the axis the face does not point down.
+        const rx = x + (dx === 0 ? step : 0)
+        const ry = y + (dy === 0 ? step : 0)
+        if (!inRect(footprint, rx, ry) || grid.levelAt(rx, ry) !== deck) break
+        if (grid.hasLadderFace(rx, ry, side)) break
+        if (grid.wallAt(rx, ry, side) === WallKind.None) break
+        grid.clearWallOpenings(rx, ry, side)
+        grid.setWall(rx, ry, side, WallKind.Parapet)
+      }
+    }
+  })
+}
+
+/**
+ * Stand the odd hoarding on a roof: a head-high panel to break the sightline.
+ *
+ * Openings below the deck keep it to a panel. The wall is one column from the
+ * ground up, and the space under a deck is not modelled, so without them the
+ * hoarding would hang down through thin air inside the building.
+ *
+ * Anything that costs the map a walkable tile is taken straight back out. The
+ * check is the whole map before against the whole map after, not the two tiles
+ * either side: a panel strands a pocket of roof around the corner from itself
+ * just as easily as it seals its own edge.
+ */
+function raiseHoardings(grid: Grid, footprint: Rect, deck: number, rng: Rng): void {
+  const tiles: Tile[] = []
+  forEachTile(footprint, (x, y) => {
+    if (grid.levelAt(x, y) === deck && grid.isWalkable(x, y)) tiles.push({ x, y })
+  })
+  if (tiles.length < 4) return
+
+  let before = grid.reachableMask(tiles[0]!)
+
+  for (let i = rng.int(0, 2); i > 0; i--) {
+    const from = tiles[rng.int(0, tiles.length - 1)]!
+    const [dx, dy] = ORTHOGONAL[rng.int(0, ORTHOGONAL.length - 1)]!
+    const side = faceToward({ x: 0, y: 0 }, { x: dx, y: dy })
+    if (side === 0) continue
+
+    const raised: Tile[] = []
+    const length = rng.int(1, 3)
+    for (let step = 0; step < length; step++) {
+      const x = from.x + (dx === 0 ? step : 0)
+      const y = from.y + (dy === 0 ? step : 0)
+      const beyond = { x: x + dx, y: y + dy }
+      // Both sides have to be roof, or this is the rim rather than the middle.
+      if (grid.levelAt(x, y) !== deck || grid.levelAt(beyond.x, beyond.y) !== deck) break
+      if (!inRect(footprint, beyond.x, beyond.y)) break
+      if (grid.wallAt(x, y, side) !== WallKind.None) break
+
+      grid.setWall(x, y, side, WallKind.Solid)
+      for (let level = 0; level < deck; level++) grid.setWallOpening(x, y, side, level)
+      raised.push({ x, y })
+    }
+    if (raised.length === 0) continue
+
+    const after = grid.reachableMask(tiles[0]!)
+    if (before.every((seen, index) => seen === 0 || after[index] !== 0)) {
+      before = after
+      continue
+    }
+
+    for (const tile of raised) {
+      grid.setWall(tile.x, tile.y, side, WallKind.None)
+      grid.clearWallOpenings(tile.x, tile.y, side)
+    }
+  }
 }
 
 /** Can a unit on `tile` step anywhere except back to `from`? */

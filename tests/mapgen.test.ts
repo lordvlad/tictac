@@ -164,13 +164,16 @@ describe('Rooms, doors and windows', () => {
     }
   })
 
-  test('a roof is bare at the rim, with the facade under it left standing', () => {
+  test('a roof is mostly bare at the rim, with the facade under it left standing', () => {
     const sides = [
       [1, 0, Side.East],
       [-1, 0, Side.West],
       [0, 1, Side.South],
       [0, -1, Side.North],
     ] as const
+
+    let bareTotal = 0
+    let parapetTotal = 0
 
     for (const seed of SEEDS) {
       const { grid, buildings } = generateMap(seed)
@@ -195,11 +198,21 @@ describe('Rooms, doors and windows', () => {
               if (ontoDeck || grid.wallAt(x, y, side) === WallKind.None) continue
               rim++
 
-              // Nothing to hide behind on a flat roof: the rim is open...
-              expect(grid.wallOpenAt(x, y, side, deck)).toBe(true)
-              expect(coverLevelInDir(grid, { x, y }, dx, dy)).toBe(CoverLevel.None)
-              // ...but the face of the building below it still stands, which is
-              // what clearing the wall outright would have taken away.
+              if (grid.wallOpenAt(x, y, side, deck)) {
+                // Bare: nothing to hide behind at the edge of a flat roof.
+                bareTotal++
+                expect(coverLevelInDir(grid, { x, y }, dx, dy)).toBe(CoverLevel.None)
+              } else {
+                // Kept: chest high, so it is cover you can still shoot over.
+                parapetTotal++
+                expect(grid.wallAt(x, y, side)).toBe(WallKind.Parapet)
+                expect(coverLevelInDir(grid, { x, y }, dx, dy)).toBe(CoverLevel.Low)
+                // A ladder's landing is never sealed — that gap is the way in.
+                expect(grid.hasLadderFace(x, y, side)).toBe(false)
+              }
+
+              // Either way the face of the building below still stands, which
+              // is what clearing the wall outright would have taken away.
               expect(grid.wallTop(x, y, side)).toBeGreaterThanOrEqual(deck * LEVEL_HEIGHT)
               if (deck > 1) expect(grid.wallOpenAt(x, y, side, deck - 1)).toBe(false)
             }
@@ -209,6 +222,52 @@ describe('Rooms, doors and windows', () => {
 
       expect(rim).toBeGreaterThan(0)
     }
+
+    // Both kinds of edge have to occur, or the roofscape is all one note.
+    expect(bareTotal).toBeGreaterThan(0)
+    expect(parapetTotal).toBeGreaterThan(0)
+    expect(parapetTotal).toBeLessThan(bareTotal)
+  })
+
+  test('a hoarding stands on the roof without cutting it in two', () => {
+    let hoardings = 0
+
+    for (const seed of SEEDS) {
+      const { grid, buildings, spawns } = generateMap(seed)
+      const reachable = grid.reachableMask(spawns[Faction.Blue][0]!)
+
+      for (const b of buildings) {
+        let deck = 0
+        for (let y = b.y; y < b.y + b.h; y++) {
+          for (let x = b.x; x < b.x + b.w; x++) deck = Math.max(deck, grid.levelAt(x, y))
+        }
+        if (deck === 0) continue
+
+        for (let y = b.y; y < b.y + b.h; y++) {
+          for (let x = b.x; x < b.x + b.w; x++) {
+            if (grid.levelAt(x, y) !== deck) continue
+            for (const [dx, dy] of ORTHOGONAL) {
+              const side = faceToward({ x, y }, { x: x + dx, y: y + dy })
+              if (side === 0) continue
+              // A hoarding is the only masonry standing between two deck tiles.
+              if (grid.levelAt(x + dx, y + dy) !== deck) continue
+              if (grid.wallAt(x, y, side) !== WallKind.Solid) continue
+              if (!grid.wallOpenAt(x, y, side, deck - 1)) continue
+              hoardings++
+
+              // Head high on the roof, and nothing hanging below the deck.
+              expect(grid.wallOpenAt(x, y, side, deck)).toBe(false)
+              expect(coverLevelInDir(grid, { x, y }, dx, dy)).toBe(CoverLevel.Tall)
+              // Both sides of it are still part of the one walkable map.
+              expect(reachable[grid.index(x, y)]).toBeTruthy()
+              expect(reachable[grid.index(x + dx, y + dy)]).toBeTruthy()
+            }
+          }
+        }
+      }
+    }
+
+    expect(hoardings).toBeGreaterThan(0)
   })
 
   test('a partition between two rooms runs end to end, broken only by doors', () => {
