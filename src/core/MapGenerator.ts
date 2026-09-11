@@ -155,14 +155,13 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
     }
   }
 
-  // --- Roof every room ------------------------------------------------------
-  // One storey above its own floor, so a room reads as enclosed from outside
-  // and the level filter lifts it away when the player looks inside.
-  for (const building of buildings) {
-    forEachTile(building.footprint, (x, y) => {
-      grid.setRoof(x, y, grid.levelAt(x, y) + 1)
-    })
-  }
+  // --- Roof every room, bar the one you walk on -----------------------------
+  // Settling re-roofs from scratch once the terrain is final, so this is the
+  // provisional pass the access fitters read.
+  roofBuildings(
+    grid,
+    buildings.map((building) => building.footprint),
+  )
 
   // --- Vertical access ------------------------------------------------------
   for (const building of buildings) {
@@ -326,16 +325,64 @@ function settleStructures(grid: Grid, footprints: readonly Rect[]): void {
     }
   })
 
-  // Everything indoors is covered...
-  for (const footprint of footprints) {
-    forEachTile(footprint, (x, y) => {
-      grid.setRoof(x, y, grid.levelAt(x, y) + 1)
-    })
-  }
+  // Everything indoors is covered, bar the deck...
+  roofBuildings(grid, footprints)
 
   // ...except stairs, which require ceiling tiles over the ramp to be removed (stairwell cutout).
   grid.forEach((x, y, block) => {
     if (block === Block.Stair) grid.setRoof(x, y, 0)
+  })
+}
+
+/**
+ * Cover every indoor tile, bar the deck.
+ *
+ * The deck is the highest floor inside the footprint. With one floor per tile
+ * that floor *is* the roof, so roofing it would put a slab over the very
+ * surface the player is meant to stand on. A footprint that never leaves the
+ * ground has no deck: taking its roof off would leave a roofless shed rather
+ * than somewhere to stand.
+ *
+ * Derived from the settled grid rather than from the building record, because
+ * settling can lower a storey that nothing could reach.
+ */
+function roofBuildings(grid: Grid, footprints: readonly Rect[]): void {
+  for (const footprint of footprints) {
+    let deck = 0
+    forEachTile(footprint, (x, y) => {
+      deck = Math.max(deck, grid.levelAt(x, y))
+    })
+
+    forEachTile(footprint, (x, y) => {
+      const level = grid.levelAt(x, y)
+      if (deck > 0 && level === deck) return
+      grid.setRoof(x, y, level + 1)
+    })
+
+    if (deck > 0) openDeckEdges(grid, footprint, deck)
+  }
+}
+
+/**
+ * Take the masonry off the roof's rim, leaving the facade under it standing.
+ *
+ * A flat roof is bare: walking to the edge and looking down is the point of
+ * being up there. The wall cannot simply be cleared, though — it is one column
+ * keyed to the higher of the two tiles it divides, so clearing it would take
+ * the whole face of the building down to the street with it. Opening the deck's
+ * own storey leaves the facade and removes only the rim.
+ */
+function openDeckEdges(grid: Grid, footprint: Rect, deck: number): void {
+  forEachTile(footprint, (x, y) => {
+    if (grid.levelAt(x, y) !== deck) return
+    for (const [dx, dy] of ORTHOGONAL) {
+      const side = faceToward({ x: 0, y: 0 }, { x: dx, y: dy })
+      if (side === 0) continue
+      // Only the rim: a face onto another deck tile is not an edge at all.
+      if (grid.levelAt(x + dx, y + dy) === deck && inRect(footprint, x + dx, y + dy)) continue
+      if (grid.wallAt(x, y, side) === WallKind.None) continue
+      grid.setWallOpening(x, y, side, deck)
+    }
   })
 }
 

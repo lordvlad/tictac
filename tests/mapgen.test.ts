@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { generateMap } from '../src/core/MapGenerator'
 import { Blocks } from '../src/render/Blocks'
 import { Block, Grid, ORTHOGONAL, Side, faceToward, type Tile } from '../src/core/Grid'
-import { WallKind } from '../src/core/Walls'
+import { CoverLevel, WallKind } from '../src/core/Walls'
+import { coverLevelInDir } from '../src/core/Cover'
 import { Faction, LEVEL_HEIGHT } from '../src/config'
 
 const SEEDS = [1, 7, 42, 99, 1337, 5150, 90210, 24601]
@@ -122,23 +123,91 @@ describe('Map generation is layered', () => {
 })
 
 describe('Rooms, doors and windows', () => {
-  test('every tile indoors is roofed', () => {
+  test('every tile indoors is roofed, bar the deck you stand on', () => {
     for (const seed of SEEDS) {
       const { grid, buildings } = generateMap(seed)
       let roomTiles = 0
       let unroofed = 0
+      let deckTiles = 0
+      let walkableDeckTiles = 0
+
       for (const b of buildings) {
+        // The deck is the highest floor in the footprint; with one floor per
+        // tile that floor is the roof, so it is open to the sky on purpose.
+        let deck = 0
+        for (let y = b.y; y < b.y + b.h; y++) {
+          for (let x = b.x; x < b.x + b.w; x++) deck = Math.max(deck, grid.levelAt(x, y))
+        }
+
         for (let y = b.y; y < b.y + b.h; y++) {
           for (let x = b.x; x < b.x + b.w; x++) {
             roomTiles++
+            const level = grid.levelAt(x, y)
+            if (deck > 0 && level === deck) {
+              deckTiles++
+              if (grid.isWalkable(x, y)) walkableDeckTiles++
+              expect(grid.roofAt(x, y)).toBe(0)
+              continue
+            }
             // Stair ramps have ceiling cutouts for head clearance. Upper landings are normal roofed tiles.
             if (grid.blockAt(x, y) === Block.Stair) continue
-            if (grid.roofAt(x, y) <= grid.levelAt(x, y)) unroofed++
+            if (grid.roofAt(x, y) <= level) unroofed++
           }
         }
       }
+
       expect(roomTiles).toBeGreaterThan(0)
       expect(unroofed).toBe(0)
+      // A map of nothing but bungalows would make the rooftops untestable.
+      expect(deckTiles).toBeGreaterThan(0)
+      expect(walkableDeckTiles).toBeGreaterThan(0)
+    }
+  })
+
+  test('a roof is bare at the rim, with the facade under it left standing', () => {
+    const sides = [
+      [1, 0, Side.East],
+      [-1, 0, Side.West],
+      [0, 1, Side.South],
+      [0, -1, Side.North],
+    ] as const
+
+    for (const seed of SEEDS) {
+      const { grid, buildings } = generateMap(seed)
+      let rim = 0
+
+      for (const b of buildings) {
+        let deck = 0
+        for (let y = b.y; y < b.y + b.h; y++) {
+          for (let x = b.x; x < b.x + b.w; x++) deck = Math.max(deck, grid.levelAt(x, y))
+        }
+        if (deck === 0) continue
+
+        for (let y = b.y; y < b.y + b.h; y++) {
+          for (let x = b.x; x < b.x + b.w; x++) {
+            if (grid.levelAt(x, y) !== deck) continue
+            for (const [dx, dy, side] of sides) {
+              const nx = x + dx
+              const ny = y + dy
+              const ontoDeck =
+                grid.levelAt(nx, ny) === deck &&
+                nx >= b.x && nx < b.x + b.w && ny >= b.y && ny < b.y + b.h
+              if (ontoDeck || grid.wallAt(x, y, side) === WallKind.None) continue
+              rim++
+
+              // Nothing to hide behind on a flat roof: the rim is open...
+              expect(grid.wallOpenAt(x, y, side, deck)).toBe(true)
+              expect(coverLevelInDir(grid, { x, y }, dx, dy)).toBe(CoverLevel.None)
+              // ...but the face of the building below it still stands, which is
+              // what clearing the wall outright would have taken away.
+              expect(grid.wallTop(x, y, side)).toBeGreaterThanOrEqual(deck * LEVEL_HEIGHT)
+              if (deck > 1) expect(grid.wallOpenAt(x, y, side, deck - 1)).toBe(false)
+            }
+          }
+        }
+      }
+
+      expect(rim).toBeGreaterThan(0)
     }
   })
 
