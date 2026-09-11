@@ -42,6 +42,9 @@ const WALL_THICKNESS = 0.12
 /** Ladders are edges, not tiles, so they get their own colour and layer. */
 const LADDER_COLOR = 0xff8800
 
+/** Opacity of a storey the level filter has lifted out of the way. */
+const LEVEL_FILTER_OPACITY = 0.15
+
 /** Face bits in a stable order, so instances and their offsets stay paired. */
 const LADDER_FACE_ORDER: readonly Side[] = [Side.North, Side.East, Side.South, Side.West]
 
@@ -255,14 +258,33 @@ interface BlockInstance {
  * One InstancedMesh per block kind, since each kind is a different box height.
  * Kinds are driven by {@link BLOCK_COLORS}, so a new height class is one entry
  * plus its enum member rather than another pair of hand-maintained fields.
+ *
+ * `fade` is the only channel the shader reads, and three things have an opinion
+ * about it: fog of war, the level filter and the x-ray. Each keeps its own
+ * state here — `known` per instance, `levels` per instance, the x-ray in
+ * {@link Blocks.masks} — and {@link Blocks.composeFade} is the single place
+ * they are combined. They used to write `fade` directly, so whichever pass ran
+ * last won: a unit stepping (which recomputes fog) turned the storey above
+ * opaque again, and an x-ray pass brought unexplored blocks back into view.
  */
 interface BlockLayer {
   mesh: InstancedMesh
   instances: BlockInstance[]
   baseColor: Color
   fade: InstancedBufferAttribute
+  /** Fog of war: 1 once the instance's tile has been seen, 0 while unknown. */
+  known: Uint8Array
+  /** Storey each instance is filtered with, resolved once at build time. */
+  levels: Uint8Array
   /** Walls are rebuilt as a group when one changes kind. */
   isWall?: boolean
+  /**
+   * A ceiling is taken away entirely once its storey is filtered out, rather
+   * than ghosted: drawn at a fraction it only hazes the room it covers, and
+   * since fog decides per tile whether an instance is drawn at all, the haze
+   * arrived a tile at a time as the floor below was explored — a patchwork.
+   */
+  isRoof?: boolean
 }
 
 /**
@@ -285,9 +307,38 @@ export class Blocks {
   /** Occlusion scratch for the x-ray pass: tiles for occupants, edges for walls. */
   private readonly masks: OcclusionMasks
   private activeLevelFilter: number | null = null
-  private occlusionActive = false
+  /** Opacity the x-ray pass last asked for. 1 means nothing is being seen through. */
+  private xrayOpacity = 1
+
+  /**
+   * Attach the per-instance state the fade composition needs, and paint the
+   * first frame's values. Every layer goes through here, so no builder can
+   * forget one of the three channels.
+   */
+  private finishLayer(layer: BlockLayer): BlockLayer {
+    layer.known.fill(1)
+    for (const inst of layer.instances) {
+      let level = inst.filterLevel ?? this.grid.levelAt(inst.x, inst.y)
+      if (inst.side !== undefined) {
+        // A wall is masonry from the ground up, so it belongs to the lower of
+        // the floors it divides: it stays solid while that floor is in view.
+        const [dx, dz] = FACE_OFFSET[inst.side]!
+        level = Math.min(level, this.grid.levelAt(inst.x + dx, inst.y + dz))
+      }
+      layer.levels[inst.index] = level
+    }
+    this.composeFade(layer)
+    return layer
+  }
 
   constructor(private readonly grid: Grid) {
+    // Allocated first: building a layer composes its fade, which reads them.
+    this.masks = {
+      tiles: new Uint8Array(grid.size * grid.size),
+      edges: new Uint8Array(grid.edgeCount),
+    }
+    this.group.name = 'blocks'
+
     const kinds = Object.keys(BLOCK_COLORS).map(Number) as Exclude<Block, typeof Block.None>[]
 
     const tilesByKind = new Map<Block, BlockInstance[]>(kinds.map((kind) => [kind, []]))
@@ -301,12 +352,6 @@ export class Blocks {
       const layer = this.buildLayer(kind, instances)
       this.layers.push(layer)
       this.group.add(layer.mesh)
-    }
-
-    this.group.name = 'blocks'
-    this.masks = {
-      tiles: new Uint8Array(grid.size * grid.size),
-      edges: new Uint8Array(grid.edgeCount),
     }
 
     for (const extra of [this.buildUpperFloors(), this.buildRoofs(), this.buildLadders()]) {
@@ -392,7 +437,15 @@ export class Blocks {
     mesh.frustumCulled = false
 
     const baseColor = new Color(style.color)
-    const layer: BlockLayer = { mesh, instances, baseColor, fade, isWall: true }
+    const layer: BlockLayer = {
+      mesh,
+      instances,
+      baseColor,
+      fade,
+      known: new Uint8Array(capacity),
+      levels: new Uint8Array(capacity),
+      isWall: true,
+    }
 
     // A unit-height box scaled per instance: a wall is a column of masonry
     // from the ground up to its top, so a wall bounding an upper storey is one
@@ -418,7 +471,7 @@ export class Blocks {
     mesh.instanceMatrix.needsUpdate = true
     if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true
 
-    return layer
+    return this.finishLayer(layer)
   }
 
   private buildLayer(kind: Exclude<Block, typeof Block.None>, instances: BlockInstance[]): BlockLayer {
@@ -444,9 +497,16 @@ export class Blocks {
     mesh.frustumCulled = false
 
     const baseColor = new Color(BLOCK_COLORS[kind])
-    const layer: BlockLayer = { mesh, instances, baseColor, fade }
+    const layer: BlockLayer = {
+      mesh,
+      instances,
+      baseColor,
+      fade,
+      known: new Uint8Array(capacity),
+      levels: new Uint8Array(capacity),
+    }
     this.placeAll(layer, height)
-    return layer
+    return this.finishLayer(layer)
   }
 
   private buildUpperFloors(): BlockLayer | null {
@@ -475,7 +535,14 @@ export class Blocks {
     mesh.frustumCulled = false
 
     const baseColor = new Color(0x64748b)
-    const layer: BlockLayer = { mesh, instances, baseColor, fade }
+    const layer: BlockLayer = {
+      mesh,
+      instances,
+      baseColor,
+      fade,
+      known: new Uint8Array(capacity),
+      levels: new Uint8Array(capacity),
+    }
 
     for (const tile of layer.instances) {
       const level = this.grid.levelAt(tile.x, tile.y)
@@ -492,7 +559,7 @@ export class Blocks {
     layer.mesh.instanceMatrix.needsUpdate = true
     if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
 
-    return layer
+    return this.finishLayer(layer)
   }
 
   /**
@@ -528,7 +595,15 @@ export class Blocks {
     mesh.frustumCulled = false
 
     const baseColor = new Color(0x55606e)
-    const layer: BlockLayer = { mesh, instances, baseColor, fade }
+    const layer: BlockLayer = {
+      mesh,
+      instances,
+      baseColor,
+      fade,
+      known: new Uint8Array(capacity),
+      levels: new Uint8Array(capacity),
+      isRoof: true,
+    }
 
     for (const tile of layer.instances) {
       this.dummy.position.set(
@@ -544,7 +619,7 @@ export class Blocks {
     layer.mesh.instanceMatrix.needsUpdate = true
     if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
 
-    return layer
+    return this.finishLayer(layer)
   }
 
   /**
@@ -581,7 +656,14 @@ export class Blocks {
     mesh.frustumCulled = false
 
     const baseColor = new Color(LADDER_COLOR)
-    const layer: BlockLayer = { mesh, instances, baseColor, fade }
+    const layer: BlockLayer = {
+      mesh,
+      instances,
+      baseColor,
+      fade,
+      known: new Uint8Array(capacity),
+      levels: new Uint8Array(capacity),
+    }
 
     instances.forEach((tile, i) => {
       const [dx, dz] = FACE_OFFSET[faces[i]!]!
@@ -605,7 +687,7 @@ export class Blocks {
     layer.mesh.instanceMatrix.needsUpdate = true
     if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
 
-    return layer
+    return this.finishLayer(layer)
   }
   private placeAll(layer: BlockLayer, height: number): void {
     for (const tile of layer.instances) {
@@ -647,8 +729,6 @@ export class Blocks {
    */
   applyVisibility(values: Uint8Array): void {
     for (const layer of this.layers) {
-      const fadeArray = layer.fade.array as Float32Array
-      let fadeDirty = false
       for (const inst of layer.instances) {
         let state = (values[this.grid.index(inst.x, inst.y)] ?? VisState.Unknown) as VisState
         if (inst.side !== undefined) {
@@ -662,14 +742,10 @@ export class Blocks {
         layer.mesh.setColorAt(inst.index, this.scratch)
 
         // Unexplored instances must be hidden so they do not draw black cutout stencils
-        const targetFade = state === VisState.Unknown ? 0 : 1
-        if (fadeArray[inst.index] !== targetFade) {
-          fadeArray[inst.index] = targetFade
-          fadeDirty = true
-        }
+        layer.known[inst.index] = state === VisState.Unknown ? 0 : 1
       }
       if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
-      if (fadeDirty) layer.fade.needsUpdate = true
+      this.composeFade(layer)
     }
   }
 
@@ -678,6 +754,8 @@ export class Blocks {
     for (const layer of this.layers) {
       for (const tile of layer.instances) layer.mesh.setColorAt(tile.index, layer.baseColor)
       if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
+      layer.known.fill(1)
+      this.composeFade(layer)
     }
   }
 
@@ -702,15 +780,15 @@ export class Blocks {
 
   /** Fade every marked block to `opacity`; all others return to fully opaque. */
   commitOcclusionFade(opacity: number): void {
-    this.occlusionActive = true
-    for (const layer of this.layers) this.applyFade(layer, opacity)
+    this.xrayOpacity = opacity
+    for (const layer of this.layers) this.composeFade(layer)
   }
 
   /** Restore all blocks to full opacity. Cheap no-op when nothing is faded. */
   clearOcclusionFade(): void {
-    if (!this.occlusionActive) return
-    this.occlusionActive = false
-    for (const layer of this.layers) this.applyFade(layer, 1)
+    if (this.xrayOpacity === 1) return
+    this.xrayOpacity = 1
+    for (const layer of this.layers) this.composeFade(layer)
   }
 
   /**
@@ -720,41 +798,51 @@ export class Blocks {
    */
   setLevelFilter(level: number | null): void {
     this.activeLevelFilter = level
-    for (const layer of this.layers) {
-      this.applyFade(layer, 1)
-    }
+    for (const layer of this.layers) this.composeFade(layer)
   }
 
-  private applyFade(layer: BlockLayer, xrayOpacity: number): void {
+  /**
+   * Fold the three opinions about an instance's opacity into the one channel
+   * the shader reads.
+   *
+   * Fog wins outright — an unexplored block is not drawn at all, and neither
+   * the level filter nor the x-ray may reveal it. Otherwise the storey filter
+   * decides, a ceiling it has lifted goes entirely, and a block the x-ray
+   * marked is taken down to whichever of the two is more transparent.
+   */
+  private composeFade(layer: BlockLayer): void {
     const values = layer.fade.array as Float32Array
     let dirty = false
+
     for (const inst of layer.instances) {
-      // A wall is masonry from the ground up, so it belongs to the lower of the
-      // floors it divides: it stays solid while that floor is the one in view.
-      let instLevel = inst.filterLevel ?? this.grid.levelAt(inst.x, inst.y)
-      if (inst.side !== undefined) {
-        const [dx, dz] = FACE_OFFSET[inst.side]!
-        instLevel = Math.min(instLevel, this.grid.levelAt(inst.x + dx, inst.y + dz))
+      let target: number
+      if (layer.known[inst.index] === 0) {
+        target = 0
+      } else {
+        const filtered =
+          this.activeLevelFilter !== null && layer.levels[inst.index]! > this.activeLevelFilter
+        if (filtered && layer.isRoof) {
+          // Nothing to see through a ceiling that has been lifted away.
+          target = 0
+        } else {
+          const levelOpacity = filtered ? LEVEL_FILTER_OPACITY : 1
+          const marked =
+            inst.edge !== undefined
+              ? this.masks.edges[inst.edge]
+              : this.masks.tiles[this.grid.index(inst.x, inst.y)]
+          target = marked ? Math.min(levelOpacity, this.xrayOpacity) : levelOpacity
+        }
       }
 
-      let levelOpacity = 1.0
-      if (this.activeLevelFilter !== null && instLevel > this.activeLevelFilter) {
-        levelOpacity = 0.15 // Transparent for upper levels when viewing lower level
-      }
-
-      const marked =
-        inst.edge !== undefined
-          ? this.masks.edges[inst.edge]
-          : this.masks.tiles[this.grid.index(inst.x, inst.y)]
-      const targetOpacity = marked ? Math.min(levelOpacity, xrayOpacity) : levelOpacity
-
-      if (values[inst.index] !== targetOpacity) {
-        values[inst.index] = targetOpacity
+      if (values[inst.index] !== target) {
+        values[inst.index] = target
         dirty = true
       }
     }
+
     if (dirty) layer.fade.needsUpdate = true
   }
+
   dispose(): void {
     for (const layer of this.layers) {
       layer.mesh.geometry.dispose()
