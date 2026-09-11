@@ -29,3 +29,12 @@ ui-lethal: skull-crossed-bones by lorc
 ui-hazard: hazard-sign by lorc
 ui-cancel: cancel by sbed
 ui-continue: next-button by delapouite
+ui-expand: expand by delapouite
+mode-snap: crosshair by delapouite
+mode-aimed: reticule by lorc
+mode-burst: laser-burst by skoll
+shot-range: archery-target by lorc
+shot-blinded: sight-disabled by skoll
+shot-conceal: hidden by lorc
+shot-damage: impact-point by lorc
+shot-shred: armor-punch by delapouite

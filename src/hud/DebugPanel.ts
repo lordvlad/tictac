@@ -2,6 +2,7 @@ import { RULES, AIM, COVER } from '../config'
 import { AMMO, AmmoId, GrenadeId, STATUSES, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ITEMS, ItemId } from '../core/Items'
 import type { Soldier } from '../entities/Soldier'
+import { icon } from './icons'
 
 /** A group of live values the panel can edit. */
 interface EditGroup {
@@ -202,7 +203,7 @@ export class DebugPanel {
     this.root.innerHTML = `
       <div class="debug-head">
         <span>Debug</span>
-        <button data-close="1">✕</button>
+        <button data-close="1">${icon('ui-cancel')}</button>
       </div>
       <div class="debug-body">
         ${loadout}

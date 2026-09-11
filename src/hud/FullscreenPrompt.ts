@@ -1,4 +1,5 @@
 import { bottomLeftStack } from './CornerStack'
+import { icon } from './icons'
 
 /**
  * The same condition the compact HUD uses: whichever viewport axis is smaller
@@ -34,9 +35,9 @@ export class FullscreenPrompt {
     this.root.className = 'fs-prompt'
     this.root.innerHTML = `
       <button class="fs-prompt-cta interactive" type="button" data-fs="enter">
-        <span class="fs-prompt-glyph">⛶</span> Play fullscreen
+        ${icon('ui-expand')} Play fullscreen
       </button>
-      <button class="fs-prompt-close interactive" type="button" data-fs="dismiss" aria-label="Dismiss">×</button>
+      <button class="fs-prompt-close interactive" type="button" data-fs="dismiss" aria-label="Dismiss">${icon('ui-cancel')}</button>
     `
     this.root.addEventListener('click', this.onClick)
     bottomLeftStack().appendChild(this.root)

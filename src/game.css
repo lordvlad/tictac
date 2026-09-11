@@ -1475,6 +1475,14 @@ canvas {
   height: 22px;
 }
 
+/** Inline with 10px readouts — the shot breakdown and the turn badge. */
+.gi.tiny {
+  width: 11px;
+  height: 11px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
 .gi.huge {
   width: 34px;
   height: 34px;

@@ -27,5 +27,14 @@
   "ui-lethal": "lorc/skull-crossed-bones",
   "ui-hazard": "lorc/hazard-sign",
   "ui-cancel": "sbed/cancel",
-  "ui-continue": "delapouite/next-button"
+  "ui-continue": "delapouite/next-button",
+  "ui-expand": "delapouite/expand",
+  "mode-snap": "delapouite/crosshair",
+  "mode-aimed": "lorc/reticule",
+  "mode-burst": "skoll/laser-burst",
+  "shot-range": "lorc/archery-target",
+  "shot-blinded": "skoll/sight-disabled",
+  "shot-conceal": "lorc/hidden",
+  "shot-damage": "lorc/impact-point",
+  "shot-shred": "delapouite/armor-punch"
 }

@@ -178,7 +178,7 @@ export class Hud {
 
     this.topRightEl.innerHTML = `
       <div class="hud-info-card">
-        <span class="hud-faction-badge ${model.factionIsBlue ? 'blue' : 'red'}">${model.networkBadge}</span>
+        <span class="hud-faction-badge ${model.factionIsBlue ? 'blue' : 'red'}">${model.networkMode === 'local' ? '' : icon(model.isMyTurn ? 'ui-deploy' : 'ui-unit-turn', 'tiny')}${model.networkBadge}</span>
         <span class="hud-turn-label">Turn ${model.turnNumber}</span>
         <span class="hud-turn-label" style="opacity: 0.6;">Seed ${model.seedLabel}</span>
       </div>
@@ -341,7 +341,7 @@ export class Hud {
       <button class="shot-option interactive ${card.available ? '' : 'unavailable'}"
               ${card.available ? '' : 'disabled'} ${Hud.intentAttr({ type: 'fireShot', mode: card.mode })}>
         <div class="shot-option-head">
-          <span class="shot-option-name">${card.name}</span>
+          <span class="shot-option-name">${icon(`mode-${card.mode}`)} ${card.name}</span>
           <span class="shot-option-ap">${card.apCost} AP · ${card.bullets} ammo</span>
         </div>
         <div class="shot-option-chance ${card.hitChance >= 50 ? 'good' : 'poor'}">
@@ -352,16 +352,16 @@ export class Hud {
             .map(
               (t) => `
             <div class="shot-row ${t.penalty ? 'penalty' : ''}">
-              <span>${t.label}</span><span>${t.value}</span>
+              <span>${t.icon ? icon(t.icon, 'tiny') : ''}${t.label}</span><span>${t.value}</span>
             </div>`,
             )
             .join('')}
         </div>
         <div class="shot-rows shot-outcome">
-          <div class="shot-row"><span>Damage</span><span>${card.damage}</span></div>
-          ${card.armorShred > 0 ? `<div class="shot-row"><span>Armor shred</span><span>-${card.armorShred}</span></div>` : ''}
+          <div class="shot-row"><span>${icon('shot-damage', 'tiny')}Damage</span><span>${card.damage}</span></div>
+          ${card.armorShred > 0 ? `<div class="shot-row"><span>${icon('shot-shred', 'tiny')}Armor shred</span><span>-${card.armorShred}</span></div>` : ''}
         </div>
-        <div class="shot-option-fire">${card.available ? 'CLICK TO FIRE' : 'UNAVAILABLE'}</div>
+        <div class="shot-option-fire">${card.available ? `${icon('ui-shoot')} CLICK TO FIRE` : 'UNAVAILABLE'}</div>
       </button>
     `
   }

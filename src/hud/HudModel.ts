@@ -75,6 +75,8 @@ export interface HudTargetIcon {
 export interface HudShotTerm {
   label: string
   value: string
+  /** Icon name under public/icons, when the term has one of its own. */
+  icon?: string
   /** Negative terms are drawn in the danger colour. */
   penalty: boolean
 }
@@ -301,12 +303,12 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       sources.myFaction !== undefined &&
       turnManager.activeFaction === sources.myFaction)
 
+  // The badge is text: the turn's own glyph is the view's business, drawn from
+  // the icon set rather than as an emoji the platform picks a typeface for.
   let networkBadge = FACTION_INFO[faction].name
   if (sources.networkMode && sources.networkMode !== 'local') {
     const activeRole = faction === Faction.Blue ? 'BLUE (HOST)' : 'RED (GUEST)'
-    networkBadge = isMyTurn
-      ? `🟢 YOUR TURN — ${activeRole}`
-      : `⏳ OPPONENT'S TURN — ${activeRole}`
+    networkBadge = isMyTurn ? `YOUR TURN — ${activeRole}` : `OPPONENT'S TURN — ${activeRole}`
   }
 
   return {
@@ -351,22 +353,43 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
     cards: pending.options.map((option) => {
       const b = option.breakdown
       const terms: HudShotTerm[] = [
-        { label: 'Weapon base', value: `${Math.round(b.base)}%`, penalty: false },
+        { label: 'Weapon base', value: `${Math.round(b.base)}%`, icon: 'ui-shoot', penalty: false },
         {
           label: `Range ${b.distance.toFixed(1)} m`,
           value: `-${b.rangePenalty}%`,
+          icon: 'shot-range',
           penalty: b.rangePenalty > 0,
         },
-        { label: 'Cover', value: `-${b.coverPenalty}%`, penalty: b.coverPenalty > 0 },
+        {
+          label: 'Cover',
+          value: `-${b.coverPenalty}%`,
+          icon: 'ui-cover',
+          penalty: b.coverPenalty > 0,
+        },
       ]
       if (b.shooterPenalty > 0) {
-        terms.push({ label: 'Blinded', value: `-${b.shooterPenalty}%`, penalty: true })
+        terms.push({
+          label: 'Blinded',
+          value: `-${b.shooterPenalty}%`,
+          icon: 'shot-blinded',
+          penalty: true,
+        })
       }
       if (b.targetDefence > 0) {
-        terms.push({ label: 'Concealment', value: `-${b.targetDefence}%`, penalty: true })
+        terms.push({
+          label: 'Concealment',
+          value: `-${b.targetDefence}%`,
+          icon: 'shot-conceal',
+          penalty: true,
+        })
       }
       if (b.modeMultiplier !== 1) {
-        terms.push({ label: 'Aimed', value: `x${b.modeMultiplier}`, penalty: false })
+        terms.push({
+          label: 'Aimed',
+          value: `x${b.modeMultiplier}`,
+          icon: 'mode-aimed',
+          penalty: false,
+        })
       }
       return {
         mode: option.mode,
