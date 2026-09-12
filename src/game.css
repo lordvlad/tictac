@@ -7,6 +7,9 @@
   --hud-danger: #e05c4f;
   --hud-blue: #5b95ef;
   --hud-red: #e05c4f;
+  /* One gap between action rows, wherever they are stacked: the panel and a
+     group's flyout have to read as one list. */
+  --hud-row-gap: 8px;
   color-scheme: dark;
 }
 
@@ -235,21 +238,34 @@ canvas {
   padding: 6px 8px;
 }
 
-/* The anchor a group's flyout hangs off. */
+/* The anchor a group's flyout hangs off.
+
+   A flex column, not a plain block: the wrapper exists only to position the
+   flyout, so its button has to come out the same width as the ungrouped rows
+   around it. A block sizes a button to its content instead, which is what
+   made the grouped rows narrower than the rest. */
 .action-group {
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Out to the left: the panel is already against the right edge, and opening
-   downwards shoved every row below it out of the way. */
+   downwards shoved every row below it out of the way.
+
+   Sized to its longest row, never narrower than the row that opened it. The
+   flyout carries a name, a cost and a count where the panel rows carry two
+   fields, so at the panel's width a name wrapped and stood that one row taller
+   than its neighbours. */
 .action-submenu {
   position: absolute;
   top: 0;
   right: calc(100% + 6px);
-  width: 100%;
+  min-width: 100%;
+  width: max-content;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--hud-row-gap);
 }
 
 /* ---------------------------------------------------------------------------
@@ -371,7 +387,7 @@ canvas {
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--hud-row-gap);
   width: 180px;
 }
 
@@ -405,6 +421,9 @@ canvas {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  /* space-between only separates them while there is slack to give, and a
+     flyout row is sized to its own content. */
+  gap: 12px;
 }
 
 .action-btn:hover:not(:disabled) {
@@ -794,10 +813,14 @@ canvas {
     font-size: 7px;
   }
 
+  /* Sized to its longest row rather than to a guess: at a fixed 118px the
+     longer labels wrapped, and a wrapped row stands taller than the rest.
+     Bounded so a long name cannot take the screen. */
   .hud-action-panel {
     right: calc(8px + env(safe-area-inset-right));
-    width: 118px;
-    gap: 5px;
+    width: max-content;
+    max-width: 45vw;
+    --hud-row-gap: 5px;
   }
 
   .action-header {
