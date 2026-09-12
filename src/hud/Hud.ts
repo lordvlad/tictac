@@ -6,6 +6,7 @@ import type {
   HudShotPanel,
   HudThrowPanel,
 } from './HudModel'
+import { bottomLeftRow } from './CornerStack'
 import { icon } from './icons'
 
 export interface ContextMenuItem {
@@ -28,16 +29,23 @@ export interface ContextMenuItem {
  */
 export class Hud {
   private readonly uiRoot: HTMLElement
-  private readonly topRightEl: HTMLElement
+  private readonly topCentreEl: HTMLElement
   private readonly levelSelectorEl: HTMLElement
   private readonly bottomCentreEl: HTMLElement
   private readonly targetStripEl: HTMLElement
   private readonly squadBarEl: HTMLElement
   private readonly actionPanelEl: HTMLElement
+  private readonly endTurnEl: HTMLElement
+  private readonly cornerActionsEl: HTMLElement
   private readonly turnOverlayEl: HTMLElement
   private readonly contextMenuEl: HTMLElement
 
   private turnOverlayVisible = false
+  /**
+   * Whether the consumables submenu is open. View state: which rows are folded
+   * away is a property of this panel, not of the match.
+   */
+  private itemsOpen = false
   private model: HudModel | null = null
 
   constructor(private readonly onIntent: (intent: HudIntent) => void) {
@@ -45,8 +53,8 @@ export class Hud {
 
     this.levelSelectorEl = document.createElement('div')
     this.levelSelectorEl.className = 'hud-level-selector'
-    this.topRightEl = document.createElement('div')
-    this.topRightEl.className = 'hud-top-right'
+    this.topCentreEl = document.createElement('div')
+    this.topCentreEl.className = 'hud-top-centre'
     // Strip and squad bar share one bottom-centred column: stacking them in the
     // layout means they cannot overlap, whatever height the cards grow to.
     this.bottomCentreEl = document.createElement('div')
@@ -63,6 +71,9 @@ export class Hud {
     this.actionPanelEl = document.createElement('div')
     this.actionPanelEl.className = 'hud-action-panel'
 
+    this.endTurnEl = document.createElement('div')
+    this.endTurnEl.className = 'hud-end-turn'
+
     this.turnOverlayEl = document.createElement('div')
     this.turnOverlayEl.className = 'turn-overlay'
 
@@ -71,13 +82,21 @@ export class Hud {
     this.contextMenuEl.style.display = 'none'
 
     this.uiRoot.append(
-      this.topRightEl,
+      this.topCentreEl,
       this.levelSelectorEl,
       this.bottomCentreEl,
       this.actionPanelEl,
+      this.endTurnEl,
       this.turnOverlayEl,
       this.contextMenuEl,
     )
+
+    // The developer tools live in the bottom-left corner beside the frame
+    // counter, which is outside #ui — so they carry their own listener.
+    this.cornerActionsEl = document.createElement('div')
+    this.cornerActionsEl.className = 'hud-corner-actions'
+    this.cornerActionsEl.addEventListener('click', this.onUiClick)
+    bottomLeftRow().prepend(this.cornerActionsEl)
 
     // Delegated: the panels are re-rendered wholesale, so per-element handlers
     // would have to be re-bound on every update.
@@ -86,11 +105,14 @@ export class Hud {
 
   dispose(): void {
     this.uiRoot.removeEventListener('click', this.onUiClick)
+    this.cornerActionsEl.removeEventListener('click', this.onUiClick)
     for (const el of [
-      this.topRightEl,
+      this.topCentreEl,
       this.levelSelectorEl,
       this.bottomCentreEl,
       this.actionPanelEl,
+      this.endTurnEl,
+      this.cornerActionsEl,
       this.turnOverlayEl,
       this.contextMenuEl,
     ]) {
@@ -106,8 +128,10 @@ export class Hud {
    */
   render(model: HudModel): void {
     this.model = model
-    this.renderTopRight(model)
+    this.renderTopCentre(model)
     this.renderLevelSelector(model)
+    this.renderCornerActions(model)
+    this.renderEndTurn(model)
     this.renderTargetStrip(model)
     this.renderSquadBar(model)
     this.renderActionPanel(model)
@@ -118,7 +142,17 @@ export class Hud {
   // ---------------------------------------------------------------------------
 
   private readonly onUiClick = (event: MouseEvent): void => {
-    const target = (event.target as HTMLElement | null)?.closest('[data-intent]')
+    const clicked = event.target as HTMLElement | null
+
+    // Folding the consumables away changes nothing in the match, so it never
+    // becomes an intent: the panel redraws itself from the model it holds.
+    if (clicked?.closest('[data-ui="items"]')) {
+      this.itemsOpen = !this.itemsOpen
+      if (this.model) this.renderActionPanel(this.model)
+      return
+    }
+
+    const target = clicked?.closest('[data-intent]')
     if (!(target instanceof HTMLElement)) return
     if (target instanceof HTMLButtonElement && target.disabled) return
 
@@ -139,8 +173,8 @@ export class Hud {
   // Panels
   // ---------------------------------------------------------------------------
 
-  private renderTopRight(model: HudModel): void {
-    const isMyTurn = model.isMyTurn || model.networkMode === 'local'
+  /** Camera and planning toggles, above the match's own state. */
+  private renderTopCentre(model: HudModel): void {
     const buttons: { label: string; icon: string; title: string; classes: string; disabled: boolean; intent: HudIntent }[] = [
       {
         label: 'Freelook',
@@ -166,22 +200,9 @@ export class Hud {
         disabled: false,
         intent: { type: 'toggleWaypoints' },
       },
-      {
-        label: 'End Turn',
-        icon: 'ui-end-turn',
-        title: isMyTurn ? 'Hand over to the other faction' : "Opponent's Turn",
-        classes: isMyTurn ? 'hud-btn-danger' : '',
-        disabled: !isMyTurn,
-        intent: { type: 'requestTurnSwitch' },
-      },
     ]
 
-    this.topRightEl.innerHTML = `
-      <div class="hud-info-card">
-        <span class="hud-faction-badge ${model.factionIsBlue ? 'blue' : 'red'}">${model.networkMode === 'local' ? '' : icon(model.isMyTurn ? 'ui-deploy' : 'ui-unit-turn', 'tiny')}${model.networkBadge}</span>
-        <span class="hud-turn-label">Turn ${model.turnNumber}</span>
-        <span class="hud-turn-label" style="opacity: 0.6;">Seed ${model.seedLabel}</span>
-      </div>
+    this.topCentreEl.innerHTML = `
       <div class="hud-btn-row">
         ${buttons
           .map(
@@ -192,6 +213,33 @@ export class Hud {
           )
           .join('')}
       </div>
+      <div class="hud-info-card">
+        <span class="hud-faction-badge ${model.factionIsBlue ? 'blue' : 'red'}">${model.networkMode === 'local' ? '' : icon(model.isMyTurn ? 'ui-deploy' : 'ui-unit-turn', 'tiny')}${model.networkBadge}</span>
+        <span class="hud-turn-label">Turn ${model.turnNumber}</span>
+      </div>
+    `
+  }
+
+  /** Handing over is the last thing you do, so it sits on its own. */
+  private renderEndTurn(model: HudModel): void {
+    const isMyTurn = model.isMyTurn || model.networkMode === 'local'
+    this.endTurnEl.innerHTML = `
+      <button class="hud-btn interactive ${isMyTurn ? 'hud-btn-danger' : ''}"
+              title="${isMyTurn ? 'Hand over to the other faction' : "Opponent's Turn"}"
+              ${isMyTurn ? '' : 'disabled'} ${Hud.intentAttr({ type: 'requestTurnSwitch' })}>
+        ${icon('ui-end-turn')} End Turn
+      </button>
+    `
+  }
+
+  /** Developer tools: glyph only, out of the way beside the frame counter. */
+  private renderCornerActions(model: HudModel): void {
+    this.cornerActionsEl.innerHTML = `
+      <button class="hud-btn hud-btn-glyph interactive" title="Unit debug panel"
+              ${Hud.intentAttr({ type: 'openDebug' })}>${icon('ui-debug')}</button>
+      <button class="hud-btn hud-btn-glyph interactive ${model.debugMapOpen ? 'active' : ''}"
+              title="Toggle 2D debug minimap"
+              ${Hud.intentAttr({ type: 'toggleDebugMap' })}>${icon('ui-map')}</button>
     `
   }
 
@@ -215,13 +263,6 @@ export class Hud {
     this.levelSelectorEl.innerHTML = `
       <div class="hud-level-title">LEVEL</div>
       <div class="hud-level-buttons">${buttons.join('')}</div>
-      <div class="hud-level-map">
-        <button class="hud-btn interactive ${model.debugMapOpen ? 'active' : ''}"
-                title="Toggle 2D Debug Minimap"
-                ${Hud.intentAttr({ type: 'toggleDebugMap' })}>
-          ${icon('ui-map')} MAP
-        </button>
-      </div>
     `
   }
 
@@ -313,9 +354,31 @@ export class Hud {
       return
     }
 
+    // No title: the squad card already says who is selected, and the panel is
+    // the only thing on that side of the screen.
+    const loose = model.actions.filter((action) => action.group === undefined)
+    const items = model.actions.filter((action) => action.group === 'items')
+
     this.actionPanelEl.innerHTML = `
-      <div class="action-header">${model.selectedName} Actions</div>
-      ${model.actions.map((action) => this.actionButton(action)).join('')}
+      ${loose.map((action) => this.actionButton(action)).join('')}
+      ${items.length === 0 ? '' : this.itemsSubmenu(items)}
+    `
+  }
+
+  /**
+   * Consumables behind one row.
+   *
+   * They are the least-pressed thing in the panel and the most numerous, so
+   * they fold away: what is left on screen is what the unit is about to do.
+   */
+  private itemsSubmenu(items: readonly HudAction[]): string {
+    const carried = items.reduce((total, item) => total + Number(item.tag.split('x')[1] ?? 0), 0)
+    return `
+      <button class="action-btn interactive ${this.itemsOpen ? 'active' : ''}" data-ui="items">
+        <span class="action-label">${icon('item-stim')} Items</span>
+        <span class="action-tag">${carried > 0 ? `x${carried}` : ''} ${this.itemsOpen ? '▾' : '▸'}</span>
+      </button>
+      ${this.itemsOpen ? `<div class="action-submenu">${items.map((item) => this.actionButton(item)).join('')}</div>` : ''}
     `
   }
 

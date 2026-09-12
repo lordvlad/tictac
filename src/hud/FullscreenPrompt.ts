@@ -35,7 +35,7 @@ export class FullscreenPrompt {
     this.root.className = 'fs-prompt'
     this.root.innerHTML = `
       <button class="fs-prompt-cta interactive" type="button" data-fs="enter">
-        ${icon('ui-expand')} Play fullscreen
+        ${icon('ui-expand')} <span class="fs-prompt-label">Play fullscreen</span>
       </button>
       <button class="fs-prompt-close interactive" type="button" data-fs="dismiss" aria-label="Dismiss">${icon('ui-cancel')}</button>
     `

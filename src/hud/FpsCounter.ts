@@ -1,4 +1,4 @@
-import { bottomLeftStack } from './CornerStack'
+import { bottomLeftRow } from './CornerStack'
 
 /**
  * How long each reading covers. Short enough that a stall is visible while it
@@ -29,7 +29,7 @@ export class FpsCounter {
     this.root = document.createElement('div')
     this.root.className = 'fps-counter'
     this.root.textContent = '— fps'
-    bottomLeftStack().appendChild(this.root)
+    bottomLeftRow().appendChild(this.root)
 
     this.handle = requestAnimationFrame(this.frame)
   }

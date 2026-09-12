@@ -43,6 +43,8 @@ export interface HudAction {
   tag: string
   active: boolean
   disabled: boolean
+  /** Consumables are folded into one submenu rather than listed outright. */
+  group?: 'items'
   intent: HudIntent
 }
 
@@ -231,29 +233,34 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       disabled: !selected.isCrouching && selected.ap < RULES.coverApCost,
       intent: { type: 'toggleCover' },
     })
+    // Only what the unit is actually carrying. A row for kit left in the crate
+    // is a row the player has to read past every turn to find what they have.
     for (const kind of Object.values(GrenadeId)) {
       const spec = selected.grenadeSpecs[kind]
       const count = selected.grenades[kind] ?? 0
+      if (count <= 0) continue
       actions.push({
         id: `grenade-${kind}`,
         label: spec.name,
         icon: `grenade-${kind}`,
-        tag: count > 0 ? `${spec.apCost} AP · x${count}` : 'none left',
+        tag: `${spec.apCost} AP · x${count}`,
         active: sources.grenade.armed === kind,
-        disabled: count <= 0 || selected.ap < spec.apCost,
+        disabled: selected.ap < spec.apCost,
         intent: { type: 'armGrenade', kind },
       })
     }
     for (const id of Object.values(ItemId)) {
       const spec = ITEMS[id]
       const count = selected.items[id] ?? 0
+      if (count <= 0) continue
       actions.push({
         id: `item-${id}`,
         label: spec.name,
         icon: `item-${id}`,
-        tag: count > 0 ? `${spec.apCost} AP · x${count}` : 'none left',
+        tag: `${spec.apCost} AP · x${count}`,
         active: false,
-        disabled: count <= 0 || selected.ap < spec.apCost,
+        disabled: selected.ap < spec.apCost,
+        group: 'items',
         intent: { type: 'useItem', itemId: id },
       })
     }
@@ -274,15 +281,6 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       active: false,
       disabled: false,
       intent: { type: 'endUnitTurn' },
-    })
-    actions.push({
-      id: 'debug',
-      label: 'Debug…',
-      icon: 'ui-debug',
-      tag: 'Dev',
-      active: false,
-      disabled: false,
-      intent: { type: 'openDebug' },
     })
   }
 

@@ -9,6 +9,7 @@
  * buttons re-enabled.
  */
 let column: HTMLDivElement | null = null
+let row: HTMLDivElement | null = null
 
 export function bottomLeftStack(): HTMLDivElement {
   if (!column) {
@@ -17,4 +18,17 @@ export function bottomLeftStack(): HTMLDivElement {
     document.body.appendChild(column)
   }
   return column
+}
+
+/**
+ * The bottom line of that column, for the things that belong side by side: the
+ * frame counter and the developer tools sit on one row rather than stacking.
+ */
+export function bottomLeftRow(): HTMLDivElement {
+  if (!row) {
+    row = document.createElement('div')
+    row.className = 'hud-corner-row'
+    bottomLeftStack().appendChild(row)
+  }
+  return row
 }
