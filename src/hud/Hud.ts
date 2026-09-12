@@ -2,7 +2,7 @@ import type {
   HudAction,
   HudIntent,
   HudModel,
-  HudShotCard,
+  HudShotOption,
   HudShotPanel,
   HudThrowPanel,
 } from './HudModel'
@@ -410,35 +410,23 @@ export class Hud {
   }
 
   /**
-   * Target header plus one card per shot option. The card *is* the trigger:
-   * clicking it fires that shot, which is why each carries its own odds, cost
-   * and full breakdown — there is nothing else to consult first.
+   * The shared picture once, then a row per way of shooting.
+   *
+   * Every option used to be a full card: the same weapon, range, cover and
+   * damage restated three times over, with one line between them that actually
+   * differed. What stays put is stated once and is not clickable; what a mode
+   * changes is all its own row shows.
    */
   private shotCard(shot: HudShotPanel): string {
     return `
       <div class="action-header">Firing at ${shot.targetName}</div>
-      <div class="shot-target">${shot.weaponName} (${shot.currentClip}/${shot.maxClip} ammo) · ${shot.ammoName} — target ${shot.targetHp} HP · ${shot.targetArmor} AR</div>
-      ${shot.cards.map((card) => this.shotOptionCard(card)).join('')}
-      <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelShoot' })}>
-        <span class="action-label">${icon('ui-cancel')} Cancel</span>
-        <span class="action-tag">Esc</span>
-      </button>
-    `
-  }
-
-  private shotOptionCard(card: HudShotCard): string {
-    return `
-      <button class="shot-option interactive ${card.available ? '' : 'unavailable'}"
-              ${card.available ? '' : 'disabled'} ${Hud.intentAttr({ type: 'fireShot', mode: card.mode })}>
-        <div class="shot-option-head">
-          <span class="shot-option-name">${icon(`mode-${card.mode}`)} ${card.name}</span>
-          <span class="shot-option-ap">${card.apCost} AP · ${card.bullets} ammo</span>
-        </div>
-        <div class="shot-option-chance ${card.hitChance >= 50 ? 'good' : 'poor'}">
-          ${card.outOfRange ? 'OUT OF RANGE' : `${card.hitChance}<span>%</span>`}
+      <div class="shot-card">
+        <div class="shot-target">${shot.weaponName} (${shot.currentClip}/${shot.maxClip} ammo) · ${shot.ammoName} — target ${shot.targetHp} HP · ${shot.targetArmor} AR</div>
+        <div class="shot-option-chance ${shot.base.chance >= 50 ? 'good' : 'poor'}">
+          ${shot.base.chance}<span>%</span>
         </div>
         <div class="shot-rows">
-          ${card.terms
+          ${shot.base.terms
             .map(
               (t) => `
             <div class="shot-row ${t.penalty ? 'penalty' : ''}">
@@ -448,10 +436,35 @@ export class Hud {
             .join('')}
         </div>
         <div class="shot-rows shot-outcome">
-          <div class="shot-row"><span>${icon('shot-damage', 'tiny')}Damage</span><span>${card.damage}</span></div>
-          ${card.armorShred > 0 ? `<div class="shot-row"><span>${icon('shot-shred', 'tiny')}Armor shred</span><span>-${card.armorShred}</span></div>` : ''}
+          <div class="shot-row"><span>${icon('shot-damage', 'tiny')}Damage a hit</span><span>${shot.base.damage}</span></div>
+          ${shot.base.armorShred > 0 ? `<div class="shot-row"><span>${icon('shot-shred', 'tiny')}Armor shred</span><span>-${shot.base.armorShred}</span></div>` : ''}
         </div>
-        <div class="shot-option-fire">${card.available ? `${icon('ui-shoot')} CLICK TO FIRE` : 'UNAVAILABLE'}</div>
+      </div>
+      ${shot.options.map((option) => this.shotOptionRow(option)).join('')}
+      <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelShoot' })}>
+        <span class="action-label">${icon('ui-cancel')} Cancel</span>
+        <span class="action-tag">Esc</span>
+      </button>
+    `
+  }
+
+  /** One mode: its own odds, its cost, and the damage its bullet count buys. */
+  private shotOptionRow(option: HudShotOption): string {
+    const delta =
+      option.chanceDelta === 0 ? '' : `${option.chanceDelta > 0 ? '+' : ''}${option.chanceDelta}`
+    return `
+      <button class="shot-option interactive ${option.available ? '' : 'unavailable'}"
+              ${option.available ? '' : 'disabled'} ${Hud.intentAttr({ type: 'fireShot', mode: option.mode })}>
+        <span class="shot-option-name">${icon(`mode-${option.mode}`)} ${option.name}</span>
+        <span class="shot-option-diff">
+          ${
+            option.outOfRange
+              ? '<span class="shot-option-hit poor">OUT OF RANGE</span>'
+              : `<span class="shot-option-hit ${option.hitChance >= 50 ? 'good' : 'poor'}">${option.hitChance}%</span>
+                 ${delta === '' ? '' : `<span class="shot-option-delta">${delta}</span>`}`
+          }
+          <span class="shot-option-ap">${option.apCost} AP · ${option.bullets}x · ${option.damageAtBest} dmg</span>
+        </span>
       </button>
     `
   }

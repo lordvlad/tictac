@@ -1,7 +1,8 @@
-import { FACTION_INFO, Faction, RULES } from '../config'
+import { AIM, FACTION_INFO, Faction, RULES } from '../config'
 import { GrenadeId, ShotMode } from '../core/Arsenal'
 import { ITEMS, ItemId } from '../core/Items'
-import { effectiveWeapon } from '../core/Ballistics'
+import { effectiveWeapon, type HitChanceBreakdown } from '../core/Ballistics'
+import { clamp } from '../core/math'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
 import type { PendingThrow } from '../game/GrenadePlanner'
@@ -87,21 +88,38 @@ export interface HudShotTerm {
   penalty: boolean
 }
 
-/** One shot option, rendered as a card that fires when clicked. */
-export interface HudShotCard {
+/**
+ * What every way of shooting this target shares.
+ *
+ * Split out because it used to be repeated on every option card: the same
+ * weapon, the same range, the same cover, five times over, with one line
+ * between them that actually differed.
+ */
+export interface HudShotBase {
+  /** Chance with no shot mode applied. */
+  chance: number
+  /** Damage a single hit does, which no mode changes. */
+  damage: number
+  armorShred: number
+  terms: HudShotTerm[]
+}
+
+/** One way of shooting, and only what choosing it changes. */
+export interface HudShotOption {
   mode: ShotMode
   name: string
   hitChance: number
-  damage: number
-  armorShred: number
+  /** Percentage points this mode puts on, or takes off, the base chance. */
+  chanceDelta: number
+  /** Damage with every bullet landing — what the bullet count buys. */
+  damageAtBest: number
   apCost: number
   bullets: number
   available: boolean
   outOfRange: boolean
-  terms: HudShotTerm[]
 }
 
-/** The target being aimed at, and a card per way of shooting it. */
+/** The target being aimed at: the shared picture, then a row per way to shoot. */
 export interface HudShotPanel {
   targetName: string
   targetHp: number
@@ -110,7 +128,8 @@ export interface HudShotPanel {
   ammoName: string
   currentClip: number
   maxClip: number
-  cards: HudShotCard[]
+  base: HudShotBase
+  options: HudShotOption[]
 }
 
 /** The throw lined up and awaiting confirmation. */
@@ -343,8 +362,64 @@ function weaponApCost(soldier: Soldier, mode: ShotMode): number {
   return effectiveWeapon(soldier, mode).apCost
 }
 
-/** Turn a pending shot into one card per option, each with its own breakdown. */
+/**
+ * The chance with no shot mode applied.
+ *
+ * Recomputed from the terms rather than divided out of an option's chance: the
+ * final figure is clamped, so dividing by the multiplier would misreport any
+ * shot that hit the ceiling or the floor.
+ */
+function neutralChance(b: HitChanceBreakdown): number {
+  if (b.outOfRange) return 0
+  const raw = b.base - b.rangePenalty - b.coverPenalty - b.shooterPenalty - b.targetDefence
+  return clamp(Math.round(raw), AIM.min, AIM.max)
+}
+
+/** Turn a pending shot into the shared picture plus what each mode changes. */
 function shotPanelOf(pending: PendingShot): HudShotPanel {
+  // Every option carries the same mode-independent terms, so the first one
+  // speaks for all of them.
+  const first = pending.options[0]?.breakdown
+  const terms: HudShotTerm[] = []
+  if (first) {
+    terms.push({
+      label: 'Weapon base',
+      value: `${Math.round(first.base)}%`,
+      icon: 'ui-shoot',
+      penalty: false,
+    })
+    terms.push({
+      label: `Range ${first.distance.toFixed(1)} m`,
+      value: `-${first.rangePenalty}%`,
+      icon: 'shot-range',
+      penalty: first.rangePenalty > 0,
+    })
+    terms.push({
+      label: 'Cover',
+      value: `-${first.coverPenalty}%`,
+      icon: 'ui-cover',
+      penalty: first.coverPenalty > 0,
+    })
+    if (first.shooterPenalty > 0) {
+      terms.push({
+        label: 'Blinded',
+        value: `-${first.shooterPenalty}%`,
+        icon: 'shot-blinded',
+        penalty: true,
+      })
+    }
+    if (first.targetDefence > 0) {
+      terms.push({
+        label: 'Concealment',
+        value: `-${first.targetDefence}%`,
+        icon: 'shot-conceal',
+        penalty: true,
+      })
+    }
+  }
+
+  const base = first ? neutralChance(first) : 0
+
   return {
     targetName: pending.target.name,
     targetHp: pending.target.hp,
@@ -353,60 +428,23 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
     ammoName: pending.ammoName,
     currentClip: pending.currentClip,
     maxClip: pending.maxClip,
-    cards: pending.options.map((option) => {
-      const b = option.breakdown
-      const terms: HudShotTerm[] = [
-        { label: 'Weapon base', value: `${Math.round(b.base)}%`, icon: 'ui-shoot', penalty: false },
-        {
-          label: `Range ${b.distance.toFixed(1)} m`,
-          value: `-${b.rangePenalty}%`,
-          icon: 'shot-range',
-          penalty: b.rangePenalty > 0,
-        },
-        {
-          label: 'Cover',
-          value: `-${b.coverPenalty}%`,
-          icon: 'ui-cover',
-          penalty: b.coverPenalty > 0,
-        },
-      ]
-      if (b.shooterPenalty > 0) {
-        terms.push({
-          label: 'Blinded',
-          value: `-${b.shooterPenalty}%`,
-          icon: 'shot-blinded',
-          penalty: true,
-        })
-      }
-      if (b.targetDefence > 0) {
-        terms.push({
-          label: 'Concealment',
-          value: `-${b.targetDefence}%`,
-          icon: 'shot-conceal',
-          penalty: true,
-        })
-      }
-      if (b.modeMultiplier !== 1) {
-        terms.push({
-          label: 'Aimed',
-          value: `x${b.modeMultiplier}`,
-          icon: 'mode-aimed',
-          penalty: false,
-        })
-      }
-      return {
-        mode: option.mode,
-        name: option.name,
-        hitChance: b.chance,
-        damage: option.damage,
-        armorShred: option.armorShred,
-        apCost: option.apCost,
-        bullets: option.bullets,
-        available: option.available,
-        outOfRange: b.outOfRange,
-        terms,
-      }
-    }),
+    base: {
+      chance: base,
+      damage: pending.options[0]?.damage ?? 0,
+      armorShred: pending.options[0]?.armorShred ?? 0,
+      terms,
+    },
+    options: pending.options.map((option) => ({
+      mode: option.mode,
+      name: option.name,
+      hitChance: option.breakdown.chance,
+      chanceDelta: option.breakdown.chance - base,
+      damageAtBest: option.damage * option.bullets,
+      apCost: option.apCost,
+      bullets: option.bullets,
+      available: option.available,
+      outOfRange: option.breakdown.outOfRange,
+    })),
   }
 }
 

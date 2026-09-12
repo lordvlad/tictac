@@ -1040,12 +1040,15 @@ canvas {
   padding: 0 2px 2px;
 }
 
+/* A row, not a card: the shared stats live in the base card above these, so
+   all a mode has to show is its own odds and what it costs. */
 .shot-option {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   width: 100%;
-  padding: 8px 10px 6px;
+  padding: 8px 10px;
   background: var(--hud-bg);
   border: 1px solid var(--hud-border);
   border-radius: 7px;
@@ -1067,11 +1070,13 @@ canvas {
   cursor: not-allowed;
 }
 
-.shot-option-head {
+/* The right-hand column of a mode row: odds over cost. */
+.shot-option-diff {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  white-space: nowrap;
 }
 
 .shot-option-name {
@@ -1081,8 +1086,29 @@ canvas {
   text-transform: uppercase;
 }
 
-.shot-option-ap {
+.shot-option-hit {
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.shot-option-hit.good {
+  color: var(--hud-accent);
+}
+
+.shot-option-hit.poor {
+  color: #ffb454;
+}
+
+/* What this mode does to the base chance, which is the reason to pick it. */
+.shot-option-delta {
   font-size: 10px;
+  font-weight: 800;
+  color: var(--hud-dim);
+}
+
+.shot-option-ap {
+  font-size: 9px;
   color: var(--hud-dim);
   font-weight: 700;
 }
@@ -1109,18 +1135,7 @@ canvas {
   color: #ffb454;
 }
 
-.shot-option-fire {
-  margin-top: 1px;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  text-align: center;
-  color: #ff9e95;
-}
-
-.shot-option.unavailable .shot-option-fire {
-  color: var(--hud-dim);
-}
+/* The fire prompt went with the option cards: a row is its own trigger. */
 
 .debug-stepper {
   display: flex;
