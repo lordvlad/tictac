@@ -235,12 +235,21 @@ canvas {
   padding: 6px 8px;
 }
 
-/* Indented under the row that opened it, so the nesting is visible. */
+/* The anchor a group's flyout hangs off. */
+.action-group {
+  position: relative;
+}
+
+/* Out to the left: the panel is already against the right edge, and opening
+   downwards shoved every row below it out of the way. */
 .action-submenu {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 6px);
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-left: 12px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -708,17 +717,9 @@ canvas {
     bottom: calc(8px + env(safe-area-inset-bottom));
   }
 
-  /* The squad bar reaches almost to the left edge down here, so the corner
-     tools stack into a narrow column instead of a row that runs under it. */
-  .hud-corner-row {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .hud-corner-actions {
-    flex-direction: column;
-  }
-
+  /* Glyph only down here: it keeps the corner narrow enough to clear the squad
+     bar, which reaches almost to the left edge. Arrangement is the corner's
+     own orientation rules, not this block's business. */
   .fs-prompt-label {
     display: none;
   }
@@ -1159,9 +1160,21 @@ canvas {
 }
 
 /* ---------------------------------------------------------------------------
-   Bottom-left corner: fullscreen prompt, frame counter
+   Bottom-left corner: frame counter, fullscreen prompt, developer tools
 
-   One column, so the two cannot overlap whatever either of them measures.
+   One DOM, two layouts, so the same elements reflow rather than being moved:
+
+     landscape        portrait
+     [fps]            [debug]
+     [fs][map][dbg]   [map]
+                      [fps]
+                      [fs]
+
+   `order` does the arranging and `display: contents` unwraps the row in
+   portrait, which is what lets a dismissed prompt take its space with it: the
+   rest move left in landscape and drop toward the corner in portrait, because
+   nothing is positioned against it.
+
    Above the start menu (z 10000) and the loadout screen (z 200): the session's
    first tap lands on one of those, and fullscreen is only granted in a gesture.
    --------------------------------------------------------------------------- */
@@ -1177,16 +1190,43 @@ canvas {
   font-family: inherit;
 }
 
-/* Frame counter and the developer tools, side by side in the corner. */
+.hud-corner-bl .fps-counter {
+  order: 1;
+}
+
 .hud-corner-row {
+  order: 2;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
+/* Reversed: the prompt comes first in the row, the tools to the right of it,
+   with the minimap nearest the prompt. */
 .hud-corner-actions {
   display: flex;
+  flex-direction: row-reverse;
   gap: 6px;
+}
+
+@media (orientation: portrait) {
+  /* The row stops being a box, so its children join the column directly. */
+  .hud-corner-row {
+    display: contents;
+  }
+
+  .hud-corner-actions {
+    order: 1;
+    flex-direction: column;
+  }
+
+  .hud-corner-bl .fps-counter {
+    order: 2;
+  }
+
+  .fs-prompt {
+    order: 3;
+  }
 }
 
 .fs-prompt {

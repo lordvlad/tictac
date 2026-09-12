@@ -43,8 +43,12 @@ export interface HudAction {
   tag: string
   active: boolean
   disabled: boolean
-  /** Consumables are folded into one submenu rather than listed outright. */
-  group?: 'items'
+  /**
+   * Rows the panel folds into one submenu. Consumables always; grenades only
+   * when the unit carries more than one kind, since a submenu holding a single
+   * row is a tap for nothing.
+   */
+  group?: 'items' | 'grenades'
   intent: HudIntent
 }
 
@@ -245,6 +249,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
         icon: `grenade-${kind}`,
         tag: `${spec.apCost} AP · x${count}`,
         active: sources.grenade.armed === kind,
+        group: 'grenades',
         disabled: selected.ap < spec.apCost,
         intent: { type: 'armGrenade', kind },
       })

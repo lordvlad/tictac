@@ -1,4 +1,4 @@
-import { bottomLeftStack } from './CornerStack'
+import { bottomLeftRow } from './CornerStack'
 import { icon } from './icons'
 
 /**
@@ -40,7 +40,7 @@ export class FullscreenPrompt {
       <button class="fs-prompt-close interactive" type="button" data-fs="dismiss" aria-label="Dismiss">${icon('ui-cancel')}</button>
     `
     this.root.addEventListener('click', this.onClick)
-    bottomLeftStack().appendChild(this.root)
+    bottomLeftRow().appendChild(this.root)
 
     this.media.addEventListener('change', this.sync)
     document.addEventListener('fullscreenchange', this.sync)

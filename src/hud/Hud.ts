@@ -42,10 +42,11 @@ export class Hud {
 
   private turnOverlayVisible = false
   /**
-   * Whether the consumables submenu is open. View state: which rows are folded
-   * away is a property of this panel, not of the match.
+   * Which group's submenu is open, if any. View state: which rows are folded
+   * away is a property of this panel, not of the match. One at a time, because
+   * two flyouts open beside the same panel would sit on top of each other.
    */
-  private itemsOpen = false
+  private openGroup: 'items' | 'grenades' | null = null
   private model: HudModel | null = null
 
   constructor(private readonly onIntent: (intent: HudIntent) => void) {
@@ -96,7 +97,7 @@ export class Hud {
     this.cornerActionsEl = document.createElement('div')
     this.cornerActionsEl.className = 'hud-corner-actions'
     this.cornerActionsEl.addEventListener('click', this.onUiClick)
-    bottomLeftRow().prepend(this.cornerActionsEl)
+    bottomLeftRow().appendChild(this.cornerActionsEl)
 
     // Delegated: the panels are re-rendered wholesale, so per-element handlers
     // would have to be re-bound on every update.
@@ -146,8 +147,10 @@ export class Hud {
 
     // Folding the consumables away changes nothing in the match, so it never
     // becomes an intent: the panel redraws itself from the model it holds.
-    if (clicked?.closest('[data-ui="items"]')) {
-      this.itemsOpen = !this.itemsOpen
+    const fold = clicked?.closest('[data-ui]')
+    if (fold instanceof HTMLElement) {
+      const group = fold.dataset.ui === 'items' ? 'items' : 'grenades'
+      this.openGroup = this.openGroup === group ? null : group
       if (this.model) this.renderActionPanel(this.model)
       return
     }
@@ -356,29 +359,53 @@ export class Hud {
 
     // No title: the squad card already says who is selected, and the panel is
     // the only thing on that side of the screen.
-    const loose = model.actions.filter((action) => action.group === undefined)
-    const items = model.actions.filter((action) => action.group === 'items')
+    const rows: string[] = []
+    const done = new Set<string>()
 
-    this.actionPanelEl.innerHTML = `
-      ${loose.map((action) => this.actionButton(action)).join('')}
-      ${items.length === 0 ? '' : this.itemsSubmenu(items)}
-    `
+    for (const action of model.actions) {
+      if (action.group === undefined) {
+        rows.push(this.actionButton(action))
+        continue
+      }
+      if (done.has(action.group)) continue
+      done.add(action.group)
+
+      // Folded where its first row would have been, so the panel keeps its
+      // order: what the unit does most sits nearest the top.
+      const members = model.actions.filter((other) => other.group === action.group)
+      rows.push(
+        action.group === 'grenades' && members.length < 2
+          ? this.actionButton(action)
+          : this.submenu(action.group, members),
+      )
+    }
+
+    this.actionPanelEl.innerHTML = rows.join('')
   }
 
   /**
-   * Consumables behind one row.
+   * A group behind one row, opening to the left.
    *
-   * They are the least-pressed thing in the panel and the most numerous, so
-   * they fold away: what is left on screen is what the unit is about to do.
+   * Leftwards because the panel is already against the right edge: opening
+   * downwards pushed every row under it around, and on a phone ran the list
+   * off the bottom of the screen.
    */
-  private itemsSubmenu(items: readonly HudAction[]): string {
-    const carried = items.reduce((total, item) => total + Number(item.tag.split('x')[1] ?? 0), 0)
+  private submenu(group: 'items' | 'grenades', members: readonly HudAction[]): string {
+    const open = this.openGroup === group
+    const spec =
+      group === 'items'
+        ? { label: 'Items', icon: 'item-stim' }
+        : { label: 'Grenades', icon: 'grenade-frag' }
+    const carried = members.reduce((total, row) => total + Number(row.tag.split('x')[1] ?? 0), 0)
+
     return `
-      <button class="action-btn interactive ${this.itemsOpen ? 'active' : ''}" data-ui="items">
-        <span class="action-label">${icon('item-stim')} Items</span>
-        <span class="action-tag">${carried > 0 ? `x${carried}` : ''} ${this.itemsOpen ? '▾' : '▸'}</span>
-      </button>
-      ${this.itemsOpen ? `<div class="action-submenu">${items.map((item) => this.actionButton(item)).join('')}</div>` : ''}
+      <div class="action-group">
+        <button class="action-btn interactive ${open ? 'active' : ''}" data-ui="${group}">
+          <span class="action-label">${icon(spec.icon)} ${spec.label}</span>
+          <span class="action-tag">${carried > 0 ? `x${carried}` : ''} ${open ? '◂' : '▸'}</span>
+        </button>
+        ${open ? `<div class="action-submenu">${members.map((row) => this.actionButton(row)).join('')}</div>` : ''}
+      </div>
     `
   }
 
