@@ -1,4 +1,5 @@
 import { StatusKind } from './Arsenal'
+import { TraitId } from './Traits'
 
 /**
  * Carried consumables: what a unit can spend a turn using on itself.
@@ -10,6 +11,7 @@ import { StatusKind } from './Arsenal'
 export const ItemId = {
   StimPack: 'stim',
   FirstAidKit: 'firstAid',
+  NullweaveVest: 'nullweave',
 } as const
 export type ItemId = (typeof ItemId)[keyof typeof ItemId]
 
@@ -35,6 +37,19 @@ export interface ItemSpec {
    * raises the maximum must be live before the top-up reads it.
    */
   effects: readonly ItemEffect[]
+  /**
+   * Traits the unit has while it is carrying one of these.
+   *
+   * This is how a piece of kit grants what a character could also have been
+   * born with: both ends feed the same fold in {@link Traits}, so nothing in
+   * combat asks where a modifier came from.
+   */
+  traits?: readonly TraitId[]
+  /**
+   * Worn, not used: it has no action of its own and never appears in the unit's
+   * action panel. It earns its slot by what carrying it does.
+   */
+  passive?: boolean
 }
 
 export const ITEMS: Record<ItemId, ItemSpec> = {
@@ -50,10 +65,19 @@ export const ITEMS: Record<ItemId, ItemSpec> = {
     apCost: 2,
     effects: [{ kind: 'restoreHp', amount: 50 }],
   },
+  [ItemId.NullweaveVest]: {
+    id: ItemId.NullweaveVest,
+    name: 'Nullweave Vest',
+    apCost: 0,
+    effects: [],
+    traits: [TraitId.Nullweave],
+    passive: true,
+  },
 }
 
 /** Starting pouch, by item. */
 export const STARTING_ITEMS: Record<ItemId, number> = {
   [ItemId.StimPack]: 1,
   [ItemId.FirstAidKit]: 1,
+  [ItemId.NullweaveVest]: 0,
 }

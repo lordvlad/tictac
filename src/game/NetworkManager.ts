@@ -1,5 +1,6 @@
 import { Peer, DataConnection } from 'peerjs'
-import { Faction } from '../config'
+import { Faction, SQUAD_SIZE } from '../config'
+import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
 import type { GrenadeId, ShotMode, StatusKind } from '../core/Arsenal'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
@@ -51,7 +52,7 @@ export type NetworkMessage =
   | { type: 'useItem'; faction: Faction; squadIndex: number; itemId: ItemId }
   | { type: 'endTurn'; faction: Faction }
   | { type: 'rightClickFacing'; faction: Faction; squadIndex: number; x: number; z: number }
-  | { type: 'ready' }
+  | { type: 'ready'; sheets: CharacterSheet[] }
 
 export class NetworkManager {
   peer: Peer | null = null
@@ -68,7 +69,7 @@ export class NetworkManager {
 
   private world: World | null = null
   private owns: (entityId: number) => boolean = () => true
-  private readonly peerReady = Promise.withResolvers<void>()
+  private readonly peerReady = Promise.withResolvers<CharacterSheet[]>()
 
   /**
    * Replicate component mutations for the entities this peer owns.
@@ -123,9 +124,12 @@ export class NetworkManager {
     }
 
     // Never forwarded as a command: `ready` can land before this side has left
-    // its loadout screen, when there is no `onMessage` to receive it.
+    // its loadout screen, when there is no `onMessage` to receive it. The
+    // sheets are checked here, at the edge, so nothing downstream has to wonder
+    // whether a peer's numbers are numbers.
     if (method === RpcMethods.ready) {
-      this.peerReady.resolve()
+      const raw = Array.isArray(params.sheets) ? params.sheets : []
+      this.peerReady.resolve(raw.slice(0, SQUAD_SIZE).map(sanitizeSheet))
       return
     }
 
@@ -232,14 +236,19 @@ export class NetworkManager {
   }
 
   /**
-   * Resolves once the peer has sent its `ready`. Immediate in local play.
+   * Resolves with the peer's squad sheets once it has sent its `ready`, or
+   * `null` in local play, where there is no peer and both squads were rolled
+   * on this side.
    *
    * Blue moves first and the host is Blue, so without this barrier the host
    * could fire while the joiner is still on the loadout screen — and with no
-   * `onMessage` attached yet, those commands would be dropped outright.
+   * `onMessage` attached yet, those commands would be dropped outright. The
+   * sheets ride the same message because this is exactly the moment both sides
+   * know who they brought: any later and a shot could be resolved against a
+   * squad this side had guessed at.
    */
-  waitForPeerReady(): Promise<void> {
-    return this.mode === 'local' ? Promise.resolve() : this.peerReady.promise
+  waitForPeerReady(): Promise<CharacterSheet[] | null> {
+    return this.mode === 'local' ? Promise.resolve(null) : this.peerReady.promise
   }
 
   dispose(): void {

@@ -1,5 +1,7 @@
 import { AMMO, AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
+import { rollSquadSheets, type CharacterSheet } from '../core/Characters'
 import { ITEMS, ItemId } from '../core/Items'
+import { resolveTraits, TRAITS, type TraitId } from '../core/Traits'
 import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
 import type { EngineContext } from '../engine'
 import {
@@ -16,6 +18,7 @@ import {
   removeGrenade,
   removeItem,
   type SquadLoadout,
+  type UnitLoadout,
 } from '../game/Loadout'
 import { icon } from './icons'
 import { LoadoutScene } from '../render/LoadoutScene'
@@ -47,6 +50,13 @@ export class LoadoutScreen {
   private readonly root: HTMLDivElement
   private readonly scene: LoadoutScene
   private readonly loadout: SquadLoadout = defaultLoadout()
+  /**
+   * The squad's people, as opposed to their kit. Rolled once here and read by
+   * the caller once Deploy is pressed, so the match is fought by the squad the
+   * player was shown: every press re-renders the whole screen, and rolling per
+   * render would reshuffle them each time a stepper was touched.
+   */
+  readonly sheets: CharacterSheet[] = rollSquadSheets()
   private selected = 0
   private waitingLabel: string | null = null
   private readonly deployed = Promise.withResolvers<SquadLoadout>()
@@ -263,7 +273,7 @@ export class LoadoutScreen {
   /**
    * The combat squad card, reused: same chrome and selection treatment, with
    * the HP/AP/AR bars — meaningless before a shot is fired — replaced by what
-   * the member is carrying.
+   * the member is carrying and who they are.
    */
   private renderCards(): string {
     const cards: string[] = []
@@ -271,8 +281,16 @@ export class LoadoutScreen {
       const unit = this.loadout[index]!
       const name = FACTION_INFO[this.faction].squadNames[index] ?? ''
       const carried = [
-        ...Object.values(GrenadeId).map((id) => ({ file: `grenade-${id}`, count: unit.grenades[id] })),
-        ...Object.values(ItemId).map((id) => ({ file: `item-${id}`, count: unit.items[id] })),
+        ...Object.values(GrenadeId).map((id) => ({
+          file: `grenade-${id}`,
+          name: GRENADES[id].name,
+          count: unit.grenades[id],
+        })),
+        ...Object.values(ItemId).map((id) => ({
+          file: `item-${id}`,
+          name: ITEMS[id].name,
+          count: unit.items[id],
+        })),
       ].filter((entry) => entry.count > 0)
 
       cards.push(`
@@ -284,12 +302,74 @@ export class LoadoutScreen {
             ${icon(`weapon-${unit.weaponId}`, 'big')}
             ${icon(`ammo-${unit.ammoId}`, 'big')}
             ${carried
-              .map((entry) => `<span class="loadout-carried">${icon(entry.file)}${entry.count}</span>`)
+              .map(
+                (entry) =>
+                  `<span class="loadout-carried" title="${entry.name}">${icon(entry.file)}${entry.count}</span>`,
+              )
               .join('')}
           </div>
+          ${LoadoutScreen.sheetBlock(unit, this.sheets[index]!)}
         </div>`)
     }
 
     return `<div class="loadout-cards">${cards.join('')}</div>`
+  }
+
+  /**
+   * Who the soldier is, under what they are carrying.
+   *
+   * Only the proficiency for the weapon currently in this unit's hands is
+   * shown. The question the card answers is whether this kit suits this
+   * soldier, and all four classes at once would bury the one number being
+   * decided — the crate rows above already say what the alternatives are.
+   *
+   * Traits granted by worn kit are listed beside the innate ones. Worn kit has
+   * no action panel row in combat, so this is the only place it explains
+   * itself.
+   */
+  private static sheetBlock(unit: UnitLoadout, sheet: CharacterSheet): string {
+    const traits: { id: TraitId; worn: boolean }[] = sheet.traits.map((id) => ({ id, worn: false }))
+    for (const id of Object.values(ItemId)) {
+      if (unit.items[id] <= 0) continue
+      for (const granted of ITEMS[id].traits ?? []) traits.push({ id: granted, worn: true })
+    }
+
+    // Every number here is what the unit will deploy with, traits folded in,
+    // because the card is being used to decide kit: a Nimble soldier who reads
+    // as their bare sheet would look like a worse pick than they are, and a
+    // vest that costs evasion would look free. Same fold the soldier does, so
+    // the same answer.
+    const fielded = resolveTraits(traits.map((trait) => trait.id))
+    const proficiency = sheet.proficiency[unit.weaponId] + fielded.accuracy
+    const evasion = Math.max(0, sheet.evasion + fielded.evasion)
+
+    const stat = (label: string, value: string, penalty = false): string => `
+      <div class="loadout-stat ${penalty ? 'penalty' : ''}">
+        <span class="loadout-stat-name">${label}</span>
+        <span class="loadout-stat-value">${value}</span>
+      </div>`
+
+    return `
+      <div class="loadout-sheet">
+        <div class="loadout-stats">
+          ${stat('HP', `${sheet.maxHp + fielded.maxHp}`)}
+          ${stat('AP', `${sheet.maxAp + fielded.maxAp}`)}
+          ${stat('Eva', `${evasion}%`)}
+          ${stat('Skill', `${proficiency > 0 ? '+' : ''}${proficiency}%`, proficiency < 0)}
+        </div>
+        <div class="loadout-spec">${WEAPONS[sheet.specialism].name} specialist</div>
+        <div class="loadout-traits">
+          ${
+            traits.length === 0
+              ? '<span class="loadout-trait none">No traits</span>'
+              : traits
+                  .map(
+                    (trait) =>
+                      `<span class="loadout-trait ${trait.worn ? 'worn' : ''}" title="${TRAITS[trait.id].description}">${TRAITS[trait.id].name}</span>`,
+                  )
+                  .join('')
+          }
+        </div>
+      </div>`
   }
 }

@@ -28,6 +28,19 @@ export interface CombatantStats {
   /** This unit's own loaded round. */
   ammo: AmmoSpec
   statuses: StatusState[]
+  /**
+   * Accuracy this unit adds with the weapon it is holding: its training on that
+   * class, plus whatever its traits add to every shot.
+   */
+  proficiency: number
+  /** Percentage points off an attacker's chance to hit this unit. */
+  evasion: number
+  /** No hit on this unit can be a critical. */
+  critImmune: boolean
+  /** Percentage points this unit's traits add to its own crit chance. */
+  critChanceBonus: number
+  /** What this unit's traits add to the multiplier its crits apply. */
+  critMultiplierBonus: number
 }
 
 /** A weapon with its loaded ammo folded in. */
@@ -48,7 +61,15 @@ export interface EffectiveWeapon {
   critRangeBias: number
 }
 
-/** Fold the loaded round's modifiers into its weapon. */
+/**
+ * Fold the loaded round's modifiers, and the holder's own traits, into its
+ * weapon.
+ *
+ * The traits belong here rather than at the crit site because they are a
+ * property of the shooter with this weapon in their hands, exactly like the
+ * ammunition in it — so everything downstream reads one set of numbers and
+ * never has to ask who is holding it.
+ */
 export function effectiveWeapon(stats: CombatantStats, mode: ShotMode): EffectiveWeapon {
   const weapon = stats.weapon
   const ammo = stats.ammo
@@ -64,8 +85,8 @@ export function effectiveWeapon(stats: CombatantStats, mode: ShotMode): Effectiv
     armorShred: weapon.armorShred + ammo.armorShredBonus,
     areaRadius: weapon.areaRadius,
     maxRange: weapon.maxRange,
-    critChance: weapon.critChance,
-    critMultiplier: weapon.critMultiplier,
+    critChance: weapon.critChance + stats.critChanceBonus,
+    critMultiplier: Math.max(1, weapon.critMultiplier + stats.critMultiplierBonus),
     critRangeBias: weapon.critRangeBias,
   }
 }
@@ -121,6 +142,10 @@ export interface HitChanceBreakdown {
   shooterPenalty: number
   /** Lost to the target's statuses (smoke). */
   targetDefence: number
+  /** What the shooter's training on this weapon class is worth. Signed. */
+  proficiency: number
+  /** Lost to the target being a hard thing to hit. */
+  evasion: number
   modeMultiplier: number
   distance: number
   outOfRange: boolean
@@ -131,6 +156,12 @@ export interface HitChanceBreakdown {
  *
  * Range is the term that distinguishes the weapons: it is the weapon's own
  * per-metre falloff scaled by the loaded round, not one global constant.
+ *
+ * Two of the terms are people rather than equipment. The shooter's proficiency
+ * is what they are worth with the class of weapon in their hands, so the same
+ * rifle is not the same rifle in every pair of hands. The target's evasion is
+ * subtracted before the mode multiplier, so a hard target is hard to snap at
+ * and hard to line up on alike.
  */
 export function hitChance(
   shooter: CombatantStats,
@@ -147,14 +178,17 @@ export function hitChance(
   const rangePenalty = distance * eff.accuracyPerMetre
   const cov = coverPenalty(cover, target.isCrouching)
   const outOfRange = distance > eff.maxRange
+  const evasion = Math.max(0, target.evasion)
 
   const raw =
     (eff.baseAccuracy +
-      AIM.globalBonus -
+      AIM.globalBonus +
+      shooter.proficiency -
       rangePenalty -
       cov -
       shooterStatus.accuracyPenalty -
-      targetStatus.defenceBonus) *
+      targetStatus.defenceBonus -
+      evasion) *
     modeMultiplier
 
   return {
@@ -164,6 +198,8 @@ export function hitChance(
     coverPenalty: cov,
     shooterPenalty: shooterStatus.accuracyPenalty,
     targetDefence: targetStatus.defenceBonus,
+    proficiency: shooter.proficiency,
+    evasion,
     modeMultiplier,
     distance,
     outOfRange,
@@ -174,7 +210,7 @@ export function hitChance(
 export interface CritBreakdown {
   /** Final clamped percentage. */
   chance: number
-  /** The weapon's own chance, before the shot's circumstances. */
+  /** The weapon's own chance, plus what the shooter's traits add. */
   base: number
   /** What the distance did: negative outside the weapon's element. */
   rangeTerm: number
@@ -182,22 +218,34 @@ export interface CritBreakdown {
   armorTerm: number
   /** What a crit multiplies raw damage by. */
   multiplier: number
+  /** The target cannot be crit at all, so none of the terms above apply. */
+  immune: boolean
 }
 
 /**
  * Chance that a hit lands as a critical, and what one is worth.
  *
- * Three things decide it. The weapon sets the odds and the multiplier. The
- * distance moves those odds along the weapon's own bias, so a shotgun is at its
- * worst across a street and a sniper rifle at its worst in a doorway. The
- * target's armour covers what a crit needs to reach, and a round that
- * penetrates armour keeps its chance at it.
+ * Three things decide it. The weapon — with the shooter's own traits already
+ * folded in — sets the odds and the multiplier. The distance moves those odds
+ * along the weapon's own bias, so a shotgun is at its worst across a street and
+ * a sniper rifle at its worst in a doorway. The target's armour covers what a
+ * crit needs to reach, and a round that penetrates armour keeps its chance at
+ * it.
+ *
+ * A target that cannot be crit ends the question before it is asked: the
+ * chance is zero whatever the weapon, the distance or the roll. That is one
+ * property, and it does not care whether the unit was born unflappable or is
+ * wearing something that spreads the shock.
  */
 export function critBreakdown(
   eff: EffectiveWeapon,
   target: CombatantStats,
   distance: number,
 ): CritBreakdown {
+  if (target.critImmune) {
+    return { chance: 0, base: eff.critChance, rangeTerm: 0, armorTerm: 0, multiplier: 1, immune: true }
+  }
+
   // -1 at the muzzle, +1 at the edge of the weapon's reach.
   const reach = eff.maxRange > 0 ? clamp(distance / eff.maxRange, 0, 1) : 0
   const rangeTerm = CRIT.rangeSwing * eff.critRangeBias * (2 * reach - 1)
@@ -212,6 +260,7 @@ export function critBreakdown(
     rangeTerm: Math.round(rangeTerm) || 0,
     armorTerm: Math.round(armorTerm) || 0,
     multiplier: eff.critMultiplier,
+    immune: false,
   }
 }
 

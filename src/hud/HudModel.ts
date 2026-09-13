@@ -105,6 +105,12 @@ export interface HudShotBase {
   critChance: number
   /** What a critical multiplies the round by. */
   critMultiplier: number
+  /**
+   * The target cannot be crit at all. Stated rather than folded into a zero
+   * chance, because a 0% with a multiplier beside it reads as bad luck when it
+   * is actually a rule.
+   */
+  critImmune: boolean
   /** Damage a critical does, after the target's armour. */
   critDamage: number
   terms: HudShotTerm[]
@@ -282,7 +288,9 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     for (const id of Object.values(ItemId)) {
       const spec = ITEMS[id]
       const count = selected.items[id] ?? 0
-      if (count <= 0) continue
+      // Worn kit has no action, so a row for it would be a button that does
+      // nothing. What the unit carries is shown on the loadout screen.
+      if (count <= 0 || spec.passive) continue
       actions.push({
         id: `item-${id}`,
         label: spec.name,
@@ -374,10 +382,21 @@ function weaponApCost(soldier: Soldier, mode: ShotMode): number {
  * Recomputed from the terms rather than divided out of an option's chance: the
  * final figure is clamped, so dividing by the multiplier would misreport any
  * shot that hit the ceiling or the floor.
+ *
+ * Every term `hitChance` uses has to appear here, or the big number on the card
+ * contradicts the rows printed under it: proficiency and evasion were missing
+ * and a target with 22 evasion still read 64%.
  */
 function neutralChance(b: HitChanceBreakdown): number {
   if (b.outOfRange) return 0
-  const raw = b.base - b.rangePenalty - b.coverPenalty - b.shooterPenalty - b.targetDefence
+  const raw =
+    b.base +
+    b.proficiency -
+    b.rangePenalty -
+    b.coverPenalty -
+    b.shooterPenalty -
+    b.targetDefence -
+    b.evasion
   return clamp(Math.round(raw), AIM.min, AIM.max)
 }
 
@@ -394,6 +413,18 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
       icon: 'ui-shoot',
       penalty: false,
     })
+    // The two terms that are people rather than kit. Worth their own rows: a
+    // player comparing two shooters on the same target has no other way to see
+    // that the rifle is not the same rifle in both pairs of hands.
+    const proficiency = Math.round(first.proficiency)
+    if (proficiency !== 0) {
+      terms.push({
+        label: `${pending.weaponName} skill`,
+        value: `${proficiency > 0 ? '+' : ''}${proficiency}%`,
+        icon: 'mode-aimed',
+        penalty: proficiency < 0,
+      })
+    }
     terms.push({
       label: `Range ${first.distance.toFixed(1)} m`,
       value: `-${first.rangePenalty}%`,
@@ -418,6 +449,14 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
       terms.push({
         label: 'Concealment',
         value: `-${first.targetDefence}%`,
+        icon: 'shot-conceal',
+        penalty: true,
+      })
+    }
+    if (first.evasion > 0) {
+      terms.push({
+        label: 'Target evasion',
+        value: `-${Math.round(first.evasion)}%`,
         icon: 'shot-conceal',
         penalty: true,
       })
@@ -459,6 +498,7 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
       armorShred: pending.options[0]?.armorShred ?? 0,
       critChance: pending.crit.chance,
       critMultiplier: pending.crit.multiplier,
+      critImmune: pending.crit.immune,
       critDamage: pending.critDamage,
       terms,
     },

@@ -416,6 +416,11 @@ export class Hud {
    * damage restated three times over, with one line between them that actually
    * differed. What stays put is stated once and is not clickable; what a mode
    * changes is all its own row shows.
+   *
+   * The crit line stays one row whether or not the target can be crit at all,
+   * so the outcome block does not change height as the aim moves between
+   * targets; an immune one states that instead of a 0% beside a multiplier
+   * that will never be applied.
    */
   private shotCard(shot: HudShotPanel): string {
     return `
@@ -437,9 +442,13 @@ export class Hud {
         </div>
         <div class="shot-rows shot-outcome">
           <div class="shot-row"><span>${icon('shot-damage', 'tiny')}Damage a hit</span><span>${shot.base.damage}</span></div>
-          <div class="shot-row shot-crit">
-            <span>${icon('shot-shred', 'tiny')}Crit ${shot.base.critChance}% &times;${shot.base.critMultiplier}</span>
-            <span>${shot.base.critDamage}</span>
+          <div class="shot-row shot-crit ${shot.base.critImmune ? 'shot-immune' : ''}">
+            ${
+              shot.base.critImmune
+                ? `<span>${icon('shot-shred', 'tiny')}Crit</span><span>IMMUNE</span>`
+                : `<span>${icon('shot-shred', 'tiny')}Crit ${shot.base.critChance}% &times;${shot.base.critMultiplier}</span>
+            <span>${shot.base.critDamage}</span>`
+            }
           </div>
           ${shot.base.armorShred > 0 ? `<div class="shot-row"><span>${icon('shot-shred', 'tiny')}Armor shred</span><span>-${shot.base.armorShred}</span></div>` : ''}
         </div>

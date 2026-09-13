@@ -24,11 +24,13 @@ function stubSoldier() {
     ammoId: AmmoId.Standard as AmmoId,
     // What a fresh InventoryComponent / ItemsComponent hands out.
     grenades: { [GrenadeId.Frag]: 1, [GrenadeId.Flash]: 1, [GrenadeId.Smoke]: 1 },
-    items: { [ItemId.StimPack]: 1, [ItemId.FirstAidKit]: 1 },
+    items: { [ItemId.StimPack]: 1, [ItemId.FirstAidKit]: 1, [ItemId.NullweaveVest]: 0 },
     equip(weaponId: WeaponId, ammoId: AmmoId): void {
       soldier.weaponId = weaponId
       soldier.ammoId = ammoId
     },
+    // Worn gear is a trait source, so the stamp re-folds the pouch afterwards.
+    refreshTraits(): void {},
   }
   return soldier as unknown as Soldier & typeof soldier
 }
@@ -53,7 +55,11 @@ describe('Shared crate', () => {
       [GrenadeId.Flash]: 3,
       [GrenadeId.Smoke]: 3,
     })
-    expect(left.items).toEqual({ [ItemId.StimPack]: 4, [ItemId.FirstAidKit]: 4 })
+    expect(left.items).toEqual({
+      [ItemId.StimPack]: 4,
+      [ItemId.FirstAidKit]: 4,
+      [ItemId.NullweaveVest]: 2,
+    })
   })
 
   test('a weapon can be handed out while the crate has one, and not after', () => {
@@ -133,7 +139,7 @@ describe('Stamping a loadout onto a soldier', () => {
       weaponId: WeaponId.Sniper,
       ammoId: AmmoId.ArmorPiercing,
       grenades: { [GrenadeId.Frag]: 2, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0 },
-      items: { [ItemId.StimPack]: 0, [ItemId.FirstAidKit]: 2 },
+      items: { [ItemId.StimPack]: 0, [ItemId.FirstAidKit]: 2, [ItemId.NullweaveVest]: 0 },
     })
 
     expect(soldier.weaponId).toBe(WeaponId.Sniper)
@@ -143,6 +149,10 @@ describe('Stamping a loadout onto a soldier', () => {
       [GrenadeId.Flash]: 0,
       [GrenadeId.Smoke]: 0,
     })
-    expect(soldier.items).toEqual({ [ItemId.StimPack]: 0, [ItemId.FirstAidKit]: 2 })
+    expect(soldier.items).toEqual({
+      [ItemId.StimPack]: 0,
+      [ItemId.FirstAidKit]: 2,
+      [ItemId.NullweaveVest]: 0,
+    })
   })
 })

@@ -156,6 +156,39 @@ export const RULES = {
 }
 
 /**
+ * How much the people differ from each other.
+ *
+ * Rolled per peer, not from the match seed: the seed is the host's map, and
+ * each side brings its own squad and sends the sheets in the start handshake.
+ * Everything here is a range around the baseline in {@link RULES}.
+ */
+export const CHARACTER = {
+  /** Hit points, absolute. */
+  hp: { min: 85, max: 120 },
+  /** Action points, absolute. */
+  ap: { min: 10, max: 14 },
+  /** Percentage points off an attacker's hit chance. */
+  evasion: { min: 0, max: 12 },
+  /**
+   * Accuracy every weapon class gets, before the one the character actually
+   * trained on.
+   */
+  proficiency: { min: -8, max: 6 },
+  /**
+   * Accuracy on top of that, for the single class they are a specialist in.
+   *
+   * Strictly greater than the span of `proficiency`, so a specialist's worst
+   * possible draw still beats every other class's best: being labelled a
+   * specialist has to mean being the best with it. At 12 it did not — a
+   * specialist could roll -8+12 = 4 against another class's 6, and one
+   * character in five was worse with the weapon they were named for.
+   */
+  specialistBonus: 15,
+  /** Chance a character is born with a trait at all. */
+  traitChance: 0.55,
+}
+
+/**
  * Global aim clamps and tuning offsets. Per-weapon accuracy and range falloff
  * live in {@link Arsenal}: what separates a shotgun from a sniper rifle is the
  * weapon, not a single global constant.

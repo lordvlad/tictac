@@ -2,8 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
 import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
-import { Faction, RULES } from '../src/config'
-import { GrenadeId, ShotMode, StatusKind } from '../src/core/Arsenal'
+import { CHARACTER, Faction, RULES, SQUAD_SIZE } from '../src/config'
+import { GrenadeId, ShotMode, StatusKind, WeaponId } from '../src/core/Arsenal'
+import { rollSquadSheets } from '../src/core/Characters'
+import { TraitId } from '../src/core/Traits'
+import { Rng } from '../src/core/rng'
 import { HealthComponent, MatchRulesComponent } from '../src/ecs/components'
 import {
   componentUpdateMethod,
@@ -325,5 +328,88 @@ describe('Component replication', () => {
     })
 
     expect(notified).toBe(false)
+  })
+})
+
+describe('The start handshake carries each peer its own squad', () => {
+  test('a squad sent with `ready` arrives as the sheets that were rolled', async () => {
+    const { net, sent } = harness()
+    const mine = rollSquadSheets(new Rng(7))
+    net.send({ type: 'ready', sheets: mine })
+
+    expect(sent[0]?.method).toBe(RpcMethods.ready)
+
+    const receiver = new NetworkManager()
+    receiver.mode = 'join'
+    receive(receiver, sent[0])
+
+    // Locally rolled sheets are already inside the envelope, so sanitising at
+    // the edge must leave them untouched — the barrier is for hostile input,
+    // not a filter every honest squad has to survive.
+    expect(await receiver.waitForPeerReady()).toEqual(mine)
+  })
+
+  test('`ready` is never delivered as a command', async () => {
+    // It can land while the peer is still on its loadout screen, where there
+    // is no `onMessage` to receive it: the barrier has to resolve regardless.
+    const receiver = new NetworkManager()
+    receiver.mode = 'join'
+    const commands: NetworkMessage[] = []
+    receiver.onMessage = (msg) => {
+      commands.push(msg)
+    }
+
+    receive(receiver, {
+      jsonrpc: '2.0',
+      method: RpcMethods.ready,
+      params: { sheets: rollSquadSheets(new Rng(11)) },
+    })
+
+    expect(await receiver.waitForPeerReady()).toHaveLength(SQUAD_SIZE)
+    expect(commands).toEqual([])
+  })
+
+  test('a squad of nonsense is taken apart before it can be played against', async () => {
+    const receiver = new NetworkManager()
+    receiver.mode = 'join'
+
+    receive(receiver, {
+      jsonrpc: '2.0',
+      method: RpcMethods.ready,
+      params: {
+        sheets: [
+          { maxHp: 1e9, maxAp: 999, evasion: 500, traits: ['toString', 'stoic'], specialism: 'x' },
+          'not a sheet',
+          null,
+        ],
+      },
+    })
+
+    const peer = await receiver.waitForPeerReady()
+    expect(peer).not.toBeNull()
+    const first = peer![0]!
+    expect(first.maxHp).toBe(CHARACTER.hp.max)
+    expect(first.maxAp).toBe(CHARACTER.ap.max)
+    expect(first.evasion).toBe(CHARACTER.evasion.max)
+    // A key off the prototype is not a trait, and the real one beside it lives.
+    expect(first.traits).toEqual([TraitId.Stoic])
+    expect(Object.values(WeaponId)).toContain(first.specialism)
+  })
+
+  test('a missing squad still lifts the barrier', async () => {
+    // A peer that sends `ready` with nothing in it must not hang the match
+    // behind a promise that never resolves; the units keep the sheets this side
+    // rolled for them.
+    const receiver = new NetworkManager()
+    receiver.mode = 'join'
+    receive(receiver, { jsonrpc: '2.0', method: RpcMethods.ready, params: {} })
+
+    expect(await receiver.waitForPeerReady()).toEqual([])
+  })
+
+  test('local play has no peer to wait for', async () => {
+    const net = new NetworkManager()
+    net.mode = 'local'
+    expect(await net.waitForPeerReady()).toBeNull()
   })
 })

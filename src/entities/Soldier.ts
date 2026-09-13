@@ -12,7 +12,15 @@ import {
   WeaponId,
 } from '../core/Arsenal'
 import { effectiveMaxAp, type StatusState } from '../core/Ballistics'
-import type { ItemId } from '../core/Items'
+import { characterSheet, type CharacterSheet } from '../core/Characters'
+import { Rng } from '../core/rng'
+import {
+  NO_TRAITS,
+  type ResolvedTraits,
+  resolveTraitsInto,
+  type TraitId,
+} from '../core/Traits'
+import { ITEMS, ItemId } from '../core/Items'
 import type { Grid, Tile } from '../core/Grid'
 import { soldierColor } from './palette'
 import type { World } from '../ecs/World'
@@ -29,6 +37,7 @@ import {
   StatusesComponent,
   WeaponComponent,
   ItemsComponent,
+  TraitsComponent,
 } from '../ecs/components'
 
 /**
@@ -75,6 +84,20 @@ export class Soldier extends Entity3D {
   /** Render-only yaw smoothing. Never networked: the peer smooths its own. */
   currentYaw = 0
 
+  /**
+   * Who this soldier is, as opposed to what they carry.
+   *
+   * Rolled by whichever peer commands this squad. For the enemy squad it is
+   * replaced wholesale when their sheets arrive in the start handshake, which
+   * is why it is not readonly.
+   */
+  sheet: CharacterSheet
+
+  /** Sheet plus carried gear, refolded whenever either could have changed. */
+  private readonly resolvedTraits: ResolvedTraits = { ...NO_TRAITS }
+  private readonly traitIds: TraitId[] = []
+  private readonly traitsComponent: TraitsComponent
+
   constructor(
     world: World,
     faction: Faction,
@@ -83,11 +106,13 @@ export class Soldier extends Entity3D {
     initialTile: Tile,
     grid: Grid,
     private readonly engine: EngineContext,
+    sheet: CharacterSheet = characterSheet(new Rng(squadIndex + 1)),
   ) {
     super()
     this.faction = faction
     this.squadIndex = squadIndex
     this.name = name
+    this.sheet = sheet
 
     grid.tileToWorld(initialTile, this.position)
     // Blue team faces North (+Z), Red team faces South (-Z)
@@ -101,10 +126,12 @@ export class Soldier extends Entity3D {
       this.entityId,
       new PositionComponent({ ...initialTile }, this.position.clone(), initialYaw),
     )
-    this.health = world.addComponent(this.entityId, new HealthComponent(RULES.maxHp, RULES.maxHp))
+    // The sheet's own trait bonuses are in these ceilings from the start; gear
+    // picked up later lifts them through `refreshTraits`.
+    this.health = world.addComponent(this.entityId, new HealthComponent(sheet.maxHp, sheet.maxHp))
     this.actionPoints = world.addComponent(
       this.entityId,
-      new ActionPointsComponent(RULES.maxAp, RULES.maxAp),
+      new ActionPointsComponent(sheet.maxAp, sheet.maxAp),
     )
     this.armorComponent = world.addComponent(
       this.entityId,
@@ -117,8 +144,103 @@ export class Soldier extends Entity3D {
     this.inventory = world.addComponent(this.entityId, new InventoryComponent())
     this.stance = world.addComponent(this.entityId, new StanceComponent())
     this.statusesComponent = world.addComponent(this.entityId, new StatusesComponent())
+    this.traitsComponent = world.addComponent(this.entityId, new TraitsComponent())
+    this.refreshTraits()
 
     this.initGraphics()
+  }
+
+  /**
+   * Refold the sheet's traits with whatever is being carried, and publish the
+   * two an enemy needs.
+   *
+   * Called on every change to the pouch rather than computed per read: a shot
+   * preview runs every frame the panel is open, and the answer only moves when
+   * gear does.
+   */
+  refreshTraits(): void {
+    this.traitIds.length = 0
+    for (const id of this.sheet.traits) this.traitIds.push(id)
+    for (const id of Object.values(ItemId)) {
+      if ((this.items[id] ?? 0) <= 0) continue
+      const granted = ITEMS[id].traits
+      if (granted) for (const trait of granted) this.traitIds.push(trait)
+    }
+    resolveTraitsInto(this.resolvedTraits, this.traitIds)
+
+    const evasion = Math.max(0, this.sheet.evasion + this.resolvedTraits.evasion)
+    if (this.traitsComponent.evasion !== evasion) this.traitsComponent.evasion = evasion
+    if (this.traitsComponent.critImmune !== this.resolvedTraits.critImmune) {
+      this.traitsComponent.critImmune = this.resolvedTraits.critImmune
+    }
+
+    // Trait ceilings sit on top of the sheet's own, and a unit at full health
+    // keeps being at full health when the source of the lift changes.
+    const maxHp = this.sheet.maxHp + this.resolvedTraits.maxHp
+    if (this.health.maxHp !== maxHp) {
+      const wasFull = this.health.hp >= this.health.maxHp
+      this.health.maxHp = maxHp
+      this.health.hp = wasFull ? maxHp : Math.min(this.health.hp, maxHp)
+    }
+    const maxAp = this.sheet.maxAp + this.resolvedTraits.maxAp
+    if (this.actionPoints.maxAp !== maxAp) {
+      const wasFull = this.actionPoints.ap >= this.actionPoints.maxAp
+      this.actionPoints.maxAp = maxAp
+      this.actionPoints.ap = wasFull ? maxAp : Math.min(this.actionPoints.ap, maxAp)
+    }
+  }
+
+  /**
+   * Adopt the sheet its own peer rolled for this soldier.
+   *
+   * Used on the enemy squad when the peer's sheets arrive in the handshake:
+   * this side rolled placeholders so the match could be built, and these are
+   * the real people. Called before the first turn, so resetting to the new
+   * ceilings is the right thing rather than a mid-match heal.
+   */
+  adoptSheet(sheet: CharacterSheet): void {
+    this.sheet = sheet
+    this.refreshTraits()
+    this.health.hp = this.health.maxHp
+    this.actionPoints.ap = this.actionPoints.maxAp
+  }
+
+  /** Every trait in force, from the sheet and from the pouch. */
+  get traits(): ResolvedTraits {
+    return this.resolvedTraits
+  }
+
+  /**
+   * Accuracy this soldier adds with the weapon in their hands: what the sheet
+   * says about that class, plus anything a trait adds to every shot.
+   */
+  get proficiency(): number {
+    return this.sheet.proficiency[this.weaponId] + this.resolvedTraits.accuracy
+  }
+
+  /**
+   * Percentage points off an attacker's hit chance.
+   *
+   * Read from the replicated component, not recomputed: for an enemy unit this
+   * is the only copy this side is allowed to trust.
+   */
+  get evasion(): number {
+    return this.traitsComponent.evasion
+  }
+
+  /** True when no hit on this unit can be a critical. Replicated, as above. */
+  get critImmune(): boolean {
+    return this.traitsComponent.critImmune
+  }
+
+  /** Percentage points this soldier's traits add to its own crit chance. */
+  get critChanceBonus(): number {
+    return this.resolvedTraits.critChance
+  }
+
+  /** What its traits add to the multiplier its own crits apply. */
+  get critMultiplierBonus(): number {
+    return this.resolvedTraits.critMultiplier
   }
 
   // --- component-backed state -----------------------------------------------

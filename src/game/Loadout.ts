@@ -61,6 +61,9 @@ export const DEMO_INVENTORY: Inventory = {
   items: {
     [ItemId.StimPack]: 4,
     [ItemId.FirstAidKit]: 4,
+    // Two in the crate: it is the answer to one enemy marksman, not to all of
+    // them.
+    [ItemId.NullweaveVest]: 2,
   },
 }
 
@@ -74,7 +77,11 @@ export function defaultLoadout(): SquadLoadout {
     weaponId,
     ammoId: AmmoId.Standard,
     grenades: { [GrenadeId.Frag]: 1, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0 },
-    items: { [ItemId.StimPack]: 0, [ItemId.FirstAidKit]: 0 },
+    items: {
+      [ItemId.StimPack]: 0,
+      [ItemId.FirstAidKit]: 0,
+      [ItemId.NullweaveVest]: 0,
+    },
   }))
 }
 
@@ -227,4 +234,7 @@ export function applyUnitLoadout(soldier: Soldier, unit: UnitLoadout): void {
   soldier.equip(unit.weaponId, unit.ammoId)
   for (const kind of Object.values(GrenadeId)) soldier.grenades[kind] = unit.grenades[kind] ?? 0
   for (const id of Object.values(ItemId)) soldier.items[id] = unit.items[id] ?? 0
+  // The pouch decides which worn gear is in force, so the traits it grants are
+  // only known once it has been stamped.
+  soldier.refreshTraits()
 }

@@ -5,6 +5,7 @@ import { OrbitRig } from './camera/OrbitRig'
 import { createEngineContext } from './engine'
 import { Faction, SIM } from './config'
 import { resolveSeed } from './core/rng'
+import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
 import { Squads } from './game/Squads'
@@ -189,6 +190,14 @@ function equipThenStart(seed: number, label: string, network: NetworkManager): v
   const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
   const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine), seed, faction)
 
+  // The squad the player was shown while equipping is the squad that deploys:
+  // the screen rolled it, so read it back rather than rolling a second one
+  // here. Rolled per peer, never from the match seed — that seed is the host's
+  // map. Local play needs an opposing squad too, and there is no peer to bring
+  // one.
+  const mySheets = screen.sheets
+  const localEnemySheets = rollSquadSheets()
+
   // A peer that drops while the player is still equipping would otherwise hang
   // the screen: there is no controller yet to show the usual overlay. `start`
   // reassigns this to the in-match overlay rather than adding a second handler.
@@ -199,11 +208,15 @@ function equipThenStart(seed: number, label: string, network: NetworkManager): v
   }
 
   void screen.show().then(async (loadout) => {
-    network.send({ type: 'ready' })
+    network.send({ type: 'ready', sheets: mySheets })
     if (network.mode !== 'local') screen.markWaiting('Waiting for opponent to deploy…')
-    await network.waitForPeerReady()
+    const peerSheets = await network.waitForPeerReady()
     screen.dispose()
-    start(seed, label, network, loadout)
+    const other = faction === Faction.Blue ? Faction.Red : Faction.Blue
+    start(seed, label, network, loadout, {
+      [faction]: mySheets,
+      [other]: peerSheets ?? localEnemySheets,
+    } as Record<Faction, CharacterSheet[]>)
   })
 }
 
@@ -212,6 +225,7 @@ function start(
   seedLabel: string,
   network: NetworkManager,
   loadout?: SquadLoadout,
+  sheets?: Record<Faction, CharacterSheet[]>,
 ): void {
   const engine = createEngineContext(Game.instance())
 
@@ -220,7 +234,15 @@ function start(
 
   const battlefield = new Battlefield(seed, engine)
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
-  const squads = new Squads(world, battlefield.grid, battlefield.spawns, engine, loadout, myFaction)
+  const squads = new Squads(
+    world,
+    battlefield.grid,
+    battlefield.spawns,
+    engine,
+    loadout,
+    myFaction,
+    sheets,
+  )
 
   const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,

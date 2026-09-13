@@ -22,13 +22,20 @@ function stubSoldier(overrides: { hp?: number; maxHp?: number; ap?: number; maxA
     armor: overrides.armor ?? 20,
     maxArmor: overrides.maxArmor ?? 20,
     statuses: [] as StatusState[],
-    items: { [ItemId.StimPack]: 1, [ItemId.FirstAidKit]: 1 } as Record<ItemId, number>,
+    items: {
+      [ItemId.StimPack]: 1,
+      [ItemId.FirstAidKit]: 1,
+      [ItemId.NullweaveVest]: 0,
+    } as Record<ItemId, number>,
     get isDead(): boolean {
       return this.hp <= 0
     },
     get effectiveMaxAp(): number {
       return effectiveMaxAp(this.maxAp, this.statuses)
     },
+    // Spending an item can end a trait the pouch was granting, so the system
+    // re-folds after every use.
+    refreshTraits(): void {},
   }
   // Structurally the surface ItemSystem uses; the rest of Soldier is graphics.
   return unit as unknown as Soldier & typeof unit

@@ -13,6 +13,7 @@ grenade-flash: flash-grenade by lorc
 grenade-smoke: smoke-bomb by darkzaitzev
 item-stim: syringe by sbed
 item-firstAid: first-aid-kit by delapouite
+item-nullweave: kevlar-vest by skoll
 ui-pool: cargo-crate by delapouite
 ui-deploy: check-mark by delapouite
 ui-shoot: targeting by lorc

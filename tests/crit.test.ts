@@ -8,9 +8,22 @@ import {
 } from '../src/core/Ballistics'
 import { AIM, CRIT } from '../src/config'
 
+/**
+ * A unit with no person in it: every character-derived modifier at zero. These
+ * tests measure what the equipment does, so the people on both ends of the
+ * shot have to contribute nothing.
+ */
+const NOBODY = {
+  proficiency: 0,
+  evasion: 0,
+  critImmune: false,
+  critChanceBonus: 0,
+  critMultiplierBonus: 0,
+} as const
+
 /** A shooter carrying `weapon`, loaded with `ammo`. */
 function shooter(weapon: CombatantStats['weapon'], ammo = AMMO[AmmoId.Standard]): CombatantStats {
-  return { hp: 100, maxHp: 100, armor: 0, isCrouching: false, weapon, ammo, statuses: [] }
+  return { hp: 100, maxHp: 100, armor: 0, isCrouching: false, weapon, ammo, statuses: [], ...NOBODY }
 }
 
 /** A target wearing `armor` points of plate. */
@@ -23,6 +36,7 @@ function target(armor: number): CombatantStats {
     weapon: new Rifle(),
     ammo: AMMO[AmmoId.Standard],
     statuses: [],
+    ...NOBODY,
   }
 }
 

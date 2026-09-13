@@ -21,6 +21,10 @@ export class ItemSystem extends System {
   /** Can this unit use `itemId` right now? */
   canUse(soldier: Soldier, itemId: ItemId): boolean {
     if (soldier.isDead) return false
+    if (!Object.hasOwn(ITEMS, itemId)) return false
+    // Worn gear has no action: it earns its slot by being carried, and
+    // "using" it would consume the thing granting the trait.
+    if (ITEMS[itemId].passive) return false
     if ((soldier.items[itemId] ?? 0) <= 0) return false
     return soldier.ap >= ITEMS[itemId].apCost
   }
@@ -31,12 +35,22 @@ export class ItemSystem extends System {
    * `force` replays a peer's use that the originating side already validated.
    */
   use(soldier: Soldier, itemId: ItemId, force = false): boolean {
+    // `Object.hasOwn`, not a truthiness check: the id arrives in a peer's
+    // `useItem` and `ITEMS` inherits `toString`, which would otherwise read as
+    // an item and then be spent as one with no `effects` to apply.
+    if (!Object.hasOwn(ITEMS, itemId)) return false
     const spec = ITEMS[itemId]
-    if (!spec) return false
+    // Refused even under `force`: a peer replaying this would be destroying a
+    // trait source on this side, and no legitimate peer sends it.
+    if (spec.passive) return false
     if (!force && !this.canUse(soldier, itemId)) return false
 
     soldier.ap = Math.max(0, soldier.ap - spec.apCost)
     soldier.items[itemId] = Math.max(0, (soldier.items[itemId] ?? 1) - 1)
+    // Spending the last of something that granted a trait ends the trait. True
+    // of no item today, but the pouch is the only source and this is where it
+    // changes.
+    soldier.refreshTraits()
 
     for (const effect of spec.effects) {
       switch (effect.kind) {
