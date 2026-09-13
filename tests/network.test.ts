@@ -86,8 +86,15 @@ describe('Command transport', () => {
       mode: ShotMode.Aimed,
       rolls: [true, false],
       hits: [
-        { faction: Faction.Red, index: 2, damage: 34, armorShred: 5, status: null },
-        { faction: Faction.Red, index: 3, damage: 12, armorShred: 0, status: StatusKind.Shredded },
+        { faction: Faction.Red, index: 2, damage: 34, armorShred: 5, status: null, crit: true },
+        {
+          faction: Faction.Red,
+          index: 3,
+          damage: 12,
+          armorShred: 0,
+          status: StatusKind.Shredded,
+          crit: false,
+        },
       ],
     }
 
@@ -138,8 +145,15 @@ describe('Command transport', () => {
       targetTile: { x: 4, y: 7 },
       areaRadius: 2.5,
       hits: [
-        { faction: Faction.Blue, index: 0, damage: 40, armorShred: 10, status: StatusKind.Shredded },
-        { faction: Faction.Red, index: 1, damage: 0, armorShred: 0, status: null },
+        {
+          faction: Faction.Blue,
+          index: 0,
+          damage: 40,
+          armorShred: 10,
+          status: StatusKind.Shredded,
+          crit: false,
+        },
+        { faction: Faction.Red, index: 1, damage: 0, armorShred: 0, status: null, crit: false },
       ],
     }
 

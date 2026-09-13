@@ -56,10 +56,15 @@ export class DamageIndicators {
     this.loop()
   }
 
-  /** Spawn an indicator over `position` (a target's feet-level world position). */
-  spawn(position: Vector3, hit: boolean, damage: number): void {
+  /**
+   * Spawn an indicator over `position` (a target's feet-level world position).
+   *
+   * A crit says so and says it bigger: the multiplier is already inside
+   * `damage`, so without the marking the number just looks like luck.
+   */
+  spawn(position: Vector3, hit: boolean, damage: number, crit = false): void {
     const el = document.createElement('div')
-    el.textContent = hit ? `\u2212${damage}` : 'MISS'
+    el.textContent = hit ? `${crit ? 'CRIT ' : ''}\u2212${damage}` : 'MISS'
     Object.assign(el.style, {
       position: 'absolute',
       left: '0',
@@ -69,9 +74,9 @@ export class DamageIndicators {
       whiteSpace: 'nowrap',
       fontFamily: "'Segoe UI', 'Inter', system-ui, sans-serif",
       fontWeight: '800',
-      fontSize: hit ? '30px' : '24px',
+      fontSize: hit ? (crit ? '38px' : '30px') : '24px',
       letterSpacing: '0.5px',
-      color: hit ? '#ff5a4a' : '#c9d4e3',
+      color: hit ? (crit ? '#ffd166' : '#ff5a4a') : '#c9d4e3',
       textShadow: '0 0 6px rgba(0,0,0,0.9), 0 2px 3px rgba(0,0,0,0.9)',
     })
     this.container.appendChild(el)

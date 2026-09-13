@@ -29,6 +29,17 @@ export abstract class Weapon {
   areaRadius = 0
   maxRange = 22
 
+  /** Chance of a critical hit, in percent, before range and armour have a say. */
+  critChance = 10
+  /** What a critical hit multiplies raw damage by, before armour subtracts. */
+  critMultiplier = 1.5
+  /**
+   * Where along its reach the weapon crits best, from -1 (at the muzzle) through
+   * 0 (no preference) to +1 (at the far edge of its range). A shotgun wants to
+   * be close; a sniper rifle wants the distance.
+   */
+  critRangeBias = 0
+
   maxClip = 6
   currentClip = 6
 
@@ -54,6 +65,9 @@ export class Rifle extends Weapon {
     this.baseAccuracy = 85
     this.maxClip = 15
     this.currentClip = 15
+    // A service rifle is accurate at any sane distance and has no favourite.
+    this.critChance = 12
+    this.critMultiplier = 1.5
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Snap, ShotMode.Aimed, ShotMode.Burst]
@@ -78,6 +92,11 @@ export class Shotgun extends Weapon {
     this.maxRange = 12
     this.maxClip = 4
     this.currentClip = 4
+    // In someone's face a shell puts everything in one place; at the far end of
+    // its short range the spread is all that arrives.
+    this.critChance = 20
+    this.critMultiplier = 1.8
+    this.critRangeBias = -1
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Snap, ShotMode.Aimed]
@@ -99,6 +118,11 @@ export class Sniper extends Weapon {
     this.maxRange = 40
     this.maxClip = 5
     this.currentClip = 5
+    // A scope is what a crit is: aimed at a vital, from far enough away to be
+    // taking the shot at all.
+    this.critChance = 25
+    this.critMultiplier = 2.2
+    this.critRangeBias = 1
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Snap, ShotMode.Aimed]
@@ -116,6 +140,11 @@ export class Gatling extends Weapon {
     this.damage = 35
     this.maxClip = 30
     this.currentClip = 30
+    // Volume, not placement. What it does get comes from being close enough
+    // that the cone still lands on one body.
+    this.critChance = 5
+    this.critMultiplier = 1.3
+    this.critRangeBias = -0.5
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Burst] // ONLY option for Gatling

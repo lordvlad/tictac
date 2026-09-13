@@ -170,6 +170,28 @@ export const AIM = {
 }
 
 /**
+ * How a critical hit is earned. The weapon decides the odds it starts from and
+ * what a crit is worth ({@link Arsenal}); this is only the scale of what the
+ * shot's circumstances can do to those odds.
+ */
+export const CRIT = {
+  /**
+   * Percentage points the range swings a weapon's crit chance by at either
+   * extreme of its reach — full penalty at the muzzle, full bonus at maximum
+   * range, or the reverse, depending on the weapon's own bias.
+   */
+  rangeSwing: 12,
+  /**
+   * Percentage points taken off per point of the target's armour, before
+   * penetration. Plate covers the vitals a crit needs, and a round that
+   * punches through plate keeps its chance at them.
+   */
+  armorResist: 0.35,
+  min: 0,
+  max: 75,
+}
+
+/**
  * Accuracy the shooter loses against a target, by the cover the bullet crosses
  * and the target's stance. Crouching ("taking cover") always beats standing,
  * and hunkering behind real cover beats crouching in the open.

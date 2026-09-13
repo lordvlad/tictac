@@ -696,6 +696,13 @@ canvas {
   color: var(--hud-danger);
 }
 
+/* The upside line: what the shot does when it goes right. */
+.shot-row.shot-crit span:last-child,
+.shot-row.shot-crit span:first-child {
+  color: #ffd166;
+  font-weight: 700;
+}
+
 .action-btn.action-fire {
   border-color: var(--hud-danger);
   background: rgba(224, 92, 79, 0.22);
@@ -814,12 +821,14 @@ canvas {
   }
 
   /* Sized to its longest row rather than to a guess: at a fixed 118px the
-     longer labels wrapped, and a wrapped row stands taller than the rest.
-     Bounded so a long name cannot take the screen. */
+     longer labels wrapped, and a wrapped row stands taller than the rest. The
+     shot panel is the widest thing that lands here — a target line, a
+     breakdown and a row per mode — so the ceiling has to clear it, and only a
+     genuinely tiny screen should squeeze it. */
   .hud-action-panel {
     right: calc(8px + env(safe-area-inset-right));
     width: max-content;
-    max-width: 45vw;
+    max-width: min(68vw, 280px);
     --hud-row-gap: 5px;
   }
 
@@ -1093,13 +1102,21 @@ canvas {
   cursor: not-allowed;
 }
 
-/* The right-hand column of a mode row: odds over cost. */
+/* The right-hand column of a mode row: odds over cost, two lines always. */
 .shot-option-diff {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 1px;
   white-space: nowrap;
+}
+
+/* Chance and delta share the line so a mode with no delta is not a line
+   shorter than its neighbours. */
+.shot-option-odds {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
 }
 
 .shot-option-name {

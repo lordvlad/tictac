@@ -478,6 +478,7 @@ export class InteractionController {
       damage: hit.damage,
       armorShred: hit.armorShred,
       status: hit.status,
+      crit: hit.crit,
     }))
   }
 
@@ -496,6 +497,8 @@ export class InteractionController {
         armorShred: hit.armorShred,
         killed: false,
         status: hit.status,
+        // Older peers do not send it; an unmarked hit is an ordinary one.
+        crit: hit.crit ?? false,
       })
     }
     return resolved

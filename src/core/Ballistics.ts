@@ -1,4 +1,4 @@
-import { AIM, COVER } from '../config'
+import { AIM, COVER, CRIT } from '../config'
 import {
   type AmmoSpec,
   type GrenadeSpec,
@@ -42,6 +42,10 @@ export interface EffectiveWeapon {
   armorShred: number
   areaRadius: number
   maxRange: number
+  /** Crit chance in percent, before the shot's own circumstances. */
+  critChance: number
+  critMultiplier: number
+  critRangeBias: number
 }
 
 /** Fold the loaded round's modifiers into its weapon. */
@@ -60,6 +64,9 @@ export function effectiveWeapon(stats: CombatantStats, mode: ShotMode): Effectiv
     armorShred: weapon.armorShred + ammo.armorShredBonus,
     areaRadius: weapon.areaRadius,
     maxRange: weapon.maxRange,
+    critChance: weapon.critChance,
+    critMultiplier: weapon.critMultiplier,
+    critRangeBias: weapon.critRangeBias,
   }
 }
 
@@ -163,6 +170,51 @@ export function hitChance(
   }
 }
 
+/** Every term behind a crit chance, so the HUD can explain the number. */
+export interface CritBreakdown {
+  /** Final clamped percentage. */
+  chance: number
+  /** The weapon's own chance, before the shot's circumstances. */
+  base: number
+  /** What the distance did: negative outside the weapon's element. */
+  rangeTerm: number
+  /** What the target's armour took off, net of penetration. */
+  armorTerm: number
+  /** What a crit multiplies raw damage by. */
+  multiplier: number
+}
+
+/**
+ * Chance that a hit lands as a critical, and what one is worth.
+ *
+ * Three things decide it. The weapon sets the odds and the multiplier. The
+ * distance moves those odds along the weapon's own bias, so a shotgun is at its
+ * worst across a street and a sniper rifle at its worst in a doorway. The
+ * target's armour covers what a crit needs to reach, and a round that
+ * penetrates armour keeps its chance at it.
+ */
+export function critBreakdown(
+  eff: EffectiveWeapon,
+  target: CombatantStats,
+  distance: number,
+): CritBreakdown {
+  // -1 at the muzzle, +1 at the edge of the weapon's reach.
+  const reach = eff.maxRange > 0 ? clamp(distance / eff.maxRange, 0, 1) : 0
+  const rangeTerm = CRIT.rangeSwing * eff.critRangeBias * (2 * reach - 1)
+  const armorTerm = -CRIT.armorResist * Math.max(0, target.armor) * (1 - eff.armorPen)
+
+  return {
+    chance: clamp(Math.round(eff.critChance + rangeTerm + armorTerm), CRIT.min, CRIT.max),
+    base: eff.critChance,
+    // `|| 0` folds the negative zero `Math.round` keeps from a negative term
+    // that rounds away: a term of nothing is nothing, and the HUD tests each
+    // for `!== 0` before it draws a row.
+    rangeTerm: Math.round(rangeTerm) || 0,
+    armorTerm: Math.round(armorTerm) || 0,
+    multiplier: eff.critMultiplier,
+  }
+}
+
 /** What a hit actually does once armour has had its say. */
 export interface DamageResult {
   /** HP removed. */
@@ -171,6 +223,8 @@ export interface DamageResult {
   armorShred: number
   /** Damage stopped by armour, for display. */
   absorbed: number
+  /** Whether the crit multiplier was applied. */
+  crit: boolean
 }
 
 /**
@@ -180,14 +234,20 @@ export interface DamageResult {
  * armour-piercing rounds bypass it entirely, buckshot barely dents it. A hit
  * always does at least `AIM.minDamage`, so armour can blunt a weapon but never
  * makes a unit immune to it.
+ *
+ * A crit multiplies the round before armour subtracts, so plate blunts a
+ * critical hit exactly as it blunts an ordinary one rather than being bypassed
+ * by it.
  */
 export function resolveDamage(
   eff: EffectiveWeapon,
   target: CombatantStats,
   falloff = 1,
+  crit = false,
 ): DamageResult {
   const status = statusTotals(target.statuses)
-  const raw = eff.damage * falloff * (1 + status.damageTakenBonus)
+  const multiplier = crit ? eff.critMultiplier : 1
+  const raw = eff.damage * falloff * multiplier * (1 + status.damageTakenBonus)
   const armorInPlay = Math.max(0, target.armor) * (1 - eff.armorPen)
   const damage = Math.max(AIM.minDamage, raw - armorInPlay)
 
@@ -195,6 +255,7 @@ export function resolveDamage(
     damage: Math.round(damage),
     armorShred: Math.round(eff.armorShred * falloff),
     absorbed: Math.round(Math.min(armorInPlay, raw - AIM.minDamage < 0 ? 0 : raw - damage)),
+    crit,
   }
 }
 
@@ -208,10 +269,15 @@ export function blastFalloff(distance: number, radius: number): number {
   return clamp(1 - (distance / radius) * 0.75, 0.25, 1)
 }
 
-/** Damage a grenade does at `distance` tiles from its centre. */
+/**
+ * Damage a grenade does at `distance` tiles from its centre.
+ *
+ * A blast never crits: there is no vital to aim a shockwave at, and falloff
+ * already decides what being close was worth.
+ */
 export function grenadeDamageAt(spec: GrenadeSpec, distance: number, target: CombatantStats): DamageResult {
   const falloff = blastFalloff(distance, spec.areaRadius)
-  if (falloff === 0) return { damage: 0, armorShred: 0, absorbed: 0 }
+  if (falloff === 0) return { damage: 0, armorShred: 0, absorbed: 0, crit: false }
   const status = statusTotals(target.statuses)
   // Explosives ignore worn armour far more than bullets do: the blast wave gets
   // through regardless, so only a quarter of armour applies.
@@ -221,5 +287,6 @@ export function grenadeDamageAt(spec: GrenadeSpec, distance: number, target: Com
     damage: spec.damage === 0 ? 0 : Math.max(AIM.minDamage, Math.round(raw - armorInPlay)),
     armorShred: Math.round(spec.armorShred * falloff),
     absorbed: Math.round(Math.min(armorInPlay, raw)),
+    crit: false,
   }
 }

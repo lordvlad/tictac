@@ -101,6 +101,12 @@ export interface HudShotBase {
   /** Damage a single hit does, which no mode changes. */
   damage: number
   armorShred: number
+  /** Chance a hit lands as a critical, after range and the target's armour. */
+  critChance: number
+  /** What a critical multiplies the round by. */
+  critMultiplier: number
+  /** Damage a critical does, after the target's armour. */
+  critDamage: number
   terms: HudShotTerm[]
 }
 
@@ -418,6 +424,25 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
     }
   }
 
+  // What moved the crit chance off the weapon's own number, so a player can see
+  // why closing in or backing off would change it.
+  if (pending.crit.rangeTerm !== 0) {
+    terms.push({
+      label: pending.crit.rangeTerm > 0 ? 'Crit at this range' : 'Crit out of its range',
+      value: `${pending.crit.rangeTerm > 0 ? '+' : ''}${pending.crit.rangeTerm}%`,
+      icon: 'shot-range',
+      penalty: pending.crit.rangeTerm < 0,
+    })
+  }
+  if (pending.crit.armorTerm !== 0) {
+    terms.push({
+      label: 'Crit vs armour',
+      value: `${pending.crit.armorTerm}%`,
+      icon: 'shot-shred',
+      penalty: true,
+    })
+  }
+
   const base = first ? neutralChance(first) : 0
 
   return {
@@ -432,6 +457,9 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
       chance: base,
       damage: pending.options[0]?.damage ?? 0,
       armorShred: pending.options[0]?.armorShred ?? 0,
+      critChance: pending.crit.chance,
+      critMultiplier: pending.crit.multiplier,
+      critDamage: pending.critDamage,
       terms,
     },
     options: pending.options.map((option) => ({

@@ -109,6 +109,9 @@ export class CombatSystem extends System {
       killed: hits.some((hit) => hit.soldier.isDead),
       hitChance: 0,
       apSpent: 0,
+      // Read off the peer's hits, never re-rolled: the crit is in the damage
+      // they already resolved.
+      crits: hits.filter((hit) => hit.crit).length,
       hits: [...hits],
     }
     // Same door as a local shot, so damage numbers and the HUD refresh follow.

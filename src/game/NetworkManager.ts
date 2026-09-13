@@ -27,6 +27,9 @@ export interface WireHit {
   damage: number
   armorShred: number
   status: StatusKind | null
+  /** Whether the sender resolved this one as a critical. Display only: the
+   *  multiplier is already inside `damage`. */
+  crit: boolean
 }
 
 /**

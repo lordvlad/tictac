@@ -2,6 +2,7 @@ import type { Grid, Tile } from '../core/Grid'
 import { shotCoverLevel } from '../core/Cover'
 import {
   type CombatantStats,
+  critBreakdown,
   type EffectiveWeapon,
   effectiveWeapon,
   grenadeDamageAt,
@@ -21,6 +22,8 @@ export interface ShotResult {
   killed: boolean
   hitChance: number
   apSpent: number
+  /** How many of the rounds that landed landed as criticals. */
+  crits: number
   /** Per-victim breakdown, so a peer can replay this shot without recomputing. */
   hits: ResolvedHit[]
 }
@@ -32,6 +35,9 @@ export interface ResolvedHit {
   armorShred: number
   killed: boolean
   status: StatusKind | null
+  /** True when the crit multiplier was in this number. Display only — the
+   *  damage has already been resolved with it. */
+  crit: boolean
 }
 
 export interface GrenadeResult {
@@ -89,6 +95,12 @@ export function canShoot(
  *
  * Splash weapons resolve their blast through the same path grenades use, so a
  * weapon with `areaRadius > 0` damages everything near the point of impact.
+ *
+ * A crit is rolled per round that lands, against the chance the weapon, the
+ * distance and the target's armour produce. It is never taken from
+ * `overrideRolls`: those are the planner's hit dice, and the panel promises a
+ * crit *chance*, not a crit. Splash damage off a critical round is ordinary —
+ * the placement was on the body the bullet hit, not on the blast.
  */
 export function executeShot(
   grid: Grid,
@@ -101,12 +113,22 @@ export function executeShot(
 ): ShotResult {
   const eff = effectiveWeapon(shooter, mode)
   if (!canShoot(grid, shooter, target, mode)) {
-    return { hit: false, damage: 0, armorShred: 0, killed: false, hitChance: 0, apSpent: 0, hits: [] }
+    return {
+      hit: false,
+      damage: 0,
+      armorShred: 0,
+      killed: false,
+      hitChance: 0,
+      apSpent: 0,
+      crits: 0,
+      hits: [],
+    }
   }
 
   shooter.ap = Math.max(0, shooter.ap - eff.apCost)
 
   const chance = calculateHitChance(grid, shooter, target, mode)
+  const crit = critBreakdown(eff, target, grid.distance(shooter.tile, target.tile))
   const shooterWorld = grid.tileToWorld(shooter.tile)
   const targetWorld = grid.tileToWorld(target.tile)
 
@@ -121,6 +143,7 @@ export function executeShot(
   let totalArmorShred = 0
   let anyHit = false
   let killed = false
+  let crits = 0
 
   for (let i = 0; i < bullets; i++) {
     const hit = overrideRolls ? (overrideRolls[i] ?? false) : Math.random() * 100 <= chance
@@ -131,7 +154,9 @@ export function executeShot(
     if (i === 0) shooter.playShoot()
 
     if (hit) {
-      const primary = applyWeaponDamage(eff, target)
+      const critical = Math.random() * 100 <= crit.chance
+      if (critical) crits++
+      const primary = applyWeaponDamage(eff, target, 1, critical)
       hits.push(primary)
       totalDamage += primary.damage
       totalArmorShred += primary.armorShred
@@ -159,6 +184,7 @@ export function executeShot(
     killed,
     hitChance: chance,
     apSpent: eff.apCost,
+    crits,
     hits,
   }
 }
@@ -183,8 +209,13 @@ export function applyHitEffects(
   else if (damage > 0) target.playHit()
 }
 
-function applyWeaponDamage(eff: EffectiveWeapon, target: Soldier, falloff = 1): ResolvedHit {
-  const result = resolveDamage(eff, target, falloff)
+function applyWeaponDamage(
+  eff: EffectiveWeapon,
+  target: Soldier,
+  falloff = 1,
+  crit = false,
+): ResolvedHit {
+  const result = resolveDamage(eff, target, falloff, crit)
   applyHitEffects(target, result.damage, result.armorShred, null)
   return {
     soldier: target,
@@ -192,6 +223,7 @@ function applyWeaponDamage(eff: EffectiveWeapon, target: Soldier, falloff = 1): 
     armorShred: result.armorShred,
     killed: target.isDead,
     status: null,
+    crit: result.crit,
   }
 }
 
@@ -233,6 +265,7 @@ export function throwGrenade(
       armorShred: result.armorShred,
       killed: soldier.isDead,
       status: spec.applies,
+      crit: false,
     })
   }
 

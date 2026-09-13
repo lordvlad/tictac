@@ -46,8 +46,26 @@ function harness(soldiers: Soldier[]): ShootPlanner {
   )
 }
 
-const KILLED: ShotResult = { hit: true, damage: 100, armorShred: 0, killed: true, hitChance: 80, apSpent: 4, hits: [] }
-const GRAZED: ShotResult = { hit: true, damage: 10, armorShred: 0, killed: false, hitChance: 80, apSpent: 4, hits: [] }
+const KILLED: ShotResult = {
+  hit: true,
+  damage: 100,
+  armorShred: 0,
+  killed: true,
+  hitChance: 80,
+  apSpent: 4,
+  crits: 1,
+  hits: [],
+}
+const GRAZED: ShotResult = {
+  hit: true,
+  damage: 10,
+  armorShred: 0,
+  killed: false,
+  hitChance: 80,
+  apSpent: 4,
+  crits: 0,
+  hits: [],
+}
 
 describe('Shoot mode ends when the shot does', () => {
   test('killing the only target closes shoot mode', () => {

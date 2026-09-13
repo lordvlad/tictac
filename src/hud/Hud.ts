@@ -437,6 +437,10 @@ export class Hud {
         </div>
         <div class="shot-rows shot-outcome">
           <div class="shot-row"><span>${icon('shot-damage', 'tiny')}Damage a hit</span><span>${shot.base.damage}</span></div>
+          <div class="shot-row shot-crit">
+            <span>${icon('shot-shred', 'tiny')}Crit ${shot.base.critChance}% &times;${shot.base.critMultiplier}</span>
+            <span>${shot.base.critDamage}</span>
+          </div>
           ${shot.base.armorShred > 0 ? `<div class="shot-row"><span>${icon('shot-shred', 'tiny')}Armor shred</span><span>-${shot.base.armorShred}</span></div>` : ''}
         </div>
       </div>
@@ -448,7 +452,13 @@ export class Hud {
     `
   }
 
-  /** One mode: its own odds, its cost, and the damage its bullet count buys. */
+  /**
+   * One mode: its own odds, its cost, and the damage its bullet count buys.
+   *
+   * The odds and the delta share a line so every row is the same two lines
+   * tall: as separate lines a mode with no delta stood shorter than its
+   * neighbours.
+   */
   private shotOptionRow(option: HudShotOption): string {
     const delta =
       option.chanceDelta === 0 ? '' : `${option.chanceDelta > 0 ? '+' : ''}${option.chanceDelta}`
@@ -457,12 +467,14 @@ export class Hud {
               ${option.available ? '' : 'disabled'} ${Hud.intentAttr({ type: 'fireShot', mode: option.mode })}>
         <span class="shot-option-name">${icon(`mode-${option.mode}`)} ${option.name}</span>
         <span class="shot-option-diff">
-          ${
-            option.outOfRange
-              ? '<span class="shot-option-hit poor">OUT OF RANGE</span>'
-              : `<span class="shot-option-hit ${option.hitChance >= 50 ? 'good' : 'poor'}">${option.hitChance}%</span>
-                 ${delta === '' ? '' : `<span class="shot-option-delta">${delta}</span>`}`
-          }
+          <span class="shot-option-odds">
+            ${
+              option.outOfRange
+                ? '<span class="shot-option-hit poor">OUT OF RANGE</span>'
+                : `<span class="shot-option-hit ${option.hitChance >= 50 ? 'good' : 'poor'}">${option.hitChance}%</span>
+                   ${delta === '' ? '' : `<span class="shot-option-delta">${delta}</span>`}`
+            }
+          </span>
           <span class="shot-option-ap">${option.apCost} AP · ${option.bullets}x · ${option.damageAtBest} dmg</span>
         </span>
       </button>

@@ -5,6 +5,8 @@ import type { Ground } from '../render/Ground'
 import { hasLineOfSight } from '../core/Visibility'
 import { SHOT_MODES, ShotMode } from '../core/Arsenal'
 import {
+  critBreakdown,
+  type CritBreakdown,
   effectiveWeapon,
   type HitChanceBreakdown,
   resolveDamage,
@@ -43,6 +45,14 @@ export interface PendingShot {
    * with its real numbers rather than making the player toggle to compare.
    */
   options: ShotOption[]
+  /**
+   * The crit terms for this shot. Outside {@link options} because nothing about
+   * a crit depends on the shot mode: the weapon, the distance and the target's
+   * armour decide it, and all three are the same whichever mode is picked.
+   */
+  crit: CritBreakdown
+  /** Damage a critical hit does, after the target's armour. */
+  critDamage: number
 }
 
 /**
@@ -149,6 +159,11 @@ export class ShootPlanner {
       }
     })
 
+    // Any mode will do for the crit terms: `effectiveWeapon` only varies its AP
+    // cost by mode, and a crit is priced off damage, range and armour.
+    const eff = effectiveWeapon(shooter, shooter.weapon.availableModes[0] ?? ShotMode.Snap)
+    const crit = critBreakdown(eff, target, this.grid.distance(shooter.tile, target.tile))
+
     return {
       target,
       weaponName: shooter.weapon.name,
@@ -156,6 +171,8 @@ export class ShootPlanner {
       currentClip: shooter.weapon.currentClip,
       maxClip: shooter.weapon.maxClip,
       options,
+      crit,
+      critDamage: resolveDamage(eff, target, 1, true).damage,
     }
   }
   /** Take the shot in `mode`. Returns target, rolls and resolved effects for P2P sync. */
@@ -179,7 +196,7 @@ export class ShootPlanner {
 
   /** Damage numbers and target bookkeeping, once combat has resolved a shot. */
   reportShot(shooter: Soldier, target: Soldier, result: ShotResult): void {
-    this.damageIndicators.spawn(target.position, result.hit, result.damage)
+    this.damageIndicators.spawn(target.position, result.hit, result.damage, result.crits > 0)
     this.settle(shooter, target)
     this.onShotResolved?.()
   }
