@@ -69,3 +69,12 @@ export function resolveSeed(): { seed: number; label: string } {
   const seed = (Math.random() * 0xffffffff) >>> 0
   return { seed, label: String(seed) }
 }
+
+/**
+ * A source of uniform floats in [0, 1).
+ *
+ * `Math.random` in a match, a seeded {@link Rng} in a simulation. Injected
+ * rather than reached for so that resolving a fight twice with the same dice is
+ * possible at all — which is what a balance sweep and a replay both need.
+ */
+export type Roll = () => number

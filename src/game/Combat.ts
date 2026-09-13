@@ -12,6 +12,7 @@ import {
 } from '../core/Ballistics'
 import { type GrenadeId, ShotMode, STATUSES, type StatusKind } from '../core/Arsenal'
 import { type Casualty, type Combatant, type CombatFx, NO_FX } from '../core/Combatant'
+import type { Roll } from '../core/rng'
 
 export interface ShotResult {
   hit: boolean
@@ -109,6 +110,7 @@ export function executeShot(
   soldiers: readonly Combatant[],
   mode: ShotMode = ShotMode.Snap,
   overrideRolls?: boolean[],
+  roll: Roll = Math.random,
 ): ShotResult {
   const eff = effectiveWeapon(shooter, mode)
   if (!canShoot(grid, shooter, target, mode)) {
@@ -145,7 +147,7 @@ export function executeShot(
   let crits = 0
 
   for (let i = 0; i < bullets; i++) {
-    const hit = overrideRolls ? (overrideRolls[i] ?? false) : Math.random() * 100 <= chance
+    const hit = overrideRolls ? (overrideRolls[i] ?? false) : roll() * 100 <= chance
     if (hit) anyHit = true
 
     fx.tracer(shooterWorld, targetWorld, hit)
@@ -153,7 +155,7 @@ export function executeShot(
     if (i === 0) fx.shoot(shooter)
 
     if (hit) {
-      const critical = Math.random() * 100 <= crit.chance
+      const critical = roll() * 100 <= crit.chance
       if (critical) crits++
       const primary = applyWeaponDamage(eff, target, fx, 1, critical)
       hits.push(primary)
@@ -186,6 +188,34 @@ export function executeShot(
     crits,
     hits,
   }
+}
+
+/**
+ * Take a shot: spend the rounds, resolve it, and report nothing if it was
+ * never legal.
+ *
+ * The whole of what it costs to pull a trigger, so that a match and a
+ * simulation cannot disagree about it. The clip comes off before resolution
+ * because a shot that spends its magazine has spent it whether or not anything
+ * was hit.
+ */
+export function fireWeapon(
+  grid: Grid,
+  shooter: Combatant,
+  target: Combatant,
+  fx: CombatFx,
+  soldiers: readonly Combatant[],
+  mode: ShotMode = ShotMode.Snap,
+  overrideRolls?: boolean[],
+  roll: Roll = Math.random,
+): ShotResult | null {
+  if (!canShoot(grid, shooter, target, mode)) return null
+
+  const consumption = shooter.weapon.bulletConsumption(mode)
+  shooter.weapon.currentClip = Math.max(0, shooter.weapon.currentClip - consumption)
+
+  const result = executeShot(grid, shooter, target, fx, soldiers, mode, overrideRolls, roll)
+  return result.apSpent ? result : null
 }
 
 /**

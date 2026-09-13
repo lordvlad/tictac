@@ -8,10 +8,11 @@ import type { Grid } from '../../core/Grid'
 import type { Soldier } from '../../entities/Soldier'
 import type { Squads } from '../../game/Squads'
 import { NO_FX, type CombatFx } from '../../core/Combatant'
+import type { Roll } from '../../core/rng'
 import {
   applyHitEffects,
   canShoot,
-  executeShot,
+  fireWeapon,
   type GrenadeResult,
   type ResolvedHit,
   type ShotResult,
@@ -31,6 +32,7 @@ export class CombatSystem extends System {
     private readonly grid: Grid,
     private readonly squads: Squads,
     private readonly fx: CombatFx = NO_FX,
+    private readonly roll: Roll = Math.random,
   ) {
     super()
   }
@@ -53,12 +55,7 @@ export class CombatSystem extends System {
    * goes to {@link replayShot}.
    */
   fireShot(shooter: Soldier, target: Soldier, mode: ShotMode, rolls?: boolean[]): ShotResult | null {
-    if (!canShoot(this.grid, shooter, target, mode)) return null
-
-    const consumption = shooter.weapon.bulletConsumption(mode)
-    shooter.weapon.currentClip = Math.max(0, shooter.weapon.currentClip - consumption)
-
-    const result = executeShot(
+    const result = fireWeapon(
       this.grid,
       shooter,
       target,
@@ -66,8 +63,9 @@ export class CombatSystem extends System {
       this.squads.soldiers,
       mode,
       rolls,
+      this.roll,
     )
-    if (!result.apSpent) return null
+    if (!result) return null
     this.onShotResolved?.(shooter, target, result)
     return result
   }

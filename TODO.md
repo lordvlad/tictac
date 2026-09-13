@@ -3,8 +3,8 @@
 Proposed work, in the order it was agreed. The engine items come first because
 the balance harness is what proves the second one landed cleanly.
 
-- [ ] [A. Narrow ports: get the rules layer off the render layer](#a-narrow-ports-get-the-rules-layer-off-the-render-layer)
-- [ ] [10. Balance harness](#10-balance-harness)
+- [x] [A. Narrow ports: get the rules layer off the render layer](#a-narrow-ports-get-the-rules-layer-off-the-render-layer)
+- [x] [10. Balance harness](#10-balance-harness)
 - [ ] [B. Finish the ECS split: data units, view units](#b-finish-the-ecs-split-data-units-view-units)
 - [ ] [1. In-match progression](#1-in-match-progression)
 - [ ] [2. Wounds as negative traits](#2-wounds-as-negative-traits)
@@ -87,6 +87,54 @@ no-op FX implementation. It must never construct the HUD, the loadout screen,
 seed range and match count as arguments, and is deterministic: the same
 arguments produce the same report, pinned by a test so the harness itself
 cannot silently drift.
+
+**Done.** `src/sim/` holds the runner (`SimUnit`, `SimMatch`, `Balance`);
+`scripts/balance.ts` is the only part that knows about a terminal. 500 matches
+run in about 7 seconds. Asymmetric sweeps are supported, because the useful
+question is nearly always a comparison: `--blue=shotgun --red=sniper`,
+`--redAmmo=ap`, `--blueVests=1`.
+
+### What the first sweeps said
+
+Recorded here because the gameplay items below are balance changes, and these
+are the numbers they will move. All figures are the stock spread unless stated,
+and every claim about a weapon or a trait was run with the sides swapped —
+first move is worth several points, so a single-sided sweep cannot tell a good
+gun from a good seat.
+
+- **First move is worth roughly 5-10 points.** 500 stock mirror matches: blue
+  292, red 184, 24 draws. Blue moves first.
+- **Fights are short and bimodal.** Median 3.5 turns, mean 6.35, with a tail
+  out to the cap. Balance work should assume a decision inside four turns.
+- **The sniper rifle beats the shotgun about 7 times in 10**, sides swapped and
+  averaged (174-98 one way, 222-60 the other). Not as one-sided as the range
+  band suggests, but consistent.
+- **The Nullweave Vest is worth nothing measurable.** 400 matches, same seeds,
+  three ways: vests on blue 224 wins, vests on red 230, neither side 226. Every
+  difference is inside the noise. Crits are a sixth of hits and the multiplier
+  is 1.3-2.2, so removing them entirely is worth less than the 3 evasion the
+  vest costs. Item 3 should treat this as a fault to fix, not a balance to
+  keep.
+- **Trait win rates are not yet separable.** Over 500 matches: nimble 56.7%,
+  stoic 53.9%, juggernaut 49.5%, fleet 48.9%, on roughly 220 decisive matches
+  each. That is within a couple of standard errors of even. Judging a trait
+  needs paired seeds — the same map and the same squads, one trait swapped —
+  which the harness does not do yet.
+
+**Two things the harness itself caught, which is the point of building it:**
+
+1. A first policy stopped advancing as soon as it *saw* an enemy. A shotgun
+   reaches 12 m and sees 14, so shotgun squads froze just outside their own
+   range and fired **no rounds at all** across 300 matches, while the report
+   cheerfully showed a missing row.
+2. Stopping at the first *legal* shot instead of a decent one had every weapon
+   engaging at its longest reach. Fixing it moved the shotgun from 37% hits and
+   22 damage a shot to 64% and 39 — the first number was measuring the
+   instrument, not the gun.
+
+**Still open.** Paired-seed trait comparison (above), and `CombatSystem` could
+take a roster port so a simulation could use it directly rather than calling
+`fireWeapon` itself. Neither blocks item B.
 
 ## B. Finish the ECS split: data units, view units
 
