@@ -19,6 +19,7 @@ import { DebugMap } from '../hud/DebugMap'
 import { GrenadePlanner } from './GrenadePlanner'
 import { ShootPlanner } from './ShootPlanner'
 import { Effects } from '../render/Effects'
+import { SceneCombatFx } from '../render/SceneCombatFx'
 import { WallXray } from './WallXray'
 import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
@@ -86,7 +87,7 @@ export class InteractionController {
     this.topLevel = battlefield.grid.maxLevel
 
     this.movementSystem = new MovementSystem(battlefield.grid)
-    this.combatSystem = new CombatSystem(battlefield.grid, squads, tracers)
+    this.combatSystem = new CombatSystem(battlefield.grid, squads, new SceneCombatFx(tracers, squads))
     this.itemSystem = new ItemSystem()
     this.renderSystem = new RenderSystem()
     this.wallSystem = new WallSystem(battlefield.grid)

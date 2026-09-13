@@ -169,7 +169,12 @@ export class GrenadePlanner {
     }
 
     for (const hit of hits) {
-      if (hit.damage > 0) this.damageIndicators.spawn(hit.soldier.position, true, hit.damage)
+      // Over the victim's tile rather than its mesh: the tile is the resolved
+      // fact, the mesh may be mid-lerp, and a resolved hit deliberately has no
+      // body attached to it.
+      if (hit.damage > 0) {
+        this.damageIndicators.spawn(this.grid.tileToWorld(hit.soldier.tile), true, hit.damage)
+      }
     }
 
     this.exit()

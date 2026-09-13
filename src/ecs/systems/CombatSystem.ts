@@ -7,7 +7,7 @@ import type { Tile } from '../../core/Grid'
 import type { Grid } from '../../core/Grid'
 import type { Soldier } from '../../entities/Soldier'
 import type { Squads } from '../../game/Squads'
-import type { Tracers } from '../../render/Tracers'
+import { NO_FX, type CombatFx } from '../../core/Combatant'
 import {
   applyHitEffects,
   canShoot,
@@ -30,7 +30,7 @@ export class CombatSystem extends System {
   constructor(
     private readonly grid: Grid,
     private readonly squads: Squads,
-    private readonly tracers: Tracers,
+    private readonly fx: CombatFx = NO_FX,
   ) {
     super()
   }
@@ -62,7 +62,7 @@ export class CombatSystem extends System {
       this.grid,
       shooter,
       target,
-      this.tracers,
+      this.fx,
       this.squads.soldiers,
       mode,
       rolls,
@@ -90,14 +90,14 @@ export class CombatSystem extends System {
     const to = this.grid.tileToWorld(target.tile)
 
     for (let i = 0; i < rolls.length; i++) {
-      this.tracers.spawnTracer(from, to, rolls[i] ?? false)
-      if (i === 0) shooter.playShoot()
+      this.fx.tracer(from, to, rolls[i] ?? false)
+      if (i === 0) this.fx.shoot(shooter)
     }
 
     let damage = 0
     let armorShred = 0
     for (const hit of hits) {
-      applyHitEffects(hit.soldier, hit.damage, hit.armorShred, hit.status)
+      applyHitEffects(hit.soldier, hit.damage, hit.armorShred, hit.status, this.fx)
       damage += hit.damage
       armorShred += hit.armorShred
     }
@@ -119,7 +119,7 @@ export class CombatSystem extends System {
     return result
   }
   throwGrenade(thrower: Soldier, at: Tile, kind: GrenadeId): GrenadeResult {
-    return throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers)
+    return throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx)
   }
 
   reload(soldier: Soldier): boolean {

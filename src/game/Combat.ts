@@ -11,8 +11,7 @@ import {
   resolveDamage,
 } from '../core/Ballistics'
 import { type GrenadeId, ShotMode, STATUSES, type StatusKind } from '../core/Arsenal'
-import type { Soldier } from '../entities/Soldier'
-import type { Tracers } from '../render/Tracers'
+import { type Casualty, type Combatant, type CombatFx, NO_FX } from '../core/Combatant'
 
 export interface ShotResult {
   hit: boolean
@@ -30,7 +29,7 @@ export interface ShotResult {
 
 /** One unit's share of an attack, already resolved: a bullet hit or a blast hit. */
 export interface ResolvedHit {
-  soldier: Soldier
+  soldier: Combatant
   damage: number
   armorShred: number
   killed: boolean
@@ -49,8 +48,8 @@ export interface GrenadeResult {
 /** Hit chance plus every term that produced it, for the HUD to explain. */
 export function shotBreakdown(
   grid: Grid,
-  shooter: Soldier,
-  target: Soldier,
+  shooter: Combatant,
+  target: Combatant,
   mode: ShotMode = ShotMode.Snap,
 ): HitChanceBreakdown {
   return hitChance(
@@ -65,23 +64,23 @@ export function shotBreakdown(
 /** Just the percentage — the common case for lists and labels. */
 export function calculateHitChance(
   grid: Grid,
-  shooter: Soldier,
-  target: Soldier,
+  shooter: Combatant,
+  target: Combatant,
   mode: ShotMode = ShotMode.Snap,
 ): number {
   return shotBreakdown(grid, shooter, target, mode).chance
 }
 
 /** AP a shot would cost, with the loaded round and shot mode folded in. */
-export function shotApCost(shooter: Soldier, mode: ShotMode = ShotMode.Snap): number {
+export function shotApCost(shooter: Combatant, mode: ShotMode = ShotMode.Snap): number {
   return effectiveWeapon(shooter, mode).apCost
 }
 
 /** Can this shot legally be taken right now? */
 export function canShoot(
   grid: Grid,
-  shooter: Soldier,
-  target: Soldier,
+  shooter: Combatant,
+  target: Combatant,
   mode: ShotMode = ShotMode.Snap,
 ): boolean {
   if (shooter.isDead || target.isDead) return false
@@ -104,10 +103,10 @@ export function canShoot(
  */
 export function executeShot(
   grid: Grid,
-  shooter: Soldier,
-  target: Soldier,
-  tracers: Tracers,
-  soldiers: readonly Soldier[],
+  shooter: Combatant,
+  target: Combatant,
+  fx: CombatFx,
+  soldiers: readonly Combatant[],
   mode: ShotMode = ShotMode.Snap,
   overrideRolls?: boolean[],
 ): ShotResult {
@@ -149,14 +148,14 @@ export function executeShot(
     const hit = overrideRolls ? (overrideRolls[i] ?? false) : Math.random() * 100 <= chance
     if (hit) anyHit = true
 
-    tracers.spawnTracer(shooterWorld, targetWorld, hit)
+    fx.tracer(shooterWorld, targetWorld, hit)
     // Only the first tracer-spawn plays the sound/visual cue
-    if (i === 0) shooter.playShoot()
+    if (i === 0) fx.shoot(shooter)
 
     if (hit) {
       const critical = Math.random() * 100 <= crit.chance
       if (critical) crits++
-      const primary = applyWeaponDamage(eff, target, 1, critical)
+      const primary = applyWeaponDamage(eff, target, fx, 1, critical)
       hits.push(primary)
       totalDamage += primary.damage
       totalArmorShred += primary.armorShred
@@ -167,7 +166,7 @@ export function executeShot(
           if (other === target || other.isDead) continue
           const distance = grid.distance(target.tile, other.tile)
           if (distance > eff.areaRadius) continue
-          const area = applyWeaponDamage(eff, other, 1 - distance / (eff.areaRadius + 1))
+          const area = applyWeaponDamage(eff, other, fx, 1 - distance / (eff.areaRadius + 1))
           hits.push(area)
           totalDamage += area.damage
           totalArmorShred += area.armorShred
@@ -192,31 +191,36 @@ export function executeShot(
 /**
  * Apply an already-resolved hit. Takes numbers, never recomputes them.
  *
- * The one copy of the clamp-and-animate rule, shared by the local paths and by
+ * The one copy of the clamp-and-announce rule, shared by the local paths and by
  * a peer's replay — where the numbers arrive off the wire and the weapon that
  * produced them does not exist on this side.
+ *
+ * `fx` is optional because most callers are replaying somebody else's
+ * resolution and the FX are theirs to decide, not this function's.
  */
 export function applyHitEffects(
-  target: Soldier,
+  target: Casualty,
   damage: number,
   armorShred: number,
   status: StatusKind | null,
+  fx: CombatFx = NO_FX,
 ): void {
   target.armor = Math.max(0, target.armor - armorShred)
   if (damage > 0) target.hp = Math.max(0, target.hp - damage)
   if (status) applyStatus(target, status)
-  if (target.isDead) target.playDeath()
-  else if (damage > 0) target.playHit()
+  if (target.isDead) fx.death(target)
+  else if (damage > 0) fx.hit(target)
 }
 
 function applyWeaponDamage(
   eff: EffectiveWeapon,
-  target: Soldier,
+  target: Combatant,
+  fx: CombatFx,
   falloff = 1,
   crit = false,
 ): ResolvedHit {
   const result = resolveDamage(eff, target, falloff, crit)
-  applyHitEffects(target, result.damage, result.armorShred, null)
+  applyHitEffects(target, result.damage, result.armorShred, null, fx)
   return {
     soldier: target,
     damage: result.damage,
@@ -236,10 +240,11 @@ function applyWeaponDamage(
  */
 export function throwGrenade(
   grid: Grid,
-  thrower: Soldier,
+  thrower: Combatant,
   at: Tile,
   kind: GrenadeId,
-  soldiers: readonly Soldier[],
+  soldiers: readonly Combatant[],
+  fx: CombatFx = NO_FX,
 ): GrenadeResult {
   const spec = thrower.grenadeSpecs[kind]
   if (thrower.isDead || thrower.ap < spec.apCost) return { thrown: false, apSpent: 0, hits: [] }
@@ -248,7 +253,7 @@ export function throwGrenade(
 
   thrower.ap = Math.max(0, thrower.ap - spec.apCost)
   thrower.grenades[kind] -= 1
-  thrower.playShoot()
+  fx.shoot(thrower)
 
   const hits: ResolvedHit[] = []
   for (const soldier of soldiers) {
@@ -257,7 +262,7 @@ export function throwGrenade(
     if (distance > spec.areaRadius) continue
 
     const result = grenadeDamageAt(spec, distance, soldier)
-    applyHitEffects(soldier, result.damage, result.armorShred, spec.applies)
+    applyHitEffects(soldier, result.damage, result.armorShred, spec.applies, fx)
 
     hits.push({
       soldier,
@@ -273,7 +278,7 @@ export function throwGrenade(
 }
 
 /** Apply (or refresh) a status on a unit. */
-export function applyStatus(soldier: Soldier, kind: StatusKind): void {
+export function applyStatus(soldier: Casualty, kind: StatusKind): void {
   const spec = STATUSES[kind]
   const existing = soldier.statuses.find((s) => s.kind === kind)
   if (existing) existing.turnsLeft = spec.turns
@@ -286,7 +291,7 @@ export function applyStatus(soldier: Soldier, kind: StatusKind): void {
  * A lapsed stim lowers the action-point ceiling, so anything held above the
  * new ceiling is given back rather than left as a permanent surplus.
  */
-export function tickStatuses(soldiers: readonly Soldier[]): void {
+export function tickStatuses(soldiers: readonly Combatant[]): void {
   for (const soldier of soldiers) {
     if (soldier.statuses.length === 0) continue
     for (const status of soldier.statuses) status.turnsLeft -= 1

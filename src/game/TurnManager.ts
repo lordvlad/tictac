@@ -1,7 +1,7 @@
 import type { Faction } from '../config'
 import type { Soldier } from '../entities/Soldier'
 import type { Squads } from './Squads'
-import type { OrbitRig } from '../camera/OrbitRig'
+import { NO_FOCUS, type FocusPort } from '../core/Combatant'
 import type { World } from '../ecs/World'
 import type { TurnSystem } from '../ecs/systems/TurnSystem'
 
@@ -22,7 +22,7 @@ export class TurnManager {
     private readonly world: World,
     readonly turns: TurnSystem,
     private readonly squads: Squads,
-    private readonly rig: OrbitRig,
+    private readonly focus: FocusPort = NO_FOCUS,
   ) {}
 
   get activeFaction(): Faction {
@@ -42,7 +42,7 @@ export class TurnManager {
     if (soldier && (soldier.isDead || soldier.faction !== this.activeFaction)) return
     this.selectedSoldier = soldier
     if (soldier) {
-      this.rig.focusOn(soldier.position)
+      this.focus.focusOn(soldier.position)
     }
     this.onSelectionChanged?.(soldier)
   }
