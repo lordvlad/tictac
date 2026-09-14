@@ -4,15 +4,18 @@
   "private": true,
   "scripts": {
     "dev": "bun --hot src/index.ts",
-    "build:character": "bun scripts/build-character.mjs",
-    "icons": "bun scripts/build-icons.mjs",
-    "build": "tsc --noEmit && bun build ./src/index.html --outdir=dist --sourcemap --target=browser --minify --public-path=./ --define:process.env.NODE_ENV='\"production\"' && bun scripts/copy-public.mjs",
-    "typecheck": "tsc --noEmit",
-    "lint:docs": "bun scripts/lint-docs.ts",
+    "preview": "NODE_ENV=production bun src/index.ts",
     "lint": "bun run --parallel typecheck lint:docs",
+    "lint:docs": "bun scripts/lint-docs.ts",
+    "typecheck": "tsc --noEmit",
     "test": "bun test",
     "balance": "bun scripts/balance.ts",
-    "preview": "NODE_ENV=production bun src/index.ts"
+    "build": "bun run typecheck && bun run build:bundle && bun run build:public",
+    "build:bundle": "bun build ./src/index.html --outdir=dist --sourcemap --target=browser --minify --public-path=./ --define:process.env.NODE_ENV='\"production\"'",
+    "build:public": "bun scripts/copy-public.mjs",
+    "build:character": "bun scripts/build-character.mjs",
+    "build:icons": "bun scripts/build-icons.mjs",
+    "icons": "bun run build:icons"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.18.2",
