@@ -42,7 +42,7 @@ function getMarkdownFiles(dir: string): string[] {
 }
 
 const docFiles = getMarkdownFiles(path.resolve(process.cwd(), 'docs'))
-const rootFiles = ['README.md', 'TODO.md', 'vite-to-bun-migration-guide.md']
+const rootFiles = ['README.md', 'vite-to-bun-migration-guide.md']
   .map((f) => path.resolve(process.cwd(), f))
   .filter((f) => fs.existsSync(f))
 

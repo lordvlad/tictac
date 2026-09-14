@@ -9,6 +9,7 @@ appliesTo:
   - "src/**"
 relatedDocs:
   - "docs/backlog/README.md"
+  - "docs/backlog/completed.md"
   - "docs/plans/sprints/sprint-current.md"
 tags: ["backlog", "tasks", "active"]
 ---
@@ -25,22 +26,28 @@ tags: ["backlog", "tasks", "active"]
 **Owner:** Unassigned  
 
 #### Why
-While narrow ports (`Combatant`, `CombatFx`) decoupled rule execution from direct render calls, `Soldier` still inherits `Entity3D`. A squad cannot be constructed without an active 3D scene and camera. Five test suites still rely on canvas stubs.
+With narrow ports (`ARCH-001`), the rules no longer *call* graphics, but a unit is still a graphics object: `Soldier` inherits `Entity3D`, so nothing can build a squad without a scene. Five test suites (`camera`, `debugmap`, `movement`, `pathmarker`, `shooting`) currently install a canvas stub and hand-build structural stand-ins to work around this seam.
 
 #### Change
-1. Make `Soldier` a pure data container wrapping entity components.
-2. Introduce `SoldierView` (`src/render/SoldierView.ts`) owning `Entity3D`, glTF meshes, cloned materials, and animation mixers.
-3. Update `RenderSystem` to drive `SoldierView` based on `PositionComponent`, `StanceComponent`, and `HealthComponent`.
-4. Update `Squads.ts` and `Battlefield.ts` to instantiate data models independently of view representations.
+1. `Soldier` becomes pure data over its components.
+2. A new `SoldierView` (`src/render/SoldierView.ts`) owns the `Entity3D`, the animation mixer, and cloned materials, driven by `RenderSystem` reading `PositionComponent`, `StanceComponent`, and `HealthComponent`.
+3. `Squads` builds units with no engine at all; a view factory attaches meshes only when there is a scene to attach them to.
+4. `Battlefield` splits the same way: terrain data is pure (`MapGenerator`), terrain meshes are detached.
+
+#### What it Buys
+A full match that runs with no renderer: AI opponents, deterministic replay from a seed plus a command log, an authoritative referee instead of trusting peers, faster tests, and deletion of `installCanvasStub` from five suites.
 
 #### Affected Files
-- `src/entities/Soldier.ts`
+- `src/entities/Soldier.ts` (~495 lines)
 - `src/render/SoldierView.ts` (new)
 - `src/render/SquadViews.ts` (new)
 - `src/ecs/systems/RenderSystem.ts`
 - `src/game/Squads.ts`
 - `src/game/Battlefield.ts`
 - `src/main.ts`
+
+#### Cost & Risk
+Touches `Soldier`, `Squads`, `Battlefield`, `RenderSystem`, `main.ts`, and every site that accesses `soldier.position` or `.rotation` through `Entity3D`. Mechanically simple but broad. Primary risk is animation and yaw regressions, which require visual verification in browser.
 
 #### Acceptance Criteria
 - [ ] `Soldier` has no references to `three` rendering types (except pure vector math) or `Entity3D`.
@@ -58,24 +65,27 @@ While narrow ports (`Combatant`, `CombatFx`) decoupled rule execution from direc
 **Owner:** Unassigned  
 
 #### Why
-Units currently have fixed stats throughout combat. Actions taken during combat do not accrue tactical advancement or dynamic builds.
+Characters vary at deployment but never change during a fight, so nothing a unit does accrues to it.
 
 #### Change
-1. Track unit XP from kills and assists.
-2. Trigger promotion upon reaching threshold; present a 3-perk trait selection prompt on HUD.
-3. Replicate choice across P2P wire as a `promote` command; append selected `TraitId` to `sheet.traits` and invoke `refreshTraits()`.
+1. Kills and assists grant XP; at a threshold the unit is promoted and the player picks one perk from three.
+2. A perk is a `TraitId` appended to `sheet.traits` followed by `refreshTraits()` (mechanism already exists).
+3. The choice travels across P2P as a new `promote` command. Defensive perks replicate through `TraitsComponent`; offensive ones resolve on sender.
 
 #### Affected Files
 - `src/core/Progression.ts` (new)
-- `src/ecs/systems/CombatSystem.ts`
+- `src/ecs/systems/CombatSystem.ts` (`onShotResolved` hook)
 - `src/game/NetworkManager.ts`
-- `src/hud/Hud.ts`
+- `src/hud/Hud.ts` (perk selection prompt)
 - `tests/rpg.test.ts`
 
+#### Caveat
+Puts player choice into the wire protocol. Requires dedicated input sanitization against malformed traits and regression pins.
+
 #### Acceptance Criteria
-- [ ] Killing an enemy yields XP and triggers promotion dialog when threshold is reached.
-- [ ] Selected trait applies immediately to active combat stats and replicates to remote peer.
-- [ ] Wire sanitization verifies trait validity against cheat injections.
+- [ ] Kills and assists accumulate XP; reaching threshold triggers 3-perk promotion UI.
+- [ ] Selected trait applies immediately to active stats and replicates across P2P.
+- [ ] Dedicated sanitizer guards wire against invalid traits.
 
 ---
 
@@ -87,10 +97,10 @@ Units currently have fixed stats throughout combat. Actions taken during combat 
 **Owner:** Unassigned  
 
 #### Why
-HP reduction currently only changes how many shots a soldier can take before dying. Health degradation should impose tactical penalties.
+HP variation currently only decides how many shots a unit survives. Crossing health degradation thresholds should cost something that persists.
 
 #### Change
-1. Add threshold checks: <50% HP inflicts `Winded` (-2 AP), <25% HP inflicts `Concussed` (-6 accuracy) and `Limping` (1.5x movement cost).
+1. Dropping below 50% and 25% HP inflicts lasting traits: `Winded` (-2 AP), `Concussed` (-6 accuracy), `Limping` (movement cost x1.5). Reuses trait fold verbatim.
 2. Extend `TraitEffects` with `moveCostMul` and `apCostDelta`.
 
 #### Affected Files
@@ -100,9 +110,9 @@ HP reduction currently only changes how many shots a soldier can take before dyi
 - `src/ecs/systems/CombatSystem.ts`
 
 #### Acceptance Criteria
-- [ ] Damage crossing 50% / 25% thresholds attaches corresponding wound traits.
+- [ ] Damage crossing 50% and 25% thresholds attaches corresponding wound traits.
 - [ ] AP pools and movement costs reflect wound multipliers.
-- [ ] Verified via unit test and headless balance sweep.
+- [ ] Regression tested in `tests/rpg.test.ts` and headless balance sweeps.
 
 ---
 
@@ -114,14 +124,14 @@ HP reduction currently only changes how many shots a soldier can take before dyi
 **Owner:** Unassigned  
 
 #### Why
-Items currently have limited variety. Expanding passive traits on gear increases loadout strategy.
+`ItemSpec.traits` and `passive` already work (the Nullweave vest proved the mechanism). Expanding content provides tactical loadout depth.
 
 #### Change
-Implement gear items with passive traits:
-- **Scope**: Accuracy scales with target distance.
-- **Bipod**: Evasion and accuracy bonus while in crouched stance.
-- **Suppressor**: Eliminates muzzle flash detection; minor crit penalty.
-- **Plate Carrier**: +2 Armor, -3 Evasion.
+Implement passive gear with specific effect fields:
+- **Scope**: Accuracy that scales with range distance.
+- **Bipod**: Evasion and accuracy bonus while crouched.
+- **Suppressor**: No muzzle reveal, reduced crit multiplier.
+- **Plate Carrier**: +Armor, -Evasion.
 
 #### Affected Files
 - `src/core/Items.ts`
@@ -138,10 +148,10 @@ Implement gear items with passive traits:
 **Owner:** Unassigned  
 
 #### Why
-Enemy evasion and combat statistics are currently visible immediately upon targeting, eliminating tension and scouting utility.
+An enemy's exact evasion is visible the moment you aim at them. While mechanically necessary for shot previews, it makes sheets read as stat blocks rather than living opponents.
 
 #### Change
-Hide enemy stat sheet numbers on HUD until that unit has acted or been engaged in combat.
+Show target stats as unknown until that unit has acted or been shot at, then reveal them. HUD only — data remains local.
 
 #### Affected Files
 - `src/hud/Hud.ts`
@@ -158,10 +168,10 @@ Hide enemy stat sheet numbers on HUD until that unit has acted or been engaged i
 **Owner:** Unassigned  
 
 #### Why
-Missed shots currently do zero mechanical work. Concentrated fire should pin enemy positions.
+A missed shot currently does nothing at all. Concentrated fire should pin down enemy positions.
 
 #### Change
-Accumulate suppression status on targets from near-miss ballistic rounds, applying accuracy penalties and AP restrictions.
+Rounds that miss accumulate suppression on the target: an accuracy penalty first, pinned at higher stacks. Integrates with `STATUSES` per-turn decay machinery via a hook in `executeShot` for un-landed rounds.
 
 #### Affected Files
 - `src/core/Arsenal.ts`
@@ -170,7 +180,7 @@ Accumulate suppression status on targets from near-miss ballistic rounds, applyi
 
 ---
 
-### [GAME-006] Fatigue & Exhaustion
+### [GAME-006] Exhaustion & Fatigue
 **Type:** Feature  
 **Priority:** P3  
 **Status:** Backlog  
@@ -178,14 +188,18 @@ Accumulate suppression status on targets from near-miss ballistic rounds, applyi
 **Owner:** Unassigned  
 
 #### Why
-Expending maximum AP across consecutive turns has no trade-off.
+Ties the stamina framing of AP to a recurring cost instead of just an instantaneous ceiling.
 
 #### Change
-Expending full AP on two consecutive turns inflicts `Winded` on the following turn.
+Spending every action point across two consecutive turns leaves the unit `Winded` on the following turn (~30 lines against existing status machinery).
+
+#### Affected Files
+- `src/ecs/systems/TurnSystem.ts`
+- `src/ecs/components/ActionPointsComponent.ts`
 
 ---
 
-### [UI-001] Loadout Screen Role Archetypes
+### [UI-001] Roles on the Loadout Screen
 **Type:** Feature  
 **Priority:** P2  
 **Status:** Backlog  
@@ -193,10 +207,14 @@ Expending full AP on two consecutive turns inflicts `Winded` on the following tu
 **Owner:** Unassigned  
 
 #### Why
-All units are currently interchangeable at the loadout screen.
+Every unit is currently interchangeable apart from its generated character sheet.
 
 #### Change
-Introduce Medic, Scout, Marksman, and Gunner roles that gate available weapon/item slots and provide unique role abilities.
+Medic, Scout, and Marksman roles gate which crate rows a unit may draw equipment from, each providing one unique role ability. Uses existing `LOADOUT_LIMITS` machinery.
+
+#### Affected Files
+- `src/hud/LoadoutScreen.ts`
+- `src/game/Loadout.ts`
 
 ---
 
@@ -208,16 +226,23 @@ Introduce Medic, Scout, Marksman, and Gunner roles that gate available weapon/it
 **Owner:** Unassigned  
 
 #### Why
-The quintessential tactical ability: reserving AP to engage moving enemies during their turn.
+The biggest tactical lift available, and the natural consumer of proficiency against evasion.
 
 #### Change
-1. Allow units to hold AP in Overwatch stance.
-2. Trigger reaction shots mid-path in `MovementSystem`.
-3. Replicate reaction fire across wire protocol authored by the reacting unit's owner.
+A unit may hold remaining AP to fire during an enemy's movement phase.
+
+#### Cost & Complexity
+Genuinely invasive. It interleaves resolution into the *enemy's* turn, and under the "sender resolves, receiver replays" contract every reaction must be authored by the reacting unit's owner and applied mid-path — so both `MovementSystem` and the wire protocol are in scope.
+
+#### Affected Files
+- `src/ecs/systems/MovementSystem.ts`
+- `src/ecs/systems/CombatSystem.ts`
+- `src/game/NetworkManager.ts`
+- `src/hud/Hud.ts`
 
 ---
 
-### [GAME-008] Persistent Campaign Roster
+### [GAME-008] Campaign Roster Persistence
 **Type:** Feature  
 **Priority:** P2  
 **Status:** Backlog  
@@ -225,7 +250,15 @@ The quintessential tactical ability: reserving AP to engage moving enemies durin
 **Owner:** Unassigned  
 
 #### Why
-Squads are rolled randomly per match and discarded.
+Squads are rolled randomly per match and forgotten upon exit.
 
 #### Change
-Persist squad character sheets in `localStorage` across matches with XP, combat records, and untreated wounds.
+Character sheets persist in `localStorage` across matches, carrying XP, promotions, and untreated wounds.
+
+#### Caveat
+Changes what the network handshake means: peers send *saved* rosters, making `sanitizeSheet` load-bearing against local tampering as well as hostile peers.
+
+#### Affected Files
+- `src/core/Characters.ts`
+- `src/game/NetworkManager.ts`
+- `src/hud/LoadoutScreen.ts`
