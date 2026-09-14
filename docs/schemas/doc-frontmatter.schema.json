@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/project/docs/schemas/doc-frontmatter.schema.json",
+  "title": "DocumentFrontmatter",
+  "description": "Standard YAML frontmatter metadata for living documentation files.",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Title of the document."
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique document identifier (e.g., ARCH-001, ADR-0001, GDD-COMBAT, GUIDE-LIVING-DOCS)."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["architecture", "adr", "rfc", "gdd", "guide", "backlog", "plan", "schema"],
+      "description": "Category/type of the document."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "proposed", "accepted", "active", "implemented", "superseded", "deprecated", "rejected"],
+      "description": "Current lifecycle status of the document."
+    },
+    "owner": {
+      "type": "string",
+      "description": "Team or individual accountable for document accuracy."
+    },
+    "lastReviewed": {
+      "type": "string",
+      "format": "date",
+      "description": "ISO-8601 date (YYYY-MM-DD) when this document was last verified against code."
+    },
+    "reviewCycleDays": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 90,
+      "description": "Maximum days allowed between verification reviews."
+    },
+    "appliesTo": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Codebase paths, modules, or sub-systems documented by this file."
+    },
+    "relatedDocs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Relative paths to related documentation files."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Keywords for indexing and filtering."
+    }
+  },
+  "required": ["title", "id", "type", "status", "lastReviewed"]
+}

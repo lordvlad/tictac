@@ -1,8 +1,16 @@
-# TODO
+# TODO / Backlog
 
-Proposed work, in the order it was agreed. The engine items come first because
-the balance harness is what proves the second one landed cleanly.
+> **Note:** The backlog and task tracking system is maintained in [`docs/backlog/active-backlog.md`](docs/backlog/active-backlog.md) following structured schemas and prioritization.
 
+### Quick Links
+- 📋 [Active Backlog](docs/backlog/active-backlog.md)
+- 🏛️ [Architecture Decisions (ADRs)](docs/design/adr/README.md)
+- 🚀 [Milestone Roadmap](docs/plans/roadmap.md)
+- 🏃 [Current Sprint Plan](docs/plans/sprints/sprint-current.md)
+
+---
+
+### Historical Snapshot
 - [x] [A. Narrow ports: get the rules layer off the render layer](#a-narrow-ports-get-the-rules-layer-off-the-render-layer)
 - [x] [10. Balance harness](#10-balance-harness)
 - [ ] [B. Finish the ECS split: data units, view units](#b-finish-the-ecs-split-data-units-view-units)
