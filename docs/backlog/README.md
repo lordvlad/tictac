@@ -3,7 +3,6 @@ title: "Engineering & Product Backlog Overview"
 id: "BACKLOG-INDEX"
 type: "backlog"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "docs/backlog/**"
@@ -38,7 +37,5 @@ stateDiagram-v2
 - [Completed Archive](./completed.md): Historical record of delivered work, verification notes, and retrospective learnings.
 
 ### Item ID Convention
-- `ARCH-xxx`: Architectural and core structural changes.
-- `ENG-xxx`: Systems, ECS, networking, performance, rendering engine work.
-- `GAME-xxx`: Gameplay mechanics, combat rules, items, RPG traits, balance.
-- `UI-xxx`: HUD, screens, visual design, sound, controls.
+All work items follow a single, unified sequential key:
+- `ITEM-001`, `ITEM-002`, `ITEM-003`, ... across all categories (architecture, features, balance, refactoring, UI).

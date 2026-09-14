@@ -3,7 +3,6 @@ title: "Completed Work Archive"
 id: "BACKLOG-COMPLETED"
 type: "backlog"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/**"
@@ -18,9 +17,10 @@ tags: ["archive", "completed", "history"]
 
 ---
 
-### [ARCH-001] Narrow Ports: Decouple Rules Layer from Render Layer
+### [ITEM-001] Narrow Ports: Decouple Rules Layer from Render Layer
 **Completed Date:** 2026-09-14  
 **Type:** Architecture / Refactor  
+**Milestone:** M1 — Headless Foundation  
 
 #### Why
 The ECS already did its job on data — components are plain serializable state — but behavior still leaked into graphics across three primary seams:
@@ -43,9 +43,10 @@ The ECS already did its job on data — components are plain serializable state 
 
 ---
 
-### [ENG-000] Deterministic Headless Balance Harness
+### [ITEM-002] Deterministic Headless Balance Harness
 **Completed Date:** 2026-09-14  
 **Type:** Infrastructure / Tooling  
+**Milestone:** M1 — Headless Foundation  
 
 #### Why
 Every gameplay tuning item is a balance change. Previously, the only way to check one was driving the browser by hand and reading numbers off the HUD, which did not scale to evaluating weapon biases or verifying refactors.

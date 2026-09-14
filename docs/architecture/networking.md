@@ -3,7 +3,6 @@ title: "P2P Networking & JSON-RPC Wire Protocol"
 id: "ARCH-NETWORKING"
 type: "architecture"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/game/NetworkManager.ts"

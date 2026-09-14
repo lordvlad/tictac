@@ -3,7 +3,6 @@ title: "System Architecture & Runtime Overview"
 id: "ARCH-OVERVIEW"
 type: "architecture"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/**"

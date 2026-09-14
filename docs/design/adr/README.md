@@ -3,7 +3,6 @@ title: "Architecture Decision Records (ADRs) Index"
 id: "ADR-INDEX"
 type: "adr"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "docs/design/adr/**"

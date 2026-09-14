@@ -3,7 +3,6 @@ title: "GDD: Squads, Progression & Meta Roster"
 id: "GDD-PROGRESSION"
 type: "gdd"
 status: "active"
-owner: "Design"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/core/Characters.ts"

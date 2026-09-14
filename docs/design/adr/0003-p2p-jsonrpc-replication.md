@@ -3,7 +3,6 @@ title: "ADR-0003: P2P JSON-RPC 2.0 State Replication & Sender-Resolved Combat"
 id: "ADR-0003"
 type: "adr"
 status: "implemented"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/game/NetworkManager.ts"

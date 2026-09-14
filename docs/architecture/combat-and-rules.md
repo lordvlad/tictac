@@ -3,7 +3,6 @@ title: "Combat, Ballistics & Rule Engine"
 id: "ARCH-COMBAT-RULES"
 type: "architecture"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/core/Arsenal.ts"

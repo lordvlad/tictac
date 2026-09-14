@@ -3,7 +3,6 @@ title: "Asset Pipeline Guide (3D Models, Draco, Icons)"
 id: "GUIDE-ASSET-PIPELINE"
 type: "guide"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "scripts/build-character.mjs"

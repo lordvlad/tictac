@@ -3,7 +3,6 @@ title: "Entity Component System (ECS) Architecture"
 id: "ARCH-ECS"
 type: "architecture"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/ecs/**"

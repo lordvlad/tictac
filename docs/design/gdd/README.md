@@ -3,7 +3,6 @@ title: "Game Design Document (GDD) Index"
 id: "GDD-INDEX"
 type: "gdd"
 status: "active"
-owner: "Design"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/game/**"

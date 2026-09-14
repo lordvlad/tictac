@@ -3,7 +3,6 @@ title: "Headless Simulation Engine & Balance Automation"
 id: "ARCH-HEADLESS-SIM"
 type: "architecture"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/sim/**"

@@ -3,7 +3,6 @@ title: "Planning & Milestones Overview (Kanban)"
 id: "PLAN-INDEX"
 type: "plan"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "docs/plans/**"

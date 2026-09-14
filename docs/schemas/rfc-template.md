@@ -3,7 +3,6 @@ title: "RFC-XXXX: Feature / Technical Design Name"
 id: "RFC-XXXX"
 type: "rfc"
 status: "draft" # draft | in-review | approved | in-progress | implemented | withdrawn
-owner: "Author Name"
 lastReviewed: "YYYY-MM-DD"
 appliesTo:
   - "src/game/..."

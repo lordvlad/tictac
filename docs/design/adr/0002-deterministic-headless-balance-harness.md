@@ -3,7 +3,6 @@ title: "ADR-0002: Deterministic Headless Balance Harness"
 id: "ADR-0002"
 type: "adr"
 status: "implemented"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/sim/**"

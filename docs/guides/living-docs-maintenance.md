@@ -3,7 +3,6 @@ title: "Living Documentation Guide & Maintenance Workflow"
 id: "GUIDE-LIVING-DOCS"
 type: "guide"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "docs/**"
@@ -74,7 +73,6 @@ title: "Document Title"
 id: "UNIQUE-ID"              # e.g., ARCH-ECS, ADR-0001, GDD-COMBAT, GUIDE-ASSETS
 type: "architecture"         # architecture | adr | rfc | gdd | guide | backlog | plan | schema
 status: "active"             # draft | proposed | accepted | active | implemented | superseded | deprecated
-owner: "Engineering"
 lastReviewed: "YYYY-MM-DD"   # Updated whenever content is verified against source code
 appliesTo:
   - "src/ecs/**"

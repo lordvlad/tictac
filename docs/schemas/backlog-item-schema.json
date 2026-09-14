@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/project/docs/schemas/backlog-item-schema.json",
   "title": "BacklogItem",
-  "description": "Schema for structured backlog items, user stories, and technical tasks in Kanban workflow.",
+  "description": "Schema for structured backlog items in single-sequence Kanban workflow.",
   "type": "object",
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^(ENG|GAME|ARCH|PERF|ASSET|UI)-[0-9]{3,4}$",
-      "description": "Standardized item key (e.g. ENG-010, GAME-002, ARCH-001, UI-001)."
+      "pattern": "^ITEM-[0-9]{3,4}$",
+      "description": "Unified item identifier (e.g. ITEM-001, ITEM-012)."
     },
     "title": {
       "type": "string",

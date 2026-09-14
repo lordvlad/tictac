@@ -23,10 +23,6 @@
       "enum": ["draft", "proposed", "accepted", "active", "implemented", "superseded", "deprecated", "rejected"],
       "description": "Current lifecycle status of the document."
     },
-    "owner": {
-      "type": "string",
-      "description": "Team or individual accountable for document accuracy."
-    },
     "lastReviewed": {
       "type": "string",
       "format": "date",

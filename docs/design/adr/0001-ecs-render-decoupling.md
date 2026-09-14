@@ -3,7 +3,6 @@ title: "ADR-0001: ECS Render Decoupling & View-Unit Separation"
 id: "ADR-0001"
 type: "adr"
 status: "implemented"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/ecs/**"

@@ -3,7 +3,6 @@ title: "GDD: Tactical Combat Mechanics"
 id: "GDD-COMBAT"
 type: "gdd"
 status: "active"
-owner: "Design"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/core/Arsenal.ts"

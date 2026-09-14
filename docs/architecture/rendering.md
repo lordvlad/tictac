@@ -3,7 +3,6 @@ title: "Rendering Engine & View Pipeline"
 id: "ARCH-RENDERING"
 type: "architecture"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/render/**"

@@ -3,7 +3,6 @@ title: "Developer Getting Started & Workflow Guide"
 id: "GUIDE-GETTING-STARTED"
 type: "guide"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "package.json"

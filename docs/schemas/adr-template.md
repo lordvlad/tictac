@@ -3,7 +3,6 @@ title: "ADR-XXXX: Title in Imperative Mood"
 id: "ADR-XXXX"
 type: "adr"
 status: "proposed" # draft | proposed | accepted | implemented | superseded | deprecated | rejected
-owner: "Engineering"
 lastReviewed: "YYYY-MM-DD"
 appliesTo:
   - "src/module/..."
@@ -17,7 +16,6 @@ tags: ["architecture", "ecs", "networking", "rendering"]
 ## Status
 **Status:** Proposed | Accepted | Implemented | Superseded by ADR-YYYY | Deprecated
 **Date:** YYYY-MM-DD
-**Deciders:** Team / Author
 
 ## Context & Problem Statement
 *Describe the context, the architectural friction, and the specific problem needing resolution. Provide evidence from code or operational metrics.*

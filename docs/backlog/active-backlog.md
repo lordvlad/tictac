@@ -3,7 +3,6 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-owner: "Engineering"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/**"
@@ -19,15 +18,14 @@ tags: ["backlog", "tasks", "active"]
 
 ---
 
-### [ENG-001] Complete ECS Split: Data Units vs View Units
+### [ITEM-003] Complete ECS Split: Data Units vs View Units
 **Type:** Refactor / Architecture  
 **Priority:** P0  
 **Status:** Ready  
 **Milestone:** M1 — Headless Foundation  
-**Owner:** Unassigned  
 
 #### Why
-With narrow ports (`ARCH-001`), the rules no longer *call* graphics, but a unit is still a graphics object: `Soldier` inherits `Entity3D`, so nothing can build a squad without a scene. Five test suites (`camera`, `debugmap`, `movement`, `pathmarker`, `shooting`) currently install a canvas stub and hand-build structural stand-ins to work around this seam.
+With narrow ports (`ITEM-001`), the rules no longer *call* graphics, but a unit is still a graphics object: `Soldier` inherits `Entity3D`, so nothing can build a squad without a scene. Five test suites (`camera`, `debugmap`, `movement`, `pathmarker`, `shooting`) currently install a canvas stub and hand-build structural stand-ins to work around this seam.
 
 #### Change
 1. `Soldier` becomes pure data over its components.
@@ -58,12 +56,11 @@ Touches `Soldier`, `Squads`, `Battlefield`, `RenderSystem`, `main.ts`, and every
 
 ---
 
-### [GAME-001] In-Match Progression & Promotion Draft
+### [ITEM-004] In-Match Progression & Promotion Draft
 **Type:** Feature  
 **Priority:** P1  
 **Status:** Ready  
 **Milestone:** M2 — Tactical Depth  
-**Owner:** Unassigned  
 
 #### Why
 Characters vary at deployment but never change during a fight, so nothing a unit does accrues to it.
@@ -90,12 +87,11 @@ Puts player choice into the wire protocol. Requires dedicated input sanitization
 
 ---
 
-### [GAME-002] Dynamic Wounds as Negative Traits
+### [ITEM-005] Dynamic Wounds as Negative Traits
 **Type:** Feature  
 **Priority:** P1  
 **Status:** Backlog  
 **Milestone:** M2 — Tactical Depth  
-**Owner:** Unassigned  
 
 #### Why
 HP variation currently only decides how many shots a unit survives. Crossing health degradation thresholds should cost something that persists.
@@ -117,12 +113,11 @@ HP variation currently only decides how many shots a unit survives. Crossing hea
 
 ---
 
-### [GAME-003] Trait-Bearing Equipment Breadth
+### [ITEM-006] Trait-Bearing Equipment Breadth
 **Type:** Content / Feature  
 **Priority:** P2  
 **Status:** Backlog  
 **Milestone:** M2 — Tactical Depth  
-**Owner:** Unassigned  
 
 #### Why
 `ItemSpec.traits` and `passive` already work (the Nullweave vest proved the mechanism). Expanding content provides tactical loadout depth.
@@ -141,12 +136,11 @@ Implement passive gear with specific effect fields:
 
 ---
 
-### [GAME-004] Enemy Intel Fog
+### [ITEM-007] Enemy Intel Fog
 **Type:** Feature / Polish  
 **Priority:** P2  
 **Status:** Backlog  
 **Milestone:** M3 — Reconnaissance & Fog  
-**Owner:** Unassigned  
 
 #### Why
 An enemy's exact evasion is visible the moment you aim at them. While mechanically necessary for shot previews, it makes sheets read as stat blocks rather than living opponents.
@@ -161,12 +155,11 @@ Show target stats as unknown until that unit has acted or been shot at, then rev
 
 ---
 
-### [GAME-005] Suppression & Morale Mechanics
+### [ITEM-008] Suppression & Morale Mechanics
 **Type:** Feature  
 **Priority:** P2  
 **Status:** Backlog  
 **Milestone:** M3 — Reconnaissance & Fog  
-**Owner:** Unassigned  
 
 #### Why
 A missed shot currently does nothing at all. Concentrated fire should pin down enemy positions.
@@ -181,12 +174,11 @@ Rounds that miss accumulate suppression on the target: an accuracy penalty first
 
 ---
 
-### [GAME-006] Exhaustion & Fatigue
+### [ITEM-009] Exhaustion & Fatigue
 **Type:** Feature  
 **Priority:** P3  
 **Status:** Backlog  
 **Milestone:** M3 — Reconnaissance & Fog  
-**Owner:** Unassigned  
 
 #### Why
 Ties the stamina framing of AP to a recurring cost instead of just an instantaneous ceiling.
@@ -200,12 +192,11 @@ Spending every action point across two consecutive turns leaves the unit `Winded
 
 ---
 
-### [UI-001] Roles on the Loadout Screen
+### [ITEM-010] Roles on the Loadout Screen
 **Type:** Feature  
 **Priority:** P2  
 **Status:** Backlog  
-**Milestone:** M4 — Meta & Campaign  
-**Owner:** Unassigned  
+**Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why
 Every unit is currently interchangeable apart from its generated character sheet.
@@ -219,15 +210,14 @@ Medic, Scout, and Marksman roles gate which crate rows a unit may draw equipment
 
 ---
 
-### [GAME-007] Overwatch & Reaction Fire
+### [ITEM-011] Overwatch & Reaction Fire
 **Type:** Feature  
 **Priority:** P1  
 **Status:** Backlog  
-**Milestone:** M4 — Meta & Campaign  
-**Owner:** Unassigned  
+**Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why
-The biggest tactical lift available, and the natural consumer of proficiency against evasion.
+The quintessential tactical ability: reserving AP to engage moving enemies during their turn.
 
 #### Change
 A unit may hold remaining AP to fire during an enemy's movement phase.
@@ -243,12 +233,11 @@ Genuinely invasive. It interleaves resolution into the *enemy's* turn, and under
 
 ---
 
-### [GAME-008] Campaign Roster Persistence
+### [ITEM-012] Campaign Roster Persistence
 **Type:** Feature  
 **Priority:** P2  
 **Status:** Backlog  
-**Milestone:** M4 — Meta & Campaign  
-**Owner:** Unassigned  
+**Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why
 Squads are rolled randomly per match and forgotten upon exit.
