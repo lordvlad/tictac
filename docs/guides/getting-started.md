@@ -49,6 +49,8 @@ The game server will boot on `http://localhost:5173`.
 | `bun run dev` | Boots `src/index.ts` with HMR on port 5173. | Day-to-day interactive gameplay and UI development. |
 | `bun test` | Runs the full unit & headless integration test suite. | Before every commit and PR. Fast execution (~1s). |
 | `bun run balance` | Executes headless combat simulation sweeps across N seeded matches. | When adjusting weapon stats, traits, hit formulas, or refactoring rules. |
+| `bun run lint` | Runs TypeScript typechecker and documentation linter in parallel. | Pre-commit validation. |
+| `bun run lint:docs` | Validates doc links, JSON schemas, and frontmatter metadata. | Documentation updates. |
 | `bun run typecheck`| Runs TypeScript compiler with `--noEmit`. | Type verification across the entire project. |
 | `bun run build` | Compiles production bundle to `dist/` with minification. | CI/CD and deployment verification. |
 | `bun run preview` | Runs the production build server locally. | Verifying production asset serving. |
