@@ -24,7 +24,7 @@ Documentation in this repository is **living**: it is maintained in the same rep
 3. **Continuous, Event-Driven Maintenance**: Because this is an open-ended hobby project, docs are kept fresh through code-change triggers and automated CI linting rather than calendar-based review schedules or time-bound sprint rituals.
 4. **Kanban & Architectural Milestones**: Planning follows pull-based Kanban flow (`Backlog` → `Ready` → `In Progress` → `Completed`) grouped by capability milestones, without arbitrary time estimates or sprint deadlines.
 5. **Evidence-First**: Technical claims cite concrete source files (`src/...`), line numbers, or deterministic test/balance outputs rather than abstract assertions.
-
+6. **Pure Bun Runtime & Asynchronous I/O**: The project runs exclusively on Bun. Never use synchronous file APIs (`fs.readFileSync`, etc.); use `Bun.file(path)` with top-level `await` and async operations.
 ---
 
 ## 2. Directory Structure & Document Taxonomy

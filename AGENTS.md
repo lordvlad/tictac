@@ -33,6 +33,10 @@ Welcome to **TicTac (No Way Home)**. This document establishes guidelines, archi
 ### 4. Component Dirty-State Synchronization
 - Replicated entity state changes travel via `World.syncDirty()`, which diffs serialized component state against previous snapshots and broadcasts JSON-RPC `componentUpdate` frames.
 
+### 5. Pure Bun Runtime & Asynchronous File I/O Only
+- The codebase runs strictly on **Bun**. Do not design for or introduce Node.js polyfills/shims.
+- **Never use synchronous file APIs** (`fs.readFileSync`, `fs.writeFileSync`, `fs.existsSync`, `fs.statSync`, `fs.readdirSync`, etc.) anywhere in application code, tests, or build scripts.
+- Use `Bun.file(path)` with top-level `await` (`file.text()`, `file.json()`, `file.exists()`, `Bun.write()`) or `node:fs/promises` for directory operations.
 ---
 
 ## 3. Tooling & Verification Workflow

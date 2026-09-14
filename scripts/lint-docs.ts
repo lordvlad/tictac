@@ -1,4 +1,4 @@
-import fs from 'node:fs'
+import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 let errors = 0
@@ -6,45 +6,62 @@ let warnings = 0
 
 console.info('[lint:docs] Starting documentation validation...')
 
-// 1. Validate JSON Schemas
+// 1. Validate JSON Schemas using Bun.file
 const schemaDir = path.resolve(process.cwd(), 'docs/schemas')
-if (fs.existsSync(schemaDir)) {
-  const schemaFiles = fs.readdirSync(schemaDir).filter((f) => f.endsWith('.json'))
-  for (const sf of schemaFiles) {
-    const fullPath = path.join(schemaDir, sf)
-    try {
-      const content = fs.readFileSync(fullPath, 'utf-8')
-      JSON.parse(content)
-      console.info(`  ✓ Valid JSON schema: docs/schemas/${sf}`)
-    } catch (err) {
-      console.error(`  ✗ Invalid JSON schema in docs/schemas/${sf}:`, err)
-      errors++
+try {
+  const schemaDirStat = await stat(schemaDir)
+  if (schemaDirStat.isDirectory()) {
+    const dirEntries = await readdir(schemaDir)
+    const schemaFiles = dirEntries.filter((f) => f.endsWith('.json'))
+    for (const sf of schemaFiles) {
+      const fullPath = path.join(schemaDir, sf)
+      try {
+        const file = Bun.file(fullPath)
+        await file.json()
+        console.info(`  ✓ Valid JSON schema: docs/schemas/${sf}`)
+      } catch (err) {
+        console.error(`  ✗ Invalid JSON schema in docs/schemas/${sf}:`, err)
+        errors++
+      }
     }
   }
+} catch {
+  // schema directory not found
 }
 
-// 2. Discover all Markdown files
-function getMarkdownFiles(dir: string): string[] {
+// 2. Discover all Markdown files asynchronously
+async function getMarkdownFiles(dir: string): Promise<string[]> {
   let results: string[] = []
-  if (!fs.existsSync(dir)) return results
-  const list = fs.readdirSync(dir)
-  for (const file of list) {
-    if (file === 'node_modules' || file === '.git' || file === 'dist') continue
-    const filePath = path.join(dir, file)
-    const stat = fs.statSync(filePath)
-    if (stat.isDirectory()) {
-      results = results.concat(getMarkdownFiles(filePath))
-    } else if (file.endsWith('.md')) {
-      results.push(filePath)
+  try {
+    const list = await readdir(dir)
+    for (const file of list) {
+      if (file === 'node_modules' || file === '.git' || file === 'dist') continue
+      const filePath = path.join(dir, file)
+      const fileStat = await stat(filePath)
+      if (fileStat.isDirectory()) {
+        const subFiles = await getMarkdownFiles(filePath)
+        results = results.concat(subFiles)
+      } else if (file.endsWith('.md')) {
+        results.push(filePath)
+      }
     }
+  } catch {
+    // ignore inaccessible dirs
   }
   return results
 }
 
-const docFiles = getMarkdownFiles(path.resolve(process.cwd(), 'docs'))
-const rootFiles = ['README.md', 'AGENTS.md', 'vite-to-bun-migration-guide.md']
-  .map((f) => path.resolve(process.cwd(), f))
-  .filter((f) => fs.existsSync(f))
+const docFiles = await getMarkdownFiles(path.resolve(process.cwd(), 'docs'))
+const potentialRootFiles = ['README.md', 'AGENTS.md', 'vite-to-bun-migration-guide.md'].map((f) =>
+  path.resolve(process.cwd(), f)
+)
+
+const rootFiles: string[] = []
+for (const rf of potentialRootFiles) {
+  if (await Bun.file(rf).exists()) {
+    rootFiles.push(rf)
+  }
+}
 
 const allMdFiles = [...rootFiles, ...docFiles]
 console.info(`  ℹ Checking ${allMdFiles.length} markdown documents for link and metadata validity...`)
@@ -55,7 +72,8 @@ const requiredFrontmatterFields = ['title', 'id', 'type', 'status', 'lastReviewe
 
 for (const filePath of allMdFiles) {
   const relPath = path.relative(process.cwd(), filePath)
-  const content = fs.readFileSync(filePath, 'utf-8')
+  const file = Bun.file(filePath)
+  const content = await file.text()
 
   // Check frontmatter on documents inside docs/ (excluding top-level README and schemas)
   if (
@@ -104,11 +122,25 @@ for (const filePath of allMdFiles) {
     if (!targetPath) continue
 
     const resolvedTarget = path.resolve(path.dirname(filePath), targetPath)
-    if (!fs.existsSync(resolvedTarget)) {
-      console.error(
-        `  ✗ Broken link in ${relPath}: [${match[1]}](${rawTarget}) -> resolved to non-existent path: ${path.relative(process.cwd(), resolvedTarget)}`
-      )
-      errors++
+    const targetFile = Bun.file(resolvedTarget)
+    const exists = await targetFile.exists()
+
+    if (!exists) {
+      // Check if it might be a directory
+      let isDir = false
+      try {
+        const targetStat = await stat(resolvedTarget)
+        isDir = targetStat.isDirectory()
+      } catch {
+        isDir = false
+      }
+
+      if (!isDir) {
+        console.error(
+          `  ✗ Broken link in ${relPath}: [${match[1]}](${rawTarget}) -> resolved to non-existent path: ${path.relative(process.cwd(), resolvedTarget)}`
+        )
+        errors++
+      }
     }
   }
 }

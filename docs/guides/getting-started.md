@@ -83,6 +83,7 @@ bun run balance --matches=1000 --seed=42
 
 ## 5. Testing Guidelines
 
-- **Headless First**: Tests in `tests/` should run in node/bun without requiring a WebGL context or browser DOM where possible.
+- **Headless First**: Tests in `tests/` run under Bun without requiring a WebGL context or browser DOM where possible.
 - **Deterministic**: Seeded RNG is used for map generation, pathing, and combat calculations to make test failures reproducible.
 - **Fast Feedback**: The entire test suite must complete in under 2 seconds.
+- **Asynchronous File I/O**: Never use synchronous file APIs (`fs.readFileSync`, `fs.writeFileSync`, `fs.existsSync`, etc.). Use `Bun.file(path)` with top-level `await` or `node:fs/promises`.
