@@ -11,13 +11,21 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE20: "true"
+
 jobs:
   validate:
     name: Lint, Test & Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        run: |
+          git init .
+          git remote add origin "${{ github.server_url }}/${{ github.repository }}"
+          git fetch --depth 1 origin "${{ github.ref }}"
+          git checkout FETCH_HEAD
 
       - name: Install Bun
         run: |
