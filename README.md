@@ -1,16 +1,49 @@
-# tictac
+# tictac (No Way Home)
 
-To install dependencies:
+A post-apocalyptic turn-based tactics game with dynamic squad combat, base building, resource management, and P2P online multiplayer. Built with TypeScript, Three.js, and Bun.
 
+---
+
+## Documentation Portal
+
+Comprehensive living documentation is maintained under [`docs/`](./docs/README.md):
+
+- 📐 **Architecture**: [`docs/architecture/`](./docs/architecture/overview.md) — System layers, ECS engine, combat ballistics, P2P JSON-RPC replication, and rendering pipeline.
+- 🎮 **Game Design**: [`docs/design/gdd/`](./docs/design/gdd/README.md) — Game design documents covering lore, combat rules, economy, and character progression.
+- 🏛️ **Decisions**: [`docs/design/adr/`](./docs/design/adr/README.md) — Architecture Decision Records (ADRs).
+- 📋 **Backlog**: [`docs/backlog/active-backlog.md`](./docs/backlog/active-backlog.md) — Prioritized engineering and gameplay task tracking.
+- 🚀 **Roadmap & Plans**: [`docs/plans/roadmap.md`](./docs/plans/roadmap.md) — Capability milestones and active Kanban focus ([`docs/plans/active-focus.md`](./docs/plans/active-focus.md)).
+- 📖 **Guides**: [`docs/guides/`](./docs/guides/living-docs-maintenance.md) — Living documentation guide, dev setup, and asset pipelines.
+- 📑 **Schemas**: [`docs/schemas/`](./docs/schemas/doc-frontmatter.schema.json) — JSON schemas and authoring templates for living docs, backlog items, ADRs, and plans.
+
+---
+
+## Quick Start
+
+### Dependencies
 ```bash
 bun install
 ```
 
-To run:
-
+### Development Server
 ```bash
 bun run dev
 ```
+Boots local development server with Hot Module Reloading (HMR) at `http://localhost:5173`.
+
+### Automated Testing & Balance Harness
+```bash
+# Run automated unit and headless integration test suite
+bun test
+
+# Run headless statistical balance sweep (500 seeded matches)
+bun run balance
+
+# Run type verification
+bun run typecheck
+```
+
+---
 
 ## Icons
 
@@ -29,5 +62,3 @@ bun run icons
 
 `public/icons/CREDITS.txt` is generated alongside and names the author of every
 icon in use.
-
-This project was created using `bun init` in bun v1.3.14. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.

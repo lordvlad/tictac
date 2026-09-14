@@ -15,7 +15,6 @@ import { NodeIO, PropertyType } from '@gltf-transform/core'
 import { prune } from '@gltf-transform/functions'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { statSync } from 'node:fs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SRC = resolve(here, '../assets/UAL1_Standard.glb')
@@ -68,8 +67,8 @@ await doc.transform(prune({ propertyTypes: [PropertyType.ACCESSOR] }))
 
 await io.write(DST, doc)
 
-const before = statSync(SRC).size
-const after = statSync(DST).size
+const before = Bun.file(SRC).size
+const after = Bun.file(DST).size
 const mb = (n) => (n / 1024 / 1024).toFixed(2)
 console.log(
   `character.glb: ${root.listAnimations().length} clips, ` +
