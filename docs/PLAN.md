@@ -8,5 +8,5 @@ This document has been reorganized into the formal documentation structure:
   - [Economy & Base Building](./design/gdd/economy-and-bases.md)
   - [Squads & Progression](./design/gdd/progression-and-meta.md)
 - 🚀 **Product & Engineering Roadmap**: [`docs/plans/roadmap.md`](./plans/roadmap.md)
-- 🏃 **Active Sprint Plan**: [`docs/plans/sprints/sprint-current.md`](./plans/sprints/sprint-current.md)
+- 🎯 **Active Kanban Focus**: [`docs/plans/active-focus.md`](./plans/active-focus.md)
 - 📋 **Active Backlog**: [`docs/backlog/active-backlog.md`](./backlog/active-backlog.md)

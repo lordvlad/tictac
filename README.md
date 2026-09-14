@@ -12,7 +12,7 @@ Comprehensive living documentation is maintained under [`docs/`](./docs/README.m
 - 🎮 **Game Design**: [`docs/design/gdd/`](./docs/design/gdd/README.md) — Game design documents covering lore, combat rules, economy, and character progression.
 - 🏛️ **Decisions**: [`docs/design/adr/`](./docs/design/adr/README.md) — Architecture Decision Records (ADRs).
 - 📋 **Backlog**: [`docs/backlog/active-backlog.md`](./docs/backlog/active-backlog.md) — Prioritized engineering and gameplay task tracking.
-- 🚀 **Roadmap & Plans**: [`docs/plans/roadmap.md`](./docs/plans/roadmap.md) — Milestone roadmaps and active sprint plans.
+- 🚀 **Roadmap & Plans**: [`docs/plans/roadmap.md`](./docs/plans/roadmap.md) — Capability milestones and active Kanban focus ([`docs/plans/active-focus.md`](./docs/plans/active-focus.md)).
 - 📖 **Guides**: [`docs/guides/`](./docs/guides/living-docs-maintenance.md) — Living documentation guide, dev setup, and asset pipelines.
 - 📑 **Schemas**: [`docs/schemas/`](./docs/schemas/doc-frontmatter.schema.json) — JSON schemas and authoring templates for living docs, backlog items, ADRs, and plans.
 

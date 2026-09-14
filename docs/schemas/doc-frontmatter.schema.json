@@ -32,12 +32,6 @@
       "format": "date",
       "description": "ISO-8601 date (YYYY-MM-DD) when this document was last verified against code."
     },
-    "reviewCycleDays": {
-      "type": "integer",
-      "minimum": 1,
-      "default": 90,
-      "description": "Maximum days allowed between verification reviews."
-    },
     "appliesTo": {
       "type": "array",
       "items": { "type": "string" },

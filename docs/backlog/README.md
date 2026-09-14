@@ -10,22 +10,23 @@ appliesTo:
 relatedDocs:
   - "docs/schemas/backlog-template.md"
   - "docs/plans/roadmap.md"
-tags: ["backlog", "tasks", "planning"]
+  - "docs/plans/active-focus.md"
+tags: ["backlog", "tasks", "kanban"]
 ---
 
 # Engineering & Product Backlog
 
-## Backlog Taxonomy & Workflow
+## Backlog Taxonomy & Kanban Workflow
 
-Items in the backlog follow a strict lifecycle and schema (`docs/schemas/backlog-item-schema.json`):
+Items in the backlog follow a pull-based Kanban flow:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Backlog
+    [*] --> Backlog: Idea / Requirement Identified
     Backlog --> Ready: Requirements & Seams Defined
-    Ready --> InProgress: Assigned in Active Sprint
-    InProgress --> Blocked: Dependency or External Blocker
-    Blocked --> InProgress: Blocker Resolved
+    Ready --> InProgress: Pulled into Active Focus
+    InProgress --> Blocked: External / Technical Dependency
+    Blocked --> InProgress: Dependency Resolved
     InProgress --> Completed: Acceptance Met & Verified
     Backlog --> Dropped: Deprecated or De-scoped
     Ready --> Dropped
@@ -33,6 +34,7 @@ stateDiagram-v2
 
 ### Document Map
 - [Active Backlog](./active-backlog.md): Prioritized, actionable items ready for or currently in execution.
+- [Active Focus Board](../plans/active-focus.md): Current work-in-progress and immediate pull queue.
 - [Completed Archive](./completed.md): Historical record of delivered work, verification notes, and retrospective learnings.
 
 ### Item ID Convention

@@ -10,7 +10,8 @@ appliesTo:
 relatedDocs:
   - "docs/backlog/README.md"
   - "docs/backlog/completed.md"
-  - "docs/plans/sprints/sprint-current.md"
+  - "docs/plans/active-focus.md"
+  - "docs/plans/roadmap.md"
 tags: ["backlog", "tasks", "active"]
 ---
 

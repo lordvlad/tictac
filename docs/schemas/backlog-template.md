@@ -4,19 +4,19 @@ id: "SCHEMA-BACKLOG"
 type: "schema"
 status: "active"
 owner: "Engineering"
-lastReviewed: "YYYY-MM-DD"
+lastReviewed: "2026-09-14"
 ---
 
 # Backlog Item Format
 
-Every backlog item in `docs/backlog/` MUST follow this structured format:
+Every backlog item in `docs/backlog/` MUST follow this structured Kanban format:
 
 ```markdown
 ### [ITEM-ID] Title in Imperative Form
 **Type:** Feature | Tech-Debt | Bug | Refactor | Balance | Infrastructure
 **Priority:** P0 | P1 | P2 | P3
 **Status:** Backlog | Ready | In-Progress | Blocked | Completed | Dropped
-**Milestone:** Target Milestone / Sprint Name
+**Milestone:** Target Milestone (e.g. M1, M2, M3)
 **Owner:** Assignee / Unassigned
 
 #### Why

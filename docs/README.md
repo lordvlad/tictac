@@ -1,6 +1,6 @@
 # TicTac / No Way Home — Documentation Portal
 
-Welcome to the central documentation portal for **TicTac / No Way Home**. This repository uses a **living documentation** structure where architecture, game design, engineering backlog, and sprint plans evolve alongside code.
+Welcome to the central documentation portal for **TicTac / No Way Home**. This repository uses a **living documentation** structure where architecture, game design, engineering backlog, and capability milestones evolve alongside code.
 
 ---
 
@@ -29,16 +29,15 @@ docs/
 │       ├── 0002-deterministic-headless-balance-harness.md
 │       └── 0003-p2p-jsonrpc-replication.md
 │
-├── backlog/              # Prioritized Work & Task Tracking
+├── backlog/              # Prioritized Work & Task Tracking (Kanban)
 │   ├── README.md         # Backlog taxonomy & workflow
 │   ├── active-backlog.md # Active items (ENG-xxx, GAME-xxx, ARCH-xxx)
 │   └── completed.md      # Historical completed archive & findings
 │
-├── plans/                # Roadmaps & Execution Sprints
+├── plans/                # Roadmaps & Milestones
 │   ├── README.md         # Planning framework
-│   ├── roadmap.md        # Multi-milestone roadmap (M1–M4)
-│   └── sprints/          # Sprint execution plans
-│       └── sprint-current.md # Active sprint plan
+│   ├── roadmap.md        # Multi-milestone capability roadmap (M1–M4)
+│   └── active-focus.md   # Current Kanban focus and WIP items
 │
 ├── guides/               # Developer Guides & Operational Manuals
 │   ├── living-docs-maintenance.md # Living docs rules, metadata schemas, triggers
@@ -51,7 +50,7 @@ docs/
     ├── adr-template.md   # ADR authoring template
     ├── rfc-template.md   # Technical RFC template
     ├── backlog-template.md # Backlog item template
-    └── plan-template.md  # Milestone / Sprint plan template
+    └── plan-template.md  # Milestone execution plan template
 ```
 
 ---
@@ -62,5 +61,6 @@ docs/
 - 📐 **Architecture**: [System Architecture Overview](architecture/overview.md)
 - 🎮 **Game Design**: [GDD: Tactical Combat Mechanics](design/gdd/combat-mechanics.md)
 - 📋 **Active Tasks**: [Active Backlog](backlog/active-backlog.md)
-- 🚀 **Next Milestones**: [Product & Engineering Roadmap](plans/roadmap.md)
+- 🎯 **Active Focus**: [Current Kanban Focus](plans/active-focus.md)
+- 🚀 **Milestones**: [Capability Roadmap](plans/roadmap.md)
 - 📖 **Doc Maintenance**: [Living Documentation Guide](guides/living-docs-maintenance.md)

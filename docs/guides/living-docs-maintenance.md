@@ -10,20 +10,21 @@ appliesTo:
 relatedDocs:
   - "docs/README.md"
   - "docs/schemas/doc-frontmatter.schema.json"
-tags: ["documentation", "process", "governance", "standards"]
+tags: ["documentation", "process", "governance", "standards", "kanban"]
 ---
 
 # Living Documentation Guide & Maintenance Workflow
 
-## 1. Philosophy: Documentation as Code
+## 1. Philosophy: Documentation as Code in a Hobby Project
 
 Documentation in this repository is **living**: it is maintained in the same repository as the code, evolves with every commit, and reflects the actual runtime architecture, data structures, game balance, and wire protocols.
 
 ### Core Principles
 1. **Single Source of Truth**: Architecture docs describe how the system works *now*, not how it was originally envisioned. Outdated documentation is treated with the same severity as broken code.
 2. **Co-located Updates**: Any PR or commit that alters architectural seams, wire formats, ECS components, balance equations, or build pipelines **must** update the corresponding document in `docs/` in the same change.
-3. **Structured & Schematized**: Documents use standard YAML frontmatter validated against JSON schemas in `docs/schemas/` to ensure metadata integrity, traceability, and discoverability.
-4. **Evidence-First**: Technical claims cite concrete source files (`src/...`), line numbers, or deterministic test/balance outputs rather than abstract assertions.
+3. **Continuous, Event-Driven Maintenance**: Because this is an open-ended hobby project, docs are kept fresh through code-change triggers and automated CI linting rather than calendar-based review schedules or time-bound sprint rituals.
+4. **Kanban & Architectural Milestones**: Planning follows pull-based Kanban flow (`Backlog` → `Ready` → `In Progress` → `Completed`) grouped by capability milestones, without arbitrary time estimates or sprint deadlines.
+5. **Evidence-First**: Technical claims cite concrete source files (`src/...`), line numbers, or deterministic test/balance outputs rather than abstract assertions.
 
 ---
 
@@ -45,9 +46,9 @@ docs/
 ├── backlog/                       # Granular, prioritized engineering & gameplay tasks
 │   ├── active-backlog.md          # Active backlog items with IDs, priority, and acceptance
 │   └── completed.md               # Archived historical tasks
-├── plans/                         # Strategic and execution planning
-│   ├── roadmap.md                 # Multi-milestone roadmap
-│   └── sprints/                   # Active and historical execution sprint plans
+├── plans/                         # Strategic and execution planning (Kanban & Milestones)
+│   ├── roadmap.md                 # Multi-milestone capability roadmap (M1–M4)
+│   └── active-focus.md            # Active Kanban focus and WIP items
 ├── guides/                        # Operational guides and developer workflows
 │   ├── living-docs-maintenance.md # This guide: maintenance standards and workflows
 │   ├── getting-started.md         # Dev environment, scripts, test execution
@@ -58,7 +59,7 @@ docs/
     ├── adr-template.md            # Template for new ADRs
     ├── rfc-template.md            # Template for Technical RFCs
     ├── backlog-template.md        # Template for Backlog entries
-    └── plan-template.md           # Template for Sprint/Milestone plans
+    └── plan-template.md           # Template for Milestone/Feature execution plans
 ```
 
 ---
@@ -113,19 +114,18 @@ tags: ["ecs", "networking"]
 2. Document context, evidence from code, alternatives evaluated, decision rationale, and consequences.
 3. Once accepted and implemented, mark status as `implemented` and update `docs/design/adr/README.md`.
 
-### Trigger 5: Backlog & Task Management
+### Trigger 5: Backlog & Kanban Task Management
 - Active work items are tracked in `docs/backlog/active-backlog.md` following `docs/schemas/backlog-template.md`.
+- Active WIP and pull-queue priorities are highlighted in `docs/plans/active-focus.md`.
 - Completed work moves to `docs/backlog/completed.md` with verification notes and PR/commit references.
-- Sprint plans in `docs/plans/sprints/` reference Backlog Item IDs (`ENG-XXX`, `GAME-XXX`).
 
 ---
 
-## 5. Review & Verification Checklist
+## 5. Automated Verification Checklist
 
-When submitting or reviewing changes to the repository:
+Automated verification runs via `bun run lint` (which executes `tsc --noEmit` and `scripts/lint-docs.ts` concurrently):
 
 - [ ] **Frontmatter Validity**: `lastReviewed` date is set to today's date if doc was updated.
-- [ ] **File Path Accuracy**: All referenced file paths (e.g. `src/game/Combat.ts`) exist and line references are accurate.
-- [ ] **Diagram Correctness**: Mermaid sequence/class/flow diagrams reflect actual code pathways.
+- [ ] **File Path Accuracy**: All referenced file paths (e.g. `src/game/Combat.ts`) exist.
 - [ ] **Cross-link Integrity**: Relative Markdown links between documents are valid and resolve.
-- [ ] **No Dead Code in Docs**: Removed or refactored functions/classes are purged from architecture guides.
+- [ ] **JSON Schema Syntax**: All schemas in `docs/schemas/` parse without error.

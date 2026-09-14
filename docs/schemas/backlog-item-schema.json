@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/project/docs/schemas/backlog-item-schema.json",
   "title": "BacklogItem",
-  "description": "Schema for structured backlog items, user stories, and technical tasks.",
+  "description": "Schema for structured backlog items, user stories, and technical tasks in Kanban workflow.",
   "type": "object",
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^(ENG|GAME|ARCH|PERF|ASSET)-[0-9]{3,4}$",
-      "description": "Standardized item key (e.g. ENG-010, GAME-002, ARCH-001)."
+      "pattern": "^(ENG|GAME|ARCH|PERF|ASSET|UI)-[0-9]{3,4}$",
+      "description": "Standardized item key (e.g. ENG-010, GAME-002, ARCH-001, UI-001)."
     },
     "title": {
       "type": "string",
@@ -24,16 +24,16 @@
     "status": {
       "type": "string",
       "enum": ["backlog", "ready", "in-progress", "blocked", "completed", "dropped"],
-      "description": "Execution status."
+      "description": "Execution status in Kanban flow."
     },
     "priority": {
       "type": "string",
       "enum": ["p0", "p1", "p2", "p3"],
-      "description": "P0=Critical/Urgent, P1=High/Next, P2=Medium, P3=Low/Nice-to-have."
+      "description": "P0=Critical/Next, P1=High, P2=Medium, P3=Low/Nice-to-have."
     },
     "milestone": {
       "type": "string",
-      "description": "Target release milestone or sprint."
+      "description": "Target capability milestone (e.g. M1 — Headless Foundation, M2 — Tactical Depth)."
     },
     "why": {
       "type": "string",

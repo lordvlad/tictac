@@ -1,5 +1,5 @@
 ---
-title: "Planning & Roadmaps Overview"
+title: "Planning & Milestones Overview (Kanban)"
 id: "PLAN-INDEX"
 type: "plan"
 status: "active"
@@ -9,19 +9,27 @@ appliesTo:
   - "docs/plans/**"
 relatedDocs:
   - "docs/backlog/active-backlog.md"
-tags: ["planning", "roadmap", "sprints"]
+  - "docs/plans/roadmap.md"
+  - "docs/plans/active-focus.md"
+tags: ["planning", "roadmap", "kanban", "milestones"]
 ---
 
-# Planning & Roadmaps Overview
+# Planning & Milestones Overview
 
-## Planning Hierarchy
+## Planning Philosophy: Kanban & Architectural Milestones
+
+As a hobby project, development is guided by **architectural dependency and player value** rather than arbitrary deadlines, sprint cycles, or time estimates. Work items are pulled continuously through Kanban stages:
 
 ```mermaid
-graph TD
-    A[Vision & GDD] --> B[Multi-Milestone Roadmap]
-    B --> C[Active Sprint / Execution Plans]
-    C --> D[Backlog Work Items]
+graph LR
+    Backlog[Backlog] --> Ready[Ready to Pull]
+    Ready --> InProgress[In Progress / WIP]
+    InProgress --> Verified[Verified & Completed]
 ```
 
-- **[Milestone Roadmap](./roadmap.md)**: High-level architectural and gameplay milestones (M1 to M4).
-- **[Active Sprint Plan](./sprints/sprint-current.md)**: Current execution plan, sprint goals, and task sequence.
+---
+
+## Planning Documents
+
+- **[Milestone Roadmap](./roadmap.md)**: Sequential capability milestones (M1 to M4) ordered strictly by dependency.
+- **[Active Focus Board](./active-focus.md)**: Current work-in-progress (WIP) and next items in the pull queue.

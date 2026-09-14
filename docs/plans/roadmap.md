@@ -1,5 +1,5 @@
 ---
-title: "Multi-Milestone Product & Engineering Roadmap"
+title: "Multi-Milestone Capability Roadmap"
 id: "PLAN-ROADMAP"
 type: "plan"
 status: "active"
@@ -9,40 +9,56 @@ appliesTo:
   - "docs/plans/**"
 relatedDocs:
   - "docs/backlog/active-backlog.md"
-tags: ["roadmap", "milestones", "release"]
+  - "docs/plans/active-focus.md"
+tags: ["roadmap", "milestones", "capabilities"]
 ---
 
-# Multi-Milestone Roadmap
+# Multi-Milestone Capability Roadmap
 
-## Milestone Timeline Overview
+Milestones are ordered strictly by architectural dependency:
 
-| Milestone | Target | Focus Area | Key Deliverables | Status |
-| --- | --- | --- | --- | --- |
-| **M1: Headless Core & Decoupling** | Q3 2026 | Architecture | Narrow Ports, Balance Harness, Full ECS Data/View Split | **In Progress** |
-| **M2: Tactical Depth & Progression** | Q4 2026 | Gameplay | In-Match XP & Promotions, Dynamic Wounds, Equipment Traits | Planned |
-| **M3: Reconnaissance & Morale** | Q1 2027 | Mechanics | Intel Fog, Suppression & Morale, AP Fatigue & Exhaustion | Planned |
-| **M4: Competitive & Meta Roster** | Q2 2027 | Meta / Network | Overwatch & Reactions, Role Archetypes, Campaign Roster Persistence | Planned |
+```mermaid
+graph TD
+    M1[Milestone 1: Headless Foundation & ECS Split] --> M2[Milestone 2: Tactical Depth & RPG Progression]
+    M2 --> M3[Milestone 3: Reconnaissance & Morale]
+    M3 --> M4[Milestone 4: Competitive Meta & Campaign]
+```
 
 ---
 
-## Detailed Milestone Objectives
+## Milestone Sequence
 
-### Milestone 1: Headless Core & Decoupling
-- Complete decoupling of rule resolvers from Three.js scene/camera rendering.
-- `Soldier` decoupled into component data container; `SoldierView` managing meshes and animations.
-- Deterministic headless simulation capable of executing 500+ match sweeps.
+### Milestone 1: Headless Foundation & ECS Split
+**Status:** In Progress  
+**Focus:** Complete separation of game rules from rendering.
+- Narrow ports (`Combatant`, `CombatFx`). *(Completed)*
+- Deterministic balance simulation runner. *(Completed)*
+- `Soldier` as pure data unit; `SoldierView` owning Three.js meshes and animation mixers.
+- Elimination of canvas stubs across test suites.
+
+---
 
 ### Milestone 2: Tactical Depth & RPG Progression
-- In-match promotion draft with dynamic trait application.
-- Severe trauma wound system applying lasting debuffs (<50%, <25% HP).
-- Trait-bearing passive items (Scopes, Bipods, Suppressors, Armor Carriers).
+**Status:** Planned  
+**Focus:** Character growth and mechanical stakes during combat.
+- In-match XP accrual and on-the-fly 3-perk promotion draft (`[GAME-001]`).
+- Lasting wound debuffs when crossing <50% and <25% HP thresholds (`[GAME-002]`).
+- Trait-bearing passive equipment: scopes, bipods, suppressors, plate carriers (`[GAME-003]`).
 
-### Milestone 3: Reconnaissance, Suppression & Fog
-- Dynamic intel fog obfuscating enemy sheet numbers until detected or attacked.
-- Ballistic suppression mechanics pinning units on near-misses.
-- Exhaustion penalty for consecutive max-AP turns.
+---
 
-### Milestone 4: Competitive Meta & Campaign Persistence
-- Complex reaction fire and overwatch interleaving in enemy move paths.
-- Distinct tactical roles (Medic, Scout, Marksman, Gunner) on loadout screen.
-- LocalStorage and P2P campaign squad persistence across matches.
+### Milestone 3: Reconnaissance & Morale
+**Status:** Planned  
+**Focus:** Information asymmetry and battlefield control.
+- Enemy intel fog hiding opposing character stat numbers until engaged (`[GAME-004]`).
+- Ballistic suppression mechanics applying accuracy debuffs on near-misses (`[GAME-005]`).
+- AP fatigue penalty for consecutive maximum-movement turns (`[GAME-006]`).
+
+---
+
+### Milestone 4: Competitive Meta & Campaign
+**Status:** Planned  
+**Focus:** High-level tactics, team composition, and long-term roster persistence.
+- Tactical role specializations on loadout screen (Medic, Scout, Marksman, Gunner) (`[UI-001]`).
+- Reaction fire and overwatch interleaving inside enemy movement paths (`[GAME-007]`).
+- LocalStorage and P2P campaign roster persistence across matches (`[GAME-008]`).
