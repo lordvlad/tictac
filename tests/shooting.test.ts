@@ -10,6 +10,11 @@ import type { CombatSystem } from '../src/ecs/systems/CombatSystem'
 import type { EngineContext } from '../src/engine'
 import type { Soldier } from '../src/entities/Soldier'
 import type { Tile } from '../src/core/Grid'
+import { installCanvasStub } from './support/dom'
+
+// Render code is under test here (canvas-backed textures), so the stub is
+// this suite's own business - it must not rely on another file installing it.
+installCanvasStub()
 
 
 /**

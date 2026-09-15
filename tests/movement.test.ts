@@ -7,6 +7,11 @@ import { MovementPlanner } from '../src/game/MovementPlanner'
 import type { Soldier } from '../src/entities/Soldier'
 import type { Squads } from '../src/game/Squads'
 import type { EngineContext } from '../src/engine'
+import { installCanvasStub } from './support/dom'
+
+// Render code is under test here (canvas-backed textures), so the stub is
+// this suite's own business - it must not rely on another file installing it.
+installCanvasStub()
 
 
 /** Just enough of a soldier for the planner: where it is and what it can spend. */

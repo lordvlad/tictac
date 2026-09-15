@@ -58,9 +58,10 @@ Originally, gameplay entities directly inherited 3D rendering primitives:
 ### Consequences
 - **Positive:**
   - Full match simulation runs 100% headless with no canvas or Three.js scene dependencies.
-  - Sub-millisecond unit test execution.
+  - Sub-millisecond unit test execution, and a squad can be built in a test with no canvas stub at all (`tests/headless.test.ts`).
   - Enables deterministic headless AI vs AI balance testing (`scripts/balance.ts`), which is also how the split was verified: 200 matches at a fixed seed produce a byte-identical report before and after.
   - Anything derivable from component state needs no announcement at all, which is how the duplicated death clip was found.
 - **Negative / Costs:**
   - Requires explicit event/component synchronization between simulation state and view representation.
   - State mirrored onto meshes lands one frame later than a direct write (~16 ms), which applies to unit visibility.
+  - The split does not retire `installCanvasStub` for suites that exercise render code: `PathMarker` and `ShootPlanner` build canvas-backed textures, so `movement`, `shooting` and `pathmarker` still install it alongside `camera` and `debugmap`. Each suite must install its own — removing it from three of them left the aggregate run green only because another file had installed it first, and CI's file order exposed that.

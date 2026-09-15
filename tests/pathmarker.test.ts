@@ -3,6 +3,11 @@ import { Line, LineLoop, Scene, Sprite, Vector3 } from 'three'
 import { PATH } from '../src/config'
 import { CoverLevel } from '../src/core/Walls'
 import { PathMarker } from '../src/render/PathMarker'
+import { installCanvasStub } from './support/dom'
+
+// Render code is under test here (canvas-backed textures), so the stub is
+// this suite's own business - it must not rely on another file installing it.
+installCanvasStub()
 
 
 interface Probe {

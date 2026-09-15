@@ -92,7 +92,7 @@ All figures are stock spread with sides swapped to account for first-move bias:
 #### Three Findings Beyond the Split
 1. **Unit visibility was living on the mesh.** Fog of war wrote `instance.visible` and the planners read it back, so "can I shoot that" was a question about the renderer and unanswerable without one. It is `SightedComponent` now, mirrored onto the mesh by the view. Costs one frame of latency where there was none (~16 ms).
 2. **`CombatFx.death` was redundant and is removed.** A corpse is `hp <= 0` in a component, so the view collapses on seeing it. It had been announced *and* derived, playing the death clip twice per kill (observed live as two calls; now one). Supersedes the `CombatFx` surface recorded under `ITEM-001`. A peer's death now animates off replicated state rather than off a message.
-3. **Three suites stopped needing a canvas.** `movement`, `shooting` and `pathmarker` no longer install the stub. `camera` and `debugmap` still do, correctly: they genuinely draw.
+3. **The canvas stub turned out to be load-bearing in more suites than expected — and hid an order dependency.** Dropping it from `movement`, `shooting` and `pathmarker` left the full run green, because `camera` and `debugmap` install it globally and happened to run first. Each of those three constructs canvas-backed textures (`PathMarker`, `ShootPlanner`) and genuinely needs it, so each installs its own now. CI runs files in a different order and caught it; `bun test <file>` per suite is the check that reproduces it.
 
 #### Verification
 - **Parity, not eyeballs** — the reason `ITEM-002` came first. 200 matches at seed 1 produce a byte-identical report before and after the split, re-checked after each follow-up change.
@@ -101,6 +101,6 @@ All figures are stock spread with sides swapped to account for first-move bias:
 
 #### Acceptance Criteria
 - [x] `Soldier` has no references to `three` rendering types (except pure vector math) or `Entity3D`.
-- [x] Squads and battlefields instantiate headless in test suites without `installCanvasStub`.
+- [x] Squads and battlefields instantiate headless in test suites without `installCanvasStub` — demonstrated by `tests/headless.test.ts`, which installs nothing. Suites that exercise render code (`camera`, `debugmap`, `movement`, `shooting`, `pathmarker`) still install it, each for itself.
 - [x] Visual sanity: unit animations, crouching, facing angles, and yaw transitions verified in browser.
 - [x] Full test suite passes (`bun test`) — 241 pass, `tsc` clean.
