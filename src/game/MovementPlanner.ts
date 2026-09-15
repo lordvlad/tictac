@@ -1,6 +1,7 @@
 import { directionalCover } from '../core/Cover'
 import { type Grid, type Tile, tileEquals } from '../core/Grid'
 import { findChainedPath } from '../core/Pathfinding'
+import { moveBudget } from './Movement'
 import type { Soldier } from '../entities/Soldier'
 import { PathMarker } from '../render/PathMarker'
 import type { Squads } from './Squads'
@@ -168,7 +169,7 @@ export class MovementPlanner {
       soldier.tile,
       endpoint,
       via,
-      soldier.ap,
+      moveBudget(soldier),
       this.occupied,
     )
 

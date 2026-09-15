@@ -1,3 +1,5 @@
+import { WOUNDS } from '../config'
+
 /**
  * Traits: named bundles of combat modifiers that a unit can pick up from
  * anywhere.
@@ -17,6 +19,10 @@ export const TraitId = {
   Stoic: 'stoic',
   /** Worn: a weave that spreads the shock of a hit out of any one place. */
   Nullweave: 'nullweave',
+  /** Wounded: hurt enough to slow down and tire early. */
+  Limping: 'limping',
+  /** Wounded badly: cannot shoot or dodge straight. */
+  Concussed: 'concussed',
 } as const
 export type TraitId = (typeof TraitId)[keyof typeof TraitId]
 
@@ -40,6 +46,14 @@ export interface TraitEffects {
   maxAp?: number
   /** No hit on this unit can be a critical, whatever the attacker rolled. */
   critImmune?: boolean
+  /**
+   * Extra fraction added to every step this unit takes: 0.5 is half again.
+   *
+   * A fraction rather than a multiplier because the fold adds, and adding
+   * multipliers is not how multipliers work. Two sources of 0.5 mean twice as
+   * expensive, which is the answer a player would expect.
+   */
+  moveCost?: number
 }
 
 export interface TraitSpec {
@@ -87,11 +101,44 @@ export const TRAITS: Record<TraitId, TraitSpec> = {
     description: 'Spreads the shock of a hit: no critical can land, but bulky.',
     effects: { critImmune: true, evasion: -3 },
   },
+  [TraitId.Limping]: {
+    id: TraitId.Limping,
+    name: 'Limping',
+    description: 'Hurt: every step costs half again, and 2 AP less to spend.',
+    effects: { moveCost: 0.5, maxAp: -2 },
+  },
+  [TraitId.Concussed]: {
+    id: TraitId.Concussed,
+    name: 'Concussed',
+    description: 'Badly hurt: -8 accuracy and harder to keep out of the way.',
+    effects: { accuracy: -8, evasion: -4 },
+  },
 }
+
+/**
+ * The wounds a unit's condition has earned it.
+ *
+ * Derived from current health rather than stamped on when a threshold is
+ * crossed. That means a peer needs to be told nothing - hit points already
+ * replicate, so both sides reach the same answer - there is no threshold
+ * hysteresis to get wrong, and patching a soldier up genuinely helps rather
+ * than leaving them limping at full health.
+ */
+export function woundTraits(hp: number, maxHp: number): readonly TraitId[] {
+  if (maxHp <= 0 || hp <= 0) return []
+  const share = hp / maxHp
+  if (share <= WOUNDS.concussed) return WOUNDED_BADLY
+  if (share <= WOUNDS.limping) return WOUNDED
+  return []
+}
+
+const WOUNDED: readonly TraitId[] = [TraitId.Limping]
+const WOUNDED_BADLY: readonly TraitId[] = [TraitId.Limping, TraitId.Concussed]
 
 /** Every trait's opinion, added up. The shape combat reads. */
 export interface ResolvedTraits {
   accuracy: number
+  moveCost: number
   evasion: number
   critChance: number
   critMultiplier: number
@@ -102,6 +149,7 @@ export interface ResolvedTraits {
 
 export const NO_TRAITS: ResolvedTraits = {
   accuracy: 0,
+  moveCost: 0,
   evasion: 0,
   critChance: 0,
   critMultiplier: 0,
@@ -119,6 +167,7 @@ export const NO_TRAITS: ResolvedTraits = {
  */
 export function resolveTraitsInto(out: ResolvedTraits, ids: Iterable<TraitId>): ResolvedTraits {
   out.accuracy = 0
+  out.moveCost = 0
   out.evasion = 0
   out.critChance = 0
   out.critMultiplier = 0
@@ -134,6 +183,7 @@ export function resolveTraitsInto(out: ResolvedTraits, ids: Iterable<TraitId>): 
     if (!Object.hasOwn(TRAITS, id)) continue
     const e = TRAITS[id].effects
     out.accuracy += e.accuracy ?? 0
+    out.moveCost += e.moveCost ?? 0
     out.evasion += e.evasion ?? 0
     out.critChance += e.critChance ?? 0
     out.critMultiplier += e.critMultiplier ?? 0

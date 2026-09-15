@@ -2,9 +2,11 @@ import { System } from '../System'
 import type { World } from '../World'
 import { PositionComponent } from '../components/PositionComponent'
 import { StanceComponent } from '../components/StanceComponent'
+import { TraitsComponent } from '../components/TraitsComponent'
 import { ActionPointsComponent } from '../components/ActionPointsComponent'
 import { HealthComponent } from '../components/HealthComponent'
 import { RULES } from '../../config'
+import { stepCost } from '../../game/Movement'
 import type { Grid, Tile } from '../../core/Grid'
 
 /**
@@ -67,6 +69,8 @@ export class MovementSystem extends System {
 
       const pos = world.getComponent(entityId, PositionComponent)!
       const ap = world.getComponent(entityId, ActionPointsComponent)!
+      // Absent for anything that is not a soldier, and whole units cost 1.
+      const moveCostMul = world.getComponent(entityId, TraitsComponent)?.moveCostMul ?? 1
 
       // Distance budget for this tick. Leftover carries across tile boundaries,
       // otherwise the remainder is discarded on every arrival and the unit
@@ -84,8 +88,8 @@ export class MovementSystem extends System {
         // Never enter a tile the unit cannot pay for. Movement always halts on
         // a tile boundary, so stopping here leaves a valid grid position.
         const prev = stance.movingPath[index - 1] ?? pos.tile
-        const stepCost = this.grid.getStepCost(prev, nextTile)
-        if (ap.ap < stepCost) {
+        const cost = stepCost(this.grid, prev, nextTile, moveCostMul)
+        if (ap.ap < cost) {
           this.stopMovement(world, entityId)
           break
         }
@@ -114,7 +118,7 @@ export class MovementSystem extends System {
 
         pos.tile = { x: nextTile.x, y: nextTile.y }
         pos.level = this.grid.levelAt(nextTile.x, nextTile.y)
-        ap.ap = Math.max(0, ap.ap - stepCost)
+        ap.ap = Math.max(0, ap.ap - cost)
 
         this.onStep?.(entityId, nextTile)
 

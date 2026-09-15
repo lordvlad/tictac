@@ -16,6 +16,7 @@ import {
   type ResolvedTraits,
   resolveTraitsInto,
   type TraitId,
+  woundTraits,
 } from '../core/Traits'
 import { ITEMS, ItemId } from '../core/Items'
 import type { Grid, Tile } from '../core/Grid'
@@ -137,6 +138,7 @@ export class Soldier {
   refreshTraits(): void {
     this.traitIds.length = 0
     for (const id of this.sheet.traits) this.traitIds.push(id)
+    for (const id of woundTraits(this.health.hp, this.health.maxHp)) this.traitIds.push(id)
     for (const id of Object.values(ItemId)) {
       if ((this.items[id] ?? 0) <= 0) continue
       const granted = ITEMS[id].traits
@@ -148,6 +150,10 @@ export class Soldier {
     if (this.traitsComponent.evasion !== evasion) this.traitsComponent.evasion = evasion
     if (this.traitsComponent.critImmune !== this.resolvedTraits.critImmune) {
       this.traitsComponent.critImmune = this.resolvedTraits.critImmune
+    }
+    const moveCostMul = 1 + this.resolvedTraits.moveCost
+    if (this.traitsComponent.moveCostMul !== moveCostMul) {
+      this.traitsComponent.moveCostMul = moveCostMul
     }
 
     // Trait ceilings sit on top of the sheet's own, and a unit at full health
@@ -209,6 +215,16 @@ export class Soldier {
     return this.traitsComponent.critImmune
   }
 
+  /**
+   * What every step costs this unit, as a multiple of the terrain's own price.
+   *
+   * One when whole. A wound adds to it, so the same route across the same
+   * ground costs a limping soldier more.
+   */
+  get moveCostMul(): number {
+    return this.traitsComponent.moveCostMul
+  }
+
   /** Percentage points this soldier's traits add to its own crit chance. */
   get critChanceBonus(): number {
     return this.resolvedTraits.critChance
@@ -225,7 +241,13 @@ export class Soldier {
     return this.health.hp
   }
   set hp(value: number) {
+    // Wounds are a function of condition, so crossing a threshold has to refold
+    // the traits. Checked against the bands rather than on every point of
+    // damage: the fold is cheap but it is not free, and nothing changes in
+    // between.
+    const before = woundTraits(this.health.hp, this.health.maxHp).length
     this.health.hp = value
+    if (woundTraits(value, this.health.maxHp).length !== before) this.refreshTraits()
   }
   get maxHp(): number {
     return this.health.maxHp

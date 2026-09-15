@@ -22,16 +22,28 @@ export class TraitsComponent extends Component {
   constructor(
     public evasion: number = 0,
     public critImmune: boolean = false,
+    /**
+     * What a step costs this unit, as a multiple of the terrain's own price.
+     *
+     * Here rather than folded on demand because the mover works on components
+     * and never sees a unit object — and because it travels for the same
+     * reason evasion does: a wound is visible in the hit points a peer already
+     * has, but gear that slowed a unit down would not be.
+     */
+    public moveCostMul: number = 1,
   ) {
     super()
   }
 
   serialize(): Record<string, unknown> {
-    return { evasion: this.evasion, critImmune: this.critImmune }
+    return { evasion: this.evasion, critImmune: this.critImmune, moveCostMul: this.moveCostMul }
   }
 
   deserialize(data: Record<string, unknown>): void {
     if (typeof data.evasion === 'number') this.evasion = data.evasion
     if (typeof data.critImmune === 'boolean') this.critImmune = data.critImmune
+    if (typeof data.moveCostMul === 'number' && data.moveCostMul > 0) {
+      this.moveCostMul = data.moveCostMul
+    }
   }
 }

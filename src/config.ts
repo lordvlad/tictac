@@ -161,6 +161,17 @@ export const RULES = {
 }
 
 /**
+ * Shares of a unit's own maximum health at which wounds set in.
+ *
+ * Read as "at or below": a unit is limping from half health and concussed from
+ * a quarter, and a quarter-health unit is both.
+ */
+export const WOUNDS = {
+  limping: 0.5,
+  concussed: 0.25,
+}
+
+/**
  * How much the people differ from each other.
  *
  * Rolled per peer, not from the match seed: the seed is the host's map, and

@@ -14,9 +14,13 @@ import { installCanvasStub } from './support/dom'
 installCanvasStub()
 
 
-/** Just enough of a soldier for the planner: where it is and what it can spend. */
+/**
+ * Just enough of a soldier for the planner: where it is, what it can spend,
+ * and what a step costs it — routes are budgeted in terrain prices, so a unit
+ * with no multiplier would plan against a budget of NaN.
+ */
 function unit(tile: Tile, ap = 12): Soldier {
-  return { tile, ap, isDead: false } as unknown as Soldier
+  return { tile, ap, isDead: false, moveCostMul: 1 } as unknown as Soldier
 }
 interface ShowCall {
   goal: { x: number; y: number; z: number }

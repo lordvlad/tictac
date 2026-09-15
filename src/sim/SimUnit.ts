@@ -4,7 +4,13 @@ import type { Combatant } from '../core/Combatant'
 import type { CharacterSheet } from '../core/Characters'
 import type { Tile } from '../core/Grid'
 import { ITEMS, ItemId } from '../core/Items'
-import { NO_TRAITS, type ResolvedTraits, resolveTraitsInto, type TraitId } from '../core/Traits'
+import {
+  NO_TRAITS,
+  type ResolvedTraits,
+  resolveTraitsInto,
+  type TraitId,
+  woundTraits,
+} from '../core/Traits'
 import { RULES, type Faction } from '../config'
 
 /**
@@ -23,8 +29,8 @@ import { RULES, type Faction } from '../config'
 export class SimUnit implements Combatant {
   readonly weapon: Weapon
   ammo: AmmoSpec
-  hp: number
   maxHp: number
+  private hpLeft = 0
   maxAp: number
   private apLeft = 0
   armor: number
@@ -85,6 +91,7 @@ export class SimUnit implements Combatant {
   refreshTraits(): void {
     this.traitIds.length = 0
     for (const id of this.sheet.traits) this.traitIds.push(id)
+    for (const id of woundTraits(this.hpLeft, this.maxHp)) this.traitIds.push(id)
     for (const id of Object.values(ItemId)) {
       if ((this.items[id] ?? 0) <= 0) continue
       const granted = ITEMS[id].traits
@@ -95,6 +102,19 @@ export class SimUnit implements Combatant {
 
   get traits(): ResolvedTraits {
     return this.resolved
+  }
+
+  get hp(): number {
+    return this.hpLeft
+  }
+  set hp(value: number) {
+    const before = woundTraits(this.hpLeft, this.maxHp).length
+    this.hpLeft = value
+    if (woundTraits(value, this.maxHp).length !== before) this.refreshTraits()
+  }
+
+  get moveCostMul(): number {
+    return 1 + this.resolved.moveCost
   }
 
   get isDead(): boolean {

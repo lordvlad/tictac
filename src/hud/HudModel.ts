@@ -3,6 +3,7 @@ import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
 import { ITEMS, ItemId } from '../core/Items'
 import { effectiveWeapon, type HitChanceBreakdown, statusStacks } from '../core/Ballistics'
 import { clamp } from '../core/math'
+import { TRAITS, woundTraits } from '../core/Traits'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
 import type { PendingThrow } from '../game/GrenadePlanner'
@@ -389,7 +390,7 @@ function weaponApCost(soldier: Soldier, mode: ShotMode): number {
 }
 
 /**
- * The statuses on a unit, spelled out.
+ * Everything currently in force on a unit, spelled out.
  *
  * Nothing surfaced these before, so a stim raising a unit's points and a shot
  * missing because the shooter was flashed both happened silently. A ceiling
@@ -397,6 +398,14 @@ function weaponApCost(soldier: Soldier, mode: ShotMode): number {
  */
 function statusChips(soldier: Soldier): HudStatusChip[] {
   const chips: HudStatusChip[] = []
+
+  // Wounds first: they are the reason a unit is shooting badly, and they last
+  // as long as the injury rather than ticking away like a status.
+  for (const id of woundTraits(soldier.hp, soldier.maxHp)) {
+    const trait = TRAITS[id]
+    chips.push({ name: trait.name, detail: trait.description, good: false })
+  }
+
   for (const state of soldier.statuses) {
     if (state.turnsLeft <= 0) continue
     const spec = STATUSES[state.kind]

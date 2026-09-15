@@ -47,6 +47,8 @@ export interface Combatant extends CombatantStats, Casualty {
   targetYaw: number
   /** The AP ceiling with live statuses folded in. */
   readonly effectiveMaxAp: number
+  /** What a step costs this unit, as a multiple of the terrain's own price. */
+  readonly moveCostMul: number
   /** Points this unit's own actions have consumed since its last refill. */
   spentThisTurn: number
   /** Consecutive turns it has spent every point it had. */

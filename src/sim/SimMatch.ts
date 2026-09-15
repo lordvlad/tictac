@@ -15,6 +15,7 @@ import {
   shotApCost,
   throwGrenade,
 } from '../game/Combat'
+import { stepCostFor } from '../game/Movement'
 import { settleTurn } from '../game/Turn'
 import { effectiveWeapon, resolveDamage } from '../core/Ballistics'
 import { SimUnit } from './SimUnit'
@@ -348,7 +349,7 @@ export class SimMatch {
       const step = path[i]!
       // Stop short of walking onto the target: the last tile is where it stands.
       if (tileEquals(step, goal.tile)) break
-      const cost = this.grid.getStepCost(path[i - 1]!, step)
+      const cost = stepCostFor(this.grid, unit, path[i - 1]!, step)
       if (unit.ap < cost) break
       unit.ap -= cost
       unit.tile = { ...step }
