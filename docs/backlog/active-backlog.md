@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-09-15"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -15,44 +15,6 @@ tags: ["backlog", "tasks", "active"]
 ---
 
 # Active Backlog
-
----
-
-### [ITEM-003] Complete ECS Split: Data Units vs View Units
-**Type:** Refactor / Architecture  
-**Priority:** P0  
-**Status:** Ready  
-**Milestone:** M1 — Headless Foundation  
-
-#### Why
-With narrow ports (`ITEM-001`), the rules no longer *call* graphics, but a unit is still a graphics object: `Soldier` inherits `Entity3D`, so nothing can build a squad without a scene. Five test suites (`camera`, `debugmap`, `movement`, `pathmarker`, `shooting`) currently install a canvas stub and hand-build structural stand-ins to work around this seam.
-
-#### Change
-1. `Soldier` becomes pure data over its components.
-2. A new `SoldierView` (`src/render/SoldierView.ts`) owns the `Entity3D`, the animation mixer, and cloned materials, driven by `RenderSystem` reading `PositionComponent`, `StanceComponent`, and `HealthComponent`.
-3. `Squads` builds units with no engine at all; a view factory attaches meshes only when there is a scene to attach them to.
-4. `Battlefield` splits the same way: terrain data is pure (`MapGenerator`), terrain meshes are detached.
-
-#### What it Buys
-A full match that runs with no renderer: AI opponents, deterministic replay from a seed plus a command log, an authoritative referee instead of trusting peers, faster tests, and deletion of `installCanvasStub` from five suites.
-
-#### Affected Files
-- `src/entities/Soldier.ts` (~495 lines)
-- `src/render/SoldierView.ts` (new)
-- `src/render/SquadViews.ts` (new)
-- `src/ecs/systems/RenderSystem.ts`
-- `src/game/Squads.ts`
-- `src/game/Battlefield.ts`
-- `src/main.ts`
-
-#### Cost & Risk
-Touches `Soldier`, `Squads`, `Battlefield`, `RenderSystem`, `main.ts`, and every site that accesses `soldier.position` or `.rotation` through `Entity3D`. Mechanically simple but broad. Primary risk is animation and yaw regressions, which require visual verification in browser.
-
-#### Acceptance Criteria
-- [ ] `Soldier` has no references to `three` rendering types (except pure vector math) or `Entity3D`.
-- [ ] Squads and battlefields instantiate headless in test suites without `installCanvasStub`.
-- [ ] Visual sanity: unit animations, crouching, facing angles, and yaw transitions verified in browser.
-- [ ] Full test suite passes (`bun test`).
 
 ---
 

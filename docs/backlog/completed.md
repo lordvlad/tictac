@@ -3,7 +3,7 @@ title: "Completed Work Archive"
 id: "BACKLOG-COMPLETED"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-09-15"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -71,3 +71,36 @@ All figures are stock spread with sides swapped to account for first-move bias:
 #### Open Items
 - Paired-seed trait comparison.
 - `CombatSystem` roster port for direct simulation use rather than calling `fireWeapon` directly.
+
+---
+
+### [ITEM-003] Complete ECS Split: Data Units vs View Units
+**Completed Date:** 2026-09-15  
+**Type:** Refactor / Architecture  
+**Milestone:** M1 — Headless Foundation  
+
+#### Why
+`ITEM-001` stopped the rules *calling* graphics, but a unit still *was* graphics: `Soldier` inherited `Entity3D`, carrying hit points, action points, stance and gear in the same object as a mesh, a skeleton and an animation mixer. A squad could not exist without a scene to stand in, and five test suites installed a canvas stub with hand-built structural stand-ins to work around it.
+
+#### Key Changes
+- `Soldier` is state over its components, with no `Entity3D` and no `three` types beyond `Vector3`.
+- `SoldierView` (`src/render/SoldierView.ts`) owns the mesh, the mixer, the cloned per-soldier materials and the smoothed transform. Strictly a reader: it decides nothing.
+- `SquadViews` (`src/render/SquadViews.ts`) builds the bodies and is the only way back from a unit to its own, resolving by identity rather than holding both halves.
+- `RenderSystem` drives views rather than units, so component state remains the single source of animation.
+- `Squads` takes no engine. `Battlefield` takes a `GeneratedMap` instead of generating one — which was the whole of the planned terrain split: `GeneratedMap` was already the data type and `Battlefield` was already only its view.
+
+#### Three Findings Beyond the Split
+1. **Unit visibility was living on the mesh.** Fog of war wrote `instance.visible` and the planners read it back, so "can I shoot that" was a question about the renderer and unanswerable without one. It is `SightedComponent` now, mirrored onto the mesh by the view. Costs one frame of latency where there was none (~16 ms).
+2. **`CombatFx.death` was redundant and is removed.** A corpse is `hp <= 0` in a component, so the view collapses on seeing it. It had been announced *and* derived, playing the death clip twice per kill (observed live as two calls; now one). Supersedes the `CombatFx` surface recorded under `ITEM-001`. A peer's death now animates off replicated state rather than off a message.
+3. **Three suites stopped needing a canvas.** `movement`, `shooting` and `pathmarker` no longer install the stub. `camera` and `debugmap` still do, correctly: they genuinely draw.
+
+#### Verification
+- **Parity, not eyeballs** — the reason `ITEM-002` came first. 200 matches at seed 1 produce a byte-identical report before and after the split, re-checked after each follow-up change.
+- **Browser** — bodies and portraits render; the run clip plays while moving and idle at rest; the body trails the unit by 0.12 m mid-stride and converges to 0; a click still resolves to the unit behind the mesh; all four enemies sit hidden under fog; a kill leaves a corpse holding its final frame.
+- **`tests/headless.test.ts`** pins the payoff with no canvas stub in the file: a squad deploys with no engine and no glTF, its state is visible in components where replication can see it, a shot resolves with nobody to draw it, fog is state, and dying stops a unit where it stands. If that file ever needs the stub back, graphics have leaked into the rules again.
+
+#### Acceptance Criteria
+- [x] `Soldier` has no references to `three` rendering types (except pure vector math) or `Entity3D`.
+- [x] Squads and battlefields instantiate headless in test suites without `installCanvasStub`.
+- [x] Visual sanity: unit animations, crouching, facing angles, and yaw transitions verified in browser.
+- [x] Full test suite passes (`bun test`) — 241 pass, `tsc` clean.
