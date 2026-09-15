@@ -3,9 +3,7 @@ import { Line, LineLoop, Scene, Sprite, Vector3 } from 'three'
 import { PATH } from '../src/config'
 import { CoverLevel } from '../src/core/Walls'
 import { PathMarker } from '../src/render/PathMarker'
-import { installCanvasStub } from './support/dom'
 
-installCanvasStub()
 
 interface Probe {
   /** Y of every sprite (AP plate, cover shields). */

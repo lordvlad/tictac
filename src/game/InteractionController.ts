@@ -20,6 +20,7 @@ import { GrenadePlanner } from './GrenadePlanner'
 import { ShootPlanner } from './ShootPlanner'
 import { Effects } from '../render/Effects'
 import { SceneCombatFx } from '../render/SceneCombatFx'
+import { SquadViews } from '../render/SquadViews'
 import { WallXray } from './WallXray'
 import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
@@ -69,6 +70,8 @@ export class InteractionController {
   private readonly pickPoint = new Vector3()
   /** Where the right button went down, to tell a facing click from an orbit drag. */
   private readonly rightDownPos = new Vector2()
+  /** The squad's bodies. Everything needing a mesh asks this, and only this. */
+  private readonly views: SquadViews
 
   constructor(
     readonly world: World,
@@ -87,9 +90,11 @@ export class InteractionController {
     this.topLevel = battlefield.grid.maxLevel
 
     this.movementSystem = new MovementSystem(battlefield.grid)
-    this.combatSystem = new CombatSystem(battlefield.grid, squads, new SceneCombatFx(tracers, squads))
     this.itemSystem = new ItemSystem()
     this.renderSystem = new RenderSystem()
+    // Bodies before the systems that announce to them.
+    this.views = new SquadViews(engine, squads, this.renderSystem)
+    this.combatSystem = new CombatSystem(battlefield.grid, squads, new SceneCombatFx(tracers, this.views))
     this.wallSystem = new WallSystem(battlefield.grid)
 
     this.world.addSystem(this.movementSystem)
@@ -116,7 +121,6 @@ export class InteractionController {
       this.debug.refresh()
     }
 
-    for (const soldier of squads.soldiers) this.renderSystem.bind(soldier)
 
     this.movementSystem.onStep = () => {
       this.recomputeVisibility()
@@ -796,7 +800,7 @@ export class InteractionController {
       while (obj) {
         const soldier = obj.userData.soldier as Soldier | undefined
         if (obj.userData.type === 'soldier' && soldier) {
-          if (!soldier.isDead && soldier.faction === faction && soldier.instance?.visible) {
+          if (!soldier.isDead && soldier.faction === faction && soldier.seen) {
             return soldier
           }
         }
@@ -840,8 +844,8 @@ export class InteractionController {
     this.updateShoulderCamera()
 
     const selected = this.turnManager.selectedSoldier
-    if (selected && !selected.isDead && selected.instance) {
-      selected.instance.visible = true
+    if (selected && !selected.isDead) {
+      selected.seen = true
       if (selected.isMoving && !this.rig.isShoulderViewActive) this.rig.focusOn(selected.position)
     }
 
@@ -871,22 +875,23 @@ export class InteractionController {
     }
 
     const shooter = selected!
-    let yaw = shooter.currentYaw
+    const shooterBody = this.views.viewOf(shooter)
+    const shooterAt = shooterBody?.renderPosition ?? shooter.position
+    const targetAt = aimTarget ? (this.views.viewOf(aimTarget)?.renderPosition ?? aimTarget.position) : null
+    let yaw = shooterBody?.facing ?? shooter.targetYaw
     let lookAt: Vector3 | undefined
 
-    if (aimTarget) {
-      const dx = aimTarget.position.x - shooter.position.x
-      const dz = aimTarget.position.z - shooter.position.z
+    if (targetAt) {
+      const dx = targetAt.x - shooterAt.x
+      const dz = targetAt.z - shooterAt.z
       if (Math.hypot(dx, dz) > 0.01) {
         // Stand behind the shot line and centre the target's chest in frame.
         yaw = Math.atan2(dx, dz)
-        lookAt = this.aimPoint
-          .copy(aimTarget.position)
-          .setY(aimTarget.position.y + CAM.shoulderAimHeight)
+        lookAt = this.aimPoint.copy(targetAt).setY(targetAt.y + CAM.shoulderAimHeight)
       }
     }
 
-    if (this.rig.isShoulderViewActive) this.rig.updateShoulderView(shooter.position, yaw, lookAt)
-    else this.rig.enterShoulderView(shooter.position, yaw, lookAt)
+    if (this.rig.isShoulderViewActive) this.rig.updateShoulderView(shooterAt, yaw, lookAt)
+    else this.rig.enterShoulderView(shooterAt, yaw, lookAt)
   }
 }

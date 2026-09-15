@@ -1,6 +1,6 @@
 import type { Vector3 } from 'three'
 import type { CombatFx, UnitRef } from '../core/Combatant'
-import type { Squads } from '../game/Squads'
+import type { SquadViews } from './SquadViews'
 import type { Tracers } from './Tracers'
 
 /**
@@ -17,7 +17,7 @@ import type { Tracers } from './Tracers'
 export class SceneCombatFx implements CombatFx {
   constructor(
     private readonly tracers: Tracers,
-    private readonly squads: Squads,
+    private readonly views: SquadViews,
   ) {}
 
   tracer(from: Vector3, to: Vector3, hit: boolean): void {
@@ -32,11 +32,7 @@ export class SceneCombatFx implements CombatFx {
     this.viewOf(unit)?.playHit()
   }
 
-  death(unit: UnitRef): void {
-    this.viewOf(unit)?.playDeath()
-  }
-
   private viewOf(unit: UnitRef) {
-    return this.squads.byFaction[unit.faction][unit.squadIndex]
+    return this.views.viewOf(unit as UnitRef & { entityId: number })
   }
 }

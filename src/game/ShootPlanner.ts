@@ -103,7 +103,7 @@ export class ShootPlanner {
       (s) =>
         s.faction !== shooter.faction &&
         !s.isDead &&
-        s.instance?.visible !== false &&
+        s.seen &&
         canShoot(this.grid, shooter, s, ShotMode.Snap),
     )
   }

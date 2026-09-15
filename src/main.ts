@@ -6,6 +6,7 @@ import { createEngineContext } from './engine'
 import { Faction, SIM } from './config'
 import { resolveSeed } from './core/rng'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
+import { generateMap } from './core/MapGenerator'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
 import { Squads } from './game/Squads'
@@ -232,17 +233,10 @@ function start(
   const world = new World()
   createGlobalRules(world)
 
-  const battlefield = new Battlefield(seed, engine)
+  // Terrain first, as data; the battlefield is the view of it.
+  const battlefield = new Battlefield(generateMap(seed), engine)
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
-  const squads = new Squads(
-    world,
-    battlefield.grid,
-    battlefield.spawns,
-    engine,
-    loadout,
-    myFaction,
-    sheets,
-  )
+  const squads = new Squads(world, battlefield.grid, battlefield.spawns, loadout, myFaction, sheets)
 
   const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,

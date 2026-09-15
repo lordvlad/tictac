@@ -1,4 +1,3 @@
-import type { EngineContext } from '../engine'
 import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
 import { AmmoId, WeaponId } from '../core/Arsenal'
 import type { Grid, Tile } from '../core/Grid'
@@ -30,7 +29,6 @@ export class Squads {
     world: World,
     grid: Grid,
     spawns: Record<Faction, Tile[]>,
-    engine: EngineContext,
     loadout?: SquadLoadout,
     loadoutFaction: Faction = Faction.Blue,
     sheets?: Record<Faction, CharacterSheet[]>,
@@ -51,7 +49,6 @@ export class Squads {
         blueNames[i]!,
         tileB,
         grid,
-        engine,
         sheets?.[Faction.Blue][i],
       )
       if (unit && loadoutFaction === Faction.Blue) applyUnitLoadout(solB, unit)
@@ -67,18 +64,12 @@ export class Squads {
         redNames[i]!,
         tileR,
         grid,
-        engine,
         sheets?.[Faction.Red][i],
       )
       if (unit && loadoutFaction === Faction.Red) applyUnitLoadout(solR, unit)
       else solR.equip(weapons[i]!, AmmoId.Standard)
       this.soldiers.push(solR)
       this.byFaction[Faction.Red].push(solR)
-      // Register into MavonEngine BaseWorld entity map
-      engine.world.add({
-        [solB.id]: solB,
-        [solR.id]: solR,
-      })
     }
   }
 
@@ -108,9 +99,15 @@ export class Squads {
     return this.byFaction[faction].filter((s) => !s.isDead)
   }
 
+  /**
+   * Nothing to tear down.
+   *
+   * A squad is state now. The bodies are disposed by whatever built them, which
+   * in a rendered match is `SquadViews`.
+   */
   dispose(): void {
-    for (const s of this.soldiers) {
-      s.destroy()
-    }
+    this.soldiers.length = 0
+    this.byFaction[Faction.Blue].length = 0
+    this.byFaction[Faction.Red].length = 0
   }
 }

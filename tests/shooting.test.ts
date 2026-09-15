@@ -10,9 +10,7 @@ import type { CombatSystem } from '../src/ecs/systems/CombatSystem'
 import type { EngineContext } from '../src/engine'
 import type { Soldier } from '../src/entities/Soldier'
 import type { Tile } from '../src/core/Grid'
-import { installCanvasStub } from './support/dom'
 
-installCanvasStub()
 
 /**
  * Just enough of a soldier for shoot mode: where it stands, what it can spend,
@@ -28,6 +26,10 @@ function unit(faction: Faction, tile: Tile, ap = 12) {
     armor: 0,
     isDead: false,
     isCrouching: false,
+    // Fog of war used to be read off the mesh, where a stub had none and so
+    // counted as visible. It is state now, and shoot mode only offers targets
+    // the active side can see.
+    seen: true,
     statuses: [],
     weapon: WEAPONS[WeaponId.Rifle],
     ammo: AMMO[AmmoId.Standard],

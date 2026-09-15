@@ -34,15 +34,15 @@ function stubUnit(weaponId: WeaponId = WeaponId.Rifle): StubUnit {
 /**
  * Counts what the resolver announced.
  *
- * The flinch and the death used to be methods on the unit, so a test asserted
- * them by counting calls on its own stub. They are announcements now, and this
- * is where they are counted — which is the same seam a scene listens on.
+ * The flinch used to be a method on the unit, so a test asserted it by counting
+ * calls on its own stub. It is an announcement now, and this is where it is
+ * counted — the same seam a scene listens on. There is no death to count: a
+ * corpse is `hp <= 0` in a component, and the view collapses on seeing it.
  */
 interface CountingFx extends CombatFx {
   tracers: number
   shots: number
   hits: number
-  deaths: number
 }
 
 function countingFx(): CountingFx {
@@ -50,7 +50,6 @@ function countingFx(): CountingFx {
     tracers: 0,
     shots: 0,
     hits: 0,
-    deaths: 0,
     tracer: () => {
       fx.tracers += 1
     },
@@ -59,9 +58,6 @@ function countingFx(): CountingFx {
     },
     hit: () => {
       fx.hits += 1
-    },
-    death: () => {
-      fx.deaths += 1
     },
   }
   return fx
@@ -77,18 +73,21 @@ describe('Applying a resolved hit', () => {
     expect(target.hp).toBe(70)
     expect(target.armor).toBe(10)
     expect(fx.hits).toBe(1)
-    expect(fx.deaths).toBe(0)
   })
 
-  test('a lethal hit clamps at zero, applies its status, and plays the death', () => {
+  /**
+   * A lethal hit must not also flinch: the collapse supersedes it, and a
+   * corpse that flinches first reads as two separate events.
+   */
+  test('a lethal hit clamps at zero and applies its status, without a flinch', () => {
     const target = stubUnit()
     const fx = countingFx()
 
     applyHitEffects(target, 200, 0, StatusKind.Shredded, fx)
 
     expect(target.hp).toBe(0)
+    expect(target.isDead).toBe(true)
     expect(target.statuses.map((status) => status.kind)).toEqual([StatusKind.Shredded])
-    expect(fx.deaths).toBe(1)
     expect(fx.hits).toBe(0)
   })
 

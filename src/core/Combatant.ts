@@ -68,8 +68,14 @@ export interface CombatFx {
   tracer(from: Vector3, to: Vector3, hit: boolean): void
   shoot(unit: UnitRef): void
   hit(unit: UnitRef): void
-  death(unit: UnitRef): void
 }
+
+/**
+ * Dying is not here. A unit at zero hit points is a fact about its components,
+ * so the view plays the collapse when it sees that - which means a peer's death
+ * animates off replicated state rather than off a message, and nothing has to
+ * announce it twice.
+ */
 
 /**
  * Where the view should be looking.
@@ -90,5 +96,4 @@ export const NO_FX: CombatFx = {
   tracer: () => {},
   shoot: () => {},
   hit: () => {},
-  death: () => {},
 }

@@ -39,7 +39,7 @@ export class WallXray {
     this.blocks.beginOcclusionFade()
     for (const soldier of this.squads.soldiers) {
       if (soldier.isDead) continue
-      if (soldier.instance && !soldier.instance.visible) continue
+      if (!soldier.seen) continue
       this.target.copy(soldier.position)
       this.blocks.addOcclusionRay(cameraPosition, this.target)
     }

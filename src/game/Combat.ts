@@ -238,8 +238,9 @@ export function applyHitEffects(
   target.armor = Math.max(0, target.armor - armorShred)
   if (damage > 0) target.hp = Math.max(0, target.hp - damage)
   if (status) applyStatus(target, status)
-  if (target.isDead) fx.death(target)
-  else if (damage > 0) fx.hit(target)
+  // No death call: a corpse is `hp <= 0` in a component, and the view collapses
+  // on seeing it.
+  if (damage > 0 && !target.isDead) fx.hit(target)
 }
 
 function applyWeaponDamage(

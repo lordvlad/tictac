@@ -44,13 +44,12 @@ export class FogOfWar {
     // rendered so the death clip's final frame reads as a body on the ground;
     // enemy corpses are still subject to fog of war.
     for (const soldier of squads.soldiers) {
-      if (!soldier.instance) continue
       if (soldier.faction === activeFaction) {
-        soldier.instance.visible = true
+        soldier.seen = true
         continue
       }
       const tileVis = visMap[this.grid.index(soldier.tile.x, soldier.tile.y)] ?? VisState.Unknown
-      soldier.instance.visible = tileVis === VisState.Visible
+      soldier.seen = tileVis === VisState.Visible
     }
   }
 }

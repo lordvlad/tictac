@@ -2,13 +2,18 @@ import { AmbientLight, Color, DirectionalLight, Fog, HemisphereLight } from 'thr
 import type { EngineContext } from '../engine'
 import type { Faction } from '../config'
 import type { Grid, Tile } from '../core/Grid'
-import { generateMap } from '../core/MapGenerator'
+import type { GeneratedMap } from '../core/MapGenerator'
 import { Blocks } from '../render/Blocks'
 import { Ground } from '../render/Ground'
 
 /**
- * Static battlefield: terrain grid plus its rendering (floor, obstacles,
- * lighting). Owns nothing that changes between turns except the fog textures.
+ * The terrain, as drawn: floor, obstacles, sky and lighting.
+ *
+ * Takes the map rather than generating one. The terrain itself is
+ * {@link GeneratedMap} - a grid and two sets of spawns, no meshes - and a
+ * simulation or a replay uses exactly that without ever reaching this far. What
+ * lives here is only the part that needs a scene, which is why it is the view
+ * of a map and not the map.
  */
 export class Battlefield {
   readonly grid: Grid
@@ -19,12 +24,11 @@ export class Battlefield {
   private readonly sun: DirectionalLight
 
   constructor(
-    seed: number,
+    map: GeneratedMap,
     private readonly engine: EngineContext,
   ) {
-    const generated = generateMap(seed)
-    this.grid = generated.grid
-    this.spawns = generated.spawns
+    this.grid = map.grid
+    this.spawns = map.spawns
 
     this.ground = new Ground(this.grid)
     this.blocks = new Blocks(this.grid)
