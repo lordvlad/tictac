@@ -59,6 +59,10 @@ describe('Shared crate', () => {
       [ItemId.StimPack]: 4,
       [ItemId.FirstAidKit]: 4,
       [ItemId.NullweaveVest]: 2,
+      [ItemId.Scope]: 2,
+      [ItemId.Bipod]: 2,
+      [ItemId.Suppressor]: 2,
+      [ItemId.PlateCarrier]: 2,
     })
   })
 
@@ -139,7 +143,15 @@ describe('Stamping a loadout onto a soldier', () => {
       weaponId: WeaponId.Sniper,
       ammoId: AmmoId.ArmorPiercing,
       grenades: { [GrenadeId.Frag]: 2, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0 },
-      items: { [ItemId.StimPack]: 0, [ItemId.FirstAidKit]: 2, [ItemId.NullweaveVest]: 0 },
+      items: {
+        [ItemId.StimPack]: 0,
+        [ItemId.FirstAidKit]: 2,
+        [ItemId.NullweaveVest]: 0,
+        [ItemId.Scope]: 1,
+        [ItemId.Bipod]: 0,
+        [ItemId.Suppressor]: 0,
+        [ItemId.PlateCarrier]: 0,
+      },
     })
 
     expect(soldier.weaponId).toBe(WeaponId.Sniper)
@@ -153,6 +165,10 @@ describe('Stamping a loadout onto a soldier', () => {
       [ItemId.StimPack]: 0,
       [ItemId.FirstAidKit]: 2,
       [ItemId.NullweaveVest]: 0,
+      [ItemId.Scope]: 1,
+      [ItemId.Bipod]: 0,
+      [ItemId.Suppressor]: 0,
+      [ItemId.PlateCarrier]: 0,
     })
   })
 })

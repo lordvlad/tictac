@@ -22,9 +22,12 @@ export function settleTurn(units: readonly Combatant[], incoming: Faction): void
   tickStatuses(units)
 
   // The incoming side starts its allowance fresh. Its points are handed back
-  // elsewhere — this only forgets what the last one cost.
+  // elsewhere — this only forgets what the last one cost, and that the unit
+  // gave its position away by shooting.
   for (const unit of units) {
-    if (unit.faction === incoming) unit.spentThisTurn = 0
+    if (unit.faction !== incoming) continue
+    unit.spentThisTurn = 0
+    unit.firedThisTurn = false
   }
 }
 

@@ -23,6 +23,14 @@ export const TraitId = {
   Limping: 'limping',
   /** Wounded badly: cannot shoot or dodge straight. */
   Concussed: 'concussed',
+  /** Worn: glass that makes distance matter less. */
+  Scoped: 'scoped',
+  /** Worn: legs to rest the weapon on, once the unit is down behind something. */
+  Braced: 'braced',
+  /** Worn: quiet, at the price of the shot's bite. */
+  Silenced: 'silenced',
+  /** Worn: plate, at the price of moving freely. */
+  Plated: 'plated',
 } as const
 export type TraitId = (typeof TraitId)[keyof typeof TraitId]
 
@@ -54,6 +62,30 @@ export interface TraitEffects {
    * expensive, which is the answer a player would expect.
    */
   moveCost?: number
+  /**
+   * Extra fraction on the weapon's range falloff: -0.35 loses a third of it.
+   *
+   * Scales with distance by construction, which is what glass is worth — it
+   * does nothing at point blank and a great deal across a street.
+   */
+  rangeFalloff?: number
+  /** Accuracy that applies only while the unit is crouched. */
+  accuracyCrouched?: number
+  /** Evasion that applies only while the unit is crouched. */
+  evasionCrouched?: number
+  /** Armour points, added to the unit's own plate. */
+  armor?: number
+  /**
+   * Fraction added to the damage this unit takes: -0.15 is a sixth less.
+   *
+   * Plate needs this rather than more armour points. Armour subtracts flat,
+   * per round, and every hit has a floor of `AIM.minDamage` - so against the
+   * many small rounds of a burst, the base twenty points already floors them
+   * and anything on top is spent on nothing.
+   */
+  damageTaken?: number
+  /** Firing does not give this unit's position away. */
+  silenced?: boolean
 }
 
 export interface TraitSpec {
@@ -113,6 +145,33 @@ export const TRAITS: Record<TraitId, TraitSpec> = {
     description: 'Badly hurt: -8 accuracy and harder to keep out of the way.',
     effects: { accuracy: -8, evasion: -4 },
   },
+  [TraitId.Scoped]: {
+    id: TraitId.Scoped,
+    name: 'Scoped',
+    description: 'Glass: -5 accuracy up close, a third less lost to distance.',
+    // The flat penalty is what makes it a choice rather than an upgrade: eye
+    // to the scope, a target in your face is harder to find, and one across
+    // the street is much easier.
+    effects: { rangeFalloff: -0.35, accuracy: -5 },
+  },
+  [TraitId.Braced]: {
+    id: TraitId.Braced,
+    name: 'Braced',
+    description: 'Bipod: +10 accuracy and +6 evasion, but only while crouched.',
+    effects: { accuracyCrouched: 10, evasionCrouched: 6 },
+  },
+  [TraitId.Silenced]: {
+    id: TraitId.Silenced,
+    name: 'Silenced',
+    description: 'Quiet: firing never gives the position away, but crits bite less.',
+    effects: { silenced: true, critMultiplier: -0.3 },
+  },
+  [TraitId.Plated]: {
+    id: TraitId.Plated,
+    name: 'Plated',
+    description: 'Heavy plate: a sixth less damage taken and +6 armour, at the cost of speed.',
+    effects: { armor: 6, damageTaken: -0.15, evasion: -4, moveCost: 0.15 },
+  },
 }
 
 /**
@@ -139,6 +198,12 @@ const WOUNDED_BADLY: readonly TraitId[] = [TraitId.Limping, TraitId.Concussed]
 export interface ResolvedTraits {
   accuracy: number
   moveCost: number
+  rangeFalloff: number
+  accuracyCrouched: number
+  evasionCrouched: number
+  armor: number
+  damageTaken: number
+  silenced: boolean
   evasion: number
   critChance: number
   critMultiplier: number
@@ -150,6 +215,12 @@ export interface ResolvedTraits {
 export const NO_TRAITS: ResolvedTraits = {
   accuracy: 0,
   moveCost: 0,
+  rangeFalloff: 0,
+  accuracyCrouched: 0,
+  evasionCrouched: 0,
+  armor: 0,
+  damageTaken: 0,
+  silenced: false,
   evasion: 0,
   critChance: 0,
   critMultiplier: 0,
@@ -168,6 +239,12 @@ export const NO_TRAITS: ResolvedTraits = {
 export function resolveTraitsInto(out: ResolvedTraits, ids: Iterable<TraitId>): ResolvedTraits {
   out.accuracy = 0
   out.moveCost = 0
+  out.rangeFalloff = 0
+  out.accuracyCrouched = 0
+  out.evasionCrouched = 0
+  out.armor = 0
+  out.damageTaken = 0
+  out.silenced = false
   out.evasion = 0
   out.critChance = 0
   out.critMultiplier = 0
@@ -184,6 +261,12 @@ export function resolveTraitsInto(out: ResolvedTraits, ids: Iterable<TraitId>): 
     const e = TRAITS[id].effects
     out.accuracy += e.accuracy ?? 0
     out.moveCost += e.moveCost ?? 0
+    out.rangeFalloff += e.rangeFalloff ?? 0
+    out.accuracyCrouched += e.accuracyCrouched ?? 0
+    out.evasionCrouched += e.evasionCrouched ?? 0
+    out.armor += e.armor ?? 0
+    out.damageTaken += e.damageTaken ?? 0
+    out.silenced = out.silenced || (e.silenced ?? false)
     out.evasion += e.evasion ?? 0
     out.critChance += e.critChance ?? 0
     out.critMultiplier += e.critMultiplier ?? 0

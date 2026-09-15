@@ -138,11 +138,11 @@ export class SimMatch {
             flash: plan.grenades?.flash ?? 0,
             smoke: plan.grenades?.smoke ?? 0,
           } as Record<GrenadeId, number>,
-          {
-            stim: plan.items?.stim ?? 0,
-            firstAid: plan.items?.firstAid ?? 0,
-            nullweave: plan.items?.nullweave ?? 0,
-          } as Record<ItemId, number>,
+          // Every id, so a plan naming one piece does not leave the rest
+          // undefined for the trait fold to read.
+          Object.fromEntries(
+            Object.values(ItemId).map((id) => [id, plan.items?.[id] ?? 0]),
+          ) as Record<ItemId, number>,
         )
         this.units.push(unit)
         this.byFaction[faction].push(unit)

@@ -12,7 +12,14 @@ export class StanceComponent extends Component {
     public isMoving: boolean = false,
     public movingPath: Tile[] = [],
     /** Corner peeking: also see from the free tiles beside the wall hugged. */
-    public peek: boolean = false
+    public peek: boolean = false,
+    /**
+     * Fired since the last handover, which is what gives a position away.
+     *
+     * Replicated: the side being shot at has to know it was shot at, and fog is
+     * recomputed from scratch on every action rather than told about events.
+     */
+    public firedThisTurn: boolean = false
   ) {
     super()
   }
@@ -22,6 +29,7 @@ export class StanceComponent extends Component {
       isCrouching: this.isCrouching,
       isMoving: this.isMoving,
       peek: this.peek,
+      firedThisTurn: this.firedThisTurn,
       movingPath: this.movingPath.map((t) => ({ x: t.x, y: t.y })),
     }
   }
@@ -30,6 +38,7 @@ export class StanceComponent extends Component {
     if (typeof data.isCrouching === 'boolean') this.isCrouching = data.isCrouching
     if (typeof data.isMoving === 'boolean') this.isMoving = data.isMoving
     if (typeof data.peek === 'boolean') this.peek = data.peek
+    if (typeof data.firedThisTurn === 'boolean') this.firedThisTurn = data.firedThisTurn
     if (Array.isArray(data.movingPath)) {
       const path: Tile[] = []
       for (const entry of data.movingPath) {

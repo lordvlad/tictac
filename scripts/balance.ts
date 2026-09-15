@@ -6,7 +6,7 @@
  *   bun run balance
  *   bun run balance -- --matches=200 --seed=1 --turnCap=60
  *   bun run balance -- --blue=shotgun --red=sniper
- *   bun run balance -- --redAmmo=ap --blueVests=4
+ *   bun run balance -- --redAmmo=ap --blueItems=scope:1,bipod:1
  *   bun run balance -- --json
  *
  * A mirror match measures the guns; an asymmetric one measures the difference
@@ -42,18 +42,31 @@ function pick<T extends string>(table: Record<string, T>, name: string, raw: str
   return value
 }
 
+/** `scope:1,plate:2` — a pouch, spelled out. */
+function itemsFor(side: 'blue' | 'red', raw: string): Partial<Record<ItemId, number>> {
+  const items: Partial<Record<ItemId, number>> = {}
+  for (const entry of raw.split(',')) {
+    const [name, count] = entry.split(':')
+    const id = pick(ItemId, `${side}Items`, (name ?? '').trim())
+    const many = count === undefined ? 1 : Number(count)
+    if (!Number.isFinite(many)) throw new Error(`--${side}Items: "${entry}" needs a count`)
+    items[id] = many
+  }
+  return items
+}
+
 function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   const weapons = arg(side)
   const ammo = arg(`${side}Ammo`)
-  const vests = arg(`${side}Vests`)
-  if (weapons === undefined && ammo === undefined && vests === undefined) return undefined
+  const items = arg(`${side}Items`)
+  if (weapons === undefined && ammo === undefined && items === undefined) return undefined
 
   return {
     weapons: (weapons ?? 'rifle,gatling,sniper,shotgun')
       .split(',')
       .map((entry) => pick(WeaponId, side, entry.trim())),
     ammo: ammo === undefined ? AmmoId.Standard : pick(AmmoId, `${side}Ammo`, ammo),
-    items: vests === undefined ? undefined : { [ItemId.NullweaveVest]: Number(vests) },
+    items: items === undefined ? undefined : itemsFor(side, items),
   }
 }
 

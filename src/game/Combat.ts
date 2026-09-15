@@ -128,6 +128,9 @@ export function executeShot(
   }
 
   shooter.ap = Math.max(0, shooter.ap - eff.apCost)
+  // Muzzle flash and noise: firing gives a position away until the handover,
+  // unless the weapon is quiet. Fog reads it; nothing else does.
+  if (!shooter.silenced) shooter.firedThisTurn = true
 
   const chance = calculateHitChance(grid, shooter, target, mode)
   const crit = critBreakdown(eff, target, grid.distance(shooter.tile, target.tile))

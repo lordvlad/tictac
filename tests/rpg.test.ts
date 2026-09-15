@@ -42,6 +42,8 @@ function combatant(overrides: Partial<CombatantStats> = {}): CombatantStats {
     proficiency: 0,
     evasion: 0,
     critImmune: false,
+    rangeFalloff: 0,
+    damageTaken: 0,
     critChanceBonus: 0,
     critMultiplierBonus: 0,
     ...overrides,

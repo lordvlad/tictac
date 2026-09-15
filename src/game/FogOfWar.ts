@@ -49,7 +49,10 @@ export class FogOfWar {
         continue
       }
       const tileVis = visMap[this.grid.index(soldier.tile.x, soldier.tile.y)] ?? VisState.Unknown
-      soldier.seen = tileVis === VisState.Visible
+      // Someone who has fired this turn has announced themselves, whatever the
+      // line of sight says - which is the whole of what a suppressor buys, by
+      // never setting the flag in the first place.
+      soldier.seen = tileVis === VisState.Visible || soldier.firedThisTurn
     }
   }
 }

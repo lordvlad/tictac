@@ -164,6 +164,15 @@ export class Soldier {
       this.health.maxHp = maxHp
       this.health.hp = wasFull ? maxHp : Math.min(this.health.hp, maxHp)
     }
+    const maxArmor = RULES.maxArmor + this.resolvedTraits.armor
+    if (this.armorComponent.maxArmor !== maxArmor) {
+      const wasFull = this.armorComponent.armor >= this.armorComponent.maxArmor
+      this.armorComponent.maxArmor = maxArmor
+      this.armorComponent.armor = wasFull
+        ? maxArmor
+        : Math.min(this.armorComponent.armor, maxArmor)
+    }
+
     const maxAp = this.sheet.maxAp + this.resolvedTraits.maxAp
     if (this.actionPoints.maxAp !== maxAp) {
       const wasFull = this.actionPoints.ap >= this.actionPoints.maxAp
@@ -197,7 +206,37 @@ export class Soldier {
    * says about that class, plus anything a trait adds to every shot.
    */
   get proficiency(): number {
-    return this.sheet.proficiency[this.weaponId] + this.resolvedTraits.accuracy
+    const braced = this.isCrouching ? this.resolvedTraits.accuracyCrouched : 0
+    return this.sheet.proficiency[this.weaponId] + this.resolvedTraits.accuracy + braced
+  }
+
+  /** Extra fraction on the weapon's range falloff, from carried gear. */
+  get rangeFalloff(): number {
+    return this.resolvedTraits.rangeFalloff
+  }
+
+  /** Fraction added to the damage this unit takes. Negative is plate helping. */
+  get damageTaken(): number {
+    return this.resolvedTraits.damageTaken
+  }
+
+  /** True when firing does not give this unit's position away. */
+  get silenced(): boolean {
+    return this.resolvedTraits.silenced
+  }
+
+  /**
+   * Whether this unit has fired since the last handover.
+   *
+   * On the stance rather than in a component of its own: it is a fact about
+   * what the unit is doing this turn, it is cleared at the handover, and it is
+   * read by fog, which already reads stance.
+   */
+  get firedThisTurn(): boolean {
+    return this.stance.firedThisTurn
+  }
+  set firedThisTurn(value: boolean) {
+    this.stance.firedThisTurn = value
   }
 
   /**
@@ -207,7 +246,9 @@ export class Soldier {
    * is the only copy this side is allowed to trust.
    */
   get evasion(): number {
-    return this.traitsComponent.evasion
+    // The crouched half is added here rather than folded into the replicated
+    // number because it changes with stance, and stance already replicates.
+    return this.traitsComponent.evasion + (this.isCrouching ? this.resolvedTraits.evasionCrouched : 0)
   }
 
   /** True when no hit on this unit can be a critical. Replicated, as above. */

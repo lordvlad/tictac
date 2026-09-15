@@ -51,6 +51,13 @@ export interface CombatantStats {
   evasion: number
   /** No hit on this unit can be a critical. */
   critImmune: boolean
+  /**
+   * Extra fraction on the weapon's range falloff, from whatever this unit is
+   * carrying. Negative is glass helping.
+   */
+  rangeFalloff: number
+  /** Fraction added to incoming damage from this unit's own gear. Negative helps. */
+  damageTaken: number
   /** Percentage points this unit's traits add to its own crit chance. */
   critChanceBonus: number
   /** What this unit's traits add to the multiplier its crits apply. */
@@ -93,7 +100,12 @@ export function effectiveWeapon(stats: CombatantStats, mode: ShotMode): Effectiv
     weapon,
     apCost: Math.max(1, Math.round((weapon.apCost + ammo.apDelta) * modeSpec.apMul)),
     baseAccuracy: weapon.baseAccuracy,
-    accuracyPerMetre: weapon.accuracyPerMetre * ammo.rangePenaltyMul,
+    // Floored at nothing: gear may cancel falloff, never invert it into a
+    // weapon that shoots better the further away the target is.
+    accuracyPerMetre: Math.max(
+      0,
+      weapon.accuracyPerMetre * ammo.rangePenaltyMul * (1 + stats.rangeFalloff),
+    ),
     damage: weapon.damage * ammo.damageMul,
     armorPen: clamp(weapon.armorPen + ammo.armorPenBonus, 0, 1),
     armorShred: weapon.armorShred + ammo.armorShredBonus,
@@ -313,7 +325,10 @@ export function resolveDamage(
 ): DamageResult {
   const status = statusTotals(target.statuses)
   const multiplier = crit ? eff.critMultiplier : 1
-  const raw = eff.damage * falloff * multiplier * (1 + status.damageTakenBonus)
+  // Gear and statuses pull on the same number, so they add rather than
+  // compounding: a plated unit under a shred takes both.
+  const raw =
+    eff.damage * falloff * multiplier * Math.max(0, 1 + status.damageTakenBonus + target.damageTaken)
   const armorInPlay = Math.max(0, target.armor) * (1 - eff.armorPen)
   const damage = Math.max(AIM.minDamage, raw - armorInPlay)
 

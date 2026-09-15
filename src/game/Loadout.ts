@@ -61,9 +61,13 @@ export const DEMO_INVENTORY: Inventory = {
   items: {
     [ItemId.StimPack]: 4,
     [ItemId.FirstAidKit]: 4,
-    // Two in the crate: it is the answer to one enemy marksman, not to all of
-    // them.
+    // Fewer of the passive pieces than there are soldiers, so kitting one out
+    // is a decision about which one rather than a formality.
     [ItemId.NullweaveVest]: 2,
+    [ItemId.Scope]: 2,
+    [ItemId.Bipod]: 2,
+    [ItemId.Suppressor]: 2,
+    [ItemId.PlateCarrier]: 2,
   },
 }
 
@@ -81,6 +85,10 @@ export function defaultLoadout(): SquadLoadout {
       [ItemId.StimPack]: 0,
       [ItemId.FirstAidKit]: 0,
       [ItemId.NullweaveVest]: 0,
+      [ItemId.Scope]: 0,
+      [ItemId.Bipod]: 0,
+      [ItemId.Suppressor]: 0,
+      [ItemId.PlateCarrier]: 0,
     },
   }))
 }

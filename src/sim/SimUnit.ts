@@ -37,6 +37,7 @@ export class SimUnit implements Combatant {
   isCrouching = false
   spentThisTurn = 0
   exhaustedTurns = 0
+  firedThisTurn = false
   readonly isMoving = false
   targetYaw = 0
   statuses: StatusState[] = []
@@ -65,7 +66,7 @@ export class SimUnit implements Combatant {
     this.tile = { ...tile }
     this.grenades = { ...grenades }
     this.items = { ...items }
-    this.armor = RULES.maxArmor
+    this.armor = RULES.maxArmor + this.resolved.armor
     this.refreshTraits()
     this.maxHp = sheet.maxHp + this.resolved.maxHp
     this.maxAp = sheet.maxAp + this.resolved.maxAp
@@ -126,11 +127,26 @@ export class SimUnit implements Combatant {
   }
 
   get proficiency(): number {
-    return this.sheet.proficiency[this.weapon.id] + this.resolved.accuracy
+    const braced = this.isCrouching ? this.resolved.accuracyCrouched : 0
+    return this.sheet.proficiency[this.weapon.id] + this.resolved.accuracy + braced
+  }
+
+  get rangeFalloff(): number {
+    return this.resolved.rangeFalloff
+  }
+
+  /** Fraction added to the damage this unit takes. Negative is plate helping. */
+  get damageTaken(): number {
+    return this.resolved.damageTaken
+  }
+
+  get silenced(): boolean {
+    return this.resolved.silenced
   }
 
   get evasion(): number {
-    return Math.max(0, this.sheet.evasion + this.resolved.evasion)
+    const braced = this.isCrouching ? this.resolved.evasionCrouched : 0
+    return Math.max(0, this.sheet.evasion + this.resolved.evasion + braced)
   }
 
   get critImmune(): boolean {

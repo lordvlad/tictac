@@ -49,6 +49,16 @@ export interface Combatant extends CombatantStats, Casualty {
   readonly effectiveMaxAp: number
   /** What a step costs this unit, as a multiple of the terrain's own price. */
   readonly moveCostMul: number
+  /**
+   * Whether this unit has fired since the last handover.
+   *
+   * Firing gives a position away, which is why it is state rather than an
+   * event: fog is recomputed from scratch on every action and has to be able
+   * to ask after the fact.
+   */
+  firedThisTurn: boolean
+  /** Firing does not give this unit away. */
+  readonly silenced: boolean
   /** Points this unit's own actions have consumed since its last refill. */
   spentThisTurn: number
   /** Consecutive turns it has spent every point it had. */
