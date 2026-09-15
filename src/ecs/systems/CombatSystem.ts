@@ -13,6 +13,7 @@ import {
   applyHitEffects,
   canShoot,
   fireWeapon,
+  suppress,
   type GrenadeResult,
   type ResolvedHit,
   type ShotResult,
@@ -99,6 +100,10 @@ export class CombatSystem extends System {
       damage += hit.damage
       armorShred += hit.armorShred
     }
+
+    // Derived from the rolls rather than sent: a miss carries no numbers to
+    // replay, so both sides count the same rounds going past the same head.
+    suppress(target, rolls.filter((landed) => !landed).length)
 
     const result: ShotResult = {
       hit: rolls.some(Boolean),

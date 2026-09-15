@@ -1,6 +1,7 @@
 import { RULES, AIM, COVER } from '../config'
-import { AMMO, AmmoId, GrenadeId, STATUSES, WEAPONS, WeaponId } from '../core/Arsenal'
+import { AMMO, AmmoId, GrenadeId, STATUSES, type StatusKind, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ITEMS, ItemId } from '../core/Items'
+import { applyStatus } from '../game/Combat'
 import type { Soldier } from '../entities/Soldier'
 import { icon } from './icons'
 
@@ -363,11 +364,9 @@ export class DebugPanel {
     }
 
     if (el.dataset.applyStatus) {
-      const kind = el.dataset.applyStatus as keyof typeof STATUSES
-      const spec = STATUSES[kind]
-      const existing = this.soldier.statuses.find((s: { kind: string; turnsLeft: number }) => s.kind === spec.kind)
-      if (existing) existing.turnsLeft = spec.turns
-      else this.soldier.statuses.push({ kind: spec.kind, turnsLeft: spec.turns })
+      // The shared rule, so the debug button stacks exactly as a grenade does
+      // and cannot drift into being its own little status system.
+      applyStatus(this.soldier, el.dataset.applyStatus as StatusKind)
       // fallthrough
     } else if (el.dataset.clearStatuses) {
       this.soldier.statuses = []

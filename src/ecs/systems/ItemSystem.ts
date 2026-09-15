@@ -1,6 +1,7 @@
 import { System } from '../System'
 import { STATUSES } from '../../core/Arsenal'
 import { ITEMS, type ItemId } from '../../core/Items'
+import { applyStatus } from '../../game/Combat'
 import type { Soldier } from '../../entities/Soldier'
 
 /**
@@ -68,14 +69,11 @@ export class ItemSystem extends System {
         case 'clearStatuses':
           soldier.statuses = []
           break
-        case 'applyStatus': {
-          const status = STATUSES[effect.status]
-          if (!status) break
-          const live = soldier.statuses.find((s) => s.kind === status.kind)
-          if (live) live.turnsLeft = status.turns
-          else soldier.statuses.push({ kind: status.kind, turnsLeft: status.turns })
+        case 'applyStatus':
+          // Through the shared rule rather than by hand, so stacking and the
+          // clock behave the same whether a stim or a grenade applied it.
+          applyStatus(soldier, effect.status)
           break
-        }
       }
     }
 

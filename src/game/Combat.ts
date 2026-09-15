@@ -9,8 +9,9 @@ import {
   type HitChanceBreakdown,
   hitChance,
   resolveDamage,
+  statusStacks,
 } from '../core/Ballistics'
-import { type GrenadeId, ShotMode, STATUSES, type StatusKind } from '../core/Arsenal'
+import { type GrenadeId, ShotMode, STATUSES, StatusKind } from '../core/Arsenal'
 import { type Casualty, type Combatant, type CombatFx, NO_FX } from '../core/Combatant'
 import type { Roll } from '../core/rng'
 
@@ -145,10 +146,12 @@ export function executeShot(
   let anyHit = false
   let killed = false
   let crits = 0
+  let misses = 0
 
   for (let i = 0; i < bullets; i++) {
     const hit = overrideRolls ? (overrideRolls[i] ?? false) : roll() * 100 <= chance
     if (hit) anyHit = true
+    else misses++
 
     fx.tracer(shooterWorld, targetWorld, hit)
     // Only the first tracer-spawn plays the sound/visual cue
@@ -178,6 +181,8 @@ export function executeShot(
     }
   }
 
+  suppress(target, misses)
+
   return {
     hit: anyHit,
     damage: totalDamage,
@@ -188,6 +193,22 @@ export function executeShot(
     crits,
     hits,
   }
+}
+
+/**
+ * Rounds that went past rather than in.
+ *
+ * A miss used to do nothing whatsoever, which made volume of fire pointless
+ * and made a 30% shot strictly worse than not shooting. Near misses now stack
+ * {@link StatusKind.Suppressed} on the target: harder to shoot back, slower to
+ * move, and at full stacks pinned in all but name.
+ *
+ * A dead unit is not suppressed - there is nothing left to suppress, and
+ * marking a corpse would show a chip on its card.
+ */
+export function suppress(target: Casualty, misses: number): void {
+  if (misses <= 0 || target.isDead) return
+  applyStatus(target, StatusKind.Suppressed, misses)
 }
 
 /**
@@ -309,11 +330,18 @@ export function throwGrenade(
 }
 
 /** Apply (or refresh) a status on a unit. */
-export function applyStatus(soldier: Casualty, kind: StatusKind): void {
+export function applyStatus(soldier: Casualty, kind: StatusKind, stacks = 1): void {
   const spec = STATUSES[kind]
   const existing = soldier.statuses.find((s) => s.kind === kind)
-  if (existing) existing.turnsLeft = spec.turns
-  else soldier.statuses.push({ kind, turnsLeft: spec.turns })
+  if (!existing) {
+    soldier.statuses.push({ kind, turnsLeft: spec.turns, stacks: Math.min(stacks, spec.maxStacks) })
+    return
+  }
+  // Re-applying always refreshes the clock, and piles up as far as the status
+  // allows: a second flash in the same turn is still one flash, three rounds
+  // past the same head are three.
+  existing.turnsLeft = spec.turns
+  existing.stacks = Math.min(statusStacks(existing) + stacks, spec.maxStacks)
 }
 
 /**

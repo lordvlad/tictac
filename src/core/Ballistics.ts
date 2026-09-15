@@ -15,6 +15,20 @@ import { clamp } from './math'
 export interface StatusState {
   kind: StatusKind
   turnsLeft: number
+  /**
+   * How many times over it is in force, capped by the status's own
+   * `maxStacks`. Every numeric effect scales with it, so one flash is one
+   * flash and three rounds cracking past a unit's head are three.
+   *
+   * Optional because an unstacked status is the common case and because this
+   * arrives off a wire: absent means one, never none.
+   */
+  stacks?: number
+}
+
+/** How many times a status is in force. Absent or nonsense counts as one. */
+export function statusStacks(status: StatusState): number {
+  return status.stacks !== undefined && status.stacks > 0 ? status.stacks : 1
 }
 
 /** The combat-relevant state of a unit, as the resolver sees it. */
@@ -108,7 +122,7 @@ export function effectiveMaxAp(maxAp: number, statuses: StatusState[]): number {
   let bonus = 0
   for (const status of statuses) {
     if (status.turnsLeft <= 0) continue
-    bonus += STATUSES[status.kind]?.apBonus ?? 0
+    bonus += (STATUSES[status.kind]?.apBonus ?? 0) * statusStacks(status)
   }
   // At least one point: a unit that can do nothing at all cannot even end its
   // own turn deliberately, and no status is meant to remove a unit from play.
@@ -126,9 +140,10 @@ function statusTotals(statuses: StatusState[]): {
   for (const status of statuses) {
     if (status.turnsLeft <= 0) continue
     const spec = STATUSES[status.kind]
-    accuracyPenalty += spec.accuracyPenalty
-    defenceBonus += spec.defenceBonus
-    damageTakenBonus += spec.damageTakenBonus
+    const stacks = statusStacks(status)
+    accuracyPenalty += spec.accuracyPenalty * stacks
+    defenceBonus += spec.defenceBonus * stacks
+    damageTakenBonus += spec.damageTakenBonus * stacks
   }
   return { accuracyPenalty, defenceBonus, damageTakenBonus }
 }

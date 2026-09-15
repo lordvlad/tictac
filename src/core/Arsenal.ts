@@ -251,6 +251,8 @@ export const StatusKind = {
   Stimmed: 'stimmed',
   /** Run into the ground: fewer action points until it recovers. */
   Winded: 'winded',
+  /** Rounds cracking past: harder to shoot back, and slower to move. */
+  Suppressed: 'suppressed',
 } as const
 export type StatusKind = (typeof StatusKind)[keyof typeof StatusKind]
 
@@ -267,6 +269,11 @@ export interface StatusSpec {
   damageTakenBonus: number
   /** Extra action points, as a fraction of the unit's own maximum. */
   apBonus: number
+  /**
+   * How many times over it can be in force. Every numeric effect above is per
+   * stack, so a status that is not meant to pile up says 1.
+   */
+  maxStacks: number
 }
 
 export const STATUSES: Record<StatusKind, StatusSpec> = {
@@ -278,6 +285,7 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0,
     apBonus: 0,
+    maxStacks: 1,
   },
   [StatusKind.Smoked]: {
     kind: StatusKind.Smoked,
@@ -287,6 +295,7 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 35,
     damageTakenBonus: 0,
     apBonus: 0,
+    maxStacks: 1,
   },
   [StatusKind.Shredded]: {
     kind: StatusKind.Shredded,
@@ -296,6 +305,7 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0.25,
     apBonus: 0,
+    maxStacks: 1,
   },
   [StatusKind.Stimmed]: {
     kind: StatusKind.Stimmed,
@@ -307,6 +317,22 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0,
     apBonus: 0.2,
+    maxStacks: 1,
+  },
+  [StatusKind.Suppressed]: {
+    kind: StatusKind.Suppressed,
+    name: 'Suppressed',
+    // Two ticks: it lasts through the shooter's turn and the target's own
+    // answer to it, then lifts unless more rounds arrive.
+    turns: 2,
+    accuracyPenalty: 12,
+    defenceBonus: 0,
+    damageTakenBonus: 0,
+    apBonus: -0.1,
+    // Three is being pinned: -36 to hit and a third of the unit's points gone.
+    // There is no separate pinned state because there does not need to be one -
+    // the degree *is* the difference.
+    maxStacks: 3,
   },
   [StatusKind.Winded]: {
     kind: StatusKind.Winded,
@@ -318,6 +344,7 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0,
     apBonus: -0.25,
+    maxStacks: 1,
   },
 }
 

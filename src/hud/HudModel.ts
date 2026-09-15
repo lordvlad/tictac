@@ -1,7 +1,7 @@
 import { AIM, FACTION_INFO, Faction, RULES } from '../config'
 import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
 import { ITEMS, ItemId } from '../core/Items'
-import { effectiveWeapon, type HitChanceBreakdown } from '../core/Ballistics'
+import { effectiveWeapon, type HitChanceBreakdown, statusStacks } from '../core/Ballistics'
 import { clamp } from '../core/math'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
@@ -402,18 +402,21 @@ function statusChips(soldier: Soldier): HudStatusChip[] {
     const spec = STATUSES[state.kind]
     if (!spec) continue
 
+    // Every effect is per stack, so the tooltip has to be too: "-12% to hit"
+    // on a unit with three stacks would be a lie the player can act on.
+    const stacks = statusStacks(state)
     const terms: string[] = []
-    if (spec.accuracyPenalty) terms.push(`-${spec.accuracyPenalty}% to hit`)
-    if (spec.defenceBonus) terms.push(`-${spec.defenceBonus}% to be hit`)
+    if (spec.accuracyPenalty) terms.push(`-${spec.accuracyPenalty * stacks}% to hit`)
+    if (spec.defenceBonus) terms.push(`-${spec.defenceBonus * stacks}% to be hit`)
     if (spec.damageTakenBonus) {
-      terms.push(`+${Math.round(spec.damageTakenBonus * 100)}% damage taken`)
+      terms.push(`+${Math.round(spec.damageTakenBonus * stacks * 100)}% damage taken`)
     }
     if (spec.apBonus) {
-      terms.push(`${spec.apBonus > 0 ? '+' : ''}${Math.round(spec.apBonus * 100)}% AP`)
+      terms.push(`${spec.apBonus > 0 ? '+' : ''}${Math.round(spec.apBonus * stacks * 100)}% AP`)
     }
 
     chips.push({
-      name: spec.name,
+      name: stacks > 1 ? `${spec.name} x${stacks}` : spec.name,
       detail: `${terms.join(', ')} · ${state.turnsLeft} turn${state.turnsLeft === 1 ? '' : 's'} left`,
       // Judged by what it does rather than listed per kind, so a status added
       // later is coloured right without being registered anywhere.
