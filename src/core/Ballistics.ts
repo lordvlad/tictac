@@ -110,7 +110,9 @@ export function effectiveMaxAp(maxAp: number, statuses: StatusState[]): number {
     if (status.turnsLeft <= 0) continue
     bonus += STATUSES[status.kind]?.apBonus ?? 0
   }
-  return Math.round(maxAp * (1 + bonus))
+  // At least one point: a unit that can do nothing at all cannot even end its
+  // own turn deliberately, and no status is meant to remove a unit from play.
+  return Math.max(1, Math.round(maxAp * (1 + bonus)))
 }
 
 function statusTotals(statuses: StatusState[]): {

@@ -282,6 +282,16 @@ export class Hud {
           ${this.bar('ap', card.ap, card.maxAp, 'AP')}
           ${this.bar('armor', card.armor, card.maxArmor, 'AR')}
         </div>
+        ${
+          card.statuses.length === 0
+            ? ''
+            : `<div class="squad-statuses">${card.statuses
+                .map(
+                  (status) =>
+                    `<span class="squad-status ${status.good ? 'good' : 'bad'}" title="${status.detail}">${status.name}</span>`,
+                )
+                .join('')}</div>`
+        }
       </div>`,
       )
       .join('')

@@ -1,5 +1,5 @@
 import { AIM, FACTION_INFO, Faction, RULES } from '../config'
-import { GrenadeId, ShotMode } from '../core/Arsenal'
+import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
 import { ITEMS, ItemId } from '../core/Items'
 import { effectiveWeapon, type HitChanceBreakdown } from '../core/Ballistics'
 import { clamp } from '../core/math'
@@ -53,6 +53,15 @@ export interface HudAction {
   intent: HudIntent
 }
 
+/** A status in force on a unit, as the card shows it. */
+export interface HudStatusChip {
+  name: string
+  /** What it is doing, for the tooltip: a name alone explains nothing. */
+  detail: string
+  /** Drawn as a benefit rather than a warning. */
+  good: boolean
+}
+
 export interface HudSquadCard {
   index: number
   name: string
@@ -65,6 +74,8 @@ export interface HudSquadCard {
   portrait: string
   selected: boolean
   dead: boolean
+  /** Whatever is currently in force on the unit, ordered as applied. */
+  statuses: HudStatusChip[]
 }
 
 /** One enemy in the target strip. */
@@ -245,6 +256,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     portrait: portraits.getPortrait(displayFaction, index),
     selected: soldier === selected,
     dead: soldier.isDead,
+    statuses: statusChips(soldier),
   }))
 
   const shootApCost = selected ? weaponApCost(selected, ShotMode.Snap) : 0
@@ -374,6 +386,41 @@ export function buildHudModel(sources: HudModelSources): HudModel {
 
 function weaponApCost(soldier: Soldier, mode: ShotMode): number {
   return effectiveWeapon(soldier, mode).apCost
+}
+
+/**
+ * The statuses on a unit, spelled out.
+ *
+ * Nothing surfaced these before, so a stim raising a unit's points and a shot
+ * missing because the shooter was flashed both happened silently. A ceiling
+ * that moves with no visible cause reads as a bug.
+ */
+function statusChips(soldier: Soldier): HudStatusChip[] {
+  const chips: HudStatusChip[] = []
+  for (const state of soldier.statuses) {
+    if (state.turnsLeft <= 0) continue
+    const spec = STATUSES[state.kind]
+    if (!spec) continue
+
+    const terms: string[] = []
+    if (spec.accuracyPenalty) terms.push(`-${spec.accuracyPenalty}% to hit`)
+    if (spec.defenceBonus) terms.push(`-${spec.defenceBonus}% to be hit`)
+    if (spec.damageTakenBonus) {
+      terms.push(`+${Math.round(spec.damageTakenBonus * 100)}% damage taken`)
+    }
+    if (spec.apBonus) {
+      terms.push(`${spec.apBonus > 0 ? '+' : ''}${Math.round(spec.apBonus * 100)}% AP`)
+    }
+
+    chips.push({
+      name: spec.name,
+      detail: `${terms.join(', ')} · ${state.turnsLeft} turn${state.turnsLeft === 1 ? '' : 's'} left`,
+      // Judged by what it does rather than listed per kind, so a status added
+      // later is coloured right without being registered anywhere.
+      good: spec.apBonus > 0 || spec.defenceBonus > 0,
+    })
+  }
+  return chips
 }
 
 /**

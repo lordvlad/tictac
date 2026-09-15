@@ -9,7 +9,8 @@ import type { OrbitRig } from '../camera/OrbitRig'
 import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
 import { buildHudModel, type HudIntent } from '../hud/HudModel'
-import { applyHitEffects, calculateHitChance, type ResolvedHit, tickStatuses } from './Combat'
+import { applyHitEffects, calculateHitChance, type ResolvedHit } from './Combat'
+import { settleTurn } from './Turn'
 import type { OffscreenPortraits } from '../render/Portraits'
 import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
@@ -598,8 +599,9 @@ export class InteractionController {
     this.unitViewRequested = false
     if (this.rig.isShoulderViewActive) this.rig.exitShoulderView()
     this.exitShootMode()
-    // Statuses and persistent smoke expire on the handover.
-    tickStatuses(this.squads.soldiers)
+    // Statuses expire, and anyone who ran themselves into the ground pays for
+    // it. The incoming side has already been handed its points by `TurnSystem`.
+    settleTurn(this.squads.soldiers, this.turnManager.activeFaction)
     this.effects.tickTurn()
 
     if (this.network && this.network.mode !== 'local') {

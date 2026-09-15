@@ -14,8 +14,8 @@ import {
   fireWeapon,
   shotApCost,
   throwGrenade,
-  tickStatuses,
 } from '../game/Combat'
+import { settleTurn } from '../game/Turn'
 import { effectiveWeapon, resolveDamage } from '../core/Ballistics'
 import { SimUnit } from './SimUnit'
 
@@ -373,15 +373,19 @@ export class SimMatch {
     return true
   }
 
-  /** The game's own turn boundary: statuses tick, then the next side refills. */
+  /**
+   * The game's own turn boundary, in the game's own order: hand over, refill
+   * the incoming side, then settle - which is what `InteractionController`
+   * does via `TurnSystem` and `settleTurn`.
+   */
   private endTurn(): void {
-    tickStatuses(this.units)
     this.activeFaction = this.activeFaction === Faction.Blue ? Faction.Red : Faction.Blue
     if (this.activeFaction === Faction.Blue) this.turnNumber++
     for (const unit of this.byFaction[this.activeFaction]) {
       if (unit.isDead) continue
       unit.ap = unit.effectiveMaxAp
     }
+    settleTurn(this.units, this.activeFaction)
   }
 }
 

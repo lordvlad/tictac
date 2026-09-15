@@ -25,10 +25,12 @@ export class SimUnit implements Combatant {
   ammo: AmmoSpec
   hp: number
   maxHp: number
-  ap: number
   maxAp: number
+  private apLeft = 0
   armor: number
   isCrouching = false
+  spentThisTurn = 0
+  exhaustedTurns = 0
   readonly isMoving = false
   targetYaw = 0
   statuses: StatusState[] = []
@@ -63,6 +65,20 @@ export class SimUnit implements Combatant {
     this.maxAp = sheet.maxAp + this.resolved.maxAp
     this.hp = this.maxHp
     this.ap = this.maxAp
+  }
+
+  /**
+   * Points left, counting what gets spent on the way down.
+   *
+   * A soldier counts spending in the same setter for the same reason: the rule
+   * about exhaustion asks what a unit *used*, not what it has left.
+   */
+  get ap(): number {
+    return this.apLeft
+  }
+  set ap(value: number) {
+    if (value < this.apLeft) this.spentThisTurn += this.apLeft - value
+    this.apLeft = value
   }
 
   /** Sheet plus carried gear, exactly as a real unit folds them. */

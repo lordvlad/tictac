@@ -249,6 +249,8 @@ export const StatusKind = {
   Shredded: 'shredded',
   /** Stimulated: action points are raised while it lasts. */
   Stimmed: 'stimmed',
+  /** Run into the ground: fewer action points until it recovers. */
+  Winded: 'winded',
 } as const
 export type StatusKind = (typeof StatusKind)[keyof typeof StatusKind]
 
@@ -305,6 +307,17 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0,
     apBonus: 0.2,
+  },
+  [StatusKind.Winded]: {
+    kind: StatusKind.Winded,
+    name: 'Winded',
+    // Applied at a handover and ticked by that same handover, so three leaves
+    // two: the unit's own next turn is the one that feels it.
+    turns: 3,
+    accuracyPenalty: 0,
+    defenceBonus: 0,
+    damageTakenBonus: 0,
+    apBonus: -0.25,
   },
 }
 

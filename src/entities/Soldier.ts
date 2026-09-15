@@ -238,7 +238,25 @@ export class Soldier {
     return this.actionPoints.ap
   }
   set ap(value: number) {
+    // Counted here because every action deducts through this one setter.
+    // Forfeiting a turn writes the component directly and so does not count as
+    // effort — see `TurnSystem.endUnitTurn`.
+    if (value < this.actionPoints.ap) this.actionPoints.spentThisTurn += this.actionPoints.ap - value
     this.actionPoints.ap = value
+  }
+
+  get spentThisTurn(): number {
+    return this.actionPoints.spentThisTurn
+  }
+  set spentThisTurn(value: number) {
+    this.actionPoints.spentThisTurn = value
+  }
+
+  get exhaustedTurns(): number {
+    return this.actionPoints.exhaustedTurns
+  }
+  set exhaustedTurns(value: number) {
+    this.actionPoints.exhaustedTurns = value
   }
   get maxAp(): number {
     return this.actionPoints.maxAp

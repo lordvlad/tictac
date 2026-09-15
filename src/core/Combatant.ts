@@ -47,6 +47,10 @@ export interface Combatant extends CombatantStats, Casualty {
   targetYaw: number
   /** The AP ceiling with live statuses folded in. */
   readonly effectiveMaxAp: number
+  /** Points this unit's own actions have consumed since its last refill. */
+  spentThisTurn: number
+  /** Consecutive turns it has spent every point it had. */
+  exhaustedTurns: number
   grenades: Record<GrenadeId, number>
   readonly grenadeSpecs: Record<GrenadeId, GrenadeSpec>
   /** Hunker down. Stance is state, so this belongs to the rules, not the view. */

@@ -138,6 +138,11 @@ export const RULES = {
   maxAp: 12,
   maxArmor: 20,
   /** AP to hunker down into cover (crouch stance) / reload. */
+  /**
+   * Consecutive turns of spending every action point before a unit is winded.
+   * One hard turn is a commitment; two in a row is running it into the ground.
+   */
+  exhaustionTurns: 2,
   coverApCost: 2,
   reloadApCost: 2,
   /** Tiles a soldier can see. */
