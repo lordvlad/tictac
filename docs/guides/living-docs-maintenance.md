@@ -3,7 +3,7 @@ title: "Living Documentation Guide & Maintenance Workflow"
 id: "GUIDE-LIVING-DOCS"
 type: "guide"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-09-16"
 appliesTo:
   - "docs/**"
 relatedDocs:
@@ -95,9 +95,15 @@ tags: ["ecs", "networking"]
 
 ### Trigger 2: Modifying Combat, Ballistics, or Game Rules
 - **Document to update**: `docs/architecture/combat-and-rules.md`
+- **Run**: `bun run docs:catalog` — the status, trait and worn-kit tables are generated, never
+  hand-written, and `tests/catalog.test.ts` fails when the checked-in copy has drifted.
 - **What to check**:
   - Formulas for hit probability, evasion, damage absorption, critical hits, line-of-sight DDA.
-  - New traits, statuses, or weapons added to `src/core/Arsenal.ts` or `src/core/Traits.ts`.
+  - Whether a *named* value has moved into or out of prose. Numbers belong in the generated
+    catalogue; documents should describe how a term behaves and link to it for the value. Both
+    stale claims found when the catalogue was introduced were numbers written out by hand: a
+    wound trait that is really a status, and a flat AP allowance that had been a range for
+    weeks.
   - Impact on balance metrics and headless simulations (`scripts/balance.ts`).
 
 ### Trigger 3: Changing Network Messages or Replication
@@ -127,3 +133,5 @@ Automated verification runs via `bun run lint` (which executes `tsc --noEmit` an
 - [ ] **File Path Accuracy**: All referenced file paths (e.g. `src/game/Combat.ts`) exist.
 - [ ] **Cross-link Integrity**: Relative Markdown links between documents are valid and resolve.
 - [ ] **JSON Schema Syntax**: All schemas in `docs/schemas/` parse without error.
+- [ ] **Generated Catalogue in Step**: `bun test tests/catalog.test.ts` passes, i.e. the status,
+      trait and worn-kit tables match `STATUSES`, `TRAITS`, `ITEMS` and the tunables.

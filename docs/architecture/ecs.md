@@ -3,7 +3,7 @@ title: "Entity Component System (ECS) Architecture"
 id: "ARCH-ECS"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-09-16"
 appliesTo:
   - "src/ecs/**"
 relatedDocs:
@@ -56,16 +56,23 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | Component | Responsibility | Replicated? |
 | --- | --- | --- |
 | `IdentityComponent` | Faction (`blue` / `red`), squad index, character name | Yes |
-| `PositionComponent` | Grid coordinate `(x, y)` and interpolated world vector | Yes |
-| `HealthComponent` | Current HP, Max HP, and alive/dead state | Yes |
-| `ArmorComponent` | Base armor, current armor, shred damage | Yes |
-| `ActionPointsComponent` | Turn AP points, max AP, movement/action costs | Yes |
-| `StanceComponent` | Stance (standing vs crouched), facing angle/yaw | Yes |
-| `WeaponComponent` | Primary weapon spec, ammo type, range band, crit modifiers | Yes |
-| `AmmoComponent` | Loaded magazine count, max capacity, reload costs | Yes |
-| `TraitsComponent` | Active passive traits and wound penalties | Yes |
-| `StatusesComponent` | Active turn-decaying buffs/debuffs (e.g. blinded, burning) | Yes |
-| `CoverRulesComponent` | Computed cover level (none / half / full) relative to threats | Local (Derived) |
+| `PositionComponent` | Grid coordinate `(x, y)`, logical world position, target yaw | Yes |
+| `HealthComponent` | Current and maximum HP. The maximum is per character, and traits move it | Yes |
+| `ArmorComponent` | Current and maximum armour. Worn plate raises the maximum | Yes |
+| `ActionPointsComponent` | Points left and the ceiling, plus `spentThisTurn` and `exhaustedTurns` — what a unit *used*, which is what exhaustion is judged on | Yes |
+| `StanceComponent` | Crouched, moving, the route being walked, corner peek, and `firedThisTurn` — a muzzle flash gives a position away until the unit's own next turn | Yes |
+| `WeaponComponent` | Equipped weapon id; the spec itself lives in `WEAPONS` | Yes |
+| `AmmoComponent` | Loaded round id; clip state lives on the weapon instance | Yes |
+| `InventoryComponent` | Grenades carried, by kind | Yes |
+| `ItemsComponent` | Items carried, by id, including worn kit | Yes |
+| `SightedComponent` | Whether the side whose turn it is can see this unit. Fog writes it, the planners and HUD read it, a view mirrors it onto a mesh | Local (per-peer) |
+| `TraitsComponent` | The trait-derived numbers an *enemy* must read: `evasion`, `critImmune`, `moveCostMul`. Everything a trait does to its own unit stays local or travels inside a resolved attack | Yes |
+| `StatusesComponent` | Turn-decaying statuses, each with `turnsLeft` and `stacks`; absent stacks mean one, so a peer omitting the count cannot disarm a status | Yes |
+| `CoverRulesComponent`, `AimRulesComponent`, `MatchRulesComponent`, `StatusSpecsComponent`, `GrenadeSpecsComponent` | Rule tables on the global entity, so both peers resolve against the same constants | Yes (global entity) |
+| `WallComponent` | Wall segment state for the terrain entities | Yes |
+
+Current values for every status and trait are in the generated
+[status and trait catalogue](../design/gdd/status-and-trait-catalog.md).
 
 ---
 

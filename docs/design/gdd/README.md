@@ -3,7 +3,7 @@ title: "Game Design Document (GDD) Index"
 id: "GDD-INDEX"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-09-16"
 appliesTo:
   - "src/game/**"
   - "src/core/**"
@@ -24,5 +24,6 @@ tags: ["gdd", "design", "gameplay"]
 | --- | --- | --- |
 | [Overview & Setting](./overview.md) | Lore, World, Factions | Crash backstory, post-EMP earth, human vs alien dynamics. |
 | [Combat Mechanics](./combat-mechanics.md) | Turn-based Tactics | Action Points, LOS DDA, cover rules, ballistic equations, weapons, traits. |
+| [Status, Trait & Worn Kit Catalogue](./status-and-trait-catalog.md) | Reference (generated) | Every status, trait and passive item with its current numbers, and where each trait can be got from. |
 | [Economy & Base Building](./economy-and-bases.md) | Meta Strategy | Nomadic vs Settled bases, resource gathering, food, crafting, research. |
 | [Progression & Squads](./progression-and-meta.md) | RPG Progression | XP, promotions, wounds, permadeath, recruitment, campaign roster. |

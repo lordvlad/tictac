@@ -21,6 +21,7 @@ docs/
 │   │   ├── README.md     # GDD Overview & index
 │   │   ├── overview.md   # Lore, factions, world setting
 │   │   ├── combat-mechanics.md # Turn-based tactical combat rules
+│   │   ├── status-and-trait-catalog.md # Generated: every status, trait and worn item
 │   │   ├── economy-and-bases.md# Base building, resource management
 │   │   └── progression-and-meta.md# RPG progression, wounds, permadeath
 │   └── adr/              # Architectural Decision Records (ADRs)
@@ -60,6 +61,7 @@ docs/
 - 🛠️ **Getting Started**: [Developer Setup & Workflow Guide](guides/getting-started.md)
 - 📐 **Architecture**: [System Architecture Overview](architecture/overview.md)
 - 🎮 **Game Design**: [GDD: Tactical Combat Mechanics](design/gdd/combat-mechanics.md)
+- 📋 **Reference**: [Status, Trait & Worn Kit Catalogue](design/gdd/status-and-trait-catalog.md) — generated from the code by `bun run docs:catalog`
 - 📋 **Active Tasks**: [Active Backlog](backlog/active-backlog.md)
 - 🎯 **Active Focus**: [Current Kanban Focus](plans/active-focus.md)
 - 🚀 **Milestones**: [Capability Roadmap](plans/roadmap.md)

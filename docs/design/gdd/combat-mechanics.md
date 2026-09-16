@@ -3,7 +3,7 @@ title: "GDD: Tactical Combat Mechanics"
 id: "GDD-COMBAT"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-09-16"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Combatant.ts"
@@ -40,21 +40,36 @@ graph TD
 ## 2. Key Pillars
 
 ### 2.1 Action Points (AP) & Movement
-- Standard allocation: 10 AP per turn (modified by traits and wounds).
-- Movement cost calculated dynamically across terrain and elevation changes.
-- Sprinting / high expenditures consecutive turns trigger fatigue/exhaustion (`Winded`).
+- Allocation is per character, not per side: each soldier rolls its own ceiling, and traits
+  move it further. See the [catalogue](status-and-trait-catalog.md) for the current range.
+- Movement cost is the terrain's price scaled by the unit's condition, so the same route costs
+  a limping soldier more. Routes are planned in terrain points and the *budget* is divided, so
+  a confirmed route can never strand a unit halfway.
+- Spending every point on consecutive turns leaves the unit `Winded` — a status, temporary,
+  which ticks away. Ending a turn early is not effort: forfeiting hands a unit nothing
+  remaining without it having run anywhere.
 
 ### 2.2 Line of Sight (LOS) & Fog of War
 - Fast DDA (Digital Differential Analyzer) ray marching across grid tiles.
 - Dynamic occlusion from terrain walls, obstacles, and smoke grenades.
-- Intel Fog: Opposing unit stats remain obfuscated until scouted or engaged.
+- **Firing reveals.** A unit that has fired is seen for the rest of the round whatever the line
+  of sight says, which is what a suppressor buys out of.
+- Intel Fog: opposing unit stats remain obfuscated until scouted or engaged. *(Planned —
+  `ITEM-007`; enemy sheets are currently legible once aimed at.)*
 
 ### 2.3 Cover & Stances
-- **Half Cover**: Provides defensive evasion bonus (+15%).
-- **Full Cover**: Substantial evasion bonus (+30%) and high occlusion.
-- **Stances**: Standing (standard mobility) vs Crouched (evasion bonus, reduced mobility).
+- Cover is an accuracy penalty on the shot rather than an evasion bonus on the target, and it
+  depends on stance as well as on what is being hidden behind: crouching in the open is worth
+  something, crouching behind a wall a great deal. Values in `COVER`
+  (`docs/architecture/combat-and-rules.md`).
+- **Stances**: standing (ordinary mobility) versus crouched (cover is worth more, and some kit
+  — the bipod — pays only while down).
 
 ### 2.4 Ballistics, Armor, and Wounds
-- **Hit Roll**: Derived from Shooter Proficiency vs Target Evasion and Range Band.
-- **Armor & Shred**: Armor directly absorbs incoming damage; specialized munitions (e.g. AP ammo, Frag grenades) permanently shred armor.
-- **Wounds as Negative Traits**: Dropping below 50% and 25% health applies lasting debilitating traits (`Winded`, `Concussed`, `Limping`).
+- **Hit roll**: the shooter's training with the weapon in hand against the target's evasion,
+  less range, cover and statuses, all scaled by the shot mode.
+- **Armor & shred**: armour subtracts flat from each round, but only the share the round fails
+  to penetrate, and every hit does at least a minimum. AP rounds and explosives shred it
+  permanently.
+- **Wounds**: `Limping` below half health, `Concussed` below a quarter — derived from current
+  health, so patching a soldier up lifts them. `Winded` is exhaustion, not a wound.
