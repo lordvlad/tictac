@@ -3,7 +3,7 @@ title: "Completed Work Archive"
 id: "BACKLOG-COMPLETED"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-15"
+lastReviewed: "2026-09-16"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -187,3 +187,28 @@ One piece per unit against a stock control over 200 matches: scope +5 wins, plat
 #### Follow-ups Identified
 - The scope and the plate were both strictly-better or strictly-worse until measured. Any new passive piece should be swept before it ships.
 - `tests/gear.test.ts` pins the invariant that nothing worn is unconditionally free: every piece either costs something outright or pays only in a particular stance.
+
+---
+
+### [ITEM-007] Enemy Intel Fog
+**Completed Date:** 2026-09-16  
+**Type:** Feature / Polish  
+**Milestone:** M3 — Reconnaissance & Fog  
+
+#### Why
+An enemy's exact evasion was legible the moment you aimed, which made a sheet read as a stat block rather than an opponent. It also left the suppressor buying something imperceptible: hiding a muzzle flash matters little when everything about the enemy is already readable.
+
+#### Key Changes
+- `SightedComponent` gained `known` beside `seen`: seeing a body tells you nothing about how hard it is to hit, so sight and knowledge are separate. Local per-peer, like fog — it is one side's knowledge, not a fact about the unit.
+- Revealed by the two things an opponent can actually observe, set in the resolvers where the evidence is: **firing** (unless silenced — this is the suppressor's real payoff) and **being shot at or caught in a blast**, hit or miss. A grenade always reveals its thrower; there is no quiet way to throw one.
+- Permanent, unlike `firedThisTurn`: a muzzle flash is about position and expires at the handover, while having measured a unit is knowledge you keep.
+- Derived on both sides rather than sent — `replayShot` reveals from the shot it is replaying, exactly as it derives suppression. No message grew.
+- HUD: the shot panel's header carries an `UNREAD` badge and the evasion row reads `-?%`; the target strip draws unread opponents with a dashed border and a `?`.
+
+#### The Design Decision
+**What is withheld is the attribution, not the number.** The headline hit chance stays honest — it is computed with the real evasion — because a figure a player commits action points to must never be a guess. Observable state is never hidden either: you can see that a soldier is bleeding, so health and armour stay visible. Only what the *sheet* says is held back.
+
+#### Verification
+- **Rules unmoved, proved rather than assumed**: 200 matches at seed 1 produce a byte-identical report with the change stashed and unstashed.
+- **Live**: aiming at an unmet opponent showed `FIRING AT CRIMSON · UNREAD`, evasion `-?%`, a dashed strip card with `?`, and a headline of 84%. One missed shot later the badge was gone, the row read `-7%`, the card was solid — and the headline was still 84%, which is the point.
+- 8 tests in `tests/intel.test.ts`, including that a suppressed shooter stays unread while its target does not, that bystanders are unaffected, and that being read survives a handover.

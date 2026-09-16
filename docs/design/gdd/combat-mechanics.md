@@ -54,8 +54,10 @@ graph TD
 - Dynamic occlusion from terrain walls, obstacles, and smoke grenades.
 - **Firing reveals.** A unit that has fired is seen for the rest of the round whatever the line
   of sight says, which is what a suppressor buys out of.
-- Intel Fog: opposing unit stats remain obfuscated until scouted or engaged. *(Planned —
-  `ITEM-007`; enemy sheets are currently legible once aimed at.)*
+- **Intel fog**: an opponent's sheet is unread until it has fired on you or you have shot at
+  it, and reading it is permanent. What is withheld is the *attribution* — the hit chance
+  stays honest, because a number a player can act on must not be a guess. Observable state
+  (health, armour) is never hidden: you can see that a soldier is hurt.
 
 ### 2.3 Weapons, Rails & Kit
 - A weapon is a **thing, not a kind of thing**: it has a serial, and its fitted kit belongs

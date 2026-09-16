@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-15"
+lastReviewed: "2026-09-16"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -46,25 +46,6 @@ Puts player choice into the wire protocol. Requires dedicated input sanitization
 - [ ] Kills and assists accumulate XP; reaching threshold triggers 3-perk promotion UI.
 - [ ] Selected trait applies immediately to active stats and replicates across P2P.
 - [ ] Dedicated sanitizer guards wire against invalid traits.
-
----
-
-### [ITEM-007] Enemy Intel Fog
-**Type:** Feature / Polish  
-**Priority:** P2  
-**Status:** Backlog  
-**Milestone:** M3 — Reconnaissance & Fog  
-
-#### Why
-An enemy's exact evasion is visible the moment you aim at them. While mechanically necessary for shot previews, it makes sheets read as stat blocks rather than living opponents.
-
-#### Change
-Show target stats as unknown until that unit has acted or been shot at, then reveal them. HUD only — data remains local.
-
-#### Affected Files
-- `src/hud/Hud.ts`
-- `src/hud/HudModel.ts`
-- `src/game/FogOfWar.ts`
 
 ---
 

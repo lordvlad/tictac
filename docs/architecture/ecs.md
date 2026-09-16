@@ -65,7 +65,7 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | `AmmoComponent` | Loaded round id; clip state lives on the weapon instance | Yes |
 | `InventoryComponent` | Grenades carried, by kind | Yes |
 | `ItemsComponent` | Items carried, by id, including body-worn kit. Weapon attachments are *not* here — a rail belongs to the weapon | Yes |
-| `SightedComponent` | Whether the side whose turn it is can see this unit. Fog writes it, the planners and HUD read it, a view mirrors it onto a mesh | Local (per-peer) |
+| `SightedComponent` | What the other side perceives: `seen` (fog writes it, a view mirrors it onto a mesh) and `known` (whether its *sheet* has been worked out) | Local (per-peer knowledge) |
 | `TraitsComponent` | The trait-derived numbers an *enemy* must read: `evasion`, `critImmune`, `moveCostMul`. Everything a trait does to its own unit stays local or travels inside a resolved attack | Yes |
 | `StatusesComponent` | Turn-decaying statuses, each with `turnsLeft` and `stacks`; absent stacks mean one, so a peer omitting the count cannot disarm a status | Yes |
 | `CoverRulesComponent`, `AimRulesComponent`, `MatchRulesComponent`, `StatusSpecsComponent`, `GrenadeSpecsComponent` | Rule tables on the global entity, so both peers resolve against the same constants | Yes (global entity) |

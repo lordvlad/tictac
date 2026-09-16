@@ -322,10 +322,11 @@ export class Hud {
     this.targetStripEl.innerHTML = model.targets
       .map(
         (t) => `
-      <button class="target-icon interactive ${t.selected ? 'selected' : ''}"
-              title="${t.name} — ${t.hitChance}% to hit"
+      <button class="target-icon interactive ${t.selected ? 'selected' : ''} ${t.known ? '' : 'unread'}"
+              title="${t.name} — ${t.hitChance}% to hit${t.known ? '' : ' · unread'}"
               ${Hud.intentAttr({ type: 'selectTarget', index: t.index })}>
         <img class="target-portrait" src="${t.portrait}" alt="${t.name}" />
+        ${t.known ? '' : '<span class="target-unread">?</span>'}
         <span class="target-chance">${t.hitChance}%</span>
         <span class="target-hp"><span class="target-hp-fill" style="width: ${Math.round(t.hpFraction * 100)}%;"></span></span>
         <span class="target-ar"><span class="target-ar-fill" style="width: ${Math.round(t.armorFraction * 100)}%;"></span></span>
@@ -434,7 +435,9 @@ export class Hud {
    */
   private shotCard(shot: HudShotPanel): string {
     return `
-      <div class="action-header">Firing at ${shot.targetName}</div>
+      <div class="action-header">
+        Firing at ${shot.targetName}${shot.targetKnown ? '' : ' <span class="shot-unknown" title="Unread: shoot at it, or be shot at by it, to learn what it is">UNREAD</span>'}
+      </div>
       <div class="shot-card">
         <div class="shot-target">${shot.weaponName} (${shot.currentClip}/${shot.maxClip} ammo) · ${shot.ammoName} — target ${shot.targetHp} HP · ${shot.targetArmor} AR</div>
         <div class="shot-option-chance ${shot.base.chance >= 50 ? 'good' : 'poor'}">

@@ -130,7 +130,14 @@ export function executeShot(
   shooter.ap = Math.max(0, shooter.ap - eff.apCost)
   // Muzzle flash and noise: firing gives a position away until the handover,
   // unless the weapon is quiet. Fog reads it; nothing else does.
-  if (!shooter.silenced) shooter.firedThisTurn = true
+  if (!shooter.silenced) {
+    shooter.firedThisTurn = true
+    // And having shot at someone, you have shown them what you are. Unlike the
+    // flash, this does not wear off - they have measured you.
+    shooter.known = true
+  }
+  // Shooting at a unit is how you find out what it is made of, hit or miss.
+  target.known = true
 
   const chance = calculateHitChance(grid, shooter, target, mode)
   const crit = critBreakdown(eff, target, grid.distance(shooter.tile, target.tile))
@@ -308,6 +315,10 @@ export function throwGrenade(
 
   thrower.ap = Math.max(0, thrower.ap - spec.apCost)
   thrower.grenades[kind] -= 1
+  // A thrown grenade is not a quiet act, and there is no silenced version of
+  // one: the thrower is on show whatever they are carrying.
+  thrower.firedThisTurn = true
+  thrower.known = true
   fx.shoot(thrower)
 
   const hits: ResolvedHit[] = []
@@ -318,6 +329,7 @@ export function throwGrenade(
 
     const result = grenadeDamageAt(spec, distance, soldier)
     applyHitEffects(soldier, result.damage, result.armorShred, spec.applies, fx)
+    soldier.known = true
 
     hits.push({
       soldier,

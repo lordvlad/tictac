@@ -473,6 +473,19 @@ export class Soldier {
     this.sighted.seen = value
   }
 
+  /**
+   * Whether the other side has worked this unit out.
+   *
+   * Sticky for the match: once an opponent has been shot at by a unit, or has
+   * hit it, they know what they are dealing with and do not forget.
+   */
+  get known(): boolean {
+    return this.sighted.known
+  }
+  set known(value: boolean) {
+    this.sighted.known = value
+  }
+
   /** Re-stamp the loadout from the shared templates. */
   equip(weaponId: WeaponId, ammoId: AmmoId): void {
     this.weaponComponent.equip(weaponId)

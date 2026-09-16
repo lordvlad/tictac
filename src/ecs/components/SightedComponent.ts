@@ -17,15 +17,26 @@ export class SightedComponent extends Component {
     return SightedComponent.componentName
   }
 
-  constructor(public seen: boolean = true) {
+  constructor(
+    public seen: boolean = true,
+    /**
+     * Whether this unit's *sheet* has been worked out by the other side.
+     *
+     * Seeing a body tells you nothing about how hard it is to hit; having it
+     * shoot at you, or hitting it, does. Local for the same reason `seen` is:
+     * it is one side's knowledge about the other, not a fact about the unit.
+     */
+    public known: boolean = false,
+  ) {
     super()
   }
 
   serialize(): Record<string, unknown> {
-    return { seen: this.seen }
+    return { seen: this.seen, known: this.known }
   }
 
   deserialize(data: Record<string, unknown>): void {
     if (typeof data.seen === 'boolean') this.seen = data.seen
+    if (typeof data.known === 'boolean') this.known = data.known
   }
 }

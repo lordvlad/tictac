@@ -39,6 +39,7 @@ export class SimUnit implements Combatant {
   spentThisTurn = 0
   exhaustedTurns = 0
   firedThisTurn = false
+  known = false
   readonly isMoving = false
   targetYaw = 0
   statuses: StatusState[] = []

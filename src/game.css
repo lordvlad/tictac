@@ -268,6 +268,35 @@ canvas {
   gap: var(--hud-row-gap);
 }
 
+/* Unread opponents: the sheet has not been worked out yet, so the panel and the
+   strip say so rather than showing a number the player would act on. Amber
+   rather than red - not knowing is a state, not a penalty. */
+.shot-unknown {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 1px 4px;
+  margin-left: 6px;
+  border-radius: 3px;
+  color: #ffb454;
+  border: 1px solid rgba(255, 180, 84, 0.5);
+  cursor: help;
+}
+
+.target-icon.unread {
+  border-style: dashed;
+}
+
+.target-unread {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 11px;
+  font-weight: 900;
+  color: #ffb454;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+}
+
 /* A row of what is currently in force on a unit. Text, not glyphs: there are
    few enough at once that a word is quicker to read than a symbol to learn. */
 .squad-statuses {

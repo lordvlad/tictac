@@ -59,6 +59,14 @@ export interface Combatant extends CombatantStats, Casualty {
   firedThisTurn: boolean
   /** Firing does not give this unit away. */
   readonly silenced: boolean
+  /**
+   * Whether the other side has worked this unit's sheet out.
+   *
+   * Set by the resolvers because they are where the revealing happens: a unit
+   * that fires has announced itself, and one that has been hit has been
+   * measured.
+   */
+  known: boolean
   /** Points this unit's own actions have consumed since its last refill. */
   spentThisTurn: number
   /** Consecutive turns it has spent every point it had. */

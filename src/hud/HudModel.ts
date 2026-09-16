@@ -88,6 +88,8 @@ export interface HudTargetIcon {
   armorFraction: number
   hitChance: number
   selected: boolean
+  /** False until this side has worked the unit out. */
+  known: boolean
 }
 
 /** One line of the "why is my chance this bad" breakdown. */
@@ -148,6 +150,15 @@ export interface HudShotPanel {
   targetName: string
   targetHp: number
   targetArmor: number
+  /**
+   * Whether this side has worked the target out.
+   *
+   * False hides what the *sheet* says - how hard it is to hit - while leaving
+   * the resolved chance and the observable damage alone. Guessing a number and
+   * showing it would be worse than admitting to not knowing: the player would
+   * act on it.
+   */
+  targetKnown: boolean
   weaponName: string
   ammoName: string
   currentClip: number
@@ -344,6 +355,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     armorFraction: soldier.maxArmor > 0 ? soldier.armor / soldier.maxArmor : 0,
     hitChance,
     selected: soldier === shoot?.pending?.target,
+    known: soldier.known,
   }))
 
   const isMyTurn =
@@ -515,7 +527,8 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
     if (first.evasion > 0) {
       terms.push({
         label: 'Target evasion',
-        value: `-${Math.round(first.evasion)}%`,
+        // The chance above already has it in; what is withheld is the reason.
+        value: pending.target.known ? `-${Math.round(first.evasion)}%` : '-?%',
         icon: 'shot-conceal',
         penalty: true,
       })
@@ -547,6 +560,7 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
     targetName: pending.target.name,
     targetHp: pending.target.hp,
     targetArmor: pending.target.armor,
+    targetKnown: pending.target.known,
     weaponName: pending.weaponName,
     ammoName: pending.ammoName,
     currentClip: pending.currentClip,
