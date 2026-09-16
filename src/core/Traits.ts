@@ -17,6 +17,8 @@ export const TraitId = {
   Fleet: 'fleet',
   /** Innate: nothing rattles this one enough to hit a vital. */
   Stoic: 'stoic',
+  /** Innate: gives nothing away under fire. */
+  Inscrutable: 'inscrutable',
   /** Worn: a weave that spreads the shock of a hit out of any one place. */
   Nullweave: 'nullweave',
   /** Wounded: hurt enough to slow down and tire early. */
@@ -86,6 +88,15 @@ export interface TraitEffects {
   damageTaken?: number
   /** Firing does not give this unit's position away. */
   silenced?: boolean
+  /**
+   * Being shot at does not give this unit's sheet away.
+   *
+   * The counterpart to `silenced` rather than a duplicate of it: one hides what
+   * a unit *does*, this hides what it *is*. Shooting at someone normally tells
+   * you how hard they were to hit; against this one it tells you nothing,
+   * because there is nothing to read in how they took it.
+   */
+  unreadable?: boolean
 }
 
 export interface TraitSpec {
@@ -126,6 +137,12 @@ export const TRAITS: Record<TraitId, TraitSpec> = {
     name: 'Stoic',
     description: 'Never caught unready: hits on them are never critical.',
     effects: { critImmune: true },
+  },
+  [TraitId.Inscrutable]: {
+    id: TraitId.Inscrutable,
+    name: 'Inscrutable',
+    description: 'Gives nothing away: being shot at never reveals their sheet.',
+    effects: { unreadable: true },
   },
   [TraitId.Nullweave]: {
     id: TraitId.Nullweave,
@@ -204,6 +221,7 @@ export interface ResolvedTraits {
   armor: number
   damageTaken: number
   silenced: boolean
+  unreadable: boolean
   evasion: number
   critChance: number
   critMultiplier: number
@@ -221,6 +239,7 @@ export const NO_TRAITS: ResolvedTraits = {
   armor: 0,
   damageTaken: 0,
   silenced: false,
+  unreadable: false,
   evasion: 0,
   critChance: 0,
   critMultiplier: 0,
@@ -245,6 +264,7 @@ export function resolveTraitsInto(out: ResolvedTraits, ids: Iterable<TraitId>): 
   out.armor = 0
   out.damageTaken = 0
   out.silenced = false
+  out.unreadable = false
   out.evasion = 0
   out.critChance = 0
   out.critMultiplier = 0
@@ -267,6 +287,7 @@ export function resolveTraitsInto(out: ResolvedTraits, ids: Iterable<TraitId>): 
     out.armor += e.armor ?? 0
     out.damageTaken += e.damageTaken ?? 0
     out.silenced = out.silenced || (e.silenced ?? false)
+    out.unreadable = out.unreadable || (e.unreadable ?? false)
     out.evasion += e.evasion ?? 0
     out.critChance += e.critChance ?? 0
     out.critMultiplier += e.critMultiplier ?? 0

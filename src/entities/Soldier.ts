@@ -167,6 +167,9 @@ export class Soldier {
     if (this.traitsComponent.damageTaken !== this.resolvedTraits.damageTaken) {
       this.traitsComponent.damageTaken = this.resolvedTraits.damageTaken
     }
+    if (this.traitsComponent.unreadable !== this.resolvedTraits.unreadable) {
+      this.traitsComponent.unreadable = this.resolvedTraits.unreadable
+    }
 
     // Trait ceilings sit on top of the sheet's own, and a unit at full health
     // keeps being at full health when the source of the lift changes.
@@ -237,9 +240,24 @@ export class Soldier {
     return this.traitsComponent.damageTaken
   }
 
-  /** True when firing does not give this unit's position away. */
+  /**
+   * True when firing does not give this unit's position away.
+   *
+   * Read from the local fold, not the component: it governs what *this* unit's
+   * own shot does, and a shot is always resolved by the side that owns it.
+   */
   get silenced(): boolean {
     return this.resolvedTraits.silenced
+  }
+
+  /**
+   * True when being shot at tells the shooter nothing about this unit.
+   *
+   * Replicated, unlike `silenced`: the side pulling the trigger is the one
+   * deciding what it learned, and this is a property of its target.
+   */
+  get unreadable(): boolean {
+    return this.traitsComponent.unreadable
   }
 
   /**

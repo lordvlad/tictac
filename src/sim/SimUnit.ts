@@ -154,6 +154,10 @@ export class SimUnit implements Combatant {
     return this.resolved.silenced
   }
 
+  get unreadable(): boolean {
+    return this.resolved.unreadable
+  }
+
   get evasion(): number {
     const braced = this.isCrouching ? this.resolved.evasionCrouched : 0
     return Math.max(0, this.sheet.evasion + this.resolved.evasion + braced)

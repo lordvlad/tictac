@@ -105,7 +105,7 @@ export class CombatSystem extends System {
     // has just fired on us has shown us what it is. Derived rather than sent,
     // like suppression below - the shot itself is the evidence.
     if (!shooter.silenced) shooter.known = true
-    target.known = true
+    if (!target.unreadable) target.known = true
 
     // Derived from the rolls rather than sent: a miss carries no numbers to
     // replay, so both sides count the same rounds going past the same head.

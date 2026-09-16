@@ -54,6 +54,7 @@ be born with the same property a piece of kit grants.
 | `juggernaut` | Juggernaut | -5 evasion, +25 max HP | born with |
 | `fleet` | Fleet | +2 max AP | born with |
 | `stoic` | Stoic | cannot be crit | born with |
+| `inscrutable` | Inscrutable | being shot at does not reveal | born with |
 | `nullweave` | Nullweave | -3 evasion, cannot be crit | worn (Nullweave Vest) |
 | `limping` | Limping | -2 max AP, +50% step cost | wound |
 | `concussed` | Concussed | -8 accuracy, -4 evasion | wound |

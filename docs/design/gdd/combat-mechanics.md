@@ -58,6 +58,10 @@ graph TD
   it, and reading it is permanent. What is withheld is the *attribution* — the hit chance
   stays honest, because a number a player can act on must not be a guess. Observable state
   (health, armour) is never hidden: you can see that a soldier is hurt.
+- Both halves of the reveal have a counter, and they are deliberately different things. A
+  **suppressor** hides what a unit *does* — firing no longer announces it. **Inscrutable**
+  hides what a unit *is* — being shot at teaches the shooter nothing. A soldier with both is
+  legible only by where they are standing.
 
 ### 2.3 Weapons, Rails & Kit
 - A weapon is a **thing, not a kind of thing**: it has a serial, and its fitted kit belongs

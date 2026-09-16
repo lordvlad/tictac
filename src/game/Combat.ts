@@ -136,8 +136,10 @@ export function executeShot(
     // flash, this does not wear off - they have measured you.
     shooter.known = true
   }
-  // Shooting at a unit is how you find out what it is made of, hit or miss.
-  target.known = true
+  // Shooting at a unit is how you find out what it is made of, hit or miss -
+  // unless it gives nothing away, which is what `unreadable` is for. Note it
+  // does not stop the target being *seen*, only read.
+  if (!target.unreadable) target.known = true
 
   const chance = calculateHitChance(grid, shooter, target, mode)
   const crit = critBreakdown(eff, target, grid.distance(shooter.tile, target.tile))
@@ -329,7 +331,7 @@ export function throwGrenade(
 
     const result = grenadeDamageAt(spec, distance, soldier)
     applyHitEffects(soldier, result.damage, result.armorShred, spec.applies, fx)
-    soldier.known = true
+    if (!soldier.unreadable) soldier.known = true
 
     hits.push({
       soldier,

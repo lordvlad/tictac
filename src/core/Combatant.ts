@@ -59,6 +59,8 @@ export interface Combatant extends CombatantStats, Casualty {
   firedThisTurn: boolean
   /** Firing does not give this unit away. */
   readonly silenced: boolean
+  /** Being shot at does not give this unit's sheet away. */
+  readonly unreadable: boolean
   /**
    * Whether the other side has worked this unit's sheet out.
    *

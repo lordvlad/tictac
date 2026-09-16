@@ -5,7 +5,8 @@ import { AttachmentId } from '../src/core/Attachments'
 import { NO_FX } from '../src/core/Combatant'
 import { Grid } from '../src/core/Grid'
 import { World } from '../src/ecs/World'
-import { SightedComponent } from '../src/ecs/components'
+import { SightedComponent, TraitsComponent } from '../src/ecs/components'
+import { TraitId } from '../src/core/Traits'
 import { fireWeapon, throwGrenade } from '../src/game/Combat'
 import { Squads } from '../src/game/Squads'
 import { settleTurn } from '../src/game/Turn'
@@ -17,7 +18,13 @@ function field(): { world: World; grid: Grid; squads: Squads } {
     [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: 4 + i, y: 4 })),
     [Faction.Red]: Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: 4 + i, y: 7 })),
   })
-  for (const unit of squads.soldiers) unit.equip(WeaponId.Rifle, AmmoId.Standard)
+  for (const unit of squads.soldiers) {
+    // Born traits are not the subject here, and one of them - `Inscrutable` -
+    // deflects the very reveal these tests are about. Each test adds back what
+    // it means to measure.
+    unit.sheet.traits.length = 0
+    unit.equip(WeaponId.Rifle, AmmoId.Standard)
+  }
   return { world, grid, squads }
 }
 
@@ -105,6 +112,71 @@ describe('What a unit gives away', () => {
 
     expect(squads.byFaction[Faction.Red][2]!.known).toBe(false)
     expect(squads.byFaction[Faction.Blue][2]!.known).toBe(false)
+  })
+
+  test('a unit that gives nothing away is not read by being shot at', () => {
+    const { grid, squads } = field()
+    const shooter = squads.byFaction[Faction.Blue][0]!
+    const target = squads.byFaction[Faction.Red][0]!
+    target.sheet.traits.push(TraitId.Inscrutable)
+    target.refreshTraits()
+
+    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+
+    expect(target.known).toBe(false)
+    // It hides what the unit *is*, not what it does: the shooter still gave
+    // itself away, and the target is still perfectly visible.
+    expect(shooter.known).toBe(true)
+    expect(target.seen).toBe(true)
+  })
+
+  test('giving nothing away does not stop the unit revealing itself', () => {
+    // The division of labour: `unreadable` answers being shot at, `silenced`
+    // answers shooting. An inscrutable soldier who opens fire has still opened
+    // fire.
+    const { grid, squads } = field()
+    const inscrutable = squads.byFaction[Faction.Blue][0]!
+    const target = squads.byFaction[Faction.Red][0]!
+    inscrutable.sheet.traits.push(TraitId.Inscrutable)
+    inscrutable.refreshTraits()
+
+    fireWeapon(grid, inscrutable, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+
+    expect(inscrutable.known).toBe(true)
+  })
+
+  test('a blast reads whoever it catches, unless they give nothing away', () => {
+    const { grid, squads } = field()
+    const thrower = squads.byFaction[Faction.Blue][0]!
+    const readable = squads.byFaction[Faction.Red][0]!
+    const inscrutable = squads.byFaction[Faction.Red][1]!
+    inscrutable.tile = { ...readable.tile }
+    inscrutable.sheet.traits.push(TraitId.Inscrutable)
+    inscrutable.refreshTraits()
+    thrower.grenades[GrenadeId.Frag] = 1
+
+    throwGrenade(grid, thrower, readable.tile, GrenadeId.Frag, squads.soldiers)
+
+    expect(readable.known).toBe(true)
+    expect(inscrutable.known).toBe(false)
+  })
+
+  test('deflecting the reveal is replicated, because the shooter reads the target', () => {
+    // Same hole as evasion and plate: the side pulling the trigger decides what
+    // it learned, and it is looking at a unit whose kit it only has a stock
+    // copy of. Left local, an inscrutable opponent would be read anyway.
+    const { world, grid, squads } = field()
+    const shooter = squads.byFaction[Faction.Blue][0]!
+    const target = squads.byFaction[Faction.Red][0]!
+    const traits = world.getComponent(target.entityId, TraitsComponent)!
+
+    // Standing in for a peer's update: the flag arrives, nothing local is
+    // refolded, and the reveal still has to be deflected.
+    traits.unreadable = true
+
+    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+
+    expect(target.known).toBe(false)
   })
 
   test('it is knowledge, not state: each side keeps its own copy', () => {

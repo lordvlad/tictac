@@ -42,6 +42,15 @@ export class TraitsComponent extends Component {
     public evasionCrouched: number = 0,
     /** Fraction added to incoming damage — worn plate taking a share off. */
     public damageTaken: number = 0,
+    /**
+     * Being shot at does not reveal this unit's sheet.
+     *
+     * Replicated for the same reason the numbers beside it are: the peer
+     * shooting decides what it has learned, and it is reading the *target*.
+     * Left local, this side would consult its stock copy of the other squad
+     * and read a unit that gives nothing away.
+     */
+    public unreadable: boolean = false,
   ) {
     super()
   }
@@ -53,6 +62,7 @@ export class TraitsComponent extends Component {
       moveCostMul: this.moveCostMul,
       evasionCrouched: this.evasionCrouched,
       damageTaken: this.damageTaken,
+      unreadable: this.unreadable,
     }
   }
 
@@ -64,5 +74,6 @@ export class TraitsComponent extends Component {
     }
     if (typeof data.evasionCrouched === 'number') this.evasionCrouched = data.evasionCrouched
     if (typeof data.damageTaken === 'number') this.damageTaken = data.damageTaken
+    if (typeof data.unreadable === 'boolean') this.unreadable = data.unreadable
   }
 }

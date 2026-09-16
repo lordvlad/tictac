@@ -32,6 +32,7 @@ const INNATE_TRAITS: readonly TraitId[] = [
   TraitId.Juggernaut,
   TraitId.Fleet,
   TraitId.Stoic,
+  TraitId.Inscrutable,
 ]
 
 /** Roll one character. */

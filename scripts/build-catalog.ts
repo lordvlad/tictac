@@ -76,6 +76,7 @@ function traitEffects(effects: TraitEffects): string {
   if (effects.moveCost) parts.push(`${percent(effects.moveCost)} step cost`)
   if (effects.rangeFalloff) parts.push(`${percent(effects.rangeFalloff)} range falloff`)
   if (effects.silenced) parts.push('firing does not reveal')
+  if (effects.unreadable) parts.push('being shot at does not reveal')
   return parts.join(', ') || '—'
 }
 

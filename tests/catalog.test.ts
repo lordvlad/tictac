@@ -58,6 +58,17 @@ describe('The catalogue is in step with the code', () => {
     }
   })
 
+  test('no trait is listed with nothing to its name', () => {
+    // A row reading "—" means the generator does not know about an effect the
+    // trait actually has, which is worse than a missing row: it reads as a
+    // trait that does nothing.
+    const traitRows = catalog
+      .split('\n')
+      .filter((line) => Object.values(TRAITS).some((spec) => line.startsWith(`| \`${spec.id}\``)))
+    expect(traitRows).toHaveLength(Object.keys(TRAITS).length)
+    for (const row of traitRows) expect(row).not.toContain('| — |')
+  })
+
   test('no trait is listed as unreachable', () => {
     // The generator writes `unreachable` for a trait nothing can grant, which
     // is either dead data or a source it failed to find - both worth knowing.
