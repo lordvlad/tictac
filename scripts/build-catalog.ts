@@ -13,8 +13,9 @@
  * `TRAITS`, `ITEMS` and the tunables, so the only way for it to be wrong is for
  * the game to be wrong.
  */
-import { STATUSES, type StatusSpec } from '../src/core/Arsenal'
+import { STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { CHARACTER, CRIT, RULES, WOUNDS } from '../src/config'
+import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
 import {
   TRAITS,
@@ -98,6 +99,14 @@ function wornTraitIds(): Map<TraitId, ItemId> {
   return worn
 }
 
+function fittedTraitIds(): Map<TraitId, AttachmentId> {
+  const fitted = new Map<TraitId, AttachmentId>()
+  for (const id of Object.values(AttachmentId)) {
+    for (const trait of ATTACHMENTS[id].traits) fitted.set(trait, id)
+  }
+  return fitted
+}
+
 function woundTraitIds(): Set<TraitId> {
   const wounds = new Set<TraitId>()
   for (const id of woundTraits(1, 100)) wounds.add(id)
@@ -108,6 +117,7 @@ function woundTraitIds(): Set<TraitId> {
 function build(): string {
   const innate = innateTraitIds()
   const worn = wornTraitIds()
+  const fitted = fittedTraitIds()
   const wounds = woundTraitIds()
 
   const source = (id: TraitId): string => {
@@ -116,6 +126,8 @@ function build(): string {
     if (wounds.has(id)) from.push('wound')
     const item = worn.get(id)
     if (item) from.push(`worn (${ITEMS[item].name})`)
+    const mod = fitted.get(id)
+    if (mod) from.push(`fitted (${ATTACHMENTS[mod].name})`)
     return from.join(', ') || 'unreachable'
   }
 
@@ -129,12 +141,13 @@ function build(): string {
   lines.push('appliesTo:')
   lines.push('  - "src/core/Arsenal.ts"')
   lines.push('  - "src/core/Traits.ts"')
+  lines.push('  - "src/core/Attachments.ts"')
   lines.push('  - "src/core/Items.ts"')
   lines.push('  - "src/config.ts"')
   lines.push('relatedDocs:')
   lines.push('  - "docs/architecture/combat-and-rules.md"')
   lines.push('  - "docs/design/gdd/combat-mechanics.md"')
-  lines.push('tags: ["statuses", "traits", "equipment", "reference", "generated"]')
+  lines.push('tags: ["statuses", "traits", "equipment", "attachments", "reference", "generated"]')
   lines.push('---')
   lines.push('')
   lines.push('# GDD: Status, Trait & Worn Kit Catalogue')
@@ -193,15 +206,48 @@ function build(): string {
   lines.push('')
   lines.push('---')
   lines.push('')
-  lines.push('## 3. Worn kit')
+  lines.push('## 3. Weapon rails and fitted kit')
+  lines.push('')
+  lines.push(
+    'A rail belongs to a weapon, not to a soldier: hand the rifle over and its glass goes',
+  )
+  lines.push(
+    'with it. Rail space is a property of the weapon class - a service rifle is built as a',
+  )
+  lines.push('platform, a hunting shotgun has a bead and a barrel.')
+  lines.push('')
+  lines.push('| Weapon | Slots |')
+  lines.push('| --- | --- |')
+  for (const id of Object.values(WeaponId)) {
+    lines.push(`| ${WEAPONS[id].name} | ${WEAPONS[id].slots} |`)
+  }
+  lines.push('')
+  lines.push('| Attachment | Slots | Grants | Net effect |')
+  lines.push('| --- | --- | --- | --- |')
+  for (const id of Object.values(AttachmentId)) {
+    const spec = ATTACHMENTS[id]
+    lines.push(
+      `| ${spec.name} | ${spec.slots} | ${spec.traits.map((t) => TRAITS[t].name).join(', ')} | ${traitEffects(resolveTraits(spec.traits))} |`,
+    )
+  }
+  lines.push('')
+  lines.push('A weapon refuses a duplicate as well as an overflow: two scopes is not twice the')
+  lines.push('glass, and the additive fold would count it twice.')
+  lines.push('')
+  lines.push('---')
+  lines.push('')
+  lines.push('## 4. Body-worn kit')
   lines.push('')
   lines.push(
     'Marked `passive`: no action of its own, never listed in the action panel, and it',
   )
   lines.push(
-    'earns its pouch slot by what carrying it does. Nothing worn is unconditionally',
+    'earns its pouch slot by what carrying it does. Nothing worn or fitted is',
   )
-  lines.push('free — each piece either costs something outright or pays only in one stance.')
+  lines.push(
+    'unconditionally free — each piece either costs something outright or pays only in one',
+  )
+  lines.push('stance.')
   lines.push('')
   lines.push('| Item | Grants | Net effect |')
   lines.push('| --- | --- | --- |')
@@ -214,7 +260,7 @@ function build(): string {
     )
   }
   lines.push('')
-  lines.push('### 3.1 Consumables, for contrast')
+  lines.push('### 4.1 Consumables, for contrast')
   lines.push('')
   lines.push('| Item | AP | Effects |')
   lines.push('| --- | --- | --- |')
@@ -227,7 +273,7 @@ function build(): string {
   lines.push('')
   lines.push('---')
   lines.push('')
-  lines.push('## 4. Where the numbers come from')
+  lines.push('## 5. Where the numbers come from')
   lines.push('')
   lines.push('| Rule | Value | Source |')
   lines.push('| --- | --- | --- |')

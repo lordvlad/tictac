@@ -6,7 +6,7 @@
  *   bun run balance
  *   bun run balance -- --matches=200 --seed=1 --turnCap=60
  *   bun run balance -- --blue=shotgun --red=sniper
- *   bun run balance -- --redAmmo=ap --blueItems=scope:1,bipod:1
+ *   bun run balance -- --redAmmo=ap --blueItems=plate:1 --blueMods=scope,bipod
  *   bun run balance -- --json
  *
  * A mirror match measures the guns; an asymmetric one measures the difference
@@ -18,6 +18,7 @@
  * arguments or reading stdout.
  */
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
+import { AttachmentId } from '../src/core/Attachments'
 import { ItemId } from '../src/core/Items'
 import { formatReport, sweep } from '../src/sim/Balance'
 import type { SquadPlan } from '../src/sim/SimMatch'
@@ -59,7 +60,10 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   const weapons = arg(side)
   const ammo = arg(`${side}Ammo`)
   const items = arg(`${side}Items`)
-  if (weapons === undefined && ammo === undefined && items === undefined) return undefined
+  const mods = arg(`${side}Mods`)
+  if (weapons === undefined && ammo === undefined && items === undefined && mods === undefined) {
+    return undefined
+  }
 
   return {
     weapons: (weapons ?? 'rifle,gatling,sniper,shotgun')
@@ -67,6 +71,11 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
       .map((entry) => pick(WeaponId, side, entry.trim())),
     ammo: ammo === undefined ? AmmoId.Standard : pick(AmmoId, `${side}Ammo`, ammo),
     items: items === undefined ? undefined : itemsFor(side, items),
+    // A list, not a pouch: a rail either has one of a thing or it does not.
+    attachments:
+      mods === undefined
+        ? undefined
+        : mods.split(',').map((entry) => pick(AttachmentId, `${side}Mods`, entry.trim())),
   }
 }
 

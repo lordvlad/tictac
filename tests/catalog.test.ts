@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { STATUSES, StatusKind } from '../src/core/Arsenal'
+import { STATUSES, StatusKind, WEAPONS, WeaponId } from '../src/core/Arsenal'
+import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
 import { TRAITS, TraitId } from '../src/core/Traits'
 
@@ -38,11 +39,23 @@ describe('The catalogue is in step with the code', () => {
       expect(catalog).toContain(`\`${spec.id}\``)
       expect(catalog).toContain(spec.name)
     }
-    // The three routes a trait reaches a unit by. If one stops appearing, a
+    // The four routes a trait reaches a unit by. If one stops appearing, a
     // whole source has gone unlisted rather than one row being wrong.
     expect(catalog).toContain('born with')
     expect(catalog).toContain('wound')
     expect(catalog).toContain('worn (')
+    expect(catalog).toContain('fitted (')
+  })
+
+  test('every attachment appears, with its rail cost', () => {
+    for (const id of Object.values(AttachmentId)) {
+      expect(catalog).toContain(ATTACHMENTS[id].name)
+    }
+    // The point of the feature: rail space differs by weapon class, so the
+    // table has to show a weapon built as a platform beside one that is not.
+    for (const id of Object.values(WeaponId)) {
+      expect(catalog).toContain(`| ${WEAPONS[id].name} | ${WEAPONS[id].slots} |`)
+    }
   })
 
   test('no trait is listed as unreachable', () => {
@@ -51,13 +64,21 @@ describe('The catalogue is in step with the code', () => {
     expect(catalog).not.toContain('unreachable')
   })
 
+  test('a pocket and a rail are kept apart', () => {
+    // Scope, bipod and suppressor used to be pouch items. Anything that still
+    // lists them as carried is describing a version of the game that is gone.
+    expect(Object.values(ItemId)).not.toContain('scope')
+    expect(catalog).toContain('## 3. Weapon rails and fitted kit')
+    expect(catalog).toContain('## 4. Body-worn kit')
+  })
+
   test('every item appears, on the side of the line it belongs', () => {
     for (const id of Object.values(ItemId)) {
       expect(catalog).toContain(ITEMS[id].name)
     }
     // Worn kit is listed by what carrying it does; a consumable by what using
     // it does. Mixing them is how a passive item ends up looking usable.
-    expect(catalog).toContain('## 3. Worn kit')
+    expect(catalog).toContain('## 4. Body-worn kit')
     expect(catalog).toContain('Consumables, for contrast')
   })
 

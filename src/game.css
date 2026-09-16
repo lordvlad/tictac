@@ -1879,6 +1879,96 @@ canvas {
 }
 
 /* ---------------------------------------------------------------------------
+   Loadout Weapon Rail
+   --------------------------------------------------------------------------- */
+/* The weapon on the card, as an object with a rail rather than a class name.
+   One row of fixed height whatever the weapon is, so the sheets under the four
+   cards still line up. */
+.loadout-rail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 14px;
+  font-size: 9px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.loadout-rail-name {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-text);
+}
+
+/* Sized to the pips it holds, so a one-slot shotgun's strip is visibly a third
+   of a rifle's before the count beside it is read. */
+.loadout-slots {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+}
+
+/* An empty slot is drawn, not omitted: room left on the rail is the thing the
+   player is deciding about, and a gap would say nothing. */
+.loadout-slot {
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--hud-border);
+  background: none;
+}
+
+.loadout-slot.filled {
+  border-color: var(--hud-accent);
+  background: var(--hud-accent);
+}
+
+.loadout-rail-count {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--hud-dim);
+}
+
+/* Floored like the trait row, so a bare rail leaves the same height as a full
+   one and the cards stay level. */
+.loadout-fitted {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  min-height: 12px;
+}
+
+.loadout-fit {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--hud-accent);
+  cursor: help;
+}
+
+/* The default 16px glyph is twice the chip's type; matched to it instead, so
+   the name reads as the label of the icon rather than the other way round. */
+.loadout-fit .gi {
+  width: 9px;
+  height: 9px;
+}
+
+/* The empty state holds the row open and is not kit: dim, no glyph, no help
+   cursor over a phrase there is nothing to explain about. */
+.loadout-fit.none {
+  color: var(--hud-dim);
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------------------
    Loadout Character Sheets
    --------------------------------------------------------------------------- */
 /* Who the soldier is, under what they are carrying. The sheet is the widest
@@ -2069,5 +2159,31 @@ canvas {
   .loadout-traits {
     gap: 2px;
     min-height: 11px;
+  }
+
+  .loadout-rail {
+    gap: 4px;
+    min-height: 11px;
+    font-size: 7px;
+    line-height: 11px;
+  }
+
+  .loadout-slot {
+    width: 4px;
+    height: 4px;
+  }
+
+  .loadout-fitted {
+    gap: 2px;
+    min-height: 9px;
+  }
+
+  .loadout-fit {
+    font-size: 7px;
+  }
+
+  .loadout-fit .gi {
+    width: 7px;
+    height: 7px;
   }
 }

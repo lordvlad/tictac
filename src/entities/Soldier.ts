@@ -18,6 +18,7 @@ import {
   type TraitId,
   woundTraits,
 } from '../core/Traits'
+import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
 import { ITEMS, ItemId } from '../core/Items'
 import type { Grid, Tile } from '../core/Grid'
 import type { World } from '../ecs/World'
@@ -144,6 +145,11 @@ export class Soldier {
       const granted = ITEMS[id].traits
       if (granted) for (const trait of granted) this.traitIds.push(trait)
     }
+    // Whatever is bolted to the weapon in its hands, which travels with the
+    // weapon rather than with the soldier.
+    for (const id of this.weapon.attachments) {
+      for (const trait of ATTACHMENTS[id]?.traits ?? []) this.traitIds.push(trait)
+    }
     resolveTraitsInto(this.resolvedTraits, this.traitIds)
 
     const evasion = Math.max(0, this.sheet.evasion + this.resolvedTraits.evasion)
@@ -154,6 +160,12 @@ export class Soldier {
     const moveCostMul = 1 + this.resolvedTraits.moveCost
     if (this.traitsComponent.moveCostMul !== moveCostMul) {
       this.traitsComponent.moveCostMul = moveCostMul
+    }
+    if (this.traitsComponent.evasionCrouched !== this.resolvedTraits.evasionCrouched) {
+      this.traitsComponent.evasionCrouched = this.resolvedTraits.evasionCrouched
+    }
+    if (this.traitsComponent.damageTaken !== this.resolvedTraits.damageTaken) {
+      this.traitsComponent.damageTaken = this.resolvedTraits.damageTaken
     }
 
     // Trait ceilings sit on top of the sheet's own, and a unit at full health
@@ -215,9 +227,14 @@ export class Soldier {
     return this.resolvedTraits.rangeFalloff
   }
 
-  /** Fraction added to the damage this unit takes. Negative is plate helping. */
+  /**
+   * Fraction added to the damage this unit takes. Negative is plate helping.
+   *
+   * Replicated, like evasion: the peer shooting at this unit resolves the
+   * damage, so it has to be able to see the plate.
+   */
   get damageTaken(): number {
-    return this.resolvedTraits.damageTaken
+    return this.traitsComponent.damageTaken
   }
 
   /** True when firing does not give this unit's position away. */
@@ -246,9 +263,11 @@ export class Soldier {
    * is the only copy this side is allowed to trust.
    */
   get evasion(): number {
-    // The crouched half is added here rather than folded into the replicated
-    // number because it changes with stance, and stance already replicates.
-    return this.traitsComponent.evasion + (this.isCrouching ? this.resolvedTraits.evasionCrouched : 0)
+    // Both halves come from the replicated component, not from the local fold:
+    // for an enemy unit the fold is over this side's *stock* copy of their kit,
+    // so reading it would quietly ignore a bipod they are actually braced on.
+    const crouched = this.isCrouching ? this.traitsComponent.evasionCrouched : 0
+    return this.traitsComponent.evasion + crouched
   }
 
   /** True when no hit on this unit can be a critical. Replicated, as above. */
@@ -458,6 +477,29 @@ export class Soldier {
   equip(weaponId: WeaponId, ammoId: AmmoId): void {
     this.weaponComponent.equip(weaponId)
     this.ammoComponent.load(ammoId)
+    // A different weapon is a different rail: what was fitted to the last one
+    // is not in force any more.
+    this.refreshTraits()
+  }
+
+  /**
+   * Bolt an attachment onto the weapon in this soldier's hands.
+   *
+   * Returns false when the rail is full or one is already fitted. The trait
+   * fold follows immediately, so the effect is in force from the moment it
+   * goes on.
+   */
+  fitAttachment(id: AttachmentId): boolean {
+    if (!this.weapon.fit(id)) return false
+    this.refreshTraits()
+    return true
+  }
+
+  /** Take one off again, and stop its effect. */
+  unfitAttachment(id: AttachmentId): boolean {
+    if (!this.weapon.unfit(id)) return false
+    this.refreshTraits()
+    return true
   }
 
   /** Hunker down. A unit mid-stride has not stopped to do it. */

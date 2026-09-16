@@ -1,5 +1,6 @@
 import { Faction, RULES, SQUAD_SIZE } from '../config'
 import { AmmoId, type GrenadeId, GRENADES, ShotMode, type WeaponId } from '../core/Arsenal'
+import type { AttachmentId } from '../core/Attachments'
 import { NO_FX } from '../core/Combatant'
 import { rollSquadSheets } from '../core/Characters'
 import { type Grid, type Tile, tileEquals } from '../core/Grid'
@@ -26,6 +27,8 @@ export interface SquadPlan {
   ammo?: AmmoId
   grenades?: Partial<Record<GrenadeId, number>>
   items?: Partial<Record<ItemId, number>>
+  /** Fitted to every unit's weapon, as far as its class has room. */
+  attachments?: readonly AttachmentId[]
 }
 
 export interface MatchSetup {
@@ -143,6 +146,7 @@ export class SimMatch {
           Object.fromEntries(
             Object.values(ItemId).map((id) => [id, plan.items?.[id] ?? 0]),
           ) as Record<ItemId, number>,
+          plan.attachments ?? [],
         )
         this.units.push(unit)
         this.byFaction[faction].push(unit)

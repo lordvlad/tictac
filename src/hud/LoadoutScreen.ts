@@ -1,4 +1,5 @@
 import { AMMO, AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
+import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { rollSquadSheets, type CharacterSheet } from '../core/Characters'
 import { ITEMS, ItemId } from '../core/Items'
 import { resolveTraits, TRAITS, type TraitId } from '../core/Traits'
@@ -9,14 +10,18 @@ import {
   canAddItem,
   canEquipAmmo,
   canEquipWeapon,
+  canFitAttachment,
   defaultLoadout,
   addGrenade,
   addItem,
   equipAmmo,
   equipWeapon,
+  fitAttachment,
+  railSpace,
   remaining,
   removeGrenade,
   removeItem,
+  unfitAttachment,
   type SquadLoadout,
   type UnitLoadout,
 } from '../game/Loadout'
@@ -31,6 +36,7 @@ type LoadoutAction =
   | { kind: 'ammo'; id: AmmoId }
   | { kind: 'grenade'; id: GrenadeId; delta: number }
   | { kind: 'item'; id: ItemId; delta: number }
+  | { kind: 'attachment'; id: AttachmentId; delta: number }
   | { kind: 'deploy' }
 
 /**
@@ -128,6 +134,10 @@ export class LoadoutScreen {
         if (action.delta > 0) addItem(this.loadout, this.selected, action.id)
         else removeItem(this.loadout, this.selected, action.id)
         break
+      case 'attachment':
+        if (action.delta > 0) fitAttachment(this.loadout, this.selected, action.id)
+        else unfitAttachment(this.loadout, this.selected, action.id)
+        break
       case 'deploy':
         this.deployed.resolve(this.loadout)
         return
@@ -188,6 +198,9 @@ export class LoadoutScreen {
           .join('')}
         ${Object.values(ItemId)
           .map((id) => row(`item-${id}`, ITEMS[id].name, left.items[id]))
+          .join('')}
+        ${Object.values(AttachmentId)
+          .map((id) => row(`attachment-${id}`, ATTACHMENTS[id].name, left.attachments[id]))
           .join('')}
       </div>`
   }
@@ -267,6 +280,20 @@ export class LoadoutScreen {
             ),
           )
           .join('')}
+
+        <div class="loadout-section">Attachments</div>
+        ${Object.values(AttachmentId)
+          .map((id) =>
+            stepper(
+              `attachment-${id}`,
+              ATTACHMENTS[id].name,
+              unit.attachments.includes(id) ? 1 : 0,
+              canFitAttachment(this.loadout, this.selected, id),
+              { kind: 'attachment', id, delta: -1 },
+              { kind: 'attachment', id, delta: 1 },
+            ),
+          )
+          .join('')}
       </div>`
   }
 
@@ -308,6 +335,7 @@ export class LoadoutScreen {
               )
               .join('')}
           </div>
+          ${LoadoutScreen.railBlock(unit)}
           ${LoadoutScreen.sheetBlock(unit, this.sheets[index]!)}
         </div>`)
     }
@@ -323,15 +351,22 @@ export class LoadoutScreen {
    * soldier, and all four classes at once would bury the one number being
    * decided — the crate rows above already say what the alternatives are.
    *
-   * Traits granted by worn kit are listed beside the innate ones. Worn kit has
-   * no action panel row in combat, so this is the only place it explains
-   * itself.
+   * Traits granted by kit — worn or bolted on — are listed beside the innate
+   * ones. Neither has an action panel row in combat, so this is the only place
+   * they explain themselves.
    */
   private static sheetBlock(unit: UnitLoadout, sheet: CharacterSheet): string {
     const traits: { id: TraitId; worn: boolean }[] = sheet.traits.map((id) => ({ id, worn: false }))
     for (const id of Object.values(ItemId)) {
       if (unit.items[id] <= 0) continue
       for (const granted of ITEMS[id].traits ?? []) traits.push({ id: granted, worn: true })
+    }
+
+    // Fitted glass is in force the moment it goes on the rail, and this is the
+    // screen it is chosen on: a scope missing from the fold would leave Skill
+    // reading the number the unit had before the player fitted it.
+    for (const id of unit.attachments) {
+      for (const granted of ATTACHMENTS[id].traits) traits.push({ id: granted, worn: true })
     }
 
     // Every number here is what the unit will deploy with, traits folded in,
@@ -370,6 +405,41 @@ export class LoadoutScreen {
                   .join('')
           }
         </div>
+      </div>`
+  }
+
+  /**
+   * The weapon in this member's hands as a thing rather than a class: what it
+   * is, how much rail it has, and what is bolted to it.
+   *
+   * The empty pips carry the row: a shotgun with its one slot and a rifle with
+   * three read as different weapons before either count is read, which is what
+   * makes handing the glass to the sniper an obvious move.
+   */
+  private static railBlock(unit: UnitLoadout): string {
+    const { used, total } = railSpace(unit)
+    const pips = Array.from(
+      { length: total },
+      (_, at) => `<span class="loadout-slot ${at < used ? 'filled' : ''}"></span>`,
+    ).join('')
+
+    return `
+      <div class="loadout-rail">
+        <span class="loadout-rail-name">${WEAPONS[unit.weaponId].name}</span>
+        <span class="loadout-slots">${pips}</span>
+        <span class="loadout-rail-count">SLOTS ${used}/${total}</span>
+      </div>
+      <div class="loadout-fitted">
+        ${
+          unit.attachments.length === 0
+            ? '<span class="loadout-fit none">Bare rail</span>'
+            : unit.attachments
+                .map(
+                  (id) =>
+                    `<span class="loadout-fit" title="${ATTACHMENTS[id].description}">${icon(`attachment-${id}`)}${ATTACHMENTS[id].name}</span>`,
+                )
+                .join('')
+        }
       </div>`
   }
 }

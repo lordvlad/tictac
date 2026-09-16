@@ -57,7 +57,16 @@ graph TD
 - Intel Fog: opposing unit stats remain obfuscated until scouted or engaged. *(Planned —
   `ITEM-007`; enemy sheets are currently legible once aimed at.)*
 
-### 2.3 Cover & Stances
+### 2.3 Weapons, Rails & Kit
+- A weapon is a **thing, not a kind of thing**: it has a serial, and its fitted kit belongs
+  to it. Handing it to another soldier takes the glass along; pocket kit stays behind.
+- **Rail space depends on the class.** A service rifle is built as a platform; a hunting
+  shotgun has a bead and a barrel. Counts in the
+  [catalogue](status-and-trait-catalog.md).
+- A rail refuses a duplicate as well as an overflow, and swapping to a weapon with fewer
+  slots trims what no longer fits back into the crate.
+
+### 2.4 Cover & Stances
 - Cover is an accuracy penalty on the shot rather than an evasion bonus on the target, and it
   depends on stance as well as on what is being hidden behind: crouching in the open is worth
   something, crouching behind a wall a great deal. Values in `COVER`
@@ -65,7 +74,7 @@ graph TD
 - **Stances**: standing (ordinary mobility) versus crouched (cover is worth more, and some kit
   — the bipod — pays only while down).
 
-### 2.4 Ballistics, Armor, and Wounds
+### 2.5 Ballistics, Armor, and Wounds
 - **Hit roll**: the shooter's training with the weapon in hand against the target's evasion,
   less range, cover and statuses, all scaled by the shot mode.
 - **Armor & shred**: armour subtracts flat from each round, but only the share the round fails

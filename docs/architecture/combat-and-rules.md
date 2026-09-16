@@ -62,8 +62,21 @@ $$\text{crit}\% = \text{clamp}\Big(w_{\text{crit}} + S \cdot b_w\big(2\tfrac{d}{
 - A crit multiplies the round **before** armour subtracts, so plate blunts a critical hit with
   the same flat bite it takes out of an ordinary one rather than being bypassed.
 
-Current values for every trait, status and piece of kit named here live in the generated
-[status and trait catalogue](../design/gdd/status-and-trait-catalog.md).
+### Where a modifier comes from
+A unit's effective numbers are one additive fold over four sources, none of which knows
+about the others: the **character sheet** it was rolled with, **wounds** derived from its
+current health, **body-worn kit** in its pockets, and **attachments fitted to the weapon in
+its hands**. A weapon is an instance with a serial and a rail whose size depends on its
+class, so glass follows the rifle rather than the soldier — and swapping weapon drops what
+was on the old one.
+
+Only the properties an *enemy* has to read are replicated (`TraitsComponent`: evasion, its
+crouched half, crit immunity, step cost, damage taken). Everything a modifier does to its
+own unit is either folded locally or already inside the numbers an attack carries, because
+this side holds only a stock copy of the other squad's kit.
+
+Current values for every trait, status, attachment and piece of kit named here live in the
+generated [status and trait catalogue](../design/gdd/status-and-trait-catalog.md).
 
 ---
 

@@ -3,23 +3,22 @@ import { Faction, RULES, SQUAD_SIZE } from '../src/config'
 import { AmmoId, ShotMode, StatusKind, WeaponId } from '../src/core/Arsenal'
 import { effectiveWeapon, resolveDamage } from '../src/core/Ballistics'
 import { Grid } from '../src/core/Grid'
+import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
 import { TraitId, TRAITS, resolveTraits } from '../src/core/Traits'
 import { World } from '../src/ecs/World'
+import { TraitsComponent } from '../src/ecs/components'
 import { NO_FX } from '../src/core/Combatant'
 import { applyStatus, calculateHitChance, fireWeapon } from '../src/game/Combat'
 import { settleTurn } from '../src/game/Turn'
 import { Squads } from '../src/game/Squads'
 import { Faction as F } from '../src/config'
 
-/** Every passive piece, for the rules that should hold of all of them. */
-const PASSIVE = [
-  ItemId.NullweaveVest,
-  ItemId.Scope,
-  ItemId.Bipod,
-  ItemId.Suppressor,
-  ItemId.PlateCarrier,
-] as const
+/** Body-worn kit: it goes in a pocket and belongs to the soldier. */
+const WORN = [ItemId.NullweaveVest, ItemId.PlateCarrier] as const
+
+/** Weapon kit: it bolts to a rail and belongs to the weapon. */
+const FITTED = [AttachmentId.Scope, AttachmentId.Bipod, AttachmentId.Suppressor] as const
 
 function squad(): { world: World; grid: Grid; squads: Squads } {
   const world = new World()
@@ -31,15 +30,20 @@ function squad(): { world: World; grid: Grid; squads: Squads } {
   return { world, grid, squads: new Squads(world, grid, spawns) }
 }
 
-/** Kit a unit out and let its traits refold, as the loadout stamp does. */
+/** Put a piece of kit in a unit's pocket, as the loadout stamp does. */
 function give(soldier: Squads['soldiers'][number], item: ItemId): void {
   soldier.items[item] = 1
   soldier.refreshTraits()
 }
 
+/** Bolt a mod onto the weapon in a unit's hands. */
+function fit(soldier: Squads['soldiers'][number], id: AttachmentId): void {
+  expect(soldier.fitAttachment(id)).toBe(true)
+}
+
 describe('Worn kit', () => {
-  test('every passive piece is worn, not used, and grants something', () => {
-    for (const id of PASSIVE) {
+  test('every worn piece is worn, not used, and grants something', () => {
+    for (const id of WORN) {
       const spec = ITEMS[id]
       expect(spec.passive).toBe(true)
       // No action of its own: it would otherwise appear in the action panel as
@@ -48,12 +52,16 @@ describe('Worn kit', () => {
       expect(spec.traits?.length ?? 0).toBeGreaterThan(0)
     }
   })
-  test('nothing worn is unconditionally free', () => {
+  test('nothing worn or fitted is unconditionally free', () => {
     // Every piece either costs something outright or only pays while the unit
     // is doing something particular. A flat, free bonus would make the choice
     // of what to carry no choice at all.
-    for (const id of PASSIVE) {
-      const resolved = resolveTraits(ITEMS[id].traits ?? [])
+    const traitSets = [
+      ...WORN.map((id) => ITEMS[id].traits ?? []),
+      ...FITTED.map((id) => ATTACHMENTS[id].traits),
+    ]
+    for (const traits of traitSets) {
+      const resolved = resolveTraits(traits)
       const helps =
         resolved.accuracy > 0 ||
         resolved.accuracyCrouched > 0 ||
@@ -91,7 +99,7 @@ describe('A scope', () => {
     const scoped = squads.byFaction[F.Blue][1]!
     bare.equip(WeaponId.Rifle, AmmoId.Standard)
     scoped.equip(WeaponId.Rifle, AmmoId.Standard)
-    give(scoped, ItemId.Scope)
+    fit(scoped, AttachmentId.Scope)
 
     const bareFalloff = effectiveWeapon(bare, ShotMode.Snap).accuracyPerMetre
     const scopedFalloff = effectiveWeapon(scoped, ShotMode.Snap).accuracyPerMetre
@@ -108,7 +116,7 @@ describe('A scope', () => {
     const scoped = squads.byFaction[F.Blue][1]!
     const target = squads.byFaction[F.Red][0]!
     for (const unit of [bare, scoped]) unit.equip(WeaponId.Rifle, AmmoId.Standard)
-    give(scoped, ItemId.Scope)
+    fit(scoped, AttachmentId.Scope)
 
     const gainAt = (distance: number): number => {
       target.tile = { x: bare.tile.x, y: bare.tile.y + distance }
@@ -127,8 +135,7 @@ describe('A scope', () => {
     const { squads } = squad()
     const soldier = squads.byFaction[F.Blue][0]!
     soldier.equip(WeaponId.Rifle, AmmoId.Standard)
-    soldier.items[ItemId.Scope] = 1
-    // Three scopes is more than the pouch allows; the maths still has to hold.
+    // More glass than any rail would take; the maths still has to hold.
     soldier.sheet.traits.push(TraitId.Scoped, TraitId.Scoped, TraitId.Scoped)
     soldier.refreshTraits()
 
@@ -144,7 +151,7 @@ describe('A bipod', () => {
     const standingAim = soldier.proficiency
     const standingEvasion = soldier.evasion
 
-    give(soldier, ItemId.Bipod)
+    fit(soldier, AttachmentId.Bipod)
 
     expect(soldier.proficiency).toBe(standingAim)
     expect(soldier.evasion).toBe(standingEvasion)
@@ -158,7 +165,7 @@ describe('A bipod', () => {
     const { squads } = squad()
     const soldier = squads.byFaction[F.Blue][0]!
     soldier.equip(WeaponId.Rifle, AmmoId.Standard)
-    give(soldier, ItemId.Bipod)
+    fit(soldier, AttachmentId.Bipod)
     const standing = soldier.proficiency
 
     soldier.enterCover()
@@ -174,7 +181,7 @@ describe('A suppressor', () => {
     const bare = squads.byFaction[F.Blue][0]!
     const quiet = squads.byFaction[F.Blue][1]!
     for (const unit of [bare, quiet]) unit.equip(WeaponId.Sniper, AmmoId.Standard)
-    give(quiet, ItemId.Suppressor)
+    fit(quiet, AttachmentId.Suppressor)
 
     expect(quiet.silenced).toBe(true)
     expect(bare.silenced).toBe(false)
@@ -204,7 +211,7 @@ describe('A suppressor', () => {
       unit.equip(WeaponId.Rifle, AmmoId.Standard)
       unit.tile = { x: target.tile.x, y: target.tile.y - 3 }
     }
-    give(quiet, ItemId.Suppressor)
+    fit(quiet, AttachmentId.Suppressor)
 
     fireWeapon(grid, loud, target, NO_FX, squads.soldiers, ShotMode.Snap, [false])
     fireWeapon(grid, quiet, target, NO_FX, squads.soldiers, ShotMode.Snap, [false])
@@ -294,5 +301,42 @@ describe('A plate carrier', () => {
 
     expect(soldier.maxArmor).toBe(RULES.maxArmor)
     expect(soldier.armor).toBeLessThanOrEqual(soldier.maxArmor)
+  })
+})
+
+describe('What an enemy has to be able to read', () => {
+  /**
+   * The hole this closes: a shooter asks the *target* how hard it is to hit and
+   * how much damage it takes. For an enemy unit the local trait fold is over
+   * this side's stock copy of their kit, so reading the fold would ignore a
+   * bipod they are braced on and plate they are wearing. Both have to come off
+   * the replicated component.
+   */
+  test('a braced target\u2019s crouched evasion travels', () => {
+    const { world, squads } = squad()
+    const soldier = squads.byFaction[F.Red][0]!
+    fit(soldier, AttachmentId.Bipod)
+
+    const traits = world.getComponent(soldier.entityId, TraitsComponent)!
+    expect(traits.evasionCrouched).toBeGreaterThan(0)
+
+    // Standing in for a peer's update: the number arrives, nothing local is
+    // refolded, and the unit still has to report it.
+    soldier.enterCover()
+    const own = soldier.evasion
+    traits.evasionCrouched += 5
+    expect(soldier.evasion).toBe(own + 5)
+  })
+
+  test('a plated target\u2019s damage reduction travels', () => {
+    const { world, squads } = squad()
+    const soldier = squads.byFaction[F.Red][0]!
+    give(soldier, ItemId.PlateCarrier)
+
+    const traits = world.getComponent(soldier.entityId, TraitsComponent)!
+    expect(traits.damageTaken).toBeLessThan(0)
+
+    traits.damageTaken = -0.5
+    expect(soldier.damageTaken).toBe(-0.5)
   })
 })

@@ -14,10 +14,10 @@ grenade-smoke: smoke-bomb by darkzaitzev
 item-stim: syringe by sbed
 item-firstAid: first-aid-kit by delapouite
 item-nullweave: kevlar-vest by skoll
-item-scope: magnifying-glass by lorc
-item-bipod: gun-stock by delapouite
-item-suppressor: silenced by delapouite
 item-plate: armor-vest by lorc
+attachment-scope: magnifying-glass by lorc
+attachment-bipod: gun-stock by delapouite
+attachment-suppressor: silenced by delapouite
 ui-pool: cargo-crate by delapouite
 ui-deploy: check-mark by delapouite
 ui-shoot: targeting by lorc

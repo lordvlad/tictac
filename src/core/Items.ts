@@ -12,9 +12,6 @@ export const ItemId = {
   StimPack: 'stim',
   FirstAidKit: 'firstAid',
   NullweaveVest: 'nullweave',
-  Scope: 'scope',
-  Bipod: 'bipod',
-  Suppressor: 'suppressor',
   PlateCarrier: 'plate',
 } as const
 export type ItemId = (typeof ItemId)[keyof typeof ItemId]
@@ -77,30 +74,6 @@ export const ITEMS: Record<ItemId, ItemSpec> = {
     traits: [TraitId.Nullweave],
     passive: true,
   },
-  [ItemId.Scope]: {
-    id: ItemId.Scope,
-    name: 'Scope',
-    apCost: 0,
-    effects: [],
-    traits: [TraitId.Scoped],
-    passive: true,
-  },
-  [ItemId.Bipod]: {
-    id: ItemId.Bipod,
-    name: 'Bipod',
-    apCost: 0,
-    effects: [],
-    traits: [TraitId.Braced],
-    passive: true,
-  },
-  [ItemId.Suppressor]: {
-    id: ItemId.Suppressor,
-    name: 'Suppressor',
-    apCost: 0,
-    effects: [],
-    traits: [TraitId.Silenced],
-    passive: true,
-  },
   [ItemId.PlateCarrier]: {
     id: ItemId.PlateCarrier,
     name: 'Plate Carrier',
@@ -116,8 +89,5 @@ export const STARTING_ITEMS: Record<ItemId, number> = {
   [ItemId.StimPack]: 1,
   [ItemId.FirstAidKit]: 1,
   [ItemId.NullweaveVest]: 0,
-  [ItemId.Scope]: 0,
-  [ItemId.Bipod]: 0,
-  [ItemId.Suppressor]: 0,
   [ItemId.PlateCarrier]: 0,
 }

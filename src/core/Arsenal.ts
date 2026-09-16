@@ -7,6 +7,7 @@
  *
  * Stats are deliberately mutable: the debug panel edits these tables live.
  */
+import { ATTACHMENTS, type AttachmentId } from './Attachments'
 
 export const WeaponId = {
   Rifle: 'rifle',
@@ -16,9 +17,26 @@ export const WeaponId = {
 } as const
 export type WeaponId = (typeof WeaponId)[keyof typeof WeaponId]
 
+/**
+ * Serial numbers, so two rifles are two rifles.
+ *
+ * A counter rather than anything random: a weapon's identity has to survive a
+ * replay and a headless sweep, and nothing about it needs to be unguessable.
+ */
+let nextSerial = 1
+
 export abstract class Weapon {
   abstract readonly id: WeaponId
   abstract readonly name: string
+
+  /**
+   * This weapon, as distinct from its class.
+   *
+   * `WEAPONS` holds one template per class and every unit carries a clone, so
+   * a serial is what makes fitted glass belong to *that* rifle rather than to
+   * rifles in general.
+   */
+  readonly serial: number = nextSerial++
 
   apCost = 4
   baseAccuracy = 85
@@ -40,6 +58,17 @@ export abstract class Weapon {
    */
   critRangeBias = 0
 
+  /**
+   * Rail space, in slots.
+   *
+   * A service rifle is built to be hung with kit; a hunting shotgun has a bead
+   * and a barrel. This is where that difference lives.
+   */
+  slots = 1
+
+  /** What is currently bolted on. Never more than {@link slots} allows. */
+  attachments: AttachmentId[] = []
+
   maxClip = 6
   currentClip = 6
 
@@ -49,9 +78,56 @@ export abstract class Weapon {
     return mode === ShotMode.Burst ? 3 : 1
   }
 
+  /** How a person refers to this particular weapon. */
+  get label(): string {
+    return `${this.name} #${this.serial}`
+  }
+
+  /** Slots taken by what is already fitted. */
+  get slotsUsed(): number {
+    let used = 0
+    for (const id of this.attachments) used += ATTACHMENTS[id]?.slots ?? 1
+    return used
+  }
+
+  get slotsFree(): number {
+    return this.slots - this.slotsUsed
+  }
+
+  /**
+   * Is there room for one of these, and is one not already on?
+   *
+   * Duplicates are refused rather than stacked: two scopes on one rifle is not
+   * twice the glass, it is a mistake, and the trait fold would add it up twice.
+   */
+  canFit(id: AttachmentId): boolean {
+    const spec = ATTACHMENTS[id]
+    if (!spec || this.attachments.includes(id)) return false
+    return spec.slots <= this.slotsFree
+  }
+
+  fit(id: AttachmentId): boolean {
+    if (!this.canFit(id)) return false
+    this.attachments.push(id)
+    return true
+  }
+
+  unfit(id: AttachmentId): boolean {
+    const at = this.attachments.indexOf(id)
+    if (at < 0) return false
+    this.attachments.splice(at, 1)
+    return true
+  }
+
+  /**
+   * A new weapon of the same class and condition.
+   *
+   * Its own serial and its own rail: cloning a template is how a unit gets a
+   * weapon, and two units must not share one array of fitted kit.
+   */
   clone(): this {
     const copy = Object.create(Object.getPrototypeOf(this)) as this
-    Object.assign(copy, this)
+    Object.assign(copy, this, { serial: nextSerial++, attachments: [...this.attachments] })
     return copy
   }
 }
@@ -65,6 +141,8 @@ export class Rifle extends Weapon {
     this.baseAccuracy = 85
     this.maxClip = 15
     this.currentClip = 15
+    // Built as a platform: optic, grip, can.
+    this.slots = 3
     // A service rifle is accurate at any sane distance and has no favourite.
     this.critChance = 12
     this.critMultiplier = 1.5
@@ -92,6 +170,8 @@ export class Shotgun extends Weapon {
     this.maxRange = 12
     this.maxClip = 4
     this.currentClip = 4
+    // A bead and a barrel. Grandpa never needed a rail.
+    this.slots = 1
     // In someone's face a shell puts everything in one place; at the far end of
     // its short range the spread is all that arrives.
     this.critChance = 20
@@ -118,6 +198,8 @@ export class Sniper extends Weapon {
     this.maxRange = 40
     this.maxClip = 5
     this.currentClip = 5
+    // Purpose-built around its glass, with room for a bipod and a can.
+    this.slots = 3
     // A scope is what a crit is: aimed at a vital, from far enough away to be
     // taking the shot at all.
     this.critChance = 25
@@ -140,6 +222,9 @@ export class Gatling extends Weapon {
     this.damage = 35
     this.maxClip = 30
     this.currentClip = 30
+    // A bipod mount and little else: there is nowhere to put an optic on a
+    // weapon nobody aims.
+    this.slots = 2
     // Volume, not placement. What it does get comes from being close enough
     // that the cone still lands on one body.
     this.critChance = 5

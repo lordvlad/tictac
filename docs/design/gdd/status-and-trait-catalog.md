@@ -7,12 +7,13 @@ lastReviewed: "2026-09-16"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Traits.ts"
+  - "src/core/Attachments.ts"
   - "src/core/Items.ts"
   - "src/config.ts"
 relatedDocs:
   - "docs/architecture/combat-and-rules.md"
   - "docs/design/gdd/combat-mechanics.md"
-tags: ["statuses", "traits", "equipment", "reference", "generated"]
+tags: ["statuses", "traits", "equipment", "attachments", "reference", "generated"]
 ---
 
 # GDD: Status, Trait & Worn Kit Catalogue
@@ -56,9 +57,9 @@ be born with the same property a piece of kit grants.
 | `nullweave` | Nullweave | -3 evasion, cannot be crit | worn (Nullweave Vest) |
 | `limping` | Limping | -2 max AP, +50% step cost | wound |
 | `concussed` | Concussed | -8 accuracy, -4 evasion | wound |
-| `scoped` | Scoped | -5 accuracy, -35% range falloff | worn (Scope) |
-| `braced` | Braced | +10 accuracy crouched, +6 evasion crouched | worn (Bipod) |
-| `silenced` | Silenced | -0.3 crit multiplier, firing does not reveal | worn (Suppressor) |
+| `scoped` | Scoped | -5 accuracy, -35% range falloff | fitted (Scope) |
+| `braced` | Braced | +10 accuracy crouched, +6 evasion crouched | fitted (Bipod) |
+| `silenced` | Silenced | -0.3 crit multiplier, firing does not reveal | fitted (Suppressor) |
 | `plated` | Plated | -4 evasion, +6 armour, -15% damage taken, +15% step cost | worn (Plate Carrier) |
 
 ### 2.1 Conditional effects
@@ -69,21 +70,43 @@ changes constantly and already replicates.
 
 ---
 
-## 3. Worn kit
+## 3. Weapon rails and fitted kit
+
+A rail belongs to a weapon, not to a soldier: hand the rifle over and its glass goes
+with it. Rail space is a property of the weapon class - a service rifle is built as a
+platform, a hunting shotgun has a bead and a barrel.
+
+| Weapon | Slots |
+| --- | --- |
+| Rifle | 3 |
+| Shotgun | 1 |
+| Sniper Rifle | 3 |
+| Gatling | 2 |
+
+| Attachment | Slots | Grants | Net effect |
+| --- | --- | --- | --- |
+| Scope | 1 | Scoped | -5 accuracy, -35% range falloff |
+| Bipod | 1 | Braced | +10 accuracy crouched, +6 evasion crouched |
+| Suppressor | 1 | Silenced | -0.3 crit multiplier, firing does not reveal |
+
+A weapon refuses a duplicate as well as an overflow: two scopes is not twice the
+glass, and the additive fold would count it twice.
+
+---
+
+## 4. Body-worn kit
 
 Marked `passive`: no action of its own, never listed in the action panel, and it
-earns its pouch slot by what carrying it does. Nothing worn is unconditionally
-free — each piece either costs something outright or pays only in one stance.
+earns its pouch slot by what carrying it does. Nothing worn or fitted is
+unconditionally free — each piece either costs something outright or pays only in one
+stance.
 
 | Item | Grants | Net effect |
 | --- | --- | --- |
 | Nullweave Vest | Nullweave | -3 evasion, cannot be crit |
-| Scope | Scoped | -5 accuracy, -35% range falloff |
-| Bipod | Braced | +10 accuracy crouched, +6 evasion crouched |
-| Suppressor | Silenced | -0.3 crit multiplier, firing does not reveal |
 | Plate Carrier | Plated | -4 evasion, +6 armour, -15% damage taken, +15% step cost |
 
-### 3.1 Consumables, for contrast
+### 4.1 Consumables, for contrast
 
 | Item | AP | Effects |
 | --- | --- | --- |
@@ -92,7 +115,7 @@ free — each piece either costs something outright or pays only in one stance.
 
 ---
 
-## 4. Where the numbers come from
+## 5. Where the numbers come from
 
 | Rule | Value | Source |
 | --- | --- | --- |

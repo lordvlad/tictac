@@ -61,10 +61,10 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | `ArmorComponent` | Current and maximum armour. Worn plate raises the maximum | Yes |
 | `ActionPointsComponent` | Points left and the ceiling, plus `spentThisTurn` and `exhaustedTurns` — what a unit *used*, which is what exhaustion is judged on | Yes |
 | `StanceComponent` | Crouched, moving, the route being walked, corner peek, and `firedThisTurn` — a muzzle flash gives a position away until the unit's own next turn | Yes |
-| `WeaponComponent` | Equipped weapon id; the spec itself lives in `WEAPONS` | Yes |
+| `WeaponComponent` | Equipped weapon id; the instance it clones carries the serial and the fitted rail. Only the id replicates — a peer's fitted kit shows up in the numbers they resolve, never in this side's copy | Yes (id only) |
 | `AmmoComponent` | Loaded round id; clip state lives on the weapon instance | Yes |
 | `InventoryComponent` | Grenades carried, by kind | Yes |
-| `ItemsComponent` | Items carried, by id, including worn kit | Yes |
+| `ItemsComponent` | Items carried, by id, including body-worn kit. Weapon attachments are *not* here — a rail belongs to the weapon | Yes |
 | `SightedComponent` | Whether the side whose turn it is can see this unit. Fog writes it, the planners and HUD read it, a view mirrors it onto a mesh | Local (per-peer) |
 | `TraitsComponent` | The trait-derived numbers an *enemy* must read: `evasion`, `critImmune`, `moveCostMul`. Everything a trait does to its own unit stays local or travels inside a resolved attack | Yes |
 | `StatusesComponent` | Turn-decaying statuses, each with `turnsLeft` and `stacks`; absent stacks mean one, so a peer omitting the count cannot disarm a status | Yes |

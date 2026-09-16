@@ -3,6 +3,7 @@ import { effectiveMaxAp, type StatusState } from '../core/Ballistics'
 import type { Combatant } from '../core/Combatant'
 import type { CharacterSheet } from '../core/Characters'
 import type { Tile } from '../core/Grid'
+import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
 import { ITEMS, ItemId } from '../core/Items'
 import {
   NO_TRAITS,
@@ -59,9 +60,14 @@ export class SimUnit implements Combatant {
     tile: Tile,
     grenades: Record<GrenadeId, number>,
     items: Record<ItemId, number>,
+    attachments: readonly AttachmentId[] = [],
   ) {
     // Cloned, because a clip is per-unit state and `WEAPONS` is the shared table.
     this.weapon = WEAPONS[weaponId].clone()
+    // Fitted before the first fold, so the rail is in force from the off. The
+    // weapon refuses anything its class has no room for, exactly as it does in
+    // a match.
+    for (const id of attachments) this.weapon.fit(id)
     this.ammo = AMMO[ammoId]
     this.tile = { ...tile }
     this.grenades = { ...grenades }
@@ -97,6 +103,9 @@ export class SimUnit implements Combatant {
       if ((this.items[id] ?? 0) <= 0) continue
       const granted = ITEMS[id].traits
       if (granted) for (const trait of granted) this.traitIds.push(trait)
+    }
+    for (const id of this.weapon.attachments) {
+      for (const trait of ATTACHMENTS[id]?.traits ?? []) this.traitIds.push(trait)
     }
     resolveTraitsInto(this.resolved, this.traitIds)
   }

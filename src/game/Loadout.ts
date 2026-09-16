@@ -1,4 +1,5 @@
-import { AmmoId, GrenadeId, WeaponId } from '../core/Arsenal'
+import { AmmoId, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
+import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { ItemId } from '../core/Items'
 import type { Soldier } from '../entities/Soldier'
 
@@ -13,12 +14,18 @@ import type { Soldier } from '../entities/Soldier'
  * item by forgetting a decrement.
  */
 
-/** One squad member's chosen kit. */
+/**
+ * One squad member's chosen kit.
+ *
+ * Attachments are a list rather than a count map: a rail either carries one of
+ * a thing or it does not, and the weapon refuses a second of the same kind.
+ */
 export interface UnitLoadout {
   weaponId: WeaponId
   ammoId: AmmoId
   grenades: Record<GrenadeId, number>
   items: Record<ItemId, number>
+  attachments: AttachmentId[]
 }
 
 /** What the whole squad has to share out, by id. */
@@ -27,6 +34,7 @@ export interface Inventory {
   ammo: Record<AmmoId, number>
   grenades: Record<GrenadeId, number>
   items: Record<ItemId, number>
+  attachments: Record<AttachmentId, number>
 }
 
 /** The squad's kit, one entry per `squadIndex`. */
@@ -64,10 +72,14 @@ export const DEMO_INVENTORY: Inventory = {
     // Fewer of the passive pieces than there are soldiers, so kitting one out
     // is a decision about which one rather than a formality.
     [ItemId.NullweaveVest]: 2,
-    [ItemId.Scope]: 2,
-    [ItemId.Bipod]: 2,
-    [ItemId.Suppressor]: 2,
     [ItemId.PlateCarrier]: 2,
+  },
+  // Two of each mod against ten rail slots across the squad: enough to make
+  // fitting one a choice about which weapon deserves it.
+  attachments: {
+    [AttachmentId.Scope]: 2,
+    [AttachmentId.Bipod]: 2,
+    [AttachmentId.Suppressor]: 2,
   },
 }
 
@@ -85,11 +97,9 @@ export function defaultLoadout(): SquadLoadout {
       [ItemId.StimPack]: 0,
       [ItemId.FirstAidKit]: 0,
       [ItemId.NullweaveVest]: 0,
-      [ItemId.Scope]: 0,
-      [ItemId.Bipod]: 0,
-      [ItemId.Suppressor]: 0,
       [ItemId.PlateCarrier]: 0,
     },
+    attachments: [],
   }))
 }
 
@@ -100,6 +110,7 @@ export function remaining(loadout: SquadLoadout, pool: Inventory = DEMO_INVENTOR
     ammo: { ...pool.ammo },
     grenades: { ...pool.grenades },
     items: { ...pool.items },
+    attachments: { ...pool.attachments },
   }
 
   for (const unit of loadout) {
@@ -107,12 +118,16 @@ export function remaining(loadout: SquadLoadout, pool: Inventory = DEMO_INVENTOR
     left.ammo[unit.ammoId] -= 1
     for (const kind of Object.values(GrenadeId)) left.grenades[kind] -= unit.grenades[kind] ?? 0
     for (const id of Object.values(ItemId)) left.items[id] -= unit.items[id] ?? 0
+    for (const id of unit.attachments) left.attachments[id] -= 1
   }
 
   for (const id of Object.values(WeaponId)) left.weapons[id] = Math.max(0, left.weapons[id])
   for (const id of Object.values(AmmoId)) left.ammo[id] = Math.max(0, left.ammo[id])
   for (const id of Object.values(GrenadeId)) left.grenades[id] = Math.max(0, left.grenades[id])
   for (const id of Object.values(ItemId)) left.items[id] = Math.max(0, left.items[id])
+  for (const id of Object.values(AttachmentId)) {
+    left.attachments[id] = Math.max(0, left.attachments[id])
+  }
 
   return left
 }
@@ -129,6 +144,16 @@ export function itemsCarried(unit: UnitLoadout): number {
   let total = 0
   for (const id of Object.values(ItemId)) total += unit.items[id] ?? 0
   return total
+}
+
+/**
+ * The rail this member is carrying: how much of it is spoken for, and how big
+ * it is. Read off the weapon class, since that is where slots live.
+ */
+export function railSpace(unit: UnitLoadout): { used: number; total: number } {
+  let used = 0
+  for (const id of unit.attachments) used += ATTACHMENTS[id].slots
+  return { used, total: WEAPONS[unit.weaponId].slots }
 }
 
 /** Keeping the weapon you already hold is always allowed, spare or not. */
@@ -150,7 +175,22 @@ export function equipWeapon(
   pool?: Inventory,
 ): void {
   if (!canEquipWeapon(loadout, index, weaponId, pool)) return
-  loadout[index]!.weaponId = weaponId
+  const unit = loadout[index]!
+  unit.weaponId = weaponId
+
+  // Trading three slots of rifle for one of shotgun cannot leave two mods
+  // hanging off nothing. The overflow is dropped from the end, so the mods
+  // chosen first survive the swap, and no refund is needed: `remaining` counts
+  // what is listed, so anything dropped is back in the crate by definition.
+  const total = WEAPONS[weaponId].slots
+  let used = 0
+  for (let at = 0; at < unit.attachments.length; at++) {
+    used += ATTACHMENTS[unit.attachments[at]!].slots
+    if (used > total) {
+      unit.attachments.length = at
+      return
+    }
+  }
 }
 
 export function canEquipAmmo(
@@ -231,18 +271,62 @@ export function removeItem(loadout: SquadLoadout, index: number, id: ItemId): vo
 }
 
 /**
+ * Room on the rail, one in the crate, and not already fitted.
+ *
+ * Duplicates are refused for the same reason the weapon itself refuses them: a
+ * second scope is not more glass, and the trait fold would count it twice.
+ */
+export function canFitAttachment(
+  loadout: SquadLoadout,
+  index: number,
+  id: AttachmentId,
+  pool?: Inventory,
+): boolean {
+  const unit = loadout[index]
+  if (!unit || unit.attachments.includes(id)) return false
+  const rail = railSpace(unit)
+  if (ATTACHMENTS[id].slots > rail.total - rail.used) return false
+  return remaining(loadout, pool).attachments[id] > 0
+}
+
+export function fitAttachment(
+  loadout: SquadLoadout,
+  index: number,
+  id: AttachmentId,
+  pool?: Inventory,
+): void {
+  if (!canFitAttachment(loadout, index, id, pool)) return
+  loadout[index]!.attachments.push(id)
+}
+
+export function unfitAttachment(loadout: SquadLoadout, index: number, id: AttachmentId): void {
+  const unit = loadout[index]
+  if (!unit) return
+  const at = unit.attachments.indexOf(id)
+  if (at < 0) return
+  unit.attachments.splice(at, 1)
+}
+
+/**
  * Stamp a chosen kit onto a soldier.
  *
  * Every grenade and item kind is written, zeros included: a fresh
  * `InventoryComponent` carries one of each grenade and `ItemsComponent` starts
  * from `STARTING_ITEMS`, so anything left unwritten keeps a default the player
  * never asked for.
+ *
+ * Attachments go on last, and only through the soldier: `equip` hands the unit
+ * a fresh clone of the weapon template with a bare rail, so nothing fitted
+ * before the swap can survive it.
  */
 export function applyUnitLoadout(soldier: Soldier, unit: UnitLoadout): void {
   soldier.equip(unit.weaponId, unit.ammoId)
   for (const kind of Object.values(GrenadeId)) soldier.grenades[kind] = unit.grenades[kind] ?? 0
   for (const id of Object.values(ItemId)) soldier.items[id] = unit.items[id] ?? 0
   // The pouch decides which worn gear is in force, so the traits it grants are
-  // only known once it has been stamped.
+  // only known once it has been stamped. `equip` and every `fitAttachment`
+  // refold as well, which is why the pouch is written before the rail: each
+  // refold has to see the finished kit.
   soldier.refreshTraits()
+  for (const id of unit.attachments) soldier.fitAttachment(id)
 }

@@ -31,12 +31,29 @@ export class TraitsComponent extends Component {
      * has, but gear that slowed a unit down would not be.
      */
     public moveCostMul: number = 1,
+    /**
+     * Evasion that only applies while the unit is crouched.
+     *
+     * Separate from `evasion` because it comes and goes with stance, and
+     * replicated for the same reason the flat part is: a shooter asks the
+     * *target* how hard it is to hit, and a bipod on the far side is fitted to
+     * a weapon this side only has a stock copy of.
+     */
+    public evasionCrouched: number = 0,
+    /** Fraction added to incoming damage — worn plate taking a share off. */
+    public damageTaken: number = 0,
   ) {
     super()
   }
 
   serialize(): Record<string, unknown> {
-    return { evasion: this.evasion, critImmune: this.critImmune, moveCostMul: this.moveCostMul }
+    return {
+      evasion: this.evasion,
+      critImmune: this.critImmune,
+      moveCostMul: this.moveCostMul,
+      evasionCrouched: this.evasionCrouched,
+      damageTaken: this.damageTaken,
+    }
   }
 
   deserialize(data: Record<string, unknown>): void {
@@ -45,5 +62,7 @@ export class TraitsComponent extends Component {
     if (typeof data.moveCostMul === 'number' && data.moveCostMul > 0) {
       this.moveCostMul = data.moveCostMul
     }
+    if (typeof data.evasionCrouched === 'number') this.evasionCrouched = data.evasionCrouched
+    if (typeof data.damageTaken === 'number') this.damageTaken = data.damageTaken
   }
 }
