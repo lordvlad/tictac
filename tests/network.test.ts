@@ -89,6 +89,10 @@ describe('Command transport', () => {
       targetIndex: 2,
       mode: ShotMode.Aimed,
       rolls: [true, false],
+      // The number the receiver checks its own state against. A shot that
+      // missed carries no damage to disagree about, so without this a whole
+      // class of divergence is unobservable.
+      chance: 64,
       hits: [
         { faction: Faction.Red, index: 2, damage: 34, armorShred: 5, status: null, crit: true },
         {

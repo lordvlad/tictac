@@ -50,7 +50,26 @@ export type NetworkMessage =
   | { type: 'init'; seed: number; seedLabel: string; protocol: number; build: string }
   | { type: 'hello'; protocol: number; build: string }
   | { type: 'moveUnit'; faction: Faction; squadIndex: number; path: { x: number; y: number }[] }
-  | { type: 'fireShot'; shooterFaction: Faction; shooterIndex: number; targetFaction: Faction; targetIndex: number; mode: ShotMode; rolls: boolean[]; hits: WireHit[] }
+  | {
+      type: 'fireShot'
+      shooterFaction: Faction
+      shooterIndex: number
+      targetFaction: Faction
+      targetIndex: number
+      mode: ShotMode
+      rolls: boolean[]
+      hits: WireHit[]
+      /**
+       * The hit chance the sender resolved against.
+       *
+       * Sent for one reason: it is the number the receiver can check. Rounds
+       * that missed carry no damage to disagree about, and the chance is the
+       * term every bug of this class has moved — target evasion, cover, a
+       * defensive trait the shooter could not see. Optional, so a peer that
+       * predates the check is merely unverifiable rather than refused.
+       */
+      chance?: number
+    }
   | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number }; areaRadius: number; hits: WireHit[] }
   | { type: 'reload'; faction: Faction; squadIndex: number }
   | { type: 'toggleCover'; faction: Faction; squadIndex: number }

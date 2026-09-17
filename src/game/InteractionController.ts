@@ -10,6 +10,7 @@ import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
 import { buildHudModel, type HudIntent } from '../hud/HudModel'
 import { applyHitEffects, calculateHitChance, type ResolvedHit } from './Combat'
+import { reportDivergence, shadowShot, shadowThrow } from './Divergence'
 import { toWireHits, Recorder, type RecordingHeader } from './Recording'
 import { settleTurn } from './Turn'
 import type { OffscreenPortraits } from '../render/Portraits'
@@ -435,6 +436,7 @@ export class InteractionController {
               mode: intent.mode,
               rolls: shotData.result.rolls,
               hits: toWireHits(shotData.result.hits),
+              chance: shotData.result.hitChance,
             })
           }
         }
@@ -558,6 +560,21 @@ export class InteractionController {
         const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
         const target = this.squads.byFaction[msg.targetFaction][msg.targetIndex]
         if (!shooter || !target) break
+        // Checked before applying, because the shadow needs the state the shot
+        // was fired at. The peer's numbers are still what lands.
+        reportDivergence(
+          `${shooter.name}'s shot at ${target.name}`,
+          shadowShot(
+            this.battlefield.grid,
+            shooter,
+            target,
+            this.squads.soldiers,
+            msg.mode,
+            msg.rolls,
+            msg.hits,
+            msg.chance,
+          ),
+        )
         this.combatSystem.replayShot(shooter, target, msg.rolls, this.fromWireHits(msg.hits))
         this.afterCombat()
         break
@@ -565,6 +582,19 @@ export class InteractionController {
       case 'throwGrenade': {
         const thrower = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
         if (!thrower) break
+        // Worth more than the shot check: a thrower resolves damage for
+        // everybody in the blast, including this side's own squad.
+        reportDivergence(
+          `${thrower.name}'s ${msg.kind}`,
+          shadowThrow(
+            this.battlefield.grid,
+            thrower,
+            msg.targetTile,
+            msg.kind,
+            this.squads.soldiers,
+            msg.hits,
+          ),
+        )
         const hits = this.fromWireHits(msg.hits)
         // Applied before the FX so a death animation is not overwritten by a
         // flinch; the indicators read their numbers from the message either way.

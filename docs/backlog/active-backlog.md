@@ -326,7 +326,7 @@ separate from it.
 ### [ITEM-020] Shadow Resolution & Divergence Detection
 **Type:** Refactor / Architecture  
 **Priority:** P1  
-**Status:** Ready  
+**Status:** In Progress — landed for shots and grenades; see the note on what is not exercised  
 **Milestone:** M2 — Tactical Depth  
 
 #### Why
@@ -378,10 +378,21 @@ Turn silent wrongness into a loud error, without changing the contract.
 - `tests/network.test.ts`
 
 #### Acceptance Criteria
-- [ ] A received `fireShot` is re-derived locally and compared; agreement is silent.
-- [ ] A deliberately unreplicated defensive property makes the comparison fire, in a test.
-- [ ] A received `throwGrenade` is compared per victim, including the receiver's own units.
-- [ ] The comparison consumes no match randomness and changes no applied outcome.
+- [x] A received `fireShot` is re-derived locally and compared; agreement is silent.
+- [x] A deliberately unreplicated defensive property makes the comparison fire, in a test.
+      Proven red the useful way: the first implementation rebuilt the unit from its sheet and
+      kit, which re-folds its traits and therefore could not see a replicated property at all.
+      The test failed, and the shadow became a delegate over the live unit instead.
+- [x] A received `throwGrenade` is compared per victim, including the receiver's own units.
+- [x] The comparison consumes no match randomness and changes no applied outcome — the crit
+      outcomes are replayed from the sender's own flags, and a test snapshots every unit's hp,
+      armour, AP, clip, statuses and reveal state across a shadow run.
+- [ ] Observed live between two peers. Blocked on tooling, not on code: the browser device is
+      failing with a filesystem `ELOOP` this session and headful Chrome has no X server, so a
+      two-tab run over the signalling broker was not possible. The two call sites in
+      `InteractionController` are typechecked but unexercised; a headless replay runner over a
+      recorded intent stream would close this without a browser at all, since playback already
+      goes through the same remote path.
 
 ---
 
