@@ -14,6 +14,7 @@
   "item-firstAid": "delapouite/first-aid-kit",
   "item-nullweave": "skoll/kevlar-vest",
   "item-plate": "lorc/armor-vest",
+  "item-repair": "lorc/auto-repair",
   "attachment-scope": "lorc/magnifying-glass",
   "attachment-bipod": "delapouite/gun-stock",
   "attachment-suppressor": "delapouite/silenced",

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { STATUSES, StatusKind, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
+import { UtilityId } from '../src/core/Characters'
 import { TRAITS, TraitId } from '../src/core/Traits'
 
 const CATALOG = 'docs/design/gdd/status-and-trait-catalog.md'
@@ -67,6 +68,22 @@ describe('The catalogue is in step with the code', () => {
       .filter((line) => Object.values(TRAITS).some((spec) => line.startsWith(`| \`${spec.id}\``)))
     expect(traitRows).toHaveLength(Object.keys(TRAITS).length)
     for (const row of traitRows) expect(row).not.toContain('| — |')
+  })
+
+  test("an item's requirement is printed, so a refused + has a stated reason", () => {
+    // The gate is the one thing about a consumable a player cannot discover by
+    // using it: below the bar there is nothing to use.
+    for (const spec of Object.values(ITEMS)) {
+      if (spec.minIntelligence === undefined) continue
+      expect(catalog).toContain(`Intelligence ${spec.minIntelligence}`)
+    }
+  })
+
+  test('every utility discipline says what it scales', () => {
+    for (const id of Object.values(UtilityId)) {
+      const name = id[0]!.toUpperCase() + id.slice(1)
+      expect(catalog).toContain(`| ${name} |`)
+    }
   })
 
   test('no trait is listed as unreachable', () => {

@@ -10,12 +10,20 @@ import {
   WeaponId,
 } from '../core/Arsenal'
 import { effectiveMaxAp, type StatusState } from '../core/Ballistics'
-import { characterSheet, type CharacterSheet, derive, type DerivedStats } from '../core/Characters'
+import {
+  characterSheet,
+  type CharacterSheet,
+  derive,
+  type DerivedStats,
+  UtilityId,
+} from '../core/Characters'
 import { Rng } from '../core/rng'
 import {
   NO_TRAITS,
   type ResolvedTraits,
-  resolveTraitsInto,
+  resolveSourcedInto,
+  type SourcedTrait,
+  TraitSource,
   type TraitId,
   woundTraits,
 } from '../core/Traits'
@@ -89,7 +97,9 @@ export class Soldier {
 
   /** Sheet plus carried gear, refolded whenever either could have changed. */
   private readonly resolvedTraits: ResolvedTraits = { ...NO_TRAITS }
-  private readonly traitIds: TraitId[] = []
+  /** The same fold over gear alone, for the rules that must tell it apart. */
+  private readonly gearTraits: ResolvedTraits = { ...NO_TRAITS }
+  private readonly sourcedTraits: SourcedTrait[] = []
   private readonly traitsComponent: TraitsComponent
 
   constructor(
@@ -139,7 +149,7 @@ export class Soldier {
     this.statusesComponent = world.addComponent(this.entityId, new StatusesComponent())
     this.sighted = world.addComponent(this.entityId, new SightedComponent())
     this.traitsComponent = world.addComponent(this.entityId, new TraitsComponent())
-    this.stampThrowRange()
+    this.stampGrenades()
     this.refreshTraits()
 
   }
@@ -153,27 +163,37 @@ export class Soldier {
    * gear does.
    */
   refreshTraits(): void {
-    this.traitIds.length = 0
-    for (const id of this.sheet.traits) this.traitIds.push(id)
-    for (const id of woundTraits(this.health.hp, this.health.maxHp)) this.traitIds.push(id)
+    this.sourcedTraits.length = 0
+    for (const id of this.sheet.traits) {
+      this.sourcedTraits.push({ id, source: TraitSource.Innate })
+    }
+    for (const id of woundTraits(this.health.hp, this.health.maxHp)) {
+      this.sourcedTraits.push({ id, source: TraitSource.Wound })
+    }
     for (const id of Object.values(ItemId)) {
       if ((this.items[id] ?? 0) <= 0) continue
       const granted = ITEMS[id].traits
-      if (granted) for (const trait of granted) this.traitIds.push(trait)
+      if (granted) for (const trait of granted) {
+        this.sourcedTraits.push({ id: trait, source: TraitSource.Gear })
+      }
     }
     // Whatever is bolted to the weapon in its hands, which travels with the
     // weapon rather than with the soldier.
     for (const id of this.weapon.attachments) {
-      for (const trait of ATTACHMENTS[id]?.traits ?? []) this.traitIds.push(trait)
+      for (const trait of ATTACHMENTS[id]?.traits ?? []) {
+        this.sourcedTraits.push({ id: trait, source: TraitSource.Gear })
+      }
     }
-    resolveTraitsInto(this.resolvedTraits, this.traitIds)
+    resolveSourcedInto(this.resolvedTraits, this.sourcedTraits)
+    // Gear's share on its own, because Strength cancels that and not a limp.
+    resolveSourcedInto(this.gearTraits, this.sourcedTraits, TraitSource.Gear)
 
     const evasion = Math.max(0, this.derived.evasion + this.resolvedTraits.evasion)
     if (this.traitsComponent.evasion !== evasion) this.traitsComponent.evasion = evasion
     if (this.traitsComponent.critImmune !== this.resolvedTraits.critImmune) {
       this.traitsComponent.critImmune = this.resolvedTraits.critImmune
     }
-    const moveCostMul = 1 + this.resolvedTraits.moveCost
+    const moveCostMul = 1 + this.resolvedTraits.moveCost - this.gearMoveRelief
     if (this.traitsComponent.moveCostMul !== moveCostMul) {
       this.traitsComponent.moveCostMul = moveCostMul
     }
@@ -204,7 +224,7 @@ export class Soldier {
         : Math.min(this.armorComponent.armor, maxArmor)
     }
 
-    const maxAp = this.derived.maxAp + this.resolvedTraits.maxAp
+    const maxAp = this.derived.maxAp + this.resolvedTraits.maxAp + this.gearApRelief
     if (this.actionPoints.maxAp !== maxAp) {
       const wasFull = this.actionPoints.ap >= this.actionPoints.maxAp
       this.actionPoints.maxAp = maxAp
@@ -223,14 +243,14 @@ export class Soldier {
   adoptSheet(sheet: CharacterSheet): void {
     this.sheet = sheet
     this.derived = derive(sheet)
-    this.stampThrowRange()
+    this.stampGrenades()
     this.refreshTraits()
     this.health.hp = this.health.maxHp
     this.actionPoints.ap = this.actionPoints.maxAp
   }
 
   /**
-   * Write this character's reach onto their own grenades.
+   * Write this character's reach and training onto their own grenades.
    *
    * Stamped into the per-unit specs rather than added at the throw site, so
    * the one number every consumer already reads - the planner's preview, the
@@ -240,13 +260,43 @@ export class Soldier {
    *
    * Floored at a tile: the weakest character can still throw, badly.
    */
-  private stampThrowRange(): void {
+  private stampGrenades(): void {
+    const demolitions = 1 + (this.sheet.utility[UtilityId.Demolitions] ?? 0) / 100
     for (const kind of Object.values(GrenadeId)) {
-      this.grenadeSpecsComponent.specs[kind].throwRange = Math.max(
-        1,
-        GRENADES[kind].throwRange + this.derived.throwRange,
-      )
+      const base = GRENADES[kind]
+      const spec = this.grenadeSpecsComponent.specs[kind]
+      spec.throwRange = Math.max(1, base.throwRange + this.derived.throwRange)
+      // Demolitions is training, so it shapes the charge rather than the arm.
+      // A radius is tiles on a grid: rounded, and never below the tile the
+      // grenade landed on, or a trained thrower could produce a dud.
+      spec.areaRadius = Math.max(1, Math.round(base.areaRadius * demolitions))
+      spec.armorShred = Math.max(0, Math.round(base.armorShred * demolitions))
     }
+  }
+
+  /**
+   * How much of gear's drag this soldier's shoulders take.
+   *
+   * Only the unfavourable share: kit that *helps* a unit move is not something
+   * being strong should undo, so a negative gear `moveCost` is left alone.
+   */
+  private get gearMoveRelief(): number {
+    return Math.max(0, this.gearTraits.moveCost) * (this.derived.gearRelief / 100)
+  }
+
+  /** The same allowance spent on the action points heavy kit costs. */
+  private get gearApRelief(): number {
+    return Math.round(-Math.min(0, this.gearTraits.maxAp) * (this.derived.gearRelief / 100))
+  }
+
+  /** What gear alone is doing to this unit, before Strength argues with it. */
+  get gearOnlyTraits(): ResolvedTraits {
+    return this.gearTraits
+  }
+
+  /** Percent each utility discipline adds to what it governs. */
+  get utility(): Record<UtilityId, number> {
+    return this.sheet.utility
   }
 
   /** Consumables this character can carry into a match. */

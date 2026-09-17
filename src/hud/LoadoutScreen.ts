@@ -133,8 +133,10 @@ export class LoadoutScreen {
         break
       case 'item':
         // The pouch is the soldier's, not the rules': the gate has to be told
-        // how much this one can carry.
+        // how much this one can carry, and asked whether this one is allowed
+        // the item at all.
         if (action.delta > 0) {
+          if (!this.meetsRequirement(action.id)) break
           const { carrySlots } = derive(this.sheets[this.selected]!)
           addItem(this.loadout, this.selected, action.id, carrySlots)
         } else removeItem(this.loadout, this.selected, action.id)
@@ -153,6 +155,19 @@ export class LoadoutScreen {
 
   private static actionAttr(action: LoadoutAction): string {
     return `data-action='${JSON.stringify(action)}'`
+  }
+
+  /**
+   * Whether the selected member clears an item's Intelligence bar.
+   *
+   * Separate from {@link canAddItem}, which answers about the crate and the
+   * pouch: this is a fact about the person, and the same predicate
+   * `ItemSystem.canUse` will apply in the match. Shared between the render and
+   * the press so a dead + and a refused press cannot disagree.
+   */
+  private meetsRequirement(id: ItemId): boolean {
+    const min = ITEMS[id].minIntelligence
+    return min === undefined || this.sheets[this.selected]!.attributes.intelligence >= min
   }
 
 
@@ -219,10 +234,11 @@ export class LoadoutScreen {
         ${icon(file)}<span class="loadout-pick-name">${label}</span>
       </button>`
 
-    const stepper = (file: string, label: string, count: number, canAdd: boolean, minus: LoadoutAction, plus: LoadoutAction): string => `
+    const stepper = (file: string, label: string, count: number, canAdd: boolean, minus: LoadoutAction, plus: LoadoutAction, note = ''): string => `
       <div class="loadout-stepper">
         ${icon(file)}
         <span class="loadout-pick-name">${label}</span>
+        ${note}
         <button class="loadout-step interactive" ${count > 0 ? '' : 'disabled'} ${LoadoutScreen.actionAttr(minus)}>−</button>
         <span class="loadout-count">${count}</span>
         <button class="loadout-step interactive" ${canAdd ? '' : 'disabled'} ${LoadoutScreen.actionAttr(plus)}>+</button>
@@ -239,6 +255,26 @@ export class LoadoutScreen {
       { length: carrySlots },
       (_, at) => `<span class="loadout-slot ${at < carried ? 'filled' : ''}"></span>`,
     ).join('')
+
+    // The Intelligence bar, printed on the row it stops. A + that will not
+    // move is indistinguishable from an empty crate otherwise, and the bar is
+    // worth reading even when it is met: it is the same INT the squad cards
+    // carry, so the number beside the item says which members could take it.
+    // Red on the ones who cannot, as a losing weapon proficiency is.
+    const { intelligence } = this.sheets[this.selected]!.attributes
+    const requirement = (id: ItemId): string => {
+      const min = ITEMS[id].minIntelligence
+      if (min === undefined) return ''
+      const short = intelligence < min
+      const why = short
+        ? `${ITEMS[id].name} needs Intelligence ${min}; ${name} has ${intelligence}`
+        : `${ITEMS[id].name} needs Intelligence ${min}`
+      return `
+        <span class="loadout-stat ${short ? 'penalty' : ''}" title="${why}">
+          <span class="loadout-stat-name">INT</span>
+          <span class="loadout-stat-value">${min}</span>
+        </span>`
+    }
 
     return `
       <div class="loadout-panel">
@@ -295,9 +331,11 @@ export class LoadoutScreen {
               `item-${id}`,
               ITEMS[id].name,
               unit.items[id],
-              canAddItem(this.loadout, this.selected, id, carrySlots),
+              canAddItem(this.loadout, this.selected, id, carrySlots) &&
+                this.meetsRequirement(id),
               { kind: 'item', id, delta: -1 },
               { kind: 'item', id, delta: 1 },
+              requirement(id),
             ),
           )
           .join('')}

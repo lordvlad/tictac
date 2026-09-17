@@ -3,7 +3,7 @@ title: "Living Documentation Guide & Maintenance Workflow"
 id: "GUIDE-LIVING-DOCS"
 type: "guide"
 status: "active"
-lastReviewed: "2026-09-16"
+lastReviewed: "2026-09-17"
 appliesTo:
   - "docs/**"
 relatedDocs:
@@ -95,8 +95,10 @@ tags: ["ecs", "networking"]
 
 ### Trigger 2: Modifying Combat, Ballistics, or Game Rules
 - **Document to update**: `docs/architecture/combat-and-rules.md`
-- **Run**: `bun run docs:catalog` — the status, trait and worn-kit tables are generated, never
-  hand-written, and `tests/catalog.test.ts` fails when the checked-in copy has drifted.
+- **Run**: `bun run docs:catalog` — the status, trait, worn-kit and utility-discipline tables
+  are generated, never hand-written, including each item's AP price and the attribute it
+  requires. `tests/catalog.test.ts` fails when the checked-in copy has drifted, when a gated
+  item's requirement goes unprinted, or when a discipline is missing.
 - **What to check**:
   - Formulas for hit probability, evasion, damage absorption, critical hits, line-of-sight DDA.
   - Whether a *named* value has moved into or out of prose. Numbers belong in the generated

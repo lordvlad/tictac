@@ -73,6 +73,10 @@ export const DEMO_INVENTORY: Inventory = {
     // is a decision about which one rather than a formality.
     [ItemId.NullweaveVest]: 2,
     [ItemId.PlateCarrier]: 2,
+    // Two repair kits for the same reason, from the other direction: the kit
+    // asks for Intelligence before it will work at all, so a stock matching
+    // the squad would put one in a pouch that cannot use it.
+    [ItemId.RepairKit]: 2,
   },
   // Two of each mod against ten rail slots across the squad: enough to make
   // fitting one a choice about which weapon deserves it.
@@ -98,6 +102,7 @@ export function defaultLoadout(): SquadLoadout {
       [ItemId.FirstAidKit]: 0,
       [ItemId.NullweaveVest]: 0,
       [ItemId.PlateCarrier]: 0,
+      [ItemId.RepairKit]: 0,
     },
     attachments: [],
   }))

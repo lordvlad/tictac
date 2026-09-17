@@ -1,6 +1,7 @@
 import { AIM, FACTION_INFO, Faction, RULES } from '../config'
 import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
-import { ITEMS, ItemId, itemApCost } from '../core/Items'
+import { ITEMS, type ItemEffect, ItemId, itemApCost, itemTargetsAlly } from '../core/Items'
+import { UtilityId } from '../core/Characters'
 import { effectiveWeapon, type HitChanceBreakdown, statusStacks } from '../core/Ballistics'
 import { clamp } from '../core/math'
 import { TRAITS, woundTraits } from '../core/Traits'
@@ -24,6 +25,8 @@ export type HudIntent =
   | { type: 'reload' }
   | { type: 'armGrenade'; kind: GrenadeId }
   | { type: 'useItem'; itemId: ItemId }
+  | { type: 'confirmItem' }
+  | { type: 'cancelItem' }
   | { type: 'confirmThrow' }
   | { type: 'cancelGrenade' }
   | { type: 'toggleCover' }
@@ -51,6 +54,11 @@ export interface HudAction {
    * row is a tap for nothing.
    */
   group?: 'items' | 'grenades'
+  /**
+   * Pressing this starts by picking who it is used on, rather than doing it.
+   * Shown on the row so the player knows before pressing.
+   */
+  targeted?: boolean
   intent: HudIntent
 }
 
@@ -79,14 +87,15 @@ export interface HudSquadCard {
   statuses: HudStatusChip[]
 }
 
-/** One enemy in the target strip. */
+/** One unit in the target strip: an enemy to shoot, or a squadmate to treat. */
 export interface HudTargetIcon {
   index: number
   name: string
   portrait: string
   hpFraction: number
   armorFraction: number
-  hitChance: number
+  /** Null when the strip is picking a patient: nothing is being rolled for. */
+  hitChance: number | null
   selected: boolean
   /** False until this side has worked the unit out. */
   known: boolean
@@ -181,6 +190,24 @@ export interface HudThrowPanel {
   caught: { name: string; friendly: boolean; damage: number; armorShred: number; lethal: boolean }[]
 }
 
+/** The item being aimed at a squadmate, and who it would be used on. */
+export interface HudItemPanel {
+  name: string
+  /** Which item, so the panel can show its icon. */
+  itemId: ItemId
+  apCost: number
+  remaining: number
+  affordable: boolean
+  /** The squadmate picked, or null while the player is still choosing. */
+  targetName: string | null
+  /**
+   * What it would do, in words rather than figures: how much a kit restores
+   * is scaled by the user's training, so a number here would not be the
+   * number applied.
+   */
+  effects: string[]
+}
+
 /** Immutable snapshot of what the HUD should show right now. */
 export interface HudModel {
   isMyTurn: boolean
@@ -193,12 +220,14 @@ export interface HudModel {
   squad: HudSquadCard[]
   selectedName: string | null
   actions: HudAction[]
-  /** Populated only in shoot mode; drives the strip above the squad bar. */
+  /** Enemies to shoot, or squadmates to treat; drives the strip above the squad bar. */
   targets: HudTargetIcon[]
   /** Populated when a target is lined up; replaces the action list. */
   shotPanel: HudShotPanel | null
   /** Populated while a grenade is armed; also replaces the action list. */
   throwPanel: HudThrowPanel | null
+  /** Populated while an item is aimed at a squadmate; also replaces it. */
+  itemPanel: HudItemPanel | null
   freelookActive: boolean
   unitViewActive: boolean
   selectedLevelFilter: number
@@ -222,6 +251,8 @@ export interface HudModelSources {
   shoot: ShootSnapshot | null
   /** The armed grenade and its aimed blast, when one is armed. */
   grenade: { armed: GrenadeId | null; pending: PendingThrow | null }
+  /** The item awaiting a patient, when one is being aimed. */
+  item: ItemTargetSnapshot | null
   networkMode?: string
   /** The player's unit-view toggle. Aiming moves the camera without setting it. */
   unitViewRequested: boolean
@@ -235,6 +266,15 @@ export interface HudModelSources {
 export interface ShootSnapshot {
   targets: { soldier: Soldier; hitChance: number }[]
   pending: PendingShot | null
+}
+
+/** What the model builder needs about an item being aimed at a squadmate. */
+export interface ItemTargetSnapshot {
+  itemId: ItemId
+  /** Squadmates the user can reach, the user included. */
+  candidates: readonly Soldier[]
+  /** The one picked, or null while the player is still choosing. */
+  target: Soldier | null
 }
 
 /**
@@ -316,17 +356,24 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       // nothing. What the unit carries is shown on the loadout screen.
       if (count <= 0 || spec.passive) continue
       // Through the shared rule, because `ItemSystem` charges the same figure:
-      // a clever soldier's stim is cheaper, and a row advertising the table's
-      // price would be a button whose cost is not the cost.
-      const apCost = itemApCost(spec, selected.itemApDelta)
+      // a clever soldier's stim is cheaper, a trained mechanic's repair is
+      // cheaper still, and a row advertising the table's price would be a
+      // button whose cost is not the cost.
+      const apCost = itemApCost(spec, selected.itemApDelta, selected.utility[UtilityId.Mechanics])
+      // Technical kit nobody on this card can operate: greyed rather than
+      // hidden, so the reason a repair kit sits unused is legible.
+      const gated =
+        spec.minIntelligence !== undefined &&
+        selected.sheet.attributes.intelligence < spec.minIntelligence
       actions.push({
         id: `item-${id}`,
         label: spec.name,
         icon: `item-${id}`,
         tag: `${apCost} AP · x${count}`,
-        active: false,
-        disabled: selected.ap < apCost,
+        active: sources.item?.itemId === id,
+        disabled: gated || selected.ap < apCost,
         group: 'items',
+        targeted: itemTargetsAlly(spec),
         intent: { type: 'useItem', itemId: id },
       })
     }
@@ -350,17 +397,36 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     })
   }
 
-  const enemyIndex = new Map(squads.byFaction[nextFaction].map((s, i) => [s, i]))
-  const targets: HudTargetIcon[] = (shoot?.targets ?? []).map(({ soldier, hitChance }) => ({
-    index: enemyIndex.get(soldier) ?? 0,
-    name: soldier.name,
-    portrait: portraits.getPortrait(nextFaction, enemyIndex.get(soldier) ?? 0),
-    hpFraction: soldier.maxHp > 0 ? soldier.hp / soldier.maxHp : 0,
-    armorFraction: soldier.maxArmor > 0 ? soldier.armor / soldier.maxArmor : 0,
-    hitChance,
-    selected: soldier === shoot?.pending?.target,
-    known: soldier.known,
-  }))
+  const item = sources.item
+  let targets: HudTargetIcon[]
+  if (item) {
+    // One strip, two jobs: an item awaiting a patient borrows shoot mode's row
+    // of portraits rather than growing a second one beside it.
+    const mateIndex = new Map(squads.byFaction[faction].map((s, i) => [s, i]))
+    targets = item.candidates.map((soldier) => ({
+      index: mateIndex.get(soldier) ?? 0,
+      name: soldier.name,
+      portrait: portraits.getPortrait(faction, mateIndex.get(soldier) ?? 0),
+      hpFraction: soldier.maxHp > 0 ? soldier.hp / soldier.maxHp : 0,
+      armorFraction: soldier.maxArmor > 0 ? soldier.armor / soldier.maxArmor : 0,
+      hitChance: null,
+      selected: soldier === item.target,
+      // Own squad: there is nothing about a squadmate left to work out.
+      known: true,
+    }))
+  } else {
+    const enemyIndex = new Map(squads.byFaction[nextFaction].map((s, i) => [s, i]))
+    targets = (shoot?.targets ?? []).map(({ soldier, hitChance }) => ({
+      index: enemyIndex.get(soldier) ?? 0,
+      name: soldier.name,
+      portrait: portraits.getPortrait(nextFaction, enemyIndex.get(soldier) ?? 0),
+      hpFraction: soldier.maxHp > 0 ? soldier.hp / soldier.maxHp : 0,
+      armorFraction: soldier.maxArmor > 0 ? soldier.armor / soldier.maxArmor : 0,
+      hitChance,
+      selected: soldier === shoot?.pending?.target,
+      known: soldier.known,
+    }))
+  }
 
   const isMyTurn =
     sources.networkMode === 'local' ||
@@ -393,6 +459,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     targets,
     shotPanel: shoot?.pending ? shotPanelOf(shoot.pending) : null,
     throwPanel: sources.grenade.pending ? throwPanelOf(sources.grenade.pending) : null,
+    itemPanel: item && selected ? itemPanelOf(item, selected) : null,
     freelookActive: rig.isFreeLookActive && !rig.isShoulderViewActive,
     unitViewActive: sources.unitViewRequested,
     waypointActive,
@@ -605,5 +672,37 @@ function throwPanelOf(pending: PendingThrow): HudThrowPanel {
     inRange: pending.inRange,
     statusName: pending.statusName,
     caught: pending.caught,
+  }
+}
+
+/** Turn an item awaiting a patient into the panel that picks one. */
+function itemPanelOf(item: ItemTargetSnapshot, user: Soldier): HudItemPanel {
+  const spec = ITEMS[item.itemId]
+  const apCost = itemApCost(spec, user.itemApDelta, user.utility[UtilityId.Mechanics])
+  return {
+    name: spec.name,
+    itemId: item.itemId,
+    apCost,
+    remaining: user.items[item.itemId] ?? 0,
+    affordable: user.ap >= apCost,
+    targetName: item.target?.name ?? null,
+    effects: spec.effects.map(effectLine),
+  }
+}
+
+/** One effect in words. Deliberately no figures: see {@link HudItemPanel}. */
+function effectLine(effect: ItemEffect): string {
+  switch (effect.kind) {
+    case 'restoreHp':
+      return 'Treats wounds'
+    case 'restoreArmor':
+      return 'Patches armour'
+    case 'refillAp':
+      // Always the user: the exertion is theirs, whoever they are working on.
+      return "Tops up the user's points"
+    case 'clearStatuses':
+      return 'Clears every status'
+    case 'applyStatus':
+      return `Applies ${STATUSES[effect.status].name}`
   }
 }

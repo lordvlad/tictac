@@ -3,7 +3,7 @@ title: "Completed Work Archive"
 id: "BACKLOG-COMPLETED"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-16"
+lastReviewed: "2026-09-17"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -212,3 +212,188 @@ An enemy's exact evasion was legible the moment you aimed, which made a sheet re
 - **Rules unmoved, proved rather than assumed**: 200 matches at seed 1 produce a byte-identical report with the change stashed and unstashed.
 - **Live**: aiming at an unmet opponent showed `FIRING AT CRIMSON · UNREAD`, evasion `-?%`, a dashed strip card with `?`, and a headline of 84%. One missed shot later the badge was gone, the row read `-7%`, the card was solid — and the headline was still 84%, which is the point.
 - 8 tests in `tests/intel.test.ts`, including that a suppressed shooter stays unread while its target does not, that bystanders are unaffected, and that being read survives a handover.
+
+---
+
+### [ITEM-013] Utility Proficiencies (Medical, Demolitions, Mechanics)
+**Completed Date:** 2026-09-17  
+**Type:** Feature  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+`sheet.proficiency` was `Record<WeaponId, number>` and nothing else, so a character had no
+channel for training that was not a gun — while [GDD §2](../design/gdd/progression-and-meta.md)
+gives one non-combat training on top of the four attributes.
+
+#### How the Blocker Was Cleared
+Filed blocked because only one of the three disciplines had anything to modify. All three
+prerequisites were built in this pass rather than worked around:
+- **Demolitions** was already live and needed nothing.
+- **Medical** wanted targeted item use. `ItemSystem.canUse`/`use` now take a `target` that
+  defaults to the user, and reaching across is read off the *effect* (`itemTargetsAlly`:
+  anything that restores hit points, restores armour or clears statuses travels; a stim's lift
+  and its AP top-up do not). The turn's price and the thing out of the pouch always come off
+  the user.
+- **Mechanics** wanted an item that repairs armour to exist. `ItemId.RepairKit` shipped in the
+  same pass (see `ITEM-016`, which wanted the same item for the other half of its reason).
+
+#### Key Changes
+- `UtilityId` (`medical` | `demolitions` | `mechanics`) and `utility: Record<UtilityId, number>`
+  on `CharacterSheet`, rolled from `CHARACTER.utility` and clamped in `sanitizeSheet` exactly
+  as weapon proficiency is — bounded ints, unknown keys dropped, missing keys zero.
+- **Rolled, not derived.** Utility is training rather than physique, so it is not a band off an
+  attribute; it is also the channel `ITEM-004`'s learn-by-doing growth will write to.
+- **Demolitions is stamped into the unit's own `grenadeSpecs`** (`areaRadius`, `armorShred`)
+  beside the throw range Strength already stamped, rather than applied at the throw site. The
+  one number every consumer already reads — the planner's blast preview, the range check in
+  `throwGrenade`, the debug panel — is the number *this* thrower can reach, and it replicates
+  with the component, so a peer sees the arm it is up against rather than its own stock copy.
+  A radius is tiles, so it rounds and floors at the tile the grenade landed on.
+- **Medical pays out only on somebody else** (`target === user ? 0 : …`): nobody gets credit
+  for bandaging their own arm, and self-use keeps costing exactly what it did. It multiplies
+  once with the *patient's* `healBonus` — the user's training and the target's physiology are
+  two separate contributions, rounded once — and floors at a point, so a frail soldier is
+  treated badly rather than not at all.
+- **Mechanics pays on any plate**, the user's own included, because it is hands on armour
+  rather than treatment of a body. It also discounts a repair's AP price, read off the item's
+  effects in `itemApCost` rather than from a flag on the spec: anything with a `restoreArmor`
+  effect is a mechanic's job by definition, so a future repair item inherits the discount
+  without saying so twice. The band runs negative as well, so the untrained end fumbles and
+  pays more.
+- The HUD prints the same `itemApCost` the system charges, so the panel cannot lie about the
+  price of the row being pressed.
+
+Values for every discipline are in the generated
+[status and trait catalogue](../design/gdd/status-and-trait-catalog.md) §4.2, which
+`tests/catalog.test.ts` fails on if a discipline goes unprinted.
+
+#### Acceptance Criteria
+- [x] A sheet carries utility proficiencies and `sanitizeSheet` clamps them like weapon ones.
+- [x] Demolitions changes a thrower's blast radius and armour shred, and nobody else's —
+      per-unit `GrenadeSpecsComponent`, so a squadmate throwing the same kind is unaffected.
+- [x] Medical only shipped once an item can be used on another unit, and Mechanics once an
+      item repairs armour. Both prerequisites are in this pass rather than deferred.
+
+---
+
+### [ITEM-015] Strength Negating Heavy-Gear Penalties
+**Completed Date:** 2026-09-17  
+**Type:** Feature  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+[GDD §1](../design/gdd/progression-and-meta.md) has sufficient Strength negate the AP and
+movement penalties heavy gear inflicts. Strength derived `throwRange` and `carrySlots` and
+stopped there, so how strong a soldier was had no bearing on what plate did to them.
+
+#### How the Blocker Was Cleared
+The blocker was real and is worth reading next to the resolution: `ResolvedTraits` folds every
+opinion into one scalar per number, so `Plated` and `Limping` were indistinguishable by the
+time anything read `moveCost`, deliberately. "Negate gear penalties only" could not be phrased
+against that number at all.
+
+The fold was **split beside itself rather than replaced**:
+- `TraitSource` (`innate` | `wound` | `gear`) and `SourcedTrait` name where a unit got a trait.
+  Three sources, not four: worn kit and a fitted attachment are both gear, and no rule has
+  wanted to tell a vest from a scope.
+- `resolveSourcedInto(out, traits, source?)` is the same fold over tagged traits, filtered to
+  one source when asked. The source-blind `resolveTraits`/`resolveTraitsInto` are untouched and
+  still the default — source-blindness is what lets a vest and a bloodline grant the same
+  modifier, and only one rule needed to care.
+- One shared `addEffects` is now the single place that knows how each field combines (numbers
+  sum, flags OR). Both folds go through it, so a new `TraitEffects` field cannot be honoured by
+  one and silently dropped by the other — which is the failure mode a second fold invites.
+- `Soldier` and `SimUnit` each keep a full fold and a gear-only fold and expose
+  `gearOnlyTraits`, so the simulation and the match answer the question the same way.
+
+#### Key Changes
+- `DerivedStats.gearRelief` — a percent off Strength (band `CHARACTER.gearRelief`) — cancels
+  that share of gear's *unfavourable* `moveCost` and of gear's *negative* `maxAp`, and nothing
+  of a wound's or a bloodline's share. Penalties only, in both directions: kit that helps a
+  unit move (`Math.max(0, …)`) or hands it a point (`Math.min(0, …)`) is never eaten, so being
+  strong cannot undo a benefit.
+- **`Plated` now also costs an action point** (`maxAp: -1`). Nothing worn inflicted an AP
+  penalty before, so the GDD's "Strength negates the AP reductions heavy gear inflicts" had
+  nothing to negate; the rule needed the cost to exist before it could answer it. Its
+  protection was raised in the same pass to keep it worth wearing.
+- Relief lands where each ceiling is already computed (`refreshTraits` for the AP ceiling,
+  `moveCostMul` for the step price), so cost, preview and reachability stay one currency and a
+  route planned at one price is still walked at that price.
+
+#### Measured
+400 matches over disjoint seed blocks 1000 / 5000 / 9000. Disjoint on purpose: `--seed` runs
+consecutive seeds, so blocks closer together than `matches` share most of their matches.
+- **Stock mirror control, after this pass**: blue 236 / 237 / 235, median 4 turns. (Before this
+  pass: blue 251, red 128. Before the attribute refactor: blue 224, red 152.)
+- **Plate on blue only**, against that control:
+  - plate as it was (armour 6, no AP bite): 224 / 242 → neutral.
+  - plate with the AP bite, protection unchanged: 188 / 231 → ≈ −27 blue wins. A bad buy.
+  - plate with the AP bite and protection raised to +9 armour / −20% damage taken:
+    203 / 241 / 242 → ≈ −8, back to roughly neutral on a *random* wearer, and strictly better
+    on a strong one who pays neither cost. That is the intended shape: heavy kit is a decision
+    about who wears it rather than a flat upgrade.
+- **Block 1000 is consistently the least kind to plate in every variant.** Recorded as block
+  variance rather than smoothed over — it is the reason three blocks are run and not one.
+
+#### Acceptance Criteria
+- [x] The movement/AP surcharge is readable per source: `resolveSourcedInto` with a
+      `TraitSource` answers gear, wound or innate alone.
+- [x] High Strength cancels a plate carrier's step cost and AP surcharge, and the same unit
+      while `Limping` still pays the wound's share in full — relief is computed from the
+      gear-only fold, which a wound never enters.
+- [ ] **Not ticked: `bun run balance` shows the change only where heavy gear is worn.** The
+      plate sweeps above do isolate the rule, and the relief is structurally inert with no gear
+      on (it reads the gear-only fold, which is all zeroes). But the stock mirror *did* move
+      across this pass (blue 251 → 236) with no plate anywhere, because `ITEM-013` landed in
+      the same pass: rolling utility proficiency consumes the sheet RNG stream and Demolitions
+      changes every thrower's blast. So "only where heavy gear is worn" was never demonstrated
+      by a single isolated sweep, and this criterion is unproven rather than met. Re-running
+      the mirror with `gearRelief` alone stashed is the check that would close it.
+
+---
+
+### [ITEM-016] Intelligence Gating Advanced Item Usage
+**Completed Date:** 2026-09-17  
+**Type:** Feature  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+[GDD §1](../design/gdd/progression-and-meta.md) has Intelligence both gate advanced kit and
+amplify it. The amplifying half had landed — `itemApDelta` makes a clever character pay less
+per use — and the gate had not.
+
+#### How the Blocker Was Cleared
+Nothing in `ITEMS` was advanced enough to gate: a stim, a first aid kit and two passive
+garments, and gating any of them would only have taken ordinary kit away from low-Intelligence
+units. `ItemId.RepairKit` is the item the blocker asked for, and `ITEM-013`'s Mechanics
+discipline wanted exactly the same thing, so one item unblocked both.
+
+#### Key Changes
+- `ItemSpec.minIntelligence`, absent meaning anyone can work it. Below the bar the kit is dead
+  weight in the pouch rather than used badly, because a technical item is knowing what to do
+  with it.
+- `ItemId.RepairKit`: 3 AP, `restoreArmor` 12, `minIntelligence` 5, not passive. Priced against
+  the first aid kit (2 AP for 50 of ~100 HP) deliberately — armour is not a second life bar, it
+  only blunts what lands, so 12 of a 20-point plate buys less of the turn and costs a point
+  more. What earns it a slot is being the only kit that undoes *permanent* loss, and a trained
+  mechanic bringing its price back down.
+- **Stocked, not issued**: `STARTING_ITEMS` carries none and `DEMO_INVENTORY` holds 2, so
+  bringing one is a loadout decision and no squad starts with kit half of it cannot use.
+- **Refused in three places, for three different reasons.** `canUse` refuses below the bar, so
+  the HUD greys the row out of the same predicate it uses to enable it. `use` refuses *before*
+  the `force` bypass, so a peer cannot make this side spend a kit its character cannot work —
+  the item id is the only thing this side trusts a peer for. The loadout screen refuses the
+  pick with the requirement spelled out, so the reason a repair kit sits unused is legible
+  rather than a dead button.
+- `scripts/build-catalog.ts` grew a `Needs` column on the item table; `tests/catalog.test.ts`
+  fails if a gated item's requirement goes unprinted.
+
+#### Acceptance Criteria
+- [x] An `ItemSpec` can require a minimum Intelligence and `canUse` refuses below it.
+- [x] A peer's `useItem` for a gated item is refused on the receiving side too. Worth being
+      precise about *where*: the live remote handler applies nothing at all (item effects
+      replicate as component state), so the path that re-runs a peer-authored use is recorded
+      playback — `applyRecordedCommand` — and the gate sits ahead of `force` in `use`, which is
+      the only door that path goes through.
+- [x] At least one item exists that is worth gating, so no currently-usable kit was removed:
+      the gate applies to the new `RepairKit` and to nothing that already existed.

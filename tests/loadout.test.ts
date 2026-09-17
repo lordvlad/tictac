@@ -41,6 +41,7 @@ function stubSoldier() {
       [ItemId.FirstAidKit]: 1,
       [ItemId.NullweaveVest]: 0,
       [ItemId.PlateCarrier]: 0,
+      [ItemId.RepairKit]: 0,
     },
     traits: resolveTraits([]),
     equip(weaponId: WeaponId, ammoId: AmmoId): void {
@@ -95,12 +96,29 @@ describe('Shared crate', () => {
       [ItemId.FirstAidKit]: 4,
       [ItemId.NullweaveVest]: 2,
       [ItemId.PlateCarrier]: 2,
+      [ItemId.RepairKit]: 2,
     })
     expect(left.attachments).toEqual({
       [AttachmentId.Scope]: 2,
       [AttachmentId.Bipod]: 2,
       [AttachmentId.Suppressor]: 2,
     })
+  })
+
+  test('every item kind is stocked, and reaches a pouch', () => {
+    // The gap ITEM-013 was filed over: an effect with no item carrying it is
+    // unreachable in play, and an item the crate holds none of is the same
+    // dead end one step later. Generalised over the enum so a new id has to
+    // be stocked, not just declared.
+    const stock = remaining(defaultLoadout()).items
+
+    for (const id of Object.values(ItemId)) {
+      expect(stock[id]).toBeGreaterThan(0)
+
+      const loadout = defaultLoadout()
+      addItem(loadout, 0, id, 1)
+      expect(loadout[0]!.items[id]).toBe(1)
+    }
   })
 
   test('a weapon can be handed out while the crate has one, and not after', () => {
@@ -282,6 +300,7 @@ describe('Stamping a loadout onto a soldier', () => {
         [ItemId.FirstAidKit]: 2,
         [ItemId.NullweaveVest]: 0,
         [ItemId.PlateCarrier]: 0,
+        [ItemId.RepairKit]: 0,
       },
       attachments: [],
     })
@@ -298,6 +317,7 @@ describe('Stamping a loadout onto a soldier', () => {
       [ItemId.FirstAidKit]: 2,
       [ItemId.NullweaveVest]: 0,
       [ItemId.PlateCarrier]: 0,
+      [ItemId.RepairKit]: 0,
     })
     expect(soldier.weapon.attachments).toEqual([])
   })
@@ -314,6 +334,7 @@ describe('Stamping a loadout onto a soldier', () => {
         [ItemId.FirstAidKit]: 0,
         [ItemId.NullweaveVest]: 0,
         [ItemId.PlateCarrier]: 0,
+        [ItemId.RepairKit]: 0,
       },
       attachments: [AttachmentId.Scope, AttachmentId.Suppressor],
     })

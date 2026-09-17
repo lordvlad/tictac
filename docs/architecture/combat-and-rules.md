@@ -3,7 +3,7 @@ title: "Combat, Ballistics & Rule Engine"
 id: "ARCH-COMBAT-RULES"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-16"
+lastReviewed: "2026-09-17"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Characters.ts"
@@ -11,6 +11,8 @@ appliesTo:
   - "src/core/Visibility.ts"
   - "src/core/Cover.ts"
   - "src/game/Combat.ts"
+  - "src/core/Traits.ts"
+  - "src/core/Items.ts"
 relatedDocs:
   - "docs/architecture/overview.md"
   - "docs/design/gdd/combat-mechanics.md"
@@ -65,8 +67,8 @@ $$\text{crit}\% = \text{clamp}\Big(w_{\text{crit}} + S \cdot b_w\big(2\tfrac{d}{
   the same flat bite it takes out of an ordinary one rather than being bypassed.
 
 ### Where a modifier comes from
-A unit's effective numbers are one additive fold over four sources, none of which knows
-about the others: the **character sheet** it was rolled with, **wounds** derived from its
+A unit's effective numbers are one additive fold over four sources, none of which normally
+knows about the others: the **character sheet** it was rolled with, **wounds** derived from its
 current health, **body-worn kit** in its pockets, and **attachments fitted to the weapon in
 its hands**. A weapon is an instance with a serial and a rail whose size depends on its
 class, so glass follows the rifle rather than the soldier — and swapping weapon drops what
@@ -85,12 +87,29 @@ and a band may run backwards — `itemApDelta` does, which is how an attribute m
 | --- | --- | --- |
 | Health | `maxHp`, `healBonus` | `hp`, `healBonus` |
 | Agility | `maxAp`, `evasion` | `ap`, `evasion` |
-| Strength | `throwRange`, `carrySlots` | `throwRange`, `carrySlots` |
+| Strength | `throwRange`, `carrySlots`, `gearRelief` | `throwRange`, `carrySlots`, `gearRelief` |
 | Intelligence | `itemApDelta` | `itemApDelta` (runs backwards, floored at 1 AP by `itemApCost`) |
 
 AP and evasion sharing Agility is a deliberate coupling, not a shortage of attributes: a
 quick character should be both harder to line up and able to do more with a turn, so the two
 move together instead of being two unrelated dice that could disagree about the same person.
+
+Intelligence is read **raw as well as banded**: the band amplifies kit (`itemApDelta`), while
+the attribute itself gates it — an `ItemSpec.minIntelligence` is refused by `canUse`, which is
+also the predicate that greys the HUD row, and refused again inside `use` ahead of the replay
+bypass, so a peer cannot make this side work kit its character cannot work.
+
+**Beside the four attributes the sheet also carries training**, which is rolled rather than
+derived: a weapon-class accuracy per class with a bonus for the one specialism, and a
+`utility` percent per discipline — Medical, Demolitions, Mechanics. Physique is rolled once
+and read onto bands; training is a separate axis because it is what practice moves, and it is
+the field organic growth will later write to. Each discipline scales exactly one thing:
+Demolitions the blast radius and armour shred of ordnance *this* character throws (stamped
+into the unit's own grenade specs, so every consumer reads the thrower's real numbers),
+Medical the hit points a treatment this character applies to **another** unit restores,
+Mechanics the armour a repair brings back and what the repair costs in points. Utility bands
+run negative as well as positive, so the untrained end of one is a penalty and not merely an
+absent bonus. `sanitizeSheet` clamps utility exactly as it clamps weapon proficiency.
 
 `derive()` is a pure function of the attributes and of nothing else — not gear, not wounds,
 not stance, which are the trait fold's business and are added on top of these. It is a
@@ -104,6 +123,31 @@ cannot state a hit-point ceiling, an evasion or a carry limit *at all* — no su
 to send, and each side derives them from attributes it has clamped itself. The envelope is
 unforgeable by construction rather than by validation: there is no absurd maximum to reject,
 only a field that was never there.
+
+#### What the fold knows about where a modifier came from
+The fold is **source-blind by default, with a source-aware fold beside it** rather than in
+place of it. Source-blindness is the property that lets a vest and a bloodline grant the same
+modifier without either knowing the other exists, and it is still what every rule reads.
+
+- `TraitSource` is `innate | wound | gear` — three, not four, because worn kit and a fitted
+  attachment are both gear and no rule has wanted to tell a vest from a scope. A `SourcedTrait`
+  is an id together with its source.
+- `resolveSourcedInto(out, traits, source?)` is the same fold over tagged traits, filtered to
+  one source when asked. With no source it is exactly the source-blind fold. `resolveTraits` /
+  `resolveTraitsInto` are unchanged and remain the default; a unit keeps a full fold and a
+  gear-only fold side by side and exposes `gearOnlyTraits`.
+- **One combining rule.** `addEffects` is the single place that knows how each `TraitEffects`
+  field combines — numbers sum, flags OR — and both folds go through it. That is the whole
+  defence against the obvious hazard of a second fold: a newly added field cannot be honoured
+  by one fold and silently dropped by the other.
+
+**Exactly one rule consumes the attribution**: `gearRelief`, a percent off Strength, cancels
+that share of what *gear* does to a unit's step price and action-point ceiling. It is
+deliberately narrow in three ways — gear only (a limp is not something broad shoulders undo),
+penalties only (kit that helps a unit move or hands it a point is never eaten, so being strong
+cannot cancel a benefit), and movement and points only (carrying the weight is not the same as
+being a smaller target, so plate's evasion cost stands whoever wears it). Heavy plate costs a
+point as well as speed for this rule to have anything to answer.
 
 Only the properties an *enemy* has to read are replicated (`TraitsComponent`: evasion, its
 crouched half, crit immunity, step cost, damage taken). Everything a modifier does to its
@@ -149,7 +193,9 @@ sequenceDiagram
   added rather than compounded, so a plated unit under a shred takes both and neither
   multiplies the other into something unintended.
 - **Armour shredding**: high-penetration rounds and explosives reduce armour for the rest of
-  the match.
+  the match — unless somebody spends a turn on it. A repair kit is the only thing that undoes
+  permanent loss, which is what earns it a pouch slot; it needs Intelligence to operate and a
+  mechanic's training makes it both cheaper and worth more.
 - **Suppression**: rounds that *miss* stack `Suppressed` on the target (accuracy and points,
   per stack, pinned at the cap). It is derived on both sides rather than sent — `executeShot`
   counts the rounds that went past and `replayShot` counts the false entries in the rolls it

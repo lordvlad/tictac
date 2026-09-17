@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { ItemSystem } from '../src/ecs/systems/ItemSystem'
 import { ITEMS, ItemId, itemApCost } from '../src/core/Items'
 import { StatusKind, STATUSES } from '../src/core/Arsenal'
+import { UtilityId } from '../src/core/Characters'
 import { effectiveMaxAp } from '../src/core/Ballistics'
 import type { StatusState } from '../src/core/Ballistics'
 import type { Soldier } from '../src/entities/Soldier'
@@ -25,8 +26,15 @@ function stubSoldier(
     itemApDelta?: number
     /** What Health adds to treatment taken. Average characters gain list. */
     healBonus?: number
+    /** Utility training, per discipline. Untrained unless a test says otherwise. */
+    utility?: Partial<Record<UtilityId, number>>
+    /** Raw Intelligence, which the gate reads. Defaults to the repair kit's bar. */
+    intelligence?: number
   } = {},
 ) {
+  const utility = {} as Record<UtilityId, number>
+  for (const id of Object.values(UtilityId)) utility[id] = overrides.utility?.[id] ?? 0
+
   const unit = {
     hp: overrides.hp ?? 100,
     maxHp: overrides.maxHp ?? 100,
@@ -36,10 +44,14 @@ function stubSoldier(
     maxArmor: overrides.maxArmor ?? 20,
     itemApDelta: overrides.itemApDelta ?? 0,
     healBonus: overrides.healBonus ?? 0,
+    utility,
+    // Only the slice of the sheet the gate reads; the rest is rolled elsewhere.
+    sheet: { attributes: { intelligence: overrides.intelligence ?? 5 } },
     statuses: [] as StatusState[],
     items: {
       [ItemId.StimPack]: 1,
       [ItemId.FirstAidKit]: 1,
+      [ItemId.RepairKit]: 1,
       [ItemId.NullweaveVest]: 0,
     } as Record<ItemId, number>,
     get isDead(): boolean {
@@ -161,7 +173,7 @@ describe('Item effect model', () => {
     const system = new ItemSystem()
     const unit = stubSoldier({ hp: 10, ap: 0 })
 
-    expect(system.use(unit, ItemId.FirstAidKit, true)).toBe(true)
+    expect(system.use(unit, ItemId.FirstAidKit, unit, true)).toBe(true)
     expect(unit.hp).toBe(60)
   })
 
@@ -235,5 +247,193 @@ describe('What the carrier brings to their own kit', () => {
     expect(frail.hp - 10).toBeLessThan(amount)
     // Treated badly, never not at all.
     expect(frail.hp).toBeGreaterThan(10)
+  })
+})
+
+describe('Treating somebody else', () => {
+  test('a trained medic gets more out of the same kit than a rookie does', () => {
+    const system = new ItemSystem()
+    const medic = stubSoldier({ utility: { [UtilityId.Medical]: 30 } })
+    const rookie = stubSoldier()
+    // Roomy ceilings, so the cap is not what the comparison is measuring.
+    const treated = stubSoldier({ hp: 10, maxHp: 500 })
+    const neglected = stubSoldier({ hp: 10, maxHp: 500 })
+
+    expect(system.use(medic, ItemId.FirstAidKit, treated)).toBe(true)
+    expect(system.use(rookie, ItemId.FirstAidKit, neglected)).toBe(true)
+
+    expect(neglected.hp - 10).toBe(50)
+    expect(treated.hp - 10).toBeGreaterThan(neglected.hp - 10)
+  })
+
+  test('training does not pay out on yourself', () => {
+    // You cannot get good at treating your own arm: self-use has to cost and
+    // return what it always did, whatever the sheet says.
+    const system = new ItemSystem()
+    const medic = stubSoldier({ hp: 10, maxHp: 500, utility: { [UtilityId.Medical]: 30 } })
+
+    system.use(medic, ItemId.FirstAidKit)
+
+    expect(medic.hp - 10).toBe(50)
+  })
+
+  test('the body being treated is the one whose Health counts', () => {
+    const system = new ItemSystem()
+    const medic = stubSoldier({ healBonus: 30 })
+    const otherMedic = stubSoldier()
+    const hardy = stubSoldier({ hp: 10, maxHp: 500, healBonus: 30 })
+    const average = stubSoldier({ hp: 10, maxHp: 500 })
+
+    // A hardy medic treating an average soldier, and the reverse.
+    system.use(medic, ItemId.FirstAidKit, average)
+    system.use(otherMedic, ItemId.FirstAidKit, hardy)
+
+    expect(average.hp - 10).toBe(50)
+    expect(hardy.hp - 10).toBeGreaterThan(50)
+  })
+
+  test('the turn and the kit come off the medic, not the patient', () => {
+    const system = new ItemSystem()
+    const medic = stubSoldier()
+    const patient = stubSoldier({ hp: 40 })
+
+    system.use(medic, ItemId.FirstAidKit, patient)
+
+    expect(medic.ap).toBe(12 - ITEMS[ItemId.FirstAidKit].apCost)
+    expect(medic.items[ItemId.FirstAidKit]).toBe(0)
+    expect(patient.ap).toBe(12)
+    expect(patient.items[ItemId.FirstAidKit]).toBe(1)
+    expect(medic.hp).toBe(100)
+  })
+
+  test('a corpse is not a patient, and a corpse is not a medic', () => {
+    const system = new ItemSystem()
+    const medic = stubSoldier()
+    const corpse = stubSoldier({ hp: 0, maxHp: 100 })
+
+    expect(system.canUse(medic, ItemId.FirstAidKit, corpse)).toBe(false)
+    expect(system.use(medic, ItemId.FirstAidKit, corpse)).toBe(false)
+    expect(corpse.hp).toBe(0)
+    expect(medic.items[ItemId.FirstAidKit]).toBe(1)
+
+    const patient = stubSoldier({ hp: 40 })
+    expect(system.use(corpse, ItemId.FirstAidKit, patient)).toBe(false)
+    expect(patient.hp).toBe(40)
+  })
+
+  test('no kit hands action points to somebody else', () => {
+    const system = new ItemSystem()
+    const user = stubSoldier({ ap: 1, maxAp: 10 })
+    const other = stubSoldier({ ap: 1, maxAp: 10 })
+
+    system.use(user, ItemId.StimPack, other)
+
+    // `refillAp` is the soldier working the kit buying part of their own turn
+    // back, so it lands on the user however the use was aimed. The chemistry
+    // went to the other unit, so the top-up reads the user's own ceiling.
+    expect(user.ap).toBe(10)
+    expect(other.ap).toBe(1)
+  })
+})
+
+describe('Repair kit', () => {
+  test('restores armour and is consumed', () => {
+    const system = new ItemSystem()
+    const unit = stubSoldier({ armor: 5 })
+
+    expect(system.use(unit, ItemId.RepairKit)).toBe(true)
+    expect(unit.armor).toBe(17)
+    expect(unit.items[ItemId.RepairKit]).toBe(0)
+    expect(unit.ap).toBe(12 - ITEMS[ItemId.RepairKit].apCost)
+  })
+
+  test('a mechanic repairs more of the plate and pays less for it', () => {
+    const system = new ItemSystem()
+    const mechanic = stubSoldier({ armor: 5, maxArmor: 40, utility: { [UtilityId.Mechanics]: 35 } })
+    const rookie = stubSoldier({ armor: 5, maxArmor: 40 })
+
+    system.use(mechanic, ItemId.RepairKit)
+    system.use(rookie, ItemId.RepairKit)
+
+    expect(mechanic.armor - 5).toBeGreaterThan(rookie.armor - 5)
+    expect(12 - mechanic.ap).toBeLessThan(12 - rookie.ap)
+  })
+
+  test('never repairs past the plate the unit is wearing', () => {
+    const system = new ItemSystem()
+    const mechanic = stubSoldier({ armor: 19, utility: { [UtilityId.Mechanics]: 35 } })
+
+    system.use(mechanic, ItemId.RepairKit)
+
+    expect(mechanic.armor).toBe(20)
+  })
+
+  test("a mechanic can work on a squadmate's plate", () => {
+    const system = new ItemSystem()
+    const mechanic = stubSoldier({ armor: 4, utility: { [UtilityId.Mechanics]: 35 } })
+    const squadmate = stubSoldier({ armor: 4 })
+
+    expect(system.use(mechanic, ItemId.RepairKit, squadmate)).toBe(true)
+
+    expect(squadmate.armor).toBeGreaterThan(4)
+    expect(mechanic.armor).toBe(4)
+    expect(mechanic.items[ItemId.RepairKit]).toBe(0)
+    expect(squadmate.items[ItemId.RepairKit]).toBe(1)
+  })
+
+  test('it is a used item, not worn kit', () => {
+    // The gate only means something on kit that has an action to refuse.
+    expect(ITEMS[ItemId.RepairKit].passive).toBeUndefined()
+    expect(ITEMS[ItemId.RepairKit].traits).toBeUndefined()
+  })
+
+  test('Mechanics discounts a repair and nothing else', () => {
+    const repair = ITEMS[ItemId.RepairKit]
+    const aid = ITEMS[ItemId.FirstAidKit]
+
+    expect(itemApCost(repair, 0, 35)).toBeLessThan(repair.apCost)
+    // Knowing armour says nothing about reading a medkit's instructions.
+    expect(itemApCost(aid, 0, 35)).toBe(aid.apCost)
+    // Signed like every utility percent: the untrained end fumbles and pays.
+    expect(itemApCost(repair, 0, -20)).toBeGreaterThan(repair.apCost)
+    // Still never free, however good the hands.
+    expect(itemApCost(repair, -5, 100)).toBe(1)
+  })
+})
+
+describe('Kit a character cannot work', () => {
+  test('the repair kit is refused below its Intelligence bar', () => {
+    const system = new ItemSystem()
+    const bar = ITEMS[ItemId.RepairKit].minIntelligence ?? 0
+    const dull = stubSoldier({ armor: 5, intelligence: bar - 1 })
+
+    expect(system.canUse(dull, ItemId.RepairKit)).toBe(false)
+    expect(system.use(dull, ItemId.RepairKit)).toBe(false)
+    expect(dull.armor).toBe(5)
+    expect(dull.items[ItemId.RepairKit]).toBe(1)
+
+    const capable = stubSoldier({ armor: 5, intelligence: bar })
+    expect(system.canUse(capable, ItemId.RepairKit)).toBe(true)
+  })
+
+  test('a peer cannot force kit past the gate', () => {
+    // The id arrives in a peer's `useItem`; whether this character can work it
+    // is a fact about this side's sheet, not something the sender decides.
+    const system = new ItemSystem()
+    const bar = ITEMS[ItemId.RepairKit].minIntelligence ?? 0
+    const dull = stubSoldier({ armor: 5, intelligence: bar - 1 })
+
+    expect(system.use(dull, ItemId.RepairKit, dull, true)).toBe(false)
+    expect(dull.armor).toBe(5)
+    expect(dull.items[ItemId.RepairKit]).toBe(1)
+    expect(dull.ap).toBe(12)
+  })
+
+  test('ordinary kit stays available to the slowest soldier', () => {
+    const system = new ItemSystem()
+    const dull = stubSoldier({ hp: 50, intelligence: 1 })
+
+    expect(system.canUse(dull, ItemId.FirstAidKit)).toBe(true)
+    expect(system.canUse(dull, ItemId.StimPack)).toBe(true)
   })
 })

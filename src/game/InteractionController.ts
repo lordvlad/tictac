@@ -30,7 +30,7 @@ import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
 import { MovementSystem, CombatSystem, ItemSystem, RenderSystem, WallSystem } from '../ecs/systems'
-import type { ItemId } from '../core/Items'
+import { ITEMS, type ItemId, itemTargetsAlly } from '../core/Items'
 
 /**
  * The intents a spectator may still press.
@@ -39,6 +39,15 @@ import type { ItemId } from '../core/Items'
  * the camera stands, which panel is open. Nothing here spends a point or moves
  * a unit, because in a replay the file is the only authority over that.
  */
+/**
+ * How far a soldier can reach to work on a squadmate, in tiles.
+ *
+ * One tile means orthogonally or diagonally adjacent, which is what handing
+ * somebody a dressing actually takes. Anything longer and a medic treats
+ * across a room; anything shorter and only the unit itself qualifies.
+ */
+const ITEM_REACH = 1
+
 const SPECTATOR_INTENTS: Partial<Record<HudIntent['type'], true>> = {
   openDebug: true,
   toggleDebugMap: true,
@@ -72,6 +81,15 @@ export class InteractionController {
   readonly renderSystem: RenderSystem
   readonly wallSystem: WallSystem
   // Hover state (mouse only — touch has no hover phase).
+  /**
+   * The item waiting for a patient, and the squadmate picked for it.
+   *
+   * Held here rather than in a planner because there is no rule to plan: the
+   * item's own effects decide what it does, and who gets it is pure input.
+   */
+  private aimedItem: ItemId | null = null
+  private itemTarget: Soldier | null = null
+
   private hoveredTile: Tile | null = null
   private hoveredEnemy: Soldier | null = null
 
@@ -275,6 +293,14 @@ export class InteractionController {
               }
             : null,
         grenade: { armed: this.grenade.armed, pending: this.grenade.pending(shooter) },
+        item:
+          this.aimedItem !== null && shooter
+            ? {
+                itemId: this.aimedItem,
+                candidates: this.itemCandidates(shooter),
+                target: this.itemTarget,
+              }
+            : null,
         unitViewRequested: this.unitViewRequested,
         networkMode: this.network?.mode ?? 'local',
         myFaction: this.network?.myFaction ?? Faction.Blue,
@@ -337,7 +363,14 @@ export class InteractionController {
       }
       case 'useItem': {
         const soldier = this.squads.byFaction[command.faction][command.squadIndex]
-        if (soldier) this.itemSystem.use(soldier, command.itemId)
+        // A recording re-runs the use, so it is the one path that has to know
+        // who it was used on. A frame from before targeted use, or one naming
+        // a unit this build cannot find, replays as a use on the carrier.
+        const target =
+          command.targetFaction !== undefined && command.targetIndex !== undefined
+            ? this.squads.byFaction[command.targetFaction][command.targetIndex]
+            : undefined
+        if (soldier) this.itemSystem.use(soldier, command.itemId, target ?? soldier)
         this.afterCombat()
         return
       }
@@ -434,6 +467,12 @@ export class InteractionController {
         break
       case 'confirmThrow':
         this.confirmThrow()
+        break
+      case 'confirmItem':
+        this.confirmItem()
+        break
+      case 'cancelItem':
+        this.exitItemMode()
         break
       case 'cancelGrenade':
         this.grenade.exit()
@@ -656,16 +695,115 @@ export class InteractionController {
     })
   }
 
-  /** Use a carried consumable on the selected unit, and tell the peer. */
+  /**
+   * Press an item row.
+   *
+   * Kit one soldier can administer to another starts by picking who gets it,
+   * the way a shot starts by picking what is being shot at: target choice and
+   * commitment are separate taps, so choosing wrongly costs nothing. Pressing
+   * the same row again puts it away, as arming a grenade twice does.
+   * Everything else is used where it stands, exactly as before.
+   */
   useItem(itemId: ItemId): void {
     const soldier = this.turnManager.selectedSoldier
     if (!soldier) return
-    if (!this.itemSystem.use(soldier, itemId)) return
+    if (!Object.hasOwn(ITEMS, itemId)) return
+
+    if (!itemTargetsAlly(ITEMS[itemId])) {
+      this.applyItem(soldier, itemId, soldier)
+      return
+    }
+
+    if (this.aimedItem === itemId) {
+      this.exitItemMode()
+      return
+    }
+    this.shoot.exit()
+    this.grenade.exit()
+    this.planner.clear()
+    this.aimedItem = itemId
+    this.itemTarget = this.neediestNearby(soldier, itemId)
+    this.renderOverlay()
+    this.refreshHud()
+  }
+
+  /** Aim the item being held at a squadmate, if they are one it can reach. */
+  private selectItemTarget(soldier: Soldier): void {
+    const user = this.turnManager.selectedSoldier
+    if (!user || this.aimedItem === null) return
+    if (!this.itemCandidates(user).includes(soldier)) return
+    this.itemTarget = soldier
+    this.renderOverlay()
+    this.refreshHud()
+  }
+
+  /** Use the item being held on the squadmate picked for it. */
+  confirmItem(): void {
+    const user = this.turnManager.selectedSoldier
+    const itemId = this.aimedItem
+    const target = this.itemTarget
+    if (!user || itemId === null || !target) return
+    this.exitItemMode()
+    this.applyItem(user, itemId, target)
+  }
+
+  private exitItemMode(): void {
+    this.aimedItem = null
+    this.itemTarget = null
+    this.renderOverlay()
+    this.refreshHud()
+  }
+
+  /**
+   * Squadmates `user` can put their hands on: alive, on their side and within
+   * arm's reach — themselves included, since treating yourself is still a use.
+   */
+  private itemCandidates(user: Soldier): Soldier[] {
+    return this.squads.byFaction[user.faction].filter(
+      (mate) => !mate.isDead && this.battlefield.grid.distance(user.tile, mate.tile) <= ITEM_REACH,
+    )
+  }
+
+  /**
+   * Who in reach is worst off in whatever the item restores, so the common
+   * case is one tap — the same favour shoot mode does by pre-picking the best
+   * odds. Nobody is pre-picked when nobody needs it: spending a kit on a unit
+   * at full health should take a deliberate tap.
+   */
+  private neediestNearby(user: Soldier, itemId: ItemId): Soldier | null {
+    const effects = ITEMS[itemId].effects
+    const treats = effects.some((e) => e.kind === 'restoreHp')
+    const repairs = effects.some((e) => e.kind === 'restoreArmor')
+    let best: Soldier | null = null
+    let worst = 0
+    for (const mate of this.itemCandidates(user)) {
+      const need =
+        (treats ? mate.maxHp - mate.hp : 0) + (repairs ? mate.maxArmor - mate.armor : 0)
+      if (need > worst) {
+        worst = need
+        best = mate
+      }
+    }
+    return best
+  }
+
+  /**
+   * Spend the item and tell the peer.
+   *
+   * Only the target travels: both sides hold both squads' real sheets, so how
+   * much a trained medic heals is derived identically on each.
+   */
+  private applyItem(user: Soldier, itemId: ItemId, target: Soldier): void {
+    if (!this.itemSystem.use(user, itemId, target)) return
+    // Self-use names nobody, exactly as it did before there was anyone to name.
+    const aimed = target === user ? null : target
     this.network?.send({
       type: 'useItem',
-      faction: soldier.faction,
-      squadIndex: soldier.squadIndex,
+      faction: user.faction,
+      squadIndex: user.squadIndex,
       itemId,
+      targetFaction: aimed?.faction,
+      targetIndex: aimed?.squadIndex,
     })
   }
 
@@ -802,6 +940,14 @@ export class InteractionController {
 
     const selected = this.turnManager.selectedSoldier
 
+    // An item is aimed: a tap is for choosing who gets it and nothing else,
+    // the selected unit included — treating yourself is a use like any other.
+    if (this.aimedItem !== null) {
+      const mate = this.pickSoldierUnderCursor(event, this.turnManager.activeFaction)
+      if (mate) this.executeClickSoldier(mate.squadIndex, mate.faction)
+      return
+    }
+
     // Tapping a friendly selects it.
     const friendly = this.pickSoldierUnderCursor(event, this.turnManager.activeFaction)
     if (friendly && friendly !== selected) {
@@ -842,7 +988,9 @@ export class InteractionController {
   executeClickSoldier(soldierIndex: number, faction: Faction): void {
     const soldier = this.squads.byFaction[faction][soldierIndex]
     if (!soldier || soldier.isDead) return
-    if (faction === this.turnManager.activeFaction) {
+    if (this.aimedItem !== null && faction === this.turnManager.activeFaction) {
+      this.selectItemTarget(soldier)
+    } else if (faction === this.turnManager.activeFaction) {
       this.turnManager.selectSoldier(soldier)
       this.exitShootMode()
     } else if (this.shoot.active) {

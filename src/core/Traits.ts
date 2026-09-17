@@ -186,8 +186,13 @@ export const TRAITS: Record<TraitId, TraitSpec> = {
   [TraitId.Plated]: {
     id: TraitId.Plated,
     name: 'Plated',
-    description: 'Heavy plate: a sixth less damage taken and +6 armour, at the cost of speed.',
-    effects: { armor: 6, damageTaken: -0.15, evasion: -4, moveCost: 0.15 },
+    description:
+      'Heavy plate: a sixth less damage taken and +6 armour, at the cost of speed and an action point.',
+    // The AP bite is what the GDD means by heavy gear inflicting an action
+    // penalty, and it is the half of a plate's cost that Strength is allowed
+    // to answer: broad shoulders carry the weight, they do not make the
+    // wearer a smaller target.
+    effects: { armor: 9, damageTaken: -0.2, evasion: -4, moveCost: 0.15, maxAp: -1 },
   },
 }
 
@@ -249,13 +254,34 @@ export const NO_TRAITS: ResolvedTraits = {
 }
 
 /**
- * Fold every trait in `ids` into `out`, which is reset first.
+ * Where a unit got a trait.
  *
- * Takes its destination so the callers on the shot-preview path — which runs
- * per frame while the panel is open — can keep one object and refill it rather
- * than allocating a fresh set of modifiers each time.
+ * The fold itself still does not care - that source-blindness is what lets a
+ * vest and a bloodline grant the same modifier. This exists for the one rule
+ * that genuinely must care: Strength cancels what *heavy gear* does to a
+ * soldier, and cancelling a limp instead would be a different game.
+ *
+ * Three, not four: worn kit and a fitted attachment are both gear, and no rule
+ * has ever wanted to tell a vest from a scope.
  */
-export function resolveTraitsInto(out: ResolvedTraits, ids: Iterable<TraitId>): ResolvedTraits {
+export const TraitSource = {
+  /** Born with it. */
+  Innate: 'innate',
+  /** Earned by being hurt. */
+  Wound: 'wound',
+  /** Carried, worn or fitted. */
+  Gear: 'gear',
+} as const
+export type TraitSource = (typeof TraitSource)[keyof typeof TraitSource]
+
+/** A trait together with where the unit got it. */
+export interface SourcedTrait {
+  id: TraitId
+  source: TraitSource
+}
+
+/** Reset every number and flag to neutral. */
+function clearTraits(out: ResolvedTraits): void {
   out.accuracy = 0
   out.moveCost = 0
   out.rangeFalloff = 0
@@ -271,31 +297,72 @@ export function resolveTraitsInto(out: ResolvedTraits, ids: Iterable<TraitId>): 
   out.maxHp = 0
   out.maxAp = 0
   out.critImmune = false
+}
 
+/**
+ * Add one trait's opinion to a fold.
+ *
+ * The single place that knows how each field combines: numbers sum, flags OR.
+ * Both folds below go through here, so a new field cannot be honoured by one
+ * of them and silently dropped by the other.
+ */
+function addEffects(out: ResolvedTraits, e: TraitEffects): void {
+  out.accuracy += e.accuracy ?? 0
+  out.moveCost += e.moveCost ?? 0
+  out.rangeFalloff += e.rangeFalloff ?? 0
+  out.accuracyCrouched += e.accuracyCrouched ?? 0
+  out.evasionCrouched += e.evasionCrouched ?? 0
+  out.armor += e.armor ?? 0
+  out.damageTaken += e.damageTaken ?? 0
+  out.silenced = out.silenced || (e.silenced ?? false)
+  out.unreadable = out.unreadable || (e.unreadable ?? false)
+  out.evasion += e.evasion ?? 0
+  out.critChance += e.critChance ?? 0
+  out.critMultiplier += e.critMultiplier ?? 0
+  out.maxHp += e.maxHp ?? 0
+  out.maxAp += e.maxAp ?? 0
+  out.critImmune = out.critImmune || (e.critImmune ?? false)
+}
+
+/**
+ * Fold every trait in `ids` into `out`, which is reset first.
+ *
+ * Takes its destination so the callers on the shot-preview path — which runs
+ * per frame while the panel is open — can keep one object and refill it rather
+ * than allocating a fresh set of modifiers each time.
+ */
+export function resolveTraitsInto(out: ResolvedTraits, ids: Iterable<TraitId>): ResolvedTraits {
+  clearTraits(out)
   for (const id of ids) {
     // `Object.hasOwn` rather than a truthiness check on the lookup: `TRAITS`
     // inherits `toString` and friends, and one of those as an id would find a
     // truthy "spec" with no `effects` on it. Ids reaching here have been
     // sanitised, but the fold is cheap to make unable to throw.
     if (!Object.hasOwn(TRAITS, id)) continue
-    const e = TRAITS[id].effects
-    out.accuracy += e.accuracy ?? 0
-    out.moveCost += e.moveCost ?? 0
-    out.rangeFalloff += e.rangeFalloff ?? 0
-    out.accuracyCrouched += e.accuracyCrouched ?? 0
-    out.evasionCrouched += e.evasionCrouched ?? 0
-    out.armor += e.armor ?? 0
-    out.damageTaken += e.damageTaken ?? 0
-    out.silenced = out.silenced || (e.silenced ?? false)
-    out.unreadable = out.unreadable || (e.unreadable ?? false)
-    out.evasion += e.evasion ?? 0
-    out.critChance += e.critChance ?? 0
-    out.critMultiplier += e.critMultiplier ?? 0
-    out.maxHp += e.maxHp ?? 0
-    out.maxAp += e.maxAp ?? 0
-    out.critImmune = out.critImmune || (e.critImmune ?? false)
+    addEffects(out, TRAITS[id].effects)
   }
+  return out
+}
 
+/**
+ * The same fold over source-tagged traits, optionally of one source only.
+ *
+ * With no `source` it is exactly {@link resolveTraitsInto}. With one, it
+ * answers "what is gear alone doing to this unit?" - which is the question a
+ * rule has to ask before it can cancel gear's share of a penalty and leave a
+ * wound's share standing.
+ */
+export function resolveSourcedInto(
+  out: ResolvedTraits,
+  traits: Iterable<SourcedTrait>,
+  source?: TraitSource,
+): ResolvedTraits {
+  clearTraits(out)
+  for (const trait of traits) {
+    if (source !== undefined && trait.source !== source) continue
+    if (!Object.hasOwn(TRAITS, trait.id)) continue
+    addEffects(out, TRAITS[trait.id].effects)
+  }
   return out
 }
 

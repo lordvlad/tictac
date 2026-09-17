@@ -15,6 +15,7 @@ item-stim: syringe by sbed
 item-firstAid: first-aid-kit by delapouite
 item-nullweave: kevlar-vest by skoll
 item-plate: armor-vest by lorc
+item-repair: auto-repair by lorc
 attachment-scope: magnifying-glass by lorc
 attachment-bipod: gun-stock by delapouite
 attachment-suppressor: silenced by delapouite

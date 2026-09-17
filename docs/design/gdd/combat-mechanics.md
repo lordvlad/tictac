@@ -3,12 +3,14 @@ title: "GDD: Tactical Combat Mechanics"
 id: "GDD-COMBAT"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-16"
+lastReviewed: "2026-09-17"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Combatant.ts"
   - "src/core/Visibility.ts"
   - "src/core/Ballistics.ts"
+  - "src/core/Items.ts"
+  - "src/core/Characters.ts"
 relatedDocs:
   - "docs/architecture/combat-and-rules.md"
 tags: ["combat", "mechanics", "rules"]
@@ -48,6 +50,11 @@ graph TD
 - Spending every point on consecutive turns leaves the unit `Winded` — a status, temporary,
   which ticks away. Ending a turn early is not effort: forfeiting hands a unit nothing
   remaining without it having run anywhere.
+- **Heavy gear costs a point.** Body plate is worth wearing and is not free: the weight takes
+  both speed and one of the turn's action points. A strong enough soldier carries it for
+  nothing — broad shoulders answer the weight, not the bulk, so plate still makes its wearer
+  easier to hit however strong they are. Who wears the heavy kit is therefore a decision about
+  the squad rather than a flat upgrade for whoever has a free slot.
 
 ### 2.2 Line of Sight (LOS) & Fog of War
 - Fast DDA (Digital Differential Analyzer) ray marching across grid tiles.
@@ -88,3 +95,28 @@ graph TD
   permanently.
 - **Wounds**: `Limping` below half health, `Concussed` below a quarter — derived from current
   health, so patching a soldier up lifts them. `Winded` is exhaustion, not a wound.
+
+### 2.6 Field Work: Treating, Repairing and Technical Kit
+- **A medic can work on somebody else.** Kit that treats a body or a plate can be used on a
+  squadmate within arm's reach instead of on yourself: pick the row, pick who gets it, confirm
+  — two taps, so choosing wrongly costs nothing, and the soldier in the worst shape nearby is
+  pre-picked for the common case. The turn's cost and the item itself always come out of the
+  *user's* pouch.
+- **Medical training only pays out on other people.** A soldier trained in medicine restores
+  noticeably more when treating a squadmate; nobody gets credit for bandaging their own arm.
+  How well treatment takes also depends on the *patient's* constitution, so a tough soldier is
+  a better patient than a frail one.
+- **A repair kit patches armour** — the only thing in the game that undoes permanent loss, so
+  a squad that has been shredded has an answer other than dying with bare plates. It is slower
+  and gives back less than a first aid kit gives in health, because armour only blunts what
+  lands rather than being a second life bar.
+- **Technical kit has to be understood to be used.** The repair kit needs a certain
+  Intelligence; a soldier below it carries it as dead weight, and the loadout screen and the
+  action row both say so rather than leaving a dead button. Roughly the clever half of a squad
+  can work one, which makes bringing it a decision about who is carrying it.
+- **Training in mechanics cuts both ways**, as all training does: a trained mechanic repairs
+  more armour and spends less of the turn doing it, while somebody untrained fumbles the job
+  and pays more for less.
+- **Explosives are trained too.** A soldier schooled in demolitions gets a wider blast and
+  strips more armour out of the same grenade — it is the charge that is better set, not the
+  arm, so throwing distance stays a matter of strength.

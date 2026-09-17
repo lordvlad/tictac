@@ -1,14 +1,16 @@
 import { AMMO, type AmmoId, type AmmoSpec, GRENADES, GrenadeId, type GrenadeSpec, WEAPONS, type Weapon, type WeaponId } from '../core/Arsenal'
 import { effectiveMaxAp, type StatusState } from '../core/Ballistics'
 import type { Combatant } from '../core/Combatant'
-import { type CharacterSheet, derive, type DerivedStats } from '../core/Characters'
+import { type CharacterSheet, derive, type DerivedStats, UtilityId } from '../core/Characters'
 import type { Tile } from '../core/Grid'
 import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
 import { ITEMS, ItemId } from '../core/Items'
 import {
   NO_TRAITS,
   type ResolvedTraits,
-  resolveTraitsInto,
+  resolveSourcedInto,
+  type SourcedTrait,
+  TraitSource,
   type TraitId,
   woundTraits,
 } from '../core/Traits'
@@ -57,7 +59,9 @@ export class SimUnit implements Combatant {
 
   private readonly derived: DerivedStats
   private readonly resolved: ResolvedTraits = { ...NO_TRAITS }
-  private readonly traitIds: TraitId[] = []
+  /** Gear's share alone, so Strength can cancel that and leave a limp. */
+  private readonly gearResolved: ResolvedTraits = { ...NO_TRAITS }
+  private readonly sourcedTraits: SourcedTrait[] = []
 
   constructor(
     readonly faction: Faction,
@@ -84,15 +88,24 @@ export class SimUnit implements Combatant {
     this.armor = RULES.maxArmor + this.resolved.armor
     this.derived = derive(sheet)
     this.grenadeSpecs = {} as Record<GrenadeId, GrenadeSpec>
+    const demolitions = 1 + (sheet.utility[UtilityId.Demolitions] ?? 0) / 100
     for (const kind of Object.values(GrenadeId)) {
+      const base = GRENADES[kind]
       this.grenadeSpecs[kind] = {
-        ...GRENADES[kind],
-        throwRange: Math.max(1, GRENADES[kind].throwRange + this.derived.throwRange),
+        ...base,
+        throwRange: Math.max(1, base.throwRange + this.derived.throwRange),
+        areaRadius: Math.max(1, Math.round(base.areaRadius * demolitions)),
+        armorShred: Math.max(0, Math.round(base.armorShred * demolitions)),
       }
     }
     this.refreshTraits()
     this.maxHp = this.derived.maxHp + this.resolved.maxHp
-    this.maxAp = this.derived.maxAp + this.resolved.maxAp
+    // Gear's AP bite, minus what these shoulders take off it - the same
+    // arithmetic a real soldier does in `refreshTraits`.
+    const apRelief = Math.round(
+      -Math.min(0, this.gearResolved.maxAp) * (this.derived.gearRelief / 100),
+    )
+    this.maxAp = this.derived.maxAp + this.resolved.maxAp + apRelief
     this.hp = this.maxHp
     this.ap = this.maxAp
   }
@@ -113,18 +126,27 @@ export class SimUnit implements Combatant {
 
   /** Sheet plus carried gear, exactly as a real unit folds them. */
   refreshTraits(): void {
-    this.traitIds.length = 0
-    for (const id of this.sheet.traits) this.traitIds.push(id)
-    for (const id of woundTraits(this.hpLeft, this.maxHp)) this.traitIds.push(id)
+    this.sourcedTraits.length = 0
+    for (const id of this.sheet.traits) {
+      this.sourcedTraits.push({ id, source: TraitSource.Innate })
+    }
+    for (const id of woundTraits(this.hpLeft, this.maxHp)) {
+      this.sourcedTraits.push({ id, source: TraitSource.Wound })
+    }
     for (const id of Object.values(ItemId)) {
       if ((this.items[id] ?? 0) <= 0) continue
       const granted = ITEMS[id].traits
-      if (granted) for (const trait of granted) this.traitIds.push(trait)
+      if (granted) for (const trait of granted) {
+        this.sourcedTraits.push({ id: trait, source: TraitSource.Gear })
+      }
     }
     for (const id of this.weapon.attachments) {
-      for (const trait of ATTACHMENTS[id]?.traits ?? []) this.traitIds.push(trait)
+      for (const trait of ATTACHMENTS[id]?.traits ?? []) {
+        this.sourcedTraits.push({ id: trait, source: TraitSource.Gear })
+      }
     }
-    resolveTraitsInto(this.resolved, this.traitIds)
+    resolveSourcedInto(this.resolved, this.sourcedTraits)
+    resolveSourcedInto(this.gearResolved, this.sourcedTraits, TraitSource.Gear)
   }
 
   get traits(): ResolvedTraits {
@@ -141,7 +163,8 @@ export class SimUnit implements Combatant {
   }
 
   get moveCostMul(): number {
-    return 1 + this.resolved.moveCost
+    const relieved = Math.max(0, this.gearResolved.moveCost) * (this.derived.gearRelief / 100)
+    return 1 + this.resolved.moveCost - relieved
   }
 
   get isDead(): boolean {
@@ -181,6 +204,14 @@ export class SimUnit implements Combatant {
 
   get itemApDelta(): number {
     return this.derived.itemApDelta
+  }
+
+  get utility(): Record<UtilityId, number> {
+    return this.sheet.utility
+  }
+
+  get gearOnlyTraits(): ResolvedTraits {
+    return this.gearResolved
   }
 
   get healBonus(): number {

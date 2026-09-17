@@ -3,7 +3,7 @@ title: "GDD: Status, Trait & Worn Kit Catalogue"
 id: "GDD-CATALOG"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-16"
+lastReviewed: "2026-09-17"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Traits.ts"
@@ -61,7 +61,7 @@ be born with the same property a piece of kit grants.
 | `scoped` | Scoped | -5 accuracy, -35% range falloff | fitted (Scope) |
 | `braced` | Braced | +10 accuracy crouched, +6 evasion crouched | fitted (Bipod) |
 | `silenced` | Silenced | -0.3 crit multiplier, firing does not reveal | fitted (Suppressor) |
-| `plated` | Plated | -4 evasion, +6 armour, -15% damage taken, +15% step cost | worn (Plate Carrier) |
+| `plated` | Plated | -4 evasion, -1 max AP, +9 armour, -20% damage taken, +15% step cost | worn (Plate Carrier) |
 
 ### 2.1 Conditional effects
 
@@ -105,14 +105,25 @@ stance.
 | Item | Grants | Net effect |
 | --- | --- | --- |
 | Nullweave Vest | Nullweave | -3 evasion, cannot be crit |
-| Plate Carrier | Plated | -4 evasion, +6 armour, -15% damage taken, +15% step cost |
+| Plate Carrier | Plated | -4 evasion, -1 max AP, +9 armour, -20% damage taken, +15% step cost |
 
 ### 4.1 Consumables, for contrast
 
-| Item | AP | Effects |
+| Item | AP | Needs | Effects |
+| --- | --- | --- | --- |
+| Stim Pack | 1 | — | applyStatus, refillAp |
+| First Aid Kit | 2 | — | restoreHp |
+| Repair Kit | 3 | Intelligence 5 | restoreArmor |
+
+### 4.2 Utility proficiencies
+
+Training rather than physique, rolled per character and scaling exactly one thing each.
+
+| Discipline | Scales | Whose |
 | --- | --- | --- |
-| Stim Pack | 1 | applyStatus, refillAp |
-| First Aid Kit | 2 | restoreHp |
+| Medical | HP an item restores, when used on somebody else | the user's |
+| Demolitions | Blast radius and armour shred of ordnance thrown | the thrower's |
+| Mechanics | Armour repaired, and what a repair costs in AP | the user's |
 
 ---
 
@@ -128,5 +139,7 @@ stance.
 | Evasion rolled | 0 to 12 | `CHARACTER.evasion` |
 | Weapon-class accuracy rolled | -8 to +6, +15 for the trained class | `CHARACTER.proficiency` |
 | Chance of an innate trait | 55% | `CHARACTER.traitChance` |
+| Utility proficiency rolled | -20 to +35% | `CHARACTER.utility` |
+| Gear penalty Strength cancels | 0 to 100% | `CHARACTER.gearRelief` |
 | Crit chance clamp | 0 to 75% | `CRIT` |
 | Crit range swing | +12 at either end of a weapon's reach | `CRIT.rangeSwing` |

@@ -14,8 +14,14 @@ import { settleTurn } from '../src/game/Turn'
 import { Squads } from '../src/game/Squads'
 import { Faction as F } from '../src/config'
 
-/** Body-worn kit: it goes in a pocket and belongs to the soldier. */
-const WORN = [ItemId.NullweaveVest, ItemId.PlateCarrier] as const
+/**
+ * Body-worn kit: it goes in a pocket and belongs to the soldier.
+ *
+ * Read off `passive` rather than listed, so an item added later is either in
+ * this invariant or provably outside it — a new worn piece that skipped the
+ * list would look exempt from having to cost anything.
+ */
+const WORN = Object.values(ItemId).filter((id) => ITEMS[id].passive === true)
 
 /** Weapon kit: it bolts to a rail and belongs to the weapon. */
 const FITTED = [AttachmentId.Scope, AttachmentId.Bipod, AttachmentId.Suppressor] as const
@@ -51,6 +57,29 @@ describe('Worn kit', () => {
       expect(spec.effects).toEqual([])
       expect(spec.traits?.length ?? 0).toBeGreaterThan(0)
     }
+  })
+
+  test('used kit is not free either, and only usable kit is gated', () => {
+    // The mirror of the worn invariant, for the half of the pouch that has an
+    // action. An Intelligence bar only bites on an item somebody has to *use*:
+    // a garment's traits are in force from the moment it is carried, so
+    // `canUse` never sees it and a requirement on one would be decoration.
+    const gated: ItemId[] = []
+
+    for (const id of Object.values(ItemId)) {
+      const spec = ITEMS[id]
+      if (spec.minIntelligence !== undefined) {
+        gated.push(id)
+        expect(spec.passive ?? false).toBe(false)
+      }
+      if (spec.passive === true) continue
+      expect(spec.apCost).toBeGreaterThan(0)
+      // A used item with nothing to do would be a button that spends a turn.
+      expect(spec.effects.length).toBeGreaterThan(0)
+    }
+
+    // ITEM-016 wanted something worth gating before the gate shipped.
+    expect(gated.length).toBeGreaterThan(0)
   })
   test('nothing worn or fitted is unconditionally free', () => {
     // Every piece either costs something outright or only pays while the unit

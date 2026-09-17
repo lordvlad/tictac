@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M4 Competitive & Meta Roster"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-16"
+lastReviewed: "2026-09-17"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -25,14 +25,13 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- Nothing in flight.
+- Nothing in flight. **The next pull is `[ITEM-004]`**: it is the queue's only P1, and it is
+  now the item with somewhere to write — utility proficiency and the four attributes are
+  rolled per character and nothing yet makes either rise, which is precisely what
+  learn-by-doing is for. Measure first (see below); `[ITEM-010]` is the cheap pull if the
+  measurement says growth cannot be earned inside a match.
 
 ### 📋 Ready (Pull Queue)
-- **`[ITEM-013]`**: Utility proficiencies — but **only the Demolitions third is actually
-  ready**. Grenades already carry `areaRadius` and `armorShred` per kind, so a per-thrower
-  multiplier has a number to move today. Medical waits on targeted item use (item use is
-  self-only) and Mechanics waits on an armour-repair item existing at all, so pulling the
-  whole item means building two prerequisites first.
 - **`[ITEM-004]`**: In-match progression, now also the home for the GDD's learn-by-doing
   growth. **Measure before building**: the harness reports a median of 3.5 turns per match, so
   count kills per unit per match first and site the XP threshold where it can actually be
@@ -52,12 +51,6 @@ reaction fire and a roster that survives a match.
   *enemy's* move, so `MovementSystem` and the wire protocol are both in scope. Under the
   "sender resolves, receiver replays" contract, every reaction must be authored by the
   reacting unit's owner and applied mid-path.
-- **`[ITEM-015]`**: Strength negating heavy-gear penalties. Blocked on a design decision, not
-  on effort: the modifier fold is deliberately source-blind, so "negate the gear share only"
-  cannot be said to it. Splitting the fold by source changes its central contract and should
-  not ride along with an attribute.
-- **`[ITEM-016]`**: Intelligence gating advanced item usage. Nothing in `ITEMS` is advanced
-  enough to gate; wants `ITEM-013`'s repair kit or a deployable first.
 - **`[ITEM-012]`**: Permadeath, lasting wounds and roster persistence. Changes what the
   handshake means: a peer would be sending a *saved* roster, so `sanitizeSheet` becomes
   load-bearing against your own stored data as well as a hostile peer. Wants `ITEM-004`
@@ -81,6 +74,17 @@ reaction fire and a roster that survives a match.
   it could not land in this pass. Worth noting for anything touching the handshake: a sheet no
   longer *has* a hit-point ceiling to send, so `sanitizeSheet` clamps four ints and the
   envelope is unforgeable by construction.
+- **`[ITEM-013]`**: Utility proficiencies (Medical, Demolitions, Mechanics) — all three, not
+  just the ready third. Both prerequisites the item was blocked on were built in the same
+  pass: item use takes a target, and a repair kit exists for a mechanic to work.
+- **`[ITEM-015]`**: Strength carrying heavy gear. The source-blind fold stayed the default and
+  a source-tagged fold was added *beside* it, with one shared combining rule so the two cannot
+  drift; `gearRelief` is the only rule that reads attribution. Plate had to be given an AP cost
+  before there was anything for Strength to negate.
+- **`[ITEM-016]`**: Intelligence gating advanced kit, on the repair kit `ITEM-013` needed
+  anyway — so one item unblocked both halves.
+- Of the four items filed out of the attribute pass, only **`[ITEM-014]`** (morale) is still
+  open, and it is in the cold backlog for its own reason rather than for a missing prerequisite.
 
 ### 🚫 Struck
 - **`[ITEM-003.4]`** — "Remove `installCanvasStub` from `movement`, `camera`, `pathmarker`,

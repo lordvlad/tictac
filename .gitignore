@@ -10,6 +10,11 @@ dist
 coverage
 *.lcov
 
+# balance sweep recordings: a command stream per match, replayable with
+# `--replay`. Captured on demand for a run worth inspecting, never an artefact
+# of the repo - the sweep that produced one is reproducible from its seed.
+recordings
+
 # logs
 logs
 _.log

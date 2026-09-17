@@ -50,7 +50,9 @@ export type NetworkMessage =
   | { type: 'reload'; faction: Faction; squadIndex: number }
   | { type: 'toggleCover'; faction: Faction; squadIndex: number }
   | { type: 'endUnitTurn'; faction: Faction; squadIndex: number }
-  | { type: 'useItem'; faction: Faction; squadIndex: number; itemId: ItemId }
+  // The target is optional because most uses are on the carrier: a frame with
+  // no target named, or naming a unit this side cannot find, is a self-use.
+  | { type: 'useItem'; faction: Faction; squadIndex: number; itemId: ItemId; targetFaction?: Faction; targetIndex?: number }
   | { type: 'endTurn'; faction: Faction }
   | { type: 'rightClickFacing'; faction: Faction; squadIndex: number; x: number; z: number }
   | { type: 'ready'; sheets: CharacterSheet[] }

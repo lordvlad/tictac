@@ -227,6 +227,23 @@ export const CHARACTER = {
   /** Percent added to HP an item restores to them. From Health. */
   healBonus: { min: -20, max: 30 },
   /**
+   * Percent of what *gear* does to a soldier's movement and action points that
+   * their own Strength cancels. From Strength.
+   *
+   * Only the unfavourable share, and only gear's: a plate carrier's drag is
+   * what shoulders are for, while a limp is not something being strong fixes.
+   * At the top of the scale heavy kit is free to wear, which is the point the
+   * GDD makes about gating heavy armour on Strength rather than forbidding it.
+   */
+  gearRelief: { min: 0, max: 100 },
+  /**
+   * Percent a utility discipline adds to what it governs, per discipline.
+   *
+   * Training, not physique, so it is rolled rather than derived from an
+   * attribute - and it is the channel organic growth will later write to.
+   */
+  utility: { min: -20, max: 35 },
+  /**
    * Accuracy every weapon class gets, before the one the character actually
    * trained on.
    */

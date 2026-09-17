@@ -5,6 +5,23 @@ import { Rng } from './rng'
 import { TraitId, TRAITS } from './Traits'
 
 /**
+ * Training a character has that is not about guns.
+ *
+ * Separate from {@link Attributes} because it is learned rather than innate:
+ * the GDD has these grow with use, while an attribute is closer to who someone
+ * is. Each one scales exactly one thing, named on the field.
+ */
+export const UtilityId = {
+  /** Healing this character applies to somebody else. */
+  Medical: 'medical',
+  /** Blast radius and armour shred of ordnance this character throws. */
+  Demolitions: 'demolitions',
+  /** Armour this character repairs, and what repairing costs them. */
+  Mechanics: 'mechanics',
+} as const
+export type UtilityId = (typeof UtilityId)[keyof typeof UtilityId]
+
+/**
  * The four numbers a character actually *is*.
  *
  * Everything tactical is derived from these by {@link derive} rather than
@@ -41,6 +58,8 @@ export interface CharacterSheet {
   attributes: Attributes
   /** Accuracy this character adds, or loses, with each weapon class. */
   proficiency: Record<WeaponId, number>
+  /** Percent each utility discipline adds to what it governs. */
+  utility: Record<UtilityId, number>
   /** The class they trained on: the one carrying {@link CHARACTER.specialistBonus}. */
   specialism: WeaponId
   /** What they were born with. Gear grants more, separately. */
@@ -67,6 +86,8 @@ export interface DerivedStats {
   itemApDelta: number
   /** Percent on top of HP an item restores to them. */
   healBonus: number
+  /** Percent of gear's own movement and AP penalty this character shrugs off. */
+  gearRelief: number
 }
 
 /** Traits a character can be born with. `Nullweave` is a garment, not a person. */
@@ -105,6 +126,7 @@ export function derive(sheet: CharacterSheet): DerivedStats {
     throwRange: band(strength, CHARACTER.throwRange),
     carrySlots: band(strength, CHARACTER.carrySlots),
     itemApDelta: band(intelligence, CHARACTER.itemApDelta),
+    gearRelief: band(strength, CHARACTER.gearRelief),
   }
 }
 
@@ -124,13 +146,18 @@ export function characterSheet(rng: Rng): CharacterSheet {
     proficiency[id] = rng.int(CHARACTER.proficiency.min, CHARACTER.proficiency.max)
   }
 
+  const utility = {} as Record<UtilityId, number>
+  for (const id of Object.values(UtilityId)) {
+    utility[id] = rng.int(CHARACTER.utility.min, CHARACTER.utility.max)
+  }
+
   const specialism = rng.pick(classes)
   proficiency[specialism] += CHARACTER.specialistBonus
 
   // Rolled last so adding a trait to the table cannot shift the stats above it.
   const traits = rng.chance(CHARACTER.traitChance) ? [rng.pick(INNATE_TRAITS)] : []
 
-  return { attributes, proficiency, specialism, traits }
+  return { attributes, proficiency, utility, specialism, traits }
 }
 
 /**
@@ -173,10 +200,12 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
       intelligence: average,
     },
     proficiency: {} as Record<WeaponId, number>,
+    utility: {} as Record<UtilityId, number>,
     specialism: WeaponId.Rifle,
     traits: [],
   }
   for (const id of Object.values(WeaponId)) fallback.proficiency[id] = 0
+  for (const id of Object.values(UtilityId)) fallback.utility[id] = 0
   if (!raw || typeof raw !== 'object') return fallback
 
   const sheet = raw as Partial<CharacterSheet>
@@ -192,6 +221,11 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
   const profMax = CHARACTER.proficiency.max + CHARACTER.specialistBonus
   for (const id of Object.values(WeaponId)) {
     proficiency[id] = number(sheet.proficiency?.[id], CHARACTER.proficiency.min, profMax, 0)
+  }
+
+  const utility = {} as Record<UtilityId, number>
+  for (const id of Object.values(UtilityId)) {
+    utility[id] = number(sheet.utility?.[id], CHARACTER.utility.min, CHARACTER.utility.max, 0)
   }
 
   const traits: TraitId[] = []
@@ -211,6 +245,7 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
   return {
     attributes,
     proficiency,
+    utility,
     specialism:
       typeof sheet.specialism === 'string' &&
       (Object.values(WeaponId) as string[]).includes(sheet.specialism)

@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-16"
+lastReviewed: "2026-09-17"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -136,55 +136,6 @@ Changes what the network handshake means: peers send *saved* rosters, making `sa
 
 ---
 
-### [ITEM-013] Utility Proficiencies (Medical, Demolitions, Mechanics)
-**Type:** Feature  
-**Priority:** P2  
-**Status:** Backlog  
-**Milestone:** M2 — Tactical Depth  
-
-#### Why
-[GDD §2](../design/gdd/progression-and-meta.md) gives a character non-combat training on top
-of the four attributes. `sheet.proficiency` is `Record<WeaponId, number>` — four weapon
-classes and nothing else — so there is currently no channel for training that is not a gun.
-
-#### Change
-1. A `utility: Record<UtilityId, number>` on the sheet, rolled from a band in `CHARACTER` and
-   clamped in `sanitizeSheet` exactly as weapon proficiency is (bounded ints, unknown keys
-   dropped).
-2. Demolitions scales `areaRadius` and `armorShred` for ordnance *this* character throws.
-3. Medical scales the HP a `restoreHp` effect this character applies to **another** unit.
-4. Mechanics scales mid-match armour repair and what it costs in AP.
-
-#### Blocker
-Only one of the three has anything to modify today, which is why none of them is in the
-attribute pass:
-- **Demolitions** — live. `GRENADES` carries `areaRadius` and `armorShred` per kind and
-  `grenadeDamageAt` already scales both by blast falloff, so a per-thrower multiplier has a
-  real number to move.
-- **Medical** — nothing to amplify. Item use is self-only: `ItemSystem.use(soldier, itemId,
-  force)` takes the *user* as its one unit and every branch of its effect switch writes to
-  that same soldier. "Healing used on others" needs targeted item use first, which also means
-  a new peer-supplied command carrying a target.
-- **Mechanics** — the effect exists, no item carries it. `ItemEffect` has a `restoreArmor`
-  kind and `ItemSystem` implements it, but none of the four entries in `ITEMS` (`StimPack`,
-  `FirstAidKit`, `NullweaveVest`, `PlateCarrier`) uses it, so repairing armour mid-match is
-  unreachable in play. Wants a repair item before a proficiency over it means anything.
-
-#### Affected Files
-- `src/core/Characters.ts`
-- `src/core/Items.ts`
-- `src/ecs/systems/ItemSystem.ts`
-- `src/game/Combat.ts`
-- `src/config.ts`
-
-#### Acceptance Criteria
-- [ ] A sheet carries utility proficiencies and `sanitizeSheet` clamps them like weapon ones.
-- [ ] Demolitions changes a thrower's blast radius and armour shred, and nobody else's.
-- [ ] Medical only ships once an item can be used on another unit; Mechanics only once an
-      item repairs armour.
-
----
-
 ### [ITEM-014] Morale, Stress & Psychological Predispositions
 **Type:** Feature  
 **Priority:** P2  
@@ -226,73 +177,3 @@ the ids alone would add three traits that do nothing.
 - [ ] Crossing the break threshold costs the unit its turn in a way the other side sees.
 - [ ] Daredevil, Teamplayer and Loner each measurably change how a unit's morale moves.
 
----
-
-### [ITEM-015] Strength Negating Heavy-Gear Penalties
-**Type:** Feature  
-**Priority:** P2  
-**Status:** Backlog  
-**Milestone:** M2 — Tactical Depth  
-
-#### Why
-[GDD §1](../design/gdd/progression-and-meta.md) has sufficient Strength negate the AP and
-movement penalties heavy gear inflicts. Strength derives `throwRange` and `carrySlots` and
-stops there, so how strong a soldier is has no bearing on what plate does to them.
-
-#### Change
-Give the movement and AP surcharge a per-source breakdown, then spend a Strength allowance
-against the *gear* share of it alone.
-
-#### Blocker
-`ResolvedTraits` folds every opinion into one scalar per number: `moveCost` is a plain sum and
-`Soldier`/`SimUnit` turn it into `moveCostMul = 1 + resolved.moveCost`. `Plated` (worn plate)
-and `Limping` (a wound) are indistinguishable by the time anything reads it, deliberately —
-source-blindness is what keeps trait, gear and wound modifiers from having to know about each
-other. "Negate gear penalties only" cannot be phrased against that number at all; it needs
-the fold split by source, which is a change to the fold's central contract and deserves its
-own pass rather than riding along with an attribute.
-
-#### Affected Files
-- `src/core/Traits.ts`
-- `src/entities/Soldier.ts`
-- `src/sim/SimUnit.ts`
-
-#### Acceptance Criteria
-- [ ] The movement/AP surcharge is readable per source (gear, wound, innate trait).
-- [ ] High Strength cancels a plate carrier's step cost and AP surcharge; the same unit while
-      `Limping` still pays the wound's share in full.
-- [ ] `bun run balance` shows the change only where heavy gear is worn.
-
----
-
-### [ITEM-016] Intelligence Gating Advanced Item Usage
-**Type:** Feature  
-**Priority:** P2  
-**Status:** Backlog  
-**Milestone:** M2 — Tactical Depth  
-
-#### Why
-[GDD §1](../design/gdd/progression-and-meta.md) has Intelligence both gate advanced kit and
-amplify it. The amplifying half landed — Intelligence derives `itemApDelta`, so a clever
-character pays less AP per use — and the gate did not.
-
-#### Change
-A minimum Intelligence on an `ItemSpec`, refused by `canUse` (so the HUD greys the row out of
-the same predicate) and refused again on the receiving side, since the item id arrives in a
-peer's `useItem`.
-
-#### Blocker
-Nothing is advanced enough to gate. `ITEMS` holds four entries — a stim, a first aid kit and
-two passive garments — and gating any of them would only take ordinary kit away from
-low-Intelligence units. Wants a deployable or technical item to exist first; `ITEM-013`'s
-armour repair kit is the obvious first candidate.
-
-#### Affected Files
-- `src/core/Items.ts`
-- `src/ecs/systems/ItemSystem.ts`
-- `src/hud/LoadoutScreen.ts`
-
-#### Acceptance Criteria
-- [ ] An `ItemSpec` can require a minimum Intelligence, and `canUse` refuses below it.
-- [ ] A peer's `useItem` for a gated item is refused on the receiving side too.
-- [ ] At least one item exists that is worth gating, so no currently-usable kit is removed.

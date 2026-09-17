@@ -1,6 +1,7 @@
 import type {
   HudAction,
   HudIntent,
+  HudItemPanel,
   HudModel,
   HudShotOption,
   HudShotPanel,
@@ -329,8 +330,10 @@ export class Hud {
   }
 
   /**
-   * Enemies that can be shot, as a centred row of small portraits above the
-   * squad bar. Picking one only previews the shot; the panel confirms it.
+   * The units worth tapping, as a centred row of small portraits above the
+   * squad bar: enemies that can be shot, or — while an item is aimed —
+   * squadmates within reach of it. Picking one only previews; the panel
+   * confirms.
    */
   private renderTargetStrip(model: HudModel): void {
     if (model.targets.length === 0 || (!model.isMyTurn && model.networkMode !== 'local')) {
@@ -341,18 +344,23 @@ export class Hud {
 
     this.targetStripEl.classList.add('visible')
     this.targetStripEl.innerHTML = model.targets
-      .map(
-        (t) => `
-      <button class="target-icon interactive ${t.selected ? 'selected' : ''} ${t.known ? '' : 'unread'}"
-              title="${t.name} — ${t.hitChance}% to hit${t.known ? '' : ' · unread'}"
+      .map((t) => {
+        const patient = t.hitChance === null
+        const figure = patient ? `${Math.round(t.hpFraction * 100)}%` : `${t.hitChance}%`
+        const title = patient
+          ? `${t.name} — ${figure} HP`
+          : `${t.name} — ${figure} to hit${t.known ? '' : ' · unread'}`
+        return `
+      <button class="target-icon interactive ${patient ? 'patient' : ''} ${t.selected ? 'selected' : ''} ${t.known ? '' : 'unread'}"
+              title="${title}"
               ${Hud.intentAttr({ type: 'selectTarget', index: t.index })}>
         <img class="target-portrait" src="${t.portrait}" alt="${t.name}" />
         ${t.known ? '' : '<span class="target-unread">?</span>'}
-        <span class="target-chance">${t.hitChance}%</span>
+        <span class="target-chance">${figure}</span>
         <span class="target-hp"><span class="target-hp-fill" style="width: ${Math.round(t.hpFraction * 100)}%;"></span></span>
         <span class="target-ar"><span class="target-ar-fill" style="width: ${Math.round(t.armorFraction * 100)}%;"></span></span>
-      </button>`,
-      )
+      </button>`
+      })
       .join('')
   }
 
@@ -381,6 +389,11 @@ export class Hud {
 
     if (model.shotPanel) {
       this.actionPanelEl.innerHTML = this.shotCard(model.shotPanel)
+      return
+    }
+
+    if (model.itemPanel) {
+      this.actionPanelEl.innerHTML = this.itemCard(model.itemPanel)
       return
     }
 
@@ -559,11 +572,43 @@ export class Hud {
     `
   }
 
+  /**
+   * An item aimed at a squadmate: who it is going to, and what it does.
+   *
+   * The strip above the squad bar is where the patient is chosen, so this
+   * panel only reports the choice and takes the commitment — the same split
+   * shoot mode uses, and for the same reason: a mis-tap on a portrait must
+   * not spend the kit.
+   */
+  private itemCard(item: HudItemPanel): string {
+    return `
+      <div class="action-header">${item.name}</div>
+      <div class="shot-card">
+        <div class="shot-weapon">x${item.remaining} left · ${item.apCost} AP</div>
+        <div class="item-patient ${item.targetName ? '' : 'pending'}">
+          ${item.targetName ? `${icon('ui-deploy', 'tiny')}Treating ${item.targetName}` : 'Pick a squadmate in reach'}
+        </div>
+        <div class="shot-rows">
+          ${item.effects.map((line) => `<div class="shot-row"><span>${line}</span></div>`).join('')}
+        </div>
+      </div>
+      <button class="action-btn action-fire interactive" ${item.targetName && item.affordable ? '' : 'disabled'}
+              ${Hud.intentAttr({ type: 'confirmItem' })}>
+        <span class="action-label">${icon(`item-${item.itemId}`)} ${item.affordable ? 'USE' : 'Not enough AP'}</span>
+        <span class="action-tag">${item.apCost} AP</span>
+      </button>
+      <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelItem' })}>
+        <span class="action-label">${icon('ui-cancel')} Cancel</span>
+        <span class="action-tag">Esc</span>
+      </button>
+    `
+  }
+
   private actionButton(action: HudAction): string {
     return `
       <button class="action-btn interactive ${action.active ? 'active' : ''}"
               ${action.disabled ? 'disabled' : ''} ${Hud.intentAttr(action.intent)}>
-        <span class="action-label">${icon(action.icon)} ${action.label}</span>
+        <span class="action-label">${icon(action.icon)} ${action.label}${action.targeted ? '<span class="action-on-ally" title="Can be used on a squadmate in reach">ALLY</span>' : ''}</span>
         <span class="action-tag">${action.tag}</span>
       </button>
     `

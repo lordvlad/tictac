@@ -263,14 +263,32 @@ function build(): string {
   lines.push('')
   lines.push('### 4.1 Consumables, for contrast')
   lines.push('')
-  lines.push('| Item | AP | Effects |')
-  lines.push('| --- | --- | --- |')
+  lines.push('| Item | AP | Needs | Effects |')
+  lines.push('| --- | --- | --- | --- |')
   for (const id of Object.values(ItemId)) {
     const spec = ITEMS[id]
     if (spec.passive) continue
     const effects = spec.effects.map((effect) => effect.kind).join(', ')
-    lines.push(`| ${spec.name} | ${spec.apCost} | ${effects || '—'} |`)
+    // A requirement nobody can read is a + that refuses for no stated reason,
+    // which is the same class of drift as an effect the generator forgets.
+    const needs =
+      spec.minIntelligence === undefined ? '—' : `Intelligence ${spec.minIntelligence}`
+    lines.push(`| ${spec.name} | ${spec.apCost} | ${needs} | ${effects || '—'} |`)
   }
+  lines.push('')
+  lines.push('### 4.2 Utility proficiencies')
+  lines.push('')
+  lines.push(
+    'Training rather than physique, rolled per character and scaling exactly one thing each.',
+  )
+  lines.push('')
+  lines.push('| Discipline | Scales | Whose |')
+  lines.push('| --- | --- | --- |')
+  lines.push(
+    `| Medical | HP an item restores, when used on somebody else | the user's |`,
+  )
+  lines.push(`| Demolitions | Blast radius and armour shred of ordnance thrown | the thrower's |`)
+  lines.push(`| Mechanics | Armour repaired, and what a repair costs in AP | the user's |`)
   lines.push('')
   lines.push('---')
   lines.push('')
@@ -295,6 +313,12 @@ function build(): string {
   )
   lines.push(
     `| Chance of an innate trait | ${share(CHARACTER.traitChance)} | \`CHARACTER.traitChance\` |`,
+  )
+  lines.push(
+    `| Utility proficiency rolled | ${range(CHARACTER.utility.min, CHARACTER.utility.max, true)}% | \`CHARACTER.utility\` |`,
+  )
+  lines.push(
+    `| Gear penalty Strength cancels | ${range(CHARACTER.gearRelief.min, CHARACTER.gearRelief.max)}% | \`CHARACTER.gearRelief\` |`,
   )
   lines.push(`| Crit chance clamp | ${range(CRIT.min, CRIT.max)}% | \`CRIT\` |`)
   lines.push(
