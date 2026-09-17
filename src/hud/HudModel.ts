@@ -1,6 +1,6 @@
 import { AIM, FACTION_INFO, Faction, RULES } from '../config'
 import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
-import { ITEMS, ItemId } from '../core/Items'
+import { ITEMS, ItemId, itemApCost } from '../core/Items'
 import { effectiveWeapon, type HitChanceBreakdown, statusStacks } from '../core/Ballistics'
 import { clamp } from '../core/math'
 import { TRAITS, woundTraits } from '../core/Traits'
@@ -315,13 +315,17 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       // Worn kit has no action, so a row for it would be a button that does
       // nothing. What the unit carries is shown on the loadout screen.
       if (count <= 0 || spec.passive) continue
+      // Through the shared rule, because `ItemSystem` charges the same figure:
+      // a clever soldier's stim is cheaper, and a row advertising the table's
+      // price would be a button whose cost is not the cost.
+      const apCost = itemApCost(spec, selected.itemApDelta)
       actions.push({
         id: `item-${id}`,
         label: spec.name,
         icon: `item-${id}`,
-        tag: `${spec.apCost} AP · x${count}`,
+        tag: `${apCost} AP · x${count}`,
         active: false,
-        disabled: selected.ap < spec.apCost,
+        disabled: selected.ap < apCost,
         group: 'items',
         intent: { type: 'useItem', itemId: id },
       })

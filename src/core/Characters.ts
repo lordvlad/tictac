@@ -5,24 +5,68 @@ import { Rng } from './rng'
 import { TraitId, TRAITS } from './Traits'
 
 /**
+ * The four numbers a character actually *is*.
+ *
+ * Everything tactical is derived from these by {@link derive} rather than
+ * rolled beside them, so a sheet has one place a number can come from. Each
+ * one has to pay for itself somewhere a player can feel: an attribute with no
+ * consumer would be flavour text with a die attached.
+ */
+export interface Attributes {
+  /** Physical resilience: hit points, and how well treatment takes. */
+  health: number
+  /** Reflexes and precision: action points, and how hard they are to hit. */
+  agility: number
+  /** Load and reach: how much kit they carry, and how far they throw it. */
+  strength: number
+  /** Technical literacy: what using a piece of kit costs them. */
+  intelligence: number
+}
+
+/**
  * What one soldier is, as distinct from what they are carrying.
  *
  * Each peer rolls its own squad and sends the sheets in the start handshake.
  * They are not derived from the match seed: the seed is the host's map, and a
  * peer's people are its own business. The receiving side takes the sheets as
  * given — after {@link sanitizeSheet}, because they arrived off a wire.
+ *
+ * Note what is *not* here: no hit-point ceiling, no evasion, no carry limit.
+ * Those are {@link DerivedStats}, computed on whichever side is asking. A peer
+ * therefore cannot claim a ceiling at all, only four attributes inside a band
+ * this build clamps — the envelope is unforgeable by construction rather than
+ * by validation.
  */
 export interface CharacterSheet {
-  maxHp: number
-  maxAp: number
-  /** Percentage points off an attacker's hit chance. */
-  evasion: number
+  attributes: Attributes
   /** Accuracy this character adds, or loses, with each weapon class. */
   proficiency: Record<WeaponId, number>
   /** The class they trained on: the one carrying {@link CHARACTER.specialistBonus}. */
   specialism: WeaponId
   /** What they were born with. Gear grants more, separately. */
   traits: TraitId[]
+}
+
+/**
+ * The tactical numbers a sheet produces.
+ *
+ * Pure function of {@link Attributes} and nothing else — not of gear, not of
+ * wounds, not of stance. Those are the trait fold's business, and they are
+ * added on top of these by the unit that owns them.
+ */
+export interface DerivedStats {
+  maxHp: number
+  maxAp: number
+  /** Percentage points off an attacker's hit chance. */
+  evasion: number
+  /** Tiles on top of a grenade's own throw range. */
+  throwRange: number
+  /** Consumables this character can carry into a match. */
+  carrySlots: number
+  /** Action points on top of an item's own price. */
+  itemApDelta: number
+  /** Percent on top of HP an item restores to them. */
+  healBonus: number
 }
 
 /** Traits a character can be born with. `Nullweave` is a garment, not a person. */
@@ -35,11 +79,44 @@ const INNATE_TRAITS: readonly TraitId[] = [
   TraitId.Inscrutable,
 ]
 
+/**
+ * Read an attribute onto the band a stat lives in.
+ *
+ * Linear and inclusive: the bottom of the scale is the bottom of the band and
+ * the top is the top, so a band is described entirely by its two ends in
+ * {@link CHARACTER} and no stat needs a curve of its own. Bands may run
+ * backwards (`itemApDelta`), which is how an attribute can make something
+ * cheaper as it rises.
+ */
+function band(attribute: number, range: { min: number; max: number }): number {
+  const { min, max } = CHARACTER.attribute
+  const t = (clamp(attribute, min, max) - min) / (max - min)
+  return Math.round(range.min + t * (range.max - range.min))
+}
+
+/** Every tactical number a sheet implies. */
+export function derive(sheet: CharacterSheet): DerivedStats {
+  const { health, agility, strength, intelligence } = sheet.attributes
+  return {
+    maxHp: band(health, CHARACTER.hp),
+    healBonus: band(health, CHARACTER.healBonus),
+    maxAp: band(agility, CHARACTER.ap),
+    evasion: band(agility, CHARACTER.evasion),
+    throwRange: band(strength, CHARACTER.throwRange),
+    carrySlots: band(strength, CHARACTER.carrySlots),
+    itemApDelta: band(intelligence, CHARACTER.itemApDelta),
+  }
+}
+
 /** Roll one character. */
 export function characterSheet(rng: Rng): CharacterSheet {
-  const maxHp = rng.int(CHARACTER.hp.min, CHARACTER.hp.max)
-  const maxAp = rng.int(CHARACTER.ap.min, CHARACTER.ap.max)
-  const evasion = rng.int(CHARACTER.evasion.min, CHARACTER.evasion.max)
+  const attribute = (): number => rng.int(CHARACTER.attribute.min, CHARACTER.attribute.max)
+  const attributes: Attributes = {
+    health: attribute(),
+    agility: attribute(),
+    strength: attribute(),
+    intelligence: attribute(),
+  }
 
   const classes = Object.values(WeaponId)
   const proficiency = {} as Record<WeaponId, number>
@@ -53,7 +130,7 @@ export function characterSheet(rng: Rng): CharacterSheet {
   // Rolled last so adding a trait to the table cannot shift the stats above it.
   const traits = rng.chance(CHARACTER.traitChance) ? [rng.pick(INNATE_TRAITS)] : []
 
-  return { maxHp, maxAp, evasion, proficiency, specialism, traits }
+  return { attributes, proficiency, specialism, traits }
 }
 
 /**
@@ -73,16 +150,28 @@ export function rollSquadSheets(rng: Rng = new Rng(Date.now() >>> 0)): Character
  * A sheet this side can safely play against.
  *
  * Peer input, so every field is checked rather than trusted: a squad that
- * arrived claiming 10^9 HP, negative evasion or a trait this build has never
- * heard of would otherwise be handed straight to the resolver. Out-of-range
- * numbers are clamped to the same envelope a local roll draws from, and
- * anything missing falls back to the baseline.
+ * arrived claiming a trait this build has never heard of would otherwise be
+ * handed straight to the resolver.
+ *
+ * There is markedly less to check than there used to be. A sheet no longer
+ * states a hit-point ceiling, an evasion or a carry limit — it states four
+ * attributes, and every ceiling is {@link derive}d from them on this side. A
+ * peer claiming 10^9 HP is no longer a number to clamp; it is a field that
+ * does not exist.
+ *
+ * A malformed sheet plays as an average soldier: the middle of the attribute
+ * scale, no specialism bonus, no traits.
  */
 export function sanitizeSheet(raw: unknown): CharacterSheet {
+  const { min, max } = CHARACTER.attribute
+  const average = Math.round((min + max) / 2)
   const fallback: CharacterSheet = {
-    maxHp: RULES.maxHp,
-    maxAp: RULES.maxAp,
-    evasion: 0,
+    attributes: {
+      health: average,
+      agility: average,
+      strength: average,
+      intelligence: average,
+    },
     proficiency: {} as Record<WeaponId, number>,
     specialism: WeaponId.Rifle,
     traits: [],
@@ -91,8 +180,13 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
   if (!raw || typeof raw !== 'object') return fallback
 
   const sheet = raw as Partial<CharacterSheet>
-  const number = (value: unknown, min: number, max: number, fall: number): number =>
-    typeof value === 'number' && Number.isFinite(value) ? clamp(Math.round(value), min, max) : fall
+  const number = (value: unknown, low: number, high: number, fall: number): number =>
+    typeof value === 'number' && Number.isFinite(value) ? clamp(Math.round(value), low, high) : fall
+
+  const attributes = {} as Attributes
+  for (const key of Object.keys(fallback.attributes) as (keyof Attributes)[]) {
+    attributes[key] = number(sheet.attributes?.[key], min, max, average)
+  }
 
   const proficiency = {} as Record<WeaponId, number>
   const profMax = CHARACTER.proficiency.max + CHARACTER.specialistBonus
@@ -115,9 +209,7 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
   }
 
   return {
-    maxHp: number(sheet.maxHp, CHARACTER.hp.min, CHARACTER.hp.max, RULES.maxHp),
-    maxAp: number(sheet.maxAp, CHARACTER.ap.min, CHARACTER.ap.max, RULES.maxAp),
-    evasion: number(sheet.evasion, CHARACTER.evasion.min, CHARACTER.evasion.max, 0),
+    attributes,
     proficiency,
     specialism:
       typeof sheet.specialism === 'string' &&

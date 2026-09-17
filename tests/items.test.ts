@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { ItemSystem } from '../src/ecs/systems/ItemSystem'
-import { ITEMS, ItemId } from '../src/core/Items'
+import { ITEMS, ItemId, itemApCost } from '../src/core/Items'
 import { StatusKind, STATUSES } from '../src/core/Arsenal'
 import { effectiveMaxAp } from '../src/core/Ballistics'
 import type { StatusState } from '../src/core/Ballistics'
@@ -13,7 +13,20 @@ import type { Soldier } from '../src/entities/Soldier'
  * stand in an object with the same contract — including `effectiveMaxAp`,
  * which delegates to the same helper the real accessor uses.
  */
-function stubSoldier(overrides: { hp?: number; maxHp?: number; ap?: number; maxAp?: number; armor?: number; maxArmor?: number } = {}) {
+function stubSoldier(
+  overrides: {
+    hp?: number
+    maxHp?: number
+    ap?: number
+    maxAp?: number
+    armor?: number
+    maxArmor?: number
+    /** What Intelligence adds to an item's price. Average characters pay list. */
+    itemApDelta?: number
+    /** What Health adds to treatment taken. Average characters gain list. */
+    healBonus?: number
+  } = {},
+) {
   const unit = {
     hp: overrides.hp ?? 100,
     maxHp: overrides.maxHp ?? 100,
@@ -21,6 +34,8 @@ function stubSoldier(overrides: { hp?: number; maxHp?: number; ap?: number; maxA
     maxAp: overrides.maxAp ?? 12,
     armor: overrides.armor ?? 20,
     maxArmor: overrides.maxArmor ?? 20,
+    itemApDelta: overrides.itemApDelta ?? 0,
+    healBonus: overrides.healBonus ?? 0,
     statuses: [] as StatusState[],
     items: {
       [ItemId.StimPack]: 1,
@@ -166,5 +181,59 @@ describe('Item effect model', () => {
     system.use(unit, ItemId.FirstAidKit)
 
     expect(seen).toEqual([ItemId.FirstAidKit])
+  })
+})
+
+describe('What the carrier brings to their own kit', () => {
+  test('a clever soldier pays less for the same item, a slow one more', () => {
+    const system = new ItemSystem()
+    const list = ITEMS[ItemId.FirstAidKit].apCost
+
+    const clever = stubSoldier({ itemApDelta: -1 })
+    const slow = stubSoldier({ itemApDelta: 1 })
+    const cleverBefore = clever.ap
+    const slowBefore = slow.ap
+
+    system.use(clever, ItemId.FirstAidKit)
+    system.use(slow, ItemId.FirstAidKit)
+
+    expect(cleverBefore - clever.ap).toBe(list - 1)
+    expect(slowBefore - slow.ap).toBe(list + 1)
+  })
+
+  test('nobody uses kit for free, however clever', () => {
+    // The floor exists so an item is always a decision about the turn. Tested
+    // on the first aid kit, not the stim: a stim's last effect is `refillAp`,
+    // so its net cost to the turn is whatever the ceiling gives back.
+    const system = new ItemSystem()
+    const genius = stubSoldier({ itemApDelta: -99 })
+    const before = genius.ap
+
+    expect(system.use(genius, ItemId.FirstAidKit)).toBe(true)
+    expect(before - genius.ap).toBe(1)
+  })
+
+  test('the price the system charges is the price a panel can print', () => {
+    // Same rule both sides of the HUD seam: a row advertising the table's
+    // figure would be a button whose cost is not the cost.
+    const spec = ITEMS[ItemId.FirstAidKit]
+    expect(itemApCost(spec, -1)).toBe(spec.apCost - 1)
+    expect(itemApCost(spec, 0)).toBe(spec.apCost)
+    expect(itemApCost(spec, -spec.apCost - 5)).toBe(1)
+  })
+
+  test('treatment takes better on a hardy body than a frail one', () => {
+    const system = new ItemSystem()
+    const amount = 50
+    const hardy = stubSoldier({ hp: 10, maxHp: 500, healBonus: 30 })
+    const frail = stubSoldier({ hp: 10, maxHp: 500, healBonus: -20 })
+
+    system.use(hardy, ItemId.FirstAidKit)
+    system.use(frail, ItemId.FirstAidKit)
+
+    expect(hardy.hp - 10).toBeGreaterThan(amount)
+    expect(frail.hp - 10).toBeLessThan(amount)
+    // Treated badly, never not at all.
+    expect(frail.hp).toBeGreaterThan(10)
   })
 })

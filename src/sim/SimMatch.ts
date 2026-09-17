@@ -2,7 +2,7 @@ import { Faction, RULES, SQUAD_SIZE } from '../config'
 import { AmmoId, type GrenadeId, GRENADES, ShotMode, type WeaponId } from '../core/Arsenal'
 import type { AttachmentId } from '../core/Attachments'
 import { NO_FX } from '../core/Combatant'
-import { rollSquadSheets } from '../core/Characters'
+import { type CharacterSheet, rollSquadSheets } from '../core/Characters'
 import { type Grid, type Tile, tileEquals } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { generateMap } from '../core/MapGenerator'
@@ -19,6 +19,14 @@ import {
 import { stepCostFor } from '../game/Movement'
 import { settleTurn } from '../game/Turn'
 import { effectiveWeapon, resolveDamage } from '../core/Ballistics'
+import type { SquadLoadout } from '../game/Loadout'
+import {
+  type CombatRecording,
+  RECORDING_VERSION,
+  Recorder,
+  type RecordingHeader,
+  toWireHits,
+} from '../game/Recording'
 import { SimUnit } from './SimUnit'
 
 /** What one squad brought, so a sweep can vary it. */
@@ -31,12 +39,41 @@ export interface SquadPlan {
   attachments?: readonly AttachmentId[]
 }
 
+/**
+ * A plan, spelled out one unit at a time.
+ *
+ * A {@link SquadPlan} is shorthand — four weapons cycled across the squad,
+ * everything else a default — and a {@link SquadLoadout} is the same kit in the
+ * form the rendered game equips from. The match builds its units through this,
+ * so a recording's loadout is by construction the kit the match actually ran
+ * rather than a second guess at it.
+ */
+export function planToLoadout(plan: SquadPlan): SquadLoadout {
+  return Array.from({ length: SQUAD_SIZE }, (_, i) => ({
+    weaponId: plan.weapons[i % plan.weapons.length]!,
+    ammoId: plan.ammo ?? AmmoId.Standard,
+    grenades: {
+      frag: plan.grenades?.frag ?? 1,
+      flash: plan.grenades?.flash ?? 0,
+      smoke: plan.grenades?.smoke ?? 0,
+    } as Record<GrenadeId, number>,
+    // Every id, so a plan naming one piece does not leave the rest undefined
+    // for the trait fold to read.
+    items: Object.fromEntries(
+      Object.values(ItemId).map((id) => [id, plan.items?.[id] ?? 0]),
+    ) as Record<ItemId, number>,
+    attachments: [...(plan.attachments ?? [])],
+  }))
+}
+
 export interface MatchSetup {
   seed: number
   blue: SquadPlan
   red: SquadPlan
   /** Declared a draw once both sides have had this many turns. */
   turnCap?: number
+  /** Keep a replayable command stream. Off by default; a sweep opts in. */
+  record?: boolean
 }
 
 /** What one weapon class did over a match. */
@@ -107,6 +144,19 @@ export class SimMatch {
     [Faction.Red]: [],
   }
 
+  /** The people this match rolled, so a recording can redeploy them. */
+  readonly sheets: Record<Faction, CharacterSheet[]> = {
+    [Faction.Blue]: [],
+    [Faction.Red]: [],
+  }
+  /** The kit each side fought with, in the form the rendered game equips from. */
+  readonly loadouts: Record<Faction, SquadLoadout> = {
+    [Faction.Blue]: [],
+    [Faction.Red]: [],
+  }
+  /** Null unless the setup asked to record. */
+  readonly recorder: Recorder | null
+
   private readonly rng: Rng
   private readonly roll = (): number => this.rng.next()
   private readonly tally = new Map<string, WeaponTally>()
@@ -125,33 +175,53 @@ export class SimMatch {
 
     for (const faction of [Faction.Blue, Faction.Red] as const) {
       const plan = faction === Faction.Blue ? setup.blue : setup.red
+      const loadout = planToLoadout(plan)
       const sheets = rollSquadSheets(this.rng)
+      this.sheets[faction] = sheets
+      this.loadouts[faction] = loadout
       for (let i = 0; i < SQUAD_SIZE; i++) {
         const spawn = map.spawns[faction][i] ?? { x: 2 + i * 2, y: faction === Faction.Blue ? 2 : this.grid.size - 3 }
+        const kit = loadout[i]!
         const unit = new SimUnit(
           faction,
           i,
           `${faction === Faction.Blue ? 'B' : 'R'}${i}`,
           sheets[i]!,
-          plan.weapons[i % plan.weapons.length]!,
-          plan.ammo ?? AmmoId.Standard,
+          kit.weaponId,
+          kit.ammoId,
           spawn,
-          {
-            frag: plan.grenades?.frag ?? 1,
-            flash: plan.grenades?.flash ?? 0,
-            smoke: plan.grenades?.smoke ?? 0,
-          } as Record<GrenadeId, number>,
-          // Every id, so a plan naming one piece does not leave the rest
-          // undefined for the trait fold to read.
-          Object.fromEntries(
-            Object.values(ItemId).map((id) => [id, plan.items?.[id] ?? 0]),
-          ) as Record<ItemId, number>,
-          plan.attachments ?? [],
+          kit.grenades,
+          kit.items,
+          kit.attachments,
         )
         this.units.push(unit)
         this.byFaction[faction].push(unit)
       }
     }
+
+    // After the squads, so the header carries the people and the kit rather
+    // than two empty arrays.
+    this.recorder = setup.record
+      ? new Recorder(this.header(), () => ({ turn: this.turnNumber, faction: this.activeFaction }))
+      : null
+  }
+
+  private header(): RecordingHeader {
+    return {
+      version: RECORDING_VERSION,
+      seed: this.setup.seed >>> 0,
+      seedLabel: String(this.setup.seed >>> 0),
+      source: 'sim',
+      createdAt: new Date().toISOString(),
+      turnCap: this.turnCap,
+      sheets: this.sheets,
+      loadouts: this.loadouts,
+    }
+  }
+
+  /** The commands this match issued, or null when it was not recording. */
+  get recording(): CombatRecording | null {
+    return this.recorder?.toJSON() ?? null
   }
 
   /** Play until one side is gone or the cap is hit. */
@@ -231,6 +301,14 @@ export class SimMatch {
       if (this.tryCover(unit)) continue
       break
     }
+
+    // The same boundary the played game has: whatever is left is forfeited, and
+    // a replay uses it to hand selection on to the next unit.
+    this.recorder?.record({
+      type: 'endUnitTurn',
+      faction: unit.faction,
+      squadIndex: unit.squadIndex,
+    })
   }
 
   /** Enemies this unit can actually see. */
@@ -286,6 +364,20 @@ export class SimMatch {
     )
     if (!result) return false
 
+    // The dice come back off the result rather than being rolled here: hit and
+    // crit rolls interleave per round, so pre-rolling would move the stream and
+    // every balance number with it.
+    this.recorder?.record({
+      type: 'fireShot',
+      shooterFaction: unit.faction,
+      shooterIndex: unit.squadIndex,
+      targetFaction: shot.target.faction,
+      targetIndex: shot.target.squadIndex,
+      mode: shot.mode,
+      rolls: result.rolls,
+      hits: toWireHits(result.hits),
+    })
+
     tally.shots += 1
     tally.rounds += unit.weapon.bulletConsumption(shot.mode)
     if (result.hit) tally.hits += 1
@@ -321,6 +413,15 @@ export class SimMatch {
       const result = throwGrenade(this.grid, unit, centre.tile, 'frag' as GrenadeId, this.units)
       if (!result.thrown) continue
       this.grenadesThrown += 1
+      this.recorder?.record({
+        type: 'throwGrenade',
+        shooterFaction: unit.faction,
+        shooterIndex: unit.squadIndex,
+        kind: 'frag' as GrenadeId,
+        targetTile: { x: centre.tile.x, y: centre.tile.y },
+        areaRadius: spec.areaRadius,
+        hits: toWireHits(result.hits),
+      })
       return true
     }
     return false
@@ -348,6 +449,10 @@ export class SimMatch {
     const { path } = findPathSegment(this.grid, unit.tile, goal.tile, occupied)
     if (path.length < 2) return false
 
+    // The tiles actually walked, starting from where the unit stood: that is
+    // the shape `MovementSystem` replays a route from, which treats the first
+    // entry as the origin.
+    const walked: Tile[] = [{ ...unit.tile }]
     let moved = false
     for (let i = 1; i < path.length; i++) {
       const step = path[i]!
@@ -358,6 +463,7 @@ export class SimMatch {
       unit.ap -= cost
       unit.tile = { ...step }
       unit.exitCover()
+      walked.push({ ...step })
       moved = true
       // One tile at a time, then re-decide, and stop the moment there is a
       // shot to take rather than the moment something comes into view: a
@@ -365,6 +471,14 @@ export class SimMatch {
       // just outside its own range, never firing a round all match.
       const shot = this.bestShot(unit)
       if (shot && shot.chance >= PREFERRED_CHANCE) break
+    }
+    if (moved) {
+      this.recorder?.record({
+        type: 'moveUnit',
+        faction: unit.faction,
+        squadIndex: unit.squadIndex,
+        path: walked.map((tile) => ({ x: tile.x, y: tile.y })),
+      })
     }
     return moved
   }
@@ -375,6 +489,11 @@ export class SimMatch {
     if (unit.hp > unit.maxHp / 2) return false
     unit.ap -= RULES.coverApCost
     unit.enterCover()
+    this.recorder?.record({
+      type: 'toggleCover',
+      faction: unit.faction,
+      squadIndex: unit.squadIndex,
+    })
     return true
   }
 
@@ -384,6 +503,9 @@ export class SimMatch {
    * does via `TurnSystem` and `settleTurn`.
    */
   private endTurn(): void {
+    // Recorded before the hand-over, so the event is stamped with the side that
+    // just finished rather than the one coming up.
+    this.recorder?.record({ type: 'endTurn', faction: this.activeFaction })
     this.activeFaction = this.activeFaction === Faction.Blue ? Faction.Red : Faction.Blue
     if (this.activeFaction === Faction.Blue) this.turnNumber++
     for (const unit of this.byFaction[this.activeFaction]) {

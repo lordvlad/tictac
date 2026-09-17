@@ -327,6 +327,59 @@ canvas {
   border-color: rgba(56, 189, 248, 0.5);
 }
 
+/* Hidden wholesale during a replay: the panels command a match, and a replay
+   has no commands to give. */
+.hud-hidden {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Replay transport
+   --------------------------------------------------------------------------- */
+/* Same berth as the squad bar it stands in for. */
+.playback-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.playback-readout {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--hud-dim);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+.playback-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The pause/play key reads as the one that matters, and stays put as its glyph
+   swaps: a button that resized on every toggle would walk the row sideways. */
+.playback-btn-primary {
+  min-width: 56px;
+  padding: 10px 14px;
+  font-size: 16px;
+  color: var(--hud-accent);
+  border-color: var(--hud-accent);
+}
+
+.playback-bar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 /* ---------------------------------------------------------------------------
    HUD Bottom Squad Bar
    --------------------------------------------------------------------------- */
@@ -1825,6 +1878,18 @@ canvas {
   margin-top: 8px;
 }
 
+/* The items header carries the unit's own pouch, so it has to make room for
+   pips beside the word the way no other section does. */
+.loadout-section-cap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.loadout-cap-count {
+  font-variant-numeric: tabular-nums;
+}
+
 .loadout-panel .action-btn {
   display: flex;
   align-items: center;
@@ -2019,6 +2084,39 @@ canvas {
   padding-top: 6px;
 }
 
+/* The roll itself, over what it produced. Label above value rather than
+   beside it: four label-value pairs on one line read as eight numbers, while
+   stacked each column is one readout, and the four then line up across the
+   cards like the derived grid under them. */
+.loadout-attrs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0 4px;
+  text-align: center;
+}
+
+.loadout-attr {
+  display: flex;
+  flex-direction: column;
+}
+
+.loadout-attr-name {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--hud-dim);
+}
+
+/* Bigger than the derived stats it sits over: this is the number the player
+   was dealt, and the rows below are consequences of it. */
+.loadout-attr-value {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 13px;
+  color: var(--hud-text);
+}
+
 /* A grid rather than flow: the numbers then line up down both columns and
    across every card, however many digits each of them runs to. */
 .loadout-stats {
@@ -2183,6 +2281,15 @@ canvas {
   .loadout-spec,
   .loadout-trait {
     font-size: 7px;
+  }
+
+  .loadout-attr-name {
+    font-size: 7px;
+  }
+
+  .loadout-attr-value {
+    font-size: 9px;
+    line-height: 11px;
   }
 
   .loadout-traits {

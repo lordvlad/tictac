@@ -7,6 +7,7 @@
  *   bun run balance -- --matches=200 --seed=1 --turnCap=60
  *   bun run balance -- --blue=shotgun --red=sniper
  *   bun run balance -- --redAmmo=ap --blueItems=plate:1 --blueMods=scope,bipod
+ *   bun run balance -- --record=recordings
  *   bun run balance -- --json
  *
  * A mirror match measures the guns; an asymmetric one measures the difference
@@ -17,10 +18,12 @@
  * itself is in `src/sim/Balance.ts`, so a test can run it without parsing
  * arguments or reading stdout.
  */
+import { mkdir } from 'node:fs/promises'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
 import { AttachmentId } from '../src/core/Attachments'
 import { ItemId } from '../src/core/Items'
 import { formatReport, sweep } from '../src/sim/Balance'
+import type { CombatRecording } from '../src/game/Recording'
 import type { SquadPlan } from '../src/sim/SimMatch'
 
 function arg(name: string): string | undefined {
@@ -79,12 +82,29 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   }
 }
 
+const recordDir = arg('record')
+const recorded: { seed: number; recording: CombatRecording }[] = []
+
 const report = sweep({
   seed: numberArg('seed', 1),
   matches: numberArg('matches', 100),
   turnCap: numberArg('turnCap', 40),
   blue: planFor('blue'),
   red: planFor('red'),
+  record: recordDir !== undefined,
+  onMatch: (outcome, recording) => {
+    if (recording) recorded.push({ seed: outcome.seed, recording })
+  },
 })
 
 console.log(process.argv.includes('--json') ? JSON.stringify(report, null, 2) : formatReport(report))
+
+// Written after the sweep rather than during it: the sweep is synchronous by
+// design, and file I/O in this codebase is asynchronous by rule.
+if (recordDir !== undefined) {
+  await mkdir(recordDir, { recursive: true })
+  for (const { seed, recording } of recorded) {
+    await Bun.write(`${recordDir}/seed-${seed}.json`, JSON.stringify(recording))
+  }
+  console.log(`[balance] wrote ${recorded.length} recordings to ${recordDir}`)
+}

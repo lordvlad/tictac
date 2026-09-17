@@ -17,6 +17,18 @@ export const SIM = {
   maxCatchUp: 0.5,
 } as const
 
+/** Spectator replay pacing. */
+export const PLAYBACK = {
+  /**
+   * Scaled seconds held between consecutive recorded events.
+   *
+   * A move animates and so paces itself, but a shot, a stance change or a
+   * handover is instantaneous — without a dwell a whole turn would resolve in
+   * one frame and there would be nothing to watch.
+   */
+  eventDwell: 0.35,
+} as const
+
 /** Grid is GRID_SIZE x GRID_SIZE tiles. */
 export const GRID_SIZE = 36
 
@@ -179,12 +191,41 @@ export const WOUNDS = {
  * Everything here is a range around the baseline in {@link RULES}.
  */
 export const CHARACTER = {
-  /** Hit points, absolute. */
+  /**
+   * The scale every core attribute is rolled and read on.
+   *
+   * Attributes are the only thing a character is *dealt*; every number below
+   * is a band that one of them is mapped onto, so a sheet is four rolls and a
+   * specialism rather than a pile of independent draws. That is also what
+   * makes a sheet safe to accept from a peer: the ceilings cannot be stated,
+   * only derived from attributes this side has clamped.
+   */
+  attribute: { min: 1, max: 10 },
+  /** Hit points, absolute. From Health. */
   hp: { min: 85, max: 120 },
-  /** Action points, absolute. */
+  /** Action points, absolute. From Agility. */
   ap: { min: 10, max: 14 },
-  /** Percentage points off an attacker's hit chance. */
+  /**
+   * Percentage points off an attacker's hit chance. From Agility.
+   *
+   * Deliberately the same attribute as AP: a quick character is both harder to
+   * line up and able to do more with a turn, so the two move together instead
+   * of being two unrelated dice.
+   */
   evasion: { min: 0, max: 12 },
+  /** Tiles added to a grenade's throw range. From Strength. */
+  throwRange: { min: -2, max: 2 },
+  /** Consumables a character can carry into a match. From Strength. */
+  carrySlots: { min: 1, max: 3 },
+  /**
+   * Action points added to the price of using an item. From Intelligence.
+   *
+   * Inverted on purpose: the clever end of the scale pays *less*. Floored at
+   * one AP by {@link itemApCost}, so no character uses kit for free.
+   */
+  itemApDelta: { min: 1, max: -1 },
+  /** Percent added to HP an item restores to them. From Health. */
+  healBonus: { min: -20, max: 30 },
   /**
    * Accuracy every weapon class gets, before the one the character actually
    * trained on.

@@ -1,7 +1,7 @@
-import { AMMO, type AmmoId, type AmmoSpec, GRENADES, type GrenadeId, type GrenadeSpec, WEAPONS, type Weapon, type WeaponId } from '../core/Arsenal'
+import { AMMO, type AmmoId, type AmmoSpec, GRENADES, GrenadeId, type GrenadeSpec, WEAPONS, type Weapon, type WeaponId } from '../core/Arsenal'
 import { effectiveMaxAp, type StatusState } from '../core/Ballistics'
 import type { Combatant } from '../core/Combatant'
-import type { CharacterSheet } from '../core/Characters'
+import { type CharacterSheet, derive, type DerivedStats } from '../core/Characters'
 import type { Tile } from '../core/Grid'
 import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
 import { ITEMS, ItemId } from '../core/Items'
@@ -46,8 +46,16 @@ export class SimUnit implements Combatant {
   tile: Tile
   readonly grenades: Record<GrenadeId, number>
   readonly items: Record<ItemId, number>
-  readonly grenadeSpecs: Record<GrenadeId, GrenadeSpec> = GRENADES
+  /**
+   * This unit's own grenades, not the shared table.
+   *
+   * Copied because Strength is stamped onto the throw range here exactly as a
+   * real soldier stamps it onto their component: mutating `GRENADES` would
+   * hand one character's arm to every unit in the sweep.
+   */
+  readonly grenadeSpecs: Record<GrenadeId, GrenadeSpec>
 
+  private readonly derived: DerivedStats
   private readonly resolved: ResolvedTraits = { ...NO_TRAITS }
   private readonly traitIds: TraitId[] = []
 
@@ -74,9 +82,17 @@ export class SimUnit implements Combatant {
     this.grenades = { ...grenades }
     this.items = { ...items }
     this.armor = RULES.maxArmor + this.resolved.armor
+    this.derived = derive(sheet)
+    this.grenadeSpecs = {} as Record<GrenadeId, GrenadeSpec>
+    for (const kind of Object.values(GrenadeId)) {
+      this.grenadeSpecs[kind] = {
+        ...GRENADES[kind],
+        throwRange: Math.max(1, GRENADES[kind].throwRange + this.derived.throwRange),
+      }
+    }
     this.refreshTraits()
-    this.maxHp = sheet.maxHp + this.resolved.maxHp
-    this.maxAp = sheet.maxAp + this.resolved.maxAp
+    this.maxHp = this.derived.maxHp + this.resolved.maxHp
+    this.maxAp = this.derived.maxAp + this.resolved.maxAp
     this.hp = this.maxHp
     this.ap = this.maxAp
   }
@@ -158,9 +174,22 @@ export class SimUnit implements Combatant {
     return this.resolved.unreadable
   }
 
+  /** Consumables this character can carry into a match. */
+  get carrySlots(): number {
+    return this.derived.carrySlots
+  }
+
+  get itemApDelta(): number {
+    return this.derived.itemApDelta
+  }
+
+  get healBonus(): number {
+    return this.derived.healBonus
+  }
+
   get evasion(): number {
     const braced = this.isCrouching ? this.resolved.evasionCrouched : 0
-    return Math.max(0, this.sheet.evasion + this.resolved.evasion + braced)
+    return Math.max(0, this.derived.evasion + this.resolved.evasion + braced)
   }
 
   get critImmune(): boolean {

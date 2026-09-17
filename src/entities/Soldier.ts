@@ -3,13 +3,14 @@ import { Faction, RULES } from '../config'
 import {
   type AmmoSpec,
   AmmoId,
+  GRENADES,
   type GrenadeSpec,
   GrenadeId,
   Weapon,
   WeaponId,
 } from '../core/Arsenal'
 import { effectiveMaxAp, type StatusState } from '../core/Ballistics'
-import { characterSheet, type CharacterSheet } from '../core/Characters'
+import { characterSheet, type CharacterSheet, derive, type DerivedStats } from '../core/Characters'
 import { Rng } from '../core/rng'
 import {
   NO_TRAITS,
@@ -76,6 +77,16 @@ export class Soldier {
    */
   sheet: CharacterSheet
 
+  /**
+   * What the sheet's attributes work out to.
+   *
+   * Recomputed only when the sheet itself changes - on construction and when a
+   * peer's real sheet arrives - because it is a pure function of four numbers
+   * that do not move during a match. Trait bonuses are *not* in here: they
+   * land on top of these, and they change whenever the pouch does.
+   */
+  private derived: DerivedStats
+
   /** Sheet plus carried gear, refolded whenever either could have changed. */
   private readonly resolvedTraits: ResolvedTraits = { ...NO_TRAITS }
   private readonly traitIds: TraitId[] = []
@@ -94,6 +105,7 @@ export class Soldier {
     this.squadIndex = squadIndex
     this.name = name
     this.sheet = sheet
+    this.derived = derive(sheet)
 
     // Blue team faces North (+Z), Red team faces South (-Z)
     const initialYaw = faction === Faction.Blue ? 0 : Math.PI
@@ -106,10 +118,13 @@ export class Soldier {
     )
     // The sheet's own trait bonuses are in these ceilings from the start; gear
     // picked up later lifts them through `refreshTraits`.
-    this.health = world.addComponent(this.entityId, new HealthComponent(sheet.maxHp, sheet.maxHp))
+    this.health = world.addComponent(
+      this.entityId,
+      new HealthComponent(this.derived.maxHp, this.derived.maxHp),
+    )
     this.actionPoints = world.addComponent(
       this.entityId,
-      new ActionPointsComponent(sheet.maxAp, sheet.maxAp),
+      new ActionPointsComponent(this.derived.maxAp, this.derived.maxAp),
     )
     this.armorComponent = world.addComponent(
       this.entityId,
@@ -124,6 +139,7 @@ export class Soldier {
     this.statusesComponent = world.addComponent(this.entityId, new StatusesComponent())
     this.sighted = world.addComponent(this.entityId, new SightedComponent())
     this.traitsComponent = world.addComponent(this.entityId, new TraitsComponent())
+    this.stampThrowRange()
     this.refreshTraits()
 
   }
@@ -152,7 +168,7 @@ export class Soldier {
     }
     resolveTraitsInto(this.resolvedTraits, this.traitIds)
 
-    const evasion = Math.max(0, this.sheet.evasion + this.resolvedTraits.evasion)
+    const evasion = Math.max(0, this.derived.evasion + this.resolvedTraits.evasion)
     if (this.traitsComponent.evasion !== evasion) this.traitsComponent.evasion = evasion
     if (this.traitsComponent.critImmune !== this.resolvedTraits.critImmune) {
       this.traitsComponent.critImmune = this.resolvedTraits.critImmune
@@ -173,7 +189,7 @@ export class Soldier {
 
     // Trait ceilings sit on top of the sheet's own, and a unit at full health
     // keeps being at full health when the source of the lift changes.
-    const maxHp = this.sheet.maxHp + this.resolvedTraits.maxHp
+    const maxHp = this.derived.maxHp + this.resolvedTraits.maxHp
     if (this.health.maxHp !== maxHp) {
       const wasFull = this.health.hp >= this.health.maxHp
       this.health.maxHp = maxHp
@@ -188,7 +204,7 @@ export class Soldier {
         : Math.min(this.armorComponent.armor, maxArmor)
     }
 
-    const maxAp = this.sheet.maxAp + this.resolvedTraits.maxAp
+    const maxAp = this.derived.maxAp + this.resolvedTraits.maxAp
     if (this.actionPoints.maxAp !== maxAp) {
       const wasFull = this.actionPoints.ap >= this.actionPoints.maxAp
       this.actionPoints.maxAp = maxAp
@@ -206,9 +222,46 @@ export class Soldier {
    */
   adoptSheet(sheet: CharacterSheet): void {
     this.sheet = sheet
+    this.derived = derive(sheet)
+    this.stampThrowRange()
     this.refreshTraits()
     this.health.hp = this.health.maxHp
     this.actionPoints.ap = this.actionPoints.maxAp
+  }
+
+  /**
+   * Write this character's reach onto their own grenades.
+   *
+   * Stamped into the per-unit specs rather than added at the throw site, so
+   * the one number every consumer already reads - the planner's preview, the
+   * range check in `throwGrenade`, the debug panel - is the number this
+   * soldier can actually reach. It replicates with the component, so a peer
+   * sees the arm it is up against rather than its own stock copy.
+   *
+   * Floored at a tile: the weakest character can still throw, badly.
+   */
+  private stampThrowRange(): void {
+    for (const kind of Object.values(GrenadeId)) {
+      this.grenadeSpecsComponent.specs[kind].throwRange = Math.max(
+        1,
+        GRENADES[kind].throwRange + this.derived.throwRange,
+      )
+    }
+  }
+
+  /** Consumables this character can carry into a match. */
+  get carrySlots(): number {
+    return this.derived.carrySlots
+  }
+
+  /** Action points on top of an item's own price, from Intelligence. */
+  get itemApDelta(): number {
+    return this.derived.itemApDelta
+  }
+
+  /** Percent on top of HP an item restores to this unit, from Health. */
+  get healBonus(): number {
+    return this.derived.healBonus
   }
 
   /** Every trait in force, from the sheet and from the pouch. */

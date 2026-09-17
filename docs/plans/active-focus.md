@@ -28,24 +28,41 @@ reaction fire and a roster that survives a match.
 - Nothing in flight.
 
 ### 📋 Ready (Pull Queue)
-- **`[ITEM-004]`**: In-match progression & promotion draft. **Measure before building**: the
-  harness reports a median of 3.5 turns per match, so count kills per unit per match first
-  and site the XP threshold where it can actually be reached. This one widens peer-supplied
-  input, so it needs its own sanitiser and regression pins rather than trusting
+- **`[ITEM-013]`**: Utility proficiencies — but **only the Demolitions third is actually
+  ready**. Grenades already carry `areaRadius` and `armorShred` per kind, so a per-thrower
+  multiplier has a number to move today. Medical waits on targeted item use (item use is
+  self-only) and Mechanics waits on an armour-repair item existing at all, so pulling the
+  whole item means building two prerequisites first.
+- **`[ITEM-004]`**: In-match progression, now also the home for the GDD's learn-by-doing
+  growth. **Measure before building**: the harness reports a median of 3.5 turns per match, so
+  count kills per unit per match first and site the XP threshold where it can actually be
+  reached — and note the GDD explicitly rejects a menu XP pool, so measure what a unit *does*
+  in 3.5 turns before deciding growth can be earned in one match at all. This one widens
+  peer-supplied input, so it needs its own sanitiser and regression pins rather than trusting
   `sanitizeSheet`.
 - **`[ITEM-010]`**: Roles on the loadout screen. Mostly UI over the existing
   `LOADOUT_LIMITS` machinery.
 
 ### 🧊 Backlog (needs its own pass)
+- **`[ITEM-014]`**: Morale, stress and predispositions. The unbuilt half of M3. Wants its own
+  replicated component and its own stress hooks; the three predispositions are trait-shaped
+  but have nothing to modify until the loop exists.
 - **`[ITEM-011]`**: Overwatch & reaction fire. The biggest tactical lift available and the
   natural consumer of proficiency against evasion — but it interleaves resolution into the
   *enemy's* move, so `MovementSystem` and the wire protocol are both in scope. Under the
   "sender resolves, receiver replays" contract, every reaction must be authored by the
   reacting unit's owner and applied mid-path.
-- **`[ITEM-012]`**: Campaign roster persistence. Changes what the handshake means: a peer
-  would be sending a *saved* roster, so `sanitizeSheet` becomes load-bearing against your
-  own stored data as well as a hostile peer. Wants `ITEM-004` first — XP is what there would
-  be to persist.
+- **`[ITEM-015]`**: Strength negating heavy-gear penalties. Blocked on a design decision, not
+  on effort: the modifier fold is deliberately source-blind, so "negate the gear share only"
+  cannot be said to it. Splitting the fold by source changes its central contract and should
+  not ride along with an attribute.
+- **`[ITEM-016]`**: Intelligence gating advanced item usage. Nothing in `ITEMS` is advanced
+  enough to gate; wants `ITEM-013`'s repair kit or a deployable first.
+- **`[ITEM-012]`**: Permadeath, lasting wounds and roster persistence. Changes what the
+  handshake means: a peer would be sending a *saved* roster, so `sanitizeSheet` becomes
+  load-bearing against your own stored data as well as a hostile peer. Wants `ITEM-004`
+  first — growth is what there would be to persist. Lasting wounds would be the first
+  modifier that outlives a match, unlike `ITEM-005`'s health-derived ones.
 
 ### ✅ Completed
 - **`[ITEM-001]`**: Narrow ports (`Combatant`, `CombatFx`, focus port for `TurnManager`).
@@ -56,6 +73,14 @@ reaction fire and a roster that survives a match.
 - **`[ITEM-007]`**: Enemy intel fog.
 - **`[ITEM-008]`**: Suppression, via stacking statuses.
 - **`[ITEM-009]`**: Exhaustion, and statuses made visible at all.
+- **Character sheets rebuilt on four core attributes** (no item id — straight from the revised
+  [progression GDD](../design/gdd/progression-and-meta.md)). Health, Agility, Strength and
+  Intelligence are rolled; every tactical number is `derive()`d from them. Scoped on purpose
+  to stats and derived stats: what the GDD specifies beyond that is filed as `ITEM-013`
+  through `ITEM-016` and folded into `ITEM-004` and `ITEM-012`, each with the concrete reason
+  it could not land in this pass. Worth noting for anything touching the handshake: a sheet no
+  longer *has* a hit-point ceiling to send, so `sanitizeSheet` clamps four ints and the
+  envelope is unforgeable by construction.
 
 ### 🚫 Struck
 - **`[ITEM-003.4]`** — "Remove `installCanvasStub` from `movement`, `camera`, `pathmarker`,

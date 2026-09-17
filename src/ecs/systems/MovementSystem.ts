@@ -51,6 +51,17 @@ export class MovementSystem extends System {
     this.onArrived?.(entityId)
   }
 
+  /**
+   * Forget every in-flight route.
+   *
+   * `pathIndices` is the one piece of movement state that is not a component,
+   * so a replay jumping to another moment has to clear it by hand or the next
+   * tick would resume walking a path the restored units are no longer on.
+   */
+  clearRoutes(world: World, entityIds: Iterable<number>): void {
+    for (const entityId of entityIds) this.stopMovement(world, entityId)
+  }
+
   update(delta: number, world: World): void {
     for (const entityId of world.query([
       PositionComponent,

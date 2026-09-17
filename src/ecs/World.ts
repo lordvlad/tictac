@@ -10,6 +10,23 @@ export type ComponentChangeListener = (
   data: Record<string, unknown>
 ) => void
 
+/** One entity's components, serialised. */
+export interface EntitySnapshot {
+  entityId: number
+  components: Record<string, Record<string, unknown>>
+}
+
+/**
+ * A moment, as component data.
+ *
+ * Recorded commands are not invertible — damage is applied, points are spent,
+ * statuses stack — so a replay that wants to step *backwards* has to have kept
+ * the moment it is going back to. Built from the same `serialize`/`deserialize`
+ * pair replication uses, because a second way to read a component out is a
+ * second thing to keep in step.
+ */
+export type WorldSnapshot = EntitySnapshot[]
+
 /** Structural equality over the JSON-shaped data a component serialises to. */
 function jsonEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true
@@ -169,6 +186,54 @@ export class World {
       this.applyingRemote = false
     }
     return true
+  }
+
+  /**
+   * Serialise the named entities' components.
+   *
+   * Named rather than "all", because a replay only ever rewinds the things a
+   * recorded command can move. Walls are entities too, and there are hundreds
+   * of them on a map: snapshotting them at every event would cost a great deal
+   * to restore terrain that nothing in the stream can change.
+   */
+  snapshot(entityIds: Iterable<number>): WorldSnapshot {
+    const frame: WorldSnapshot = []
+    for (const entityId of entityIds) {
+      const components = this.entityComponents.get(entityId)
+      if (!components) continue
+      const data: Record<string, Record<string, unknown>> = {}
+      for (const [name, component] of components) data[name] = component.serialize()
+      frame.push({ entityId, components: data })
+    }
+    return frame
+  }
+
+  /**
+   * Put a snapshot back, without announcing it and without leaving the diff
+   * armed.
+   *
+   * Same discipline as {@link applyRemote}: writes are made under
+   * `applyingRemote` so nothing echoes, and each result is re-baselined so the
+   * next `syncDirty` does not report the rewind as a mutation. A component
+   * named in the frame but no longer on the entity is skipped.
+   */
+  restore(snapshot: WorldSnapshot): void {
+    this.applyingRemote = true
+    try {
+      for (const { entityId, components } of snapshot) {
+        const live = this.entityComponents.get(entityId)
+        if (!live) continue
+        const baseline = this.snapshots.get(entityId)
+        for (const [name, data] of Object.entries(components)) {
+          const component = live.get(name)
+          if (!component) continue
+          component.deserialize(data)
+          baseline?.set(name, component.serialize())
+        }
+      }
+    } finally {
+      this.applyingRemote = false
+    }
   }
 
   private emit(entityId: number, componentName: string, data: Record<string, unknown>): void {

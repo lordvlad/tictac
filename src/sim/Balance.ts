@@ -1,19 +1,38 @@
 import { Faction } from '../config'
 import { WeaponId } from '../core/Arsenal'
-import { simulate, type MatchOutcome, type SquadPlan, type WeaponTally } from './SimMatch'
+import type { CombatRecording } from '../game/Recording'
+import { type MatchOutcome, SimMatch, type SquadPlan, type WeaponTally } from './SimMatch'
 
 /** The stock spread, which is what the loadout screen opens on. */
-const STOCK: SquadPlan = {
+export const STOCK_PLAN: SquadPlan = {
   weapons: [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun],
 }
 
 export interface SweepOptions {
-  /** First seed. Seeds run consecutively from here, so a sweep is reproducible. */
+  /**
+   * First seed. Seeds run consecutively from here, so a sweep is reproducible.
+   *
+   * Consecutively is the trap: two sweeps whose seeds differ by less than
+   * `matches` share almost every match, so they agree with each other no
+   * matter what the code does. Comparing a change against itself that way
+   * reads as rock-solid stability and measures nothing. To estimate how much a
+   * report moves on its own, run blocks at least `matches` apart.
+   */
   seed: number
   matches: number
   turnCap?: number
   blue?: SquadPlan
   red?: SquadPlan
+  /** Keep a replayable command stream per match, for {@link SweepOptions.onMatch}. */
+  record?: boolean
+  /**
+   * Called once per match, in seed order.
+   *
+   * The hook rather than a directory, because writing files is the tool's job:
+   * the sweep stays a pure function so a test can run it without touching a
+   * disk or a terminal.
+   */
+  onMatch?: (outcome: MatchOutcome, recording: CombatRecording | null) => void
 }
 
 export interface WeaponReport extends WeaponTally {
@@ -79,14 +98,18 @@ export function sweep(options: SweepOptions): SweepReport {
   const outcomes: MatchOutcome[] = []
 
   for (let i = 0; i < matches; i++) {
-    outcomes.push(
-      simulate({
-        seed: seed + i,
-        blue: options.blue ?? STOCK,
-        red: options.red ?? STOCK,
-        turnCap,
-      }),
-    )
+    // Built out rather than through `simulate`, because a sweep that is
+    // recording needs the match itself to read the stream back off.
+    const match = new SimMatch({
+      seed: seed + i,
+      blue: options.blue ?? STOCK_PLAN,
+      red: options.red ?? STOCK_PLAN,
+      turnCap,
+      record: options.record,
+    })
+    const outcome = match.run()
+    outcomes.push(outcome)
+    options.onMatch?.(outcome, match.recording)
   }
 
   const wins = { blue: 0, red: 0, draw: 0 }

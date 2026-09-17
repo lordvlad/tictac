@@ -4,7 +4,7 @@ import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { CHARACTER, Faction, RULES, SQUAD_SIZE } from '../src/config'
 import { GrenadeId, ShotMode, StatusKind, WeaponId } from '../src/core/Arsenal'
-import { rollSquadSheets } from '../src/core/Characters'
+import { derive, rollSquadSheets } from '../src/core/Characters'
 import { TraitId } from '../src/core/Traits'
 import { Rng } from '../src/core/rng'
 import { HealthComponent, MatchRulesComponent } from '../src/ecs/components'
@@ -378,7 +378,12 @@ describe('The start handshake carries each peer its own squad', () => {
       method: RpcMethods.ready,
       params: {
         sheets: [
-          { maxHp: 1e9, maxAp: 999, evasion: 500, traits: ['toString', 'stoic'], specialism: 'x' },
+          {
+            attributes: { health: 1e9, agility: 999, strength: NaN, intelligence: -5 },
+            maxHp: 1e9,
+            traits: ['toString', 'stoic'],
+            specialism: 'x',
+          },
           'not a sheet',
           null,
         ],
@@ -388,9 +393,13 @@ describe('The start handshake carries each peer its own squad', () => {
     const peer = await receiver.waitForPeerReady()
     expect(peer).not.toBeNull()
     const first = peer![0]!
-    expect(first.maxHp).toBe(CHARACTER.hp.max)
-    expect(first.maxAp).toBe(CHARACTER.ap.max)
-    expect(first.evasion).toBe(CHARACTER.evasion.max)
+    expect(first.attributes.health).toBe(CHARACTER.attribute.max)
+    expect(first.attributes.agility).toBe(CHARACTER.attribute.max)
+    expect(first.attributes.intelligence).toBe(CHARACTER.attribute.min)
+    // The ceiling it tried to state is not a field, so it cannot arrive: what
+    // this side plays against is derived from the attributes above.
+    expect(first).not.toHaveProperty('maxHp')
+    expect(derive(first).maxHp).toBe(CHARACTER.hp.max)
     // A key off the prototype is not a trait, and the real one beside it lives.
     expect(first.traits).toEqual([TraitId.Stoic])
     expect(Object.values(WeaponId)).toContain(first.specialism)

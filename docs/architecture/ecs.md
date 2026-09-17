@@ -57,9 +57,9 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | --- | --- | --- |
 | `IdentityComponent` | Faction (`blue` / `red`), squad index, character name | Yes |
 | `PositionComponent` | Grid coordinate `(x, y)`, logical world position, target yaw | Yes |
-| `HealthComponent` | Current and maximum HP. The maximum is per character, and traits move it | Yes |
+| `HealthComponent` | Current and maximum HP. The maximum is `derive(sheet).maxHp` — read off the character's Health attribute, not stated by the sheet — with traits moving it from there | Yes |
 | `ArmorComponent` | Current and maximum armour. Worn plate raises the maximum | Yes |
-| `ActionPointsComponent` | Points left and the ceiling, plus `spentThisTurn` and `exhaustedTurns` — what a unit *used*, which is what exhaustion is judged on | Yes |
+| `ActionPointsComponent` | Points left and the ceiling (`derive(sheet).maxAp`, from Agility, then traits), plus `spentThisTurn` and `exhaustedTurns` — what a unit *used*, which is what exhaustion is judged on | Yes |
 | `StanceComponent` | Crouched, moving, the route being walked, corner peek, and `firedThisTurn` — a muzzle flash gives a position away until the unit's own next turn | Yes |
 | `WeaponComponent` | Equipped weapon id; the instance it clones carries the serial and the fitted rail. Only the id replicates — a peer's fitted kit shows up in the numbers they resolve, never in this side's copy | Yes (id only) |
 | `AmmoComponent` | Loaded round id; clip state lives on the weapon instance | Yes |
@@ -70,6 +70,11 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | `StatusesComponent` | Turn-decaying statuses, each with `turnsLeft` and `stacks`; absent stacks mean one, so a peer omitting the count cannot disarm a status | Yes |
 | `CoverRulesComponent`, `AimRulesComponent`, `MatchRulesComponent`, `StatusSpecsComponent`, `GrenadeSpecsComponent` | Rule tables on the global entity, so both peers resolve against the same constants | Yes (global entity) |
 | `WallComponent` | Wall segment state for the terrain entities | Yes |
+
+Nothing about a character's derived stats replicates in its own right. A sheet carries four
+attributes and no ceilings, and each side runs `derive()` over the attributes it holds, so the
+numbers above travel only as the *resolved* state of a component the rules already had to
+send — never as a ceiling a peer asserted.
 
 Current values for every status and trait are in the generated
 [status and trait catalogue](../design/gdd/status-and-trait-catalog.md).
@@ -96,3 +101,12 @@ Every component implements `serialize(): Record<string, unknown>` and `deseriali
 2. **Diffing (`World.syncDirty()`)**: Iterates all active components, compares current serialized JSON against previous snapshot using `jsonEqual()`.
 3. **Broadcast**: Emits `componentUpdate` JSON-RPC notifications for modified components.
 4. **Remote Ingestion (`World.applyRemoteUpdate()`)**: Remote client unpacks data, calls `deserialize()`, and bypasses re-broadcasting via `applyingRemote` guard.
+5. **Rewind (`World.snapshot(entityIds)` / `World.restore(snapshot)`)**: The
+   same `serialize`/`deserialize` pair, used to record and put back a whole
+   moment rather than one component. `restore` writes under the same
+   `applyingRemote` guard and re-baselines the snapshot map, so a rewind is
+   neither broadcast nor reported by the next `syncDirty()`. Takes named
+   entities rather than all of them: spectator playback only rewinds soldiers,
+   and snapshotting a map's worth of wall entities at every event would cost a
+   great deal to restore terrain that nothing can change. See
+   [P2P Networking §4](networking.md) for what uses it.

@@ -122,6 +122,7 @@ export class CombatSystem extends System {
       // they already resolved.
       crits: hits.filter((hit) => hit.crit).length,
       hits: [...hits],
+      rolls: [...rolls],
     }
     // Same door as a local shot, so damage numbers and the HUD refresh follow.
     this.onShotResolved?.(shooter, target, result)

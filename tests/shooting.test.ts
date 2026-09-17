@@ -62,6 +62,7 @@ const KILLED: ShotResult = {
   apSpent: 4,
   crits: 1,
   hits: [],
+  rolls: [true],
 }
 const GRAZED: ShotResult = {
   hit: true,
@@ -72,6 +73,7 @@ const GRAZED: ShotResult = {
   apSpent: 4,
   crits: 0,
   hits: [],
+  rolls: [true],
 }
 
 describe('Shoot mode ends when the shot does', () => {

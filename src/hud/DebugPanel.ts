@@ -16,6 +16,24 @@ interface EditGroup {
 }
 
 /**
+ * The recorder, as the panel is allowed to touch it.
+ *
+ * A port rather than the {@link Recorder} itself: whether a recording may start
+ * is a question about the *match*, not about the buffer, and the controller is
+ * the only thing that can answer it.
+ */
+export interface RecordingControls {
+  /** True while a recorder is attached. */
+  isRecording(): boolean
+  /** True while starting one is still valid — no command has been issued yet. */
+  canArm(): boolean
+  eventCount(): number
+  setRecording(on: boolean): void
+  /** Serialise and download. Does nothing with an empty buffer. */
+  export(): void
+}
+
+/**
  * Developer panel: edit any live gameplay value.
  *
  * Deliberately outside the HUD's model/intent discipline — it writes straight to
@@ -33,6 +51,7 @@ export class DebugPanel {
   constructor(
     private readonly onChange: () => void,
     private readonly getSelected: () => Soldier | null,
+    private readonly recording: RecordingControls | null = null,
   ) {
     this.root = document.createElement('div')
     this.root.className = 'debug-panel'
@@ -207,8 +226,45 @@ export class DebugPanel {
         <button data-close="1">${icon('ui-cancel')}</button>
       </div>
       <div class="debug-body">
+        ${this.renderRecording()}
         ${loadout}
         ${groups.map((group) => this.renderGroup(group)).join('')}
+      </div>
+    `
+  }
+
+  /**
+   * Arm and export the combat recorder.
+   *
+   * The switch closes once the match has issued its first command, and says so.
+   * A stream that does not begin at the opening position is not a shorter
+   * recording — it is an unplayable one, because playback rebuilds state by
+   * re-running the rules over the commands from the start.
+   */
+  private renderRecording(): string {
+    const controls = this.recording
+    if (!controls) return ''
+
+    const on = controls.isRecording()
+    const events = controls.eventCount()
+    const locked = !on && !controls.canArm()
+    const note = locked
+      ? 'this match has already moved — deploy a new one to record it'
+      : 'every command is captured; export writes a file the start screen can load'
+
+    return `
+      <div class="debug-group">
+        <div class="debug-group-title">Recording</div>
+        <label class="debug-row">
+          <span>record</span>
+          <input type="checkbox" data-record="toggle"
+                 ${on ? 'checked' : ''} ${locked ? 'disabled' : ''} />
+        </label>
+        <div class="debug-note">${note}</div>
+        <div class="debug-row"><span>events</span><span>${events}</span></div>
+        <div class="debug-buttons">
+          <button data-record="export" ${events === 0 ? 'disabled' : ''}>export .json</button>
+        </div>
       </div>
     `
   }
@@ -336,6 +392,18 @@ export class DebugPanel {
       this.close()
       return
     }
+    // Above the selection guard: recording is about the match, not about
+    // whichever unit happens to be under the cursor.
+    if (el.dataset.record === 'toggle') {
+      this.recording?.setRecording(el instanceof HTMLInputElement && el.checked)
+      this.render()
+      return
+    }
+    if (el.dataset.record === 'export') {
+      this.recording?.export()
+      return
+    }
+
     if (!this.soldier) return
 
     if (el.dataset.grenadePlus || el.dataset.grenadeMinus) {

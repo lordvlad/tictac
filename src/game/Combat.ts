@@ -27,6 +27,14 @@ export interface ShotResult {
   crits: number
   /** Per-victim breakdown, so a peer can replay this shot without recomputing. */
   hits: ResolvedHit[]
+  /**
+   * The per-round hit dice this shot resolved with, in order.
+   *
+   * Whatever `overrideRolls` supplied, or what `roll` produced. Read back
+   * rather than re-derived: the hit and crit dice interleave per round, so
+   * anything that pre-rolled the hits on its own would move the sequence.
+   */
+  rolls: boolean[]
 }
 
 /** One unit's share of an attack, already resolved: a bullet hit or a blast hit. */
@@ -124,6 +132,7 @@ export function executeShot(
       apSpent: 0,
       crits: 0,
       hits: [],
+      rolls: [],
     }
   }
 
@@ -153,6 +162,7 @@ export function executeShot(
 
   const bullets = eff.weapon.bulletConsumption(mode)
   const hits: ResolvedHit[] = []
+  const rolls: boolean[] = []
   let totalDamage = 0
   let totalArmorShred = 0
   let anyHit = false
@@ -162,6 +172,7 @@ export function executeShot(
 
   for (let i = 0; i < bullets; i++) {
     const hit = overrideRolls ? (overrideRolls[i] ?? false) : roll() * 100 <= chance
+    rolls.push(hit)
     if (hit) anyHit = true
     else misses++
 
@@ -204,6 +215,7 @@ export function executeShot(
     apSpent: eff.apCost,
     crits,
     hits,
+    rolls,
   }
 }
 

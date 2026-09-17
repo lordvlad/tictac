@@ -12,6 +12,7 @@ import {
   parseComponentUpdateMethod,
   RpcMethods,
 } from './JsonRpc'
+import type { Recorder } from './Recording'
 
 export type NetworkMode = 'local' | 'host' | 'join'
 
@@ -66,6 +67,14 @@ export class NetworkManager {
   onDisconnected: ((reason?: string) => void) | null = null
   /** Fired after peer state has been written into the world. */
   onComponentUpdate: (() => void) | null = null
+  /**
+   * Attached to write every command this side issues to a file.
+   *
+   * Tapped here rather than at each call site because this is the one door a
+   * command goes out of, and a recording with a hole in it is worse than none.
+   * Null unless the debug panel armed it.
+   */
+  recorder: Recorder | null = null
 
   private world: World | null = null
   private owns: (entityId: number) => boolean = () => true
@@ -230,6 +239,9 @@ export class NetworkManager {
   }
 
   send(msg: NetworkMessage): void {
+    // Before the local-mode return: a recording is made of what this side did,
+    // and in local play nothing is transmitted but everything still happened.
+    this.recorder?.record(msg)
     if (this.mode === 'local') return
     console.info(`%c[P2P 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
     this.sendRpc(this.messageToRpc(msg))

@@ -6,6 +6,7 @@ status: "active"
 lastReviewed: "2026-09-16"
 appliesTo:
   - "src/core/Characters.ts"
+  - "src/config.ts"
   - "src/core/Traits.ts"
 relatedDocs:
   - "docs/design/gdd/combat-mechanics.md"

@@ -53,6 +53,21 @@ export interface ItemSpec {
   passive?: boolean
 }
 
+/**
+ * What using this item actually costs *this* character.
+ *
+ * Intelligence is the difference: technical literacy shows up as getting more
+ * out of the same kit, and the cheapest way to say that with the items which
+ * exist today is the price of working one. Floored at a point, so no character
+ * ever uses gear for free - an item is always a decision about the turn.
+ *
+ * Shared rather than computed at each call site because the HUD prints this
+ * number and the system charges it; the two drifting would make the panel lie.
+ */
+export function itemApCost(spec: ItemSpec, apDelta: number): number {
+  return Math.max(1, spec.apCost + apDelta)
+}
+
 export const ITEMS: Record<ItemId, ItemSpec> = {
   [ItemId.StimPack]: {
     id: ItemId.StimPack,

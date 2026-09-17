@@ -83,8 +83,8 @@ export const DEMO_INVENTORY: Inventory = {
   },
 }
 
-/** Carry caps, so one soldier cannot hoover up the whole pouch. */
-export const LOADOUT_LIMITS = { grenadesPerUnit: 3, itemsPerUnit: 2 } as const
+/** Grenade cap, so one soldier cannot hoover up the whole pouch. */
+export const LOADOUT_LIMITS = { grenadesPerUnit: 3 } as const
 
 /** The spread the squad has always deployed with, as a valid starting point. */
 export function defaultLoadout(): SquadLoadout {
@@ -242,15 +242,26 @@ export function removeGrenade(loadout: SquadLoadout, index: number, kind: Grenad
   unit.grenades[kind] -= 1
 }
 
+/**
+ * Room in the pouch, and one still in the crate.
+ *
+ * The consumable cap is an argument rather than an entry in
+ * {@link LOADOUT_LIMITS} because it belongs to the person: it is `carrySlots`
+ * off the holder's derived stats, so two members of the same squad answer
+ * differently. Required, and deliberately not defaulted — a fallback here
+ * would be the old global rule wearing a parameter's clothes, and the caller
+ * that forgot to ask the sheet would never find out.
+ */
 export function canAddItem(
   loadout: SquadLoadout,
   index: number,
   id: ItemId,
+  carrySlots: number,
   pool?: Inventory,
 ): boolean {
   const unit = loadout[index]
   if (!unit) return false
-  if (itemsCarried(unit) >= LOADOUT_LIMITS.itemsPerUnit) return false
+  if (itemsCarried(unit) >= carrySlots) return false
   return remaining(loadout, pool).items[id] > 0
 }
 
@@ -258,9 +269,10 @@ export function addItem(
   loadout: SquadLoadout,
   index: number,
   id: ItemId,
+  carrySlots: number,
   pool?: Inventory,
 ): void {
-  if (!canAddItem(loadout, index, id, pool)) return
+  if (!canAddItem(loadout, index, id, carrySlots, pool)) return
   loadout[index]!.items[id] += 1
 }
 

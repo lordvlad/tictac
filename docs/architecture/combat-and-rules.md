@@ -6,6 +6,7 @@ status: "active"
 lastReviewed: "2026-09-16"
 appliesTo:
   - "src/core/Arsenal.ts"
+  - "src/core/Characters.ts"
   - "src/core/Ballistics.ts"
   - "src/core/Visibility.ts"
   - "src/core/Cover.ts"
@@ -13,6 +14,7 @@ appliesTo:
 relatedDocs:
   - "docs/architecture/overview.md"
   - "docs/design/gdd/combat-mechanics.md"
+  - "docs/design/gdd/progression-and-meta.md"
 tags: ["combat", "ballistics", "rules", "los", "cover"]
 ---
 
@@ -69,6 +71,39 @@ current health, **body-worn kit** in its pockets, and **attachments fitted to th
 its hands**. A weapon is an instance with a serial and a rail whose size depends on its
 class, so glass follows the rifle rather than the soldier — and swapping weapon drops what
 was on the old one.
+
+#### The sheet: four attributes, every number derived
+A sheet is dealt four numbers — Health, Agility, Strength, Intelligence — each rolled on the
+one scale in `CHARACTER.attribute`. Nothing tactical is rolled *beside* them: `derive()`
+(`src/core/Characters.ts`) reads each attribute linearly onto the band its stat lives in, the
+bottom of the scale landing on the bottom of the band and the top on the top. A stat is
+therefore described entirely by its two ends in `CHARACTER` and needs no curve of its own,
+and a band may run backwards — `itemApDelta` does, which is how an attribute makes kit
+*cheaper* as it rises.
+
+| Attribute | Derived stats | Band in `CHARACTER` |
+| --- | --- | --- |
+| Health | `maxHp`, `healBonus` | `hp`, `healBonus` |
+| Agility | `maxAp`, `evasion` | `ap`, `evasion` |
+| Strength | `throwRange`, `carrySlots` | `throwRange`, `carrySlots` |
+| Intelligence | `itemApDelta` | `itemApDelta` (runs backwards, floored at 1 AP by `itemApCost`) |
+
+AP and evasion sharing Agility is a deliberate coupling, not a shortage of attributes: a
+quick character should be both harder to line up and able to do more with a turn, so the two
+move together instead of being two unrelated dice that could disagree about the same person.
+
+`derive()` is a pure function of the attributes and of nothing else — not gear, not wounds,
+not stance, which are the trait fold's business and are added on top of these. It is a
+function rather than a getter, so a caller takes the result into a local once instead of
+re-deriving per read.
+
+**The wire consequence** is the load-bearing part: a sheet carries attributes, not ceilings.
+Sheets arrive from a peer in the start handshake, and `sanitizeSheet` has four integers to
+clamp to `CHARACTER.attribute`, plus a specialism and a trait list to recognise. A peer
+cannot state a hit-point ceiling, an evasion or a carry limit *at all* — no such field exists
+to send, and each side derives them from attributes it has clamped itself. The envelope is
+unforgeable by construction rather than by validation: there is no absurd maximum to reject,
+only a field that was never there.
 
 Only the properties an *enemy* has to read are replicated (`TraitsComponent`: evasion, its
 crouched half, crit immunity, step cost, damage taken). Everything a modifier does to its

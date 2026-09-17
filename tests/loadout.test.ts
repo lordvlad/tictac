@@ -7,6 +7,8 @@ import {
   LOADOUT_LIMITS,
   addGrenade,
   addItem,
+  canAddItem,
+  itemsCarried,
   applyUnitLoadout,
   canEquipWeapon,
   canFitAttachment,
@@ -158,15 +160,39 @@ describe('Shared crate', () => {
     expect(loadout[3]!.grenades[GrenadeId.Flash]).toBe(0)
   })
 
-  test('items obey their own cap and stock', () => {
+  test('items obey the carrier and the stock, not a global cap', () => {
+    // The cap is the character's, so the same three clicks land differently on
+    // a strong soldier and a weak one - and nothing in here knows a number
+    // that applies to everybody.
     const loadout = defaultLoadout()
-    addItem(loadout, 0, ItemId.StimPack)
-    addItem(loadout, 0, ItemId.FirstAidKit)
-    addItem(loadout, 0, ItemId.StimPack)
+    addItem(loadout, 0, ItemId.StimPack, 2)
+    addItem(loadout, 0, ItemId.FirstAidKit, 2)
+    addItem(loadout, 0, ItemId.StimPack, 2)
 
+    expect(itemsCarried(loadout[0]!)).toBe(2)
     expect(loadout[0]!.items[ItemId.StimPack]).toBe(1)
     expect(loadout[0]!.items[ItemId.FirstAidKit]).toBe(1)
     expect(remaining(loadout).items[ItemId.StimPack]).toBe(3)
+
+    const weak = defaultLoadout()
+    addItem(weak, 0, ItemId.StimPack, 1)
+    addItem(weak, 0, ItemId.FirstAidKit, 1)
+    expect(itemsCarried(weak[0]!)).toBe(1)
+
+    const strong = defaultLoadout()
+    for (const id of [ItemId.StimPack, ItemId.FirstAidKit, ItemId.StimPack]) {
+      addItem(strong, 0, id, 3)
+    }
+    expect(itemsCarried(strong[0]!)).toBe(3)
+  })
+
+  test('a character cannot be handed a slot they do not have', () => {
+    const loadout = defaultLoadout()
+    expect(canAddItem(loadout, 0, ItemId.StimPack, 1)).toBe(true)
+    addItem(loadout, 0, ItemId.StimPack, 1)
+    expect(canAddItem(loadout, 0, ItemId.FirstAidKit, 1)).toBe(false)
+    // The same loadout, a stronger carrier: the crate is not what stopped it.
+    expect(canAddItem(loadout, 0, ItemId.FirstAidKit, 2)).toBe(true)
   })
 })
 

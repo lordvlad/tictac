@@ -23,6 +23,14 @@ import { NetworkManager } from './game/NetworkManager'
 import { World } from './ecs/World'
 import { createGlobalRules } from './ecs/globals'
 import { TurnSystem } from './ecs/systems'
+import { Playback } from './game/Playback'
+import { PlaybackControls } from './hud/PlaybackControls'
+import {
+  type CombatRecording,
+  parseRecording,
+  RECORDING_VERSION,
+  type RecordingHeader,
+} from './game/Recording'
 
 const baseUrl = new URL('./', document.baseURI).href
 
@@ -80,6 +88,8 @@ function showMenu(): void {
         <button id="btn-local" style="padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Local Versus (Same Screen)</button>
         <button id="btn-host-mode" style="padding: 12px; background: #0ea5e9; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Host P2P Match</button>
         <button id="btn-join-mode" style="padding: 12px; background: #6366f1; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Join P2P Match</button>
+        <button id="btn-load-recording" style="padding: 12px; background: #475569; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Load Recording (Spectate)</button>
+        <input id="recording-file" type="file" accept="application/json,.json" style="display: none;" />
       </div>
 
       <div id="menu-details" style="margin-top: 20px; display: none;"></div>
@@ -97,6 +107,28 @@ function showMenu(): void {
     container.remove()
     const { seed, label } = resolveSeed()
     equipThenStart(seed, label, new NetworkManager())
+  })
+
+  // Spectating a file, not playing a match: no loadout screen, no peer, no
+  // handshake. Everything the replay needs is in the recording.
+  const fileEl = container.querySelector('#recording-file') as HTMLInputElement
+  container.querySelector('#btn-load-recording')?.addEventListener('click', () => fileEl.click())
+  fileEl.addEventListener('change', async () => {
+    const file = fileEl.files?.[0]
+    if (!file) return
+    try {
+      // `File.text()`, never `FileReader`: this codebase reads files
+      // asynchronously and nothing here needs a progress event.
+      const recording = parseRecording(JSON.parse(await file.text()))
+      container.remove()
+      startPlayback(recording)
+    } catch (err) {
+      fileEl.value = ''
+      detailsEl.style.display = 'block'
+      detailsEl.innerHTML = `<p style="font-size: 12px; color: #ef4444; margin: 0;">${
+        err instanceof Error ? err.message : 'could not read that file'
+      }</p>`
+    }
   })
 
   // Host Mode
@@ -238,6 +270,23 @@ function start(
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
   const squads = new Squads(world, battlefield.grid, battlefield.spawns, loadout, myFaction, sheets)
 
+  // The opening position, captured before anything can move it. A recording
+  // armed later still replays from here, which is the only point a stream can
+  // start from and be replayable at all.
+  const recordingHeader: RecordingHeader = {
+    version: RECORDING_VERSION,
+    seed,
+    seedLabel,
+    source: 'live',
+    createdAt: new Date().toISOString(),
+    turnCap: null,
+    sheets: sheets ?? { [Faction.Blue]: [], [Faction.Red]: [] },
+    loadouts: {
+      [Faction.Blue]: squads.loadoutOf(Faction.Blue),
+      [Faction.Red]: squads.loadoutOf(Faction.Red),
+    },
+  }
+
   const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,
   })
@@ -265,6 +314,7 @@ function start(
     tracers,
     engine,
     network,
+    recordingHeader,
   )
 
   network.onMessage = (msg) => {
@@ -350,4 +400,170 @@ function start(
   })
 
   console.info(`[tictac] tactical combat ready — mode: ${network.mode}, seed ${seedLabel}`)
+}
+
+/**
+ * Watch a recording instead of playing a match.
+ *
+ * The same construction order a match uses, with three differences: both
+ * squads are equipped from the file rather than one from a loadout screen,
+ * there is no network (nothing to transmit, nothing to record), and the
+ * controller is told it is spectating — which reveals the whole field and takes
+ * the player's hands off the units.
+ *
+ * The terrain is not in the file. It is regenerated from the seed, which is the
+ * only reason a recording of a forty-turn fight is fifteen kilobytes.
+ */
+function startPlayback(recording: CombatRecording): void {
+  const { header } = recording
+  const engine = createEngineContext(Game.instance())
+
+  const world = new World()
+  createGlobalRules(world)
+
+  const battlefield = new Battlefield(generateMap(header.seed), engine)
+  const squads = new Squads(
+    world,
+    battlefield.grid,
+    battlefield.spawns,
+    undefined,
+    Faction.Blue,
+    header.sheets,
+  )
+  // Both sides, from the file: a replay resolves nothing itself, but every
+  // panel reads the kit, and half a squad on the stock spread would be a
+  // different fight on screen than the one that was recorded.
+  squads.equipFaction(Faction.Blue, header.loadouts[Faction.Blue])
+  squads.equipFaction(Faction.Red, header.loadouts[Faction.Red])
+
+  const rig = new OrbitRig(engine.camera, engine.canvas, {
+    bounds: battlefield.grid.halfExtent,
+  })
+
+  const portraits = new OffscreenPortraits(engine)
+  const tracers = new Tracers(engine)
+  const turnSystem = new TurnSystem()
+  const turnManager = new TurnManager(world, turnSystem, squads, rig)
+
+  let controller!: InteractionController
+  const hud = new Hud((intent) => {
+    controller.handleIntent(intent)
+  })
+
+  controller = new InteractionController(
+    world,
+    battlefield,
+    squads,
+    turnManager,
+    rig,
+    hud,
+    portraits,
+    header.seedLabel,
+    tracers,
+    engine,
+    null,
+  )
+  controller.spectating = true
+  hud.setHidden(true)
+  turnManager.autoSelectFirst()
+  controller.recomputeVisibility()
+
+  // Only the soldiers: no recorded command can change a wall, and snapshotting
+  // a map's worth of wall entities at every event would cost a great deal to
+  // restore terrain that never moved.
+  const soldierIds = squads.soldiers.map((soldier) => soldier.entityId)
+
+  const playback = new Playback({
+    recording,
+    apply: (command) => controller.applyRecordedCommand(command),
+    busy: () => controller.anyUnitMoving,
+    capture: () => ({
+      entities: world.snapshot(soldierIds),
+      activeFaction: turnSystem.activeFaction,
+      turnNumber: turnSystem.turnNumber,
+    }),
+    restore: (frame) => {
+      // Routes first: `pathIndices` is the one piece of movement state that is
+      // not a component, so a restored unit would otherwise resume walking a
+      // path it is no longer on.
+      controller.movementSystem.clearRoutes(world, soldierIds)
+      world.restore(frame.entities)
+      turnSystem.activeFaction = frame.activeFaction
+      turnSystem.turnNumber = frame.turnNumber
+      turnManager.autoSelectFirst()
+      controller.recomputeVisibility()
+      battlefield.flush()
+    },
+  })
+
+  const controls = new PlaybackControls((command) => {
+    switch (command.type) {
+      case 'play':
+        playback.play(command.speed)
+        break
+      case 'pause':
+        playback.pause()
+        break
+      case 'stepForward':
+        playback.stepForward()
+        break
+      case 'stepBackward':
+        playback.stepBackward()
+        break
+    }
+  })
+
+  const renderControls = (): void => {
+    controls.render({
+      playing: playback.playing,
+      speed: playback.speed,
+      index: playback.index,
+      total: playback.total,
+      turn: playback.turn,
+      turns: playback.turns,
+      seedLabel: header.seedLabel,
+    })
+  }
+  playback.onChanged = renderControls
+  renderControls()
+
+  const commander = squads.byFaction[Faction.Blue][0]
+  rig.snapTo(commander ? commander.position : new Vector3(0, 0, 0))
+
+  let accumulator = 0
+  Game.instance().onUpdate((delta) => {
+    // The speed multiplier goes into the accumulator rather than into the event
+    // pacing alone, so animations and dispatch run fast together: a 2x replay
+    // that only dispatched faster would show the same walk at the same pace
+    // with less room to breathe between moves.
+    const scale = playback.playing ? playback.speed : 1
+    accumulator = Math.min(accumulator + delta * scale, SIM.maxCatchUp)
+    while (accumulator >= SIM.step) {
+      accumulator -= SIM.step
+      tracers.update(SIM.step)
+      controller.update(SIM.step)
+      playback.update(SIM.step)
+    }
+    battlefield.flush()
+  })
+
+  Object.assign(window as unknown as Record<string, unknown>, {
+    tictac: {
+      game: Game.instance(),
+      battlefield,
+      squads,
+      rig,
+      turnManager,
+      hud,
+      controller,
+      tracers,
+      playback,
+      seed: header.seed,
+      seedLabel: header.seedLabel,
+    },
+  })
+
+  console.info(
+    `[tictac] replay ready — ${recording.events.length} events, ${header.source} seed ${header.seedLabel}`,
+  )
 }

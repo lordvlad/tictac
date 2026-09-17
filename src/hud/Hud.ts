@@ -122,6 +122,27 @@ export class Hud {
   }
 
   /**
+   * Hide the in-match panels.
+   *
+   * For a replay, where there is nothing to command: a squad bar whose buttons
+   * do nothing is worse than no squad bar. The bottom-left corner tools stay —
+   * reading a unit's state turn by turn is the reason to watch a replay at all.
+   */
+  setHidden(hidden: boolean): void {
+    for (const el of [
+      this.topCentreEl,
+      this.levelSelectorEl,
+      this.bottomCentreEl,
+      this.actionPanelEl,
+      this.endTurnEl,
+      this.turnOverlayEl,
+      this.contextMenuEl,
+    ]) {
+      el.classList.toggle('hud-hidden', hidden)
+    }
+  }
+
+  /**
    * Re-render the live panels. Deliberately excludes the turn overlay: this
    * runs on every state change (30 Hz while a unit walks), and replacing the
    * overlay's markup under the player's finger loses the press — the click

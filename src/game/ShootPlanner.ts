@@ -175,8 +175,14 @@ export class ShootPlanner {
       critDamage: resolveDamage(eff, target, 1, true).damage,
     }
   }
-  /** Take the shot in `mode`. Returns target, rolls and resolved effects for P2P sync. */
-  fire(shooter: Soldier, mode: ShotMode): { target: Soldier; rolls: boolean[]; result: ShotResult } | null {
+  /**
+   * Take the shot in `mode`.
+   *
+   * The dice are rolled here and handed to the resolver, so the outcome the
+   * panel promised is the outcome that lands. They come back out on
+   * {@link ShotResult.rolls}, which is what a peer or a replay reads.
+   */
+  fire(shooter: Soldier, mode: ShotMode): { target: Soldier; result: ShotResult } | null {
     const pending = this.pending(shooter)
     if (!pending) return null
     const option = pending.options.find((o) => o.mode === mode)
@@ -191,7 +197,7 @@ export class ShootPlanner {
     }
 
     const result = this.combat.fireShot(shooter, target, mode, rolls)
-    return result ? { target, rolls, result } : null
+    return result ? { target, result } : null
   }
 
   /** Damage numbers and target bookkeeping, once combat has resolved a shot. */

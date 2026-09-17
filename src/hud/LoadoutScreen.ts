@@ -1,6 +1,6 @@
 import { AMMO, AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
-import { rollSquadSheets, type CharacterSheet } from '../core/Characters'
+import { derive, rollSquadSheets, type CharacterSheet } from '../core/Characters'
 import { ITEMS, ItemId } from '../core/Items'
 import { resolveTraits, TRAITS, type TraitId } from '../core/Traits'
 import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
@@ -17,6 +17,7 @@ import {
   equipAmmo,
   equipWeapon,
   fitAttachment,
+  itemsCarried,
   railSpace,
   remaining,
   removeGrenade,
@@ -131,8 +132,12 @@ export class LoadoutScreen {
         else removeGrenade(this.loadout, this.selected, action.id)
         break
       case 'item':
-        if (action.delta > 0) addItem(this.loadout, this.selected, action.id)
-        else removeItem(this.loadout, this.selected, action.id)
+        // The pouch is the soldier's, not the rules': the gate has to be told
+        // how much this one can carry.
+        if (action.delta > 0) {
+          const { carrySlots } = derive(this.sheets[this.selected]!)
+          addItem(this.loadout, this.selected, action.id, carrySlots)
+        } else removeItem(this.loadout, this.selected, action.id)
         break
       case 'attachment':
         if (action.delta > 0) fitAttachment(this.loadout, this.selected, action.id)
@@ -223,6 +228,18 @@ export class LoadoutScreen {
         <button class="loadout-step interactive" ${canAdd ? '' : 'disabled'} ${LoadoutScreen.actionAttr(plus)}>+</button>
       </div>`
 
+    // Shown here as well as on the card because this is where the + goes
+    // dead: a stepper that stops responding needs its reason in the same
+    // panel. Same pips as the weapon rail — it is the same question about a
+    // different container, and a second vocabulary for it would be one more
+    // thing to learn.
+    const { carrySlots } = derive(this.sheets[this.selected]!)
+    const carried = itemsCarried(unit)
+    const pouch = Array.from(
+      { length: carrySlots },
+      (_, at) => `<span class="loadout-slot ${at < carried ? 'filled' : ''}"></span>`,
+    ).join('')
+
     return `
       <div class="loadout-panel">
         <div class="loadout-panel-head">${name}</div>
@@ -267,14 +284,18 @@ export class LoadoutScreen {
           )
           .join('')}
 
-        <div class="loadout-section">Items</div>
+        <div class="loadout-section loadout-section-cap">
+          Items
+          <span class="loadout-slots">${pouch}</span>
+          <span class="loadout-cap-count">SLOTS ${carried}/${carrySlots}</span>
+        </div>
         ${Object.values(ItemId)
           .map((id) =>
             stepper(
               `item-${id}`,
               ITEMS[id].name,
               unit.items[id],
-              canAddItem(this.loadout, this.selected, id),
+              canAddItem(this.loadout, this.selected, id, carrySlots),
               { kind: 'item', id, delta: -1 },
               { kind: 'item', id, delta: 1 },
             ),
@@ -351,6 +372,13 @@ export class LoadoutScreen {
    * soldier, and all four classes at once would bury the one number being
    * decided — the crate rows above already say what the alternatives are.
    *
+   * The four attributes sit above the numbers they produce rather than in
+   * place of them: the roll is what the player is stuck with, the derived
+   * stats are what it bought, and a card showing only one of the two leaves a
+   * good sheet indistinguishable from a lucky one. Throw and Item earn their
+   * rows the same way — without them Strength and Intelligence would be on
+   * the card with nothing a player could point at.
+   *
    * Traits granted by kit — worn or bolted on — are listed beside the innate
    * ones. Neither has an action panel row in combat, so this is the only place
    * they explain themselves.
@@ -375,8 +403,9 @@ export class LoadoutScreen {
     // vest that costs evasion would look free. Same fold the soldier does, so
     // the same answer.
     const fielded = resolveTraits(traits.map((trait) => trait.id))
+    const stats = derive(sheet)
     const proficiency = sheet.proficiency[unit.weaponId] + fielded.accuracy
-    const evasion = Math.max(0, sheet.evasion + fielded.evasion)
+    const evasion = Math.max(0, stats.evasion + fielded.evasion)
 
     const stat = (label: string, value: string, penalty = false): string => `
       <div class="loadout-stat ${penalty ? 'penalty' : ''}">
@@ -384,13 +413,32 @@ export class LoadoutScreen {
         <span class="loadout-stat-value">${value}</span>
       </div>`
 
+    const attr = (label: string, value: number): string => `
+      <div class="loadout-attr">
+        <span class="loadout-attr-name">${label}</span>
+        <span class="loadout-attr-value">${value}</span>
+      </div>`
+
+    // Both halves of the sheet read as deltas, and a bare `3` beside a `-2`
+    // would look like a different kind of number.
+    const signed = (value: number): string => `${value > 0 ? '+' : ''}${value}`
+    const { health, agility, strength, intelligence } = sheet.attributes
+
     return `
       <div class="loadout-sheet">
+        <div class="loadout-attrs">
+          ${attr('HEA', health)}
+          ${attr('AGI', agility)}
+          ${attr('STR', strength)}
+          ${attr('INT', intelligence)}
+        </div>
         <div class="loadout-stats">
-          ${stat('HP', `${sheet.maxHp + fielded.maxHp}`)}
-          ${stat('AP', `${sheet.maxAp + fielded.maxAp}`)}
+          ${stat('HP', `${stats.maxHp + fielded.maxHp}`)}
+          ${stat('AP', `${stats.maxAp + fielded.maxAp}`)}
           ${stat('Eva', `${evasion}%`)}
-          ${stat('Skill', `${proficiency > 0 ? '+' : ''}${proficiency}%`, proficiency < 0)}
+          ${stat('Skill', `${signed(proficiency)}%`, proficiency < 0)}
+          ${stat('Throw', signed(stats.throwRange), stats.throwRange < 0)}
+          ${stat('Item', `${signed(stats.itemApDelta)} AP`, stats.itemApDelta > 0)}
         </div>
         <div class="loadout-spec">${WEAPONS[sheet.specialism].name} specialist</div>
         <div class="loadout-traits">

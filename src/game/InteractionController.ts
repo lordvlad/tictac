@@ -10,12 +10,14 @@ import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
 import { buildHudModel, type HudIntent } from '../hud/HudModel'
 import { applyHitEffects, calculateHitChance, type ResolvedHit } from './Combat'
+import { toWireHits, Recorder, type RecordingHeader } from './Recording'
 import { settleTurn } from './Turn'
 import type { OffscreenPortraits } from '../render/Portraits'
 import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
 import { MovementPlanner } from './MovementPlanner'
-import { DebugPanel } from '../hud/DebugPanel'
+import { DebugPanel, type RecordingControls } from '../hud/DebugPanel'
+import { downloadJson } from '../hud/download'
 import { DebugMap } from '../hud/DebugMap'
 import { GrenadePlanner } from './GrenadePlanner'
 import { ShootPlanner } from './ShootPlanner'
@@ -29,6 +31,22 @@ import type { Tracers } from '../render/Tracers'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
 import { MovementSystem, CombatSystem, ItemSystem, RenderSystem, WallSystem } from '../ecs/systems'
 import type { ItemId } from '../core/Items'
+
+/**
+ * The intents a spectator may still press.
+ *
+ * Everything here changes only what is on screen — which storey is drawn, where
+ * the camera stands, which panel is open. Nothing here spends a point or moves
+ * a unit, because in a replay the file is the only authority over that.
+ */
+const SPECTATOR_INTENTS: Partial<Record<HudIntent['type'], true>> = {
+  openDebug: true,
+  toggleDebugMap: true,
+  selectLevel: true,
+  toggleFreelook: true,
+  toggleUnitView: true,
+  selectUnit: true,
+}
 
 /**
  * Routes player input to the subsystem that owns the decision, and keeps the
@@ -73,6 +91,16 @@ export class InteractionController {
   private readonly rightDownPos = new Vector2()
   /** The squad's bodies. Everything needing a mesh asks this, and only this. */
   private readonly views: SquadViews
+  /**
+   * Watching a recording rather than commanding a match.
+   *
+   * Two things change: nothing is hidden, because the point of a replay is to
+   * watch both sides; and input cannot move a unit, because the only authority
+   * over what happens is the file.
+   */
+  spectating = false
+  /** A recording was armed once this match, so it cannot be armed again. */
+  private recordingStarted = false
 
   constructor(
     readonly world: World,
@@ -86,6 +114,8 @@ export class InteractionController {
     tracers: Tracers,
     private readonly engine: EngineContext,
     public network: NetworkManager | null = null,
+    /** The match's opening position, for a recording armed from the debug panel. */
+    private readonly recordingHeader: RecordingHeader | null = null,
   ) {
     this.effects = new Effects(engine)
     this.topLevel = battlefield.grid.maxLevel
@@ -180,6 +210,7 @@ export class InteractionController {
         this.refreshHud()
       },
       () => this.turnManager.selectedSoldier,
+      this.recordingControls(),
     )
     this.fog = new FogOfWar(battlefield.grid, battlefield.ground, battlefield.blocks)
     this.xray = new WallXray(rig, squads, battlefield.blocks)
@@ -251,11 +282,87 @@ export class InteractionController {
     )
   }
 
+  /**
+   * The recorder, as the debug panel is allowed to touch it.
+   *
+   * Arming is refused once the match has issued a command, because a stream
+   * that does not begin at the opening position cannot be replayed at all:
+   * playback rebuilds state by re-running the rules over the commands, from
+   * the start. Better to say so than to write a file that desynchronises.
+   */
+  private recordingControls(): RecordingControls | null {
+    if (!this.recordingHeader) return null
+    return {
+      isRecording: () => this.network?.recorder != null,
+      canArm: () => !this.recordingStarted && this.turnManager.turnNumber === 1,
+      eventCount: () => this.network?.recorder?.eventCount ?? 0,
+      setRecording: (on) => {
+        const network = this.network
+        const header = this.recordingHeader
+        if (!network || !header) return
+        if (!on) {
+          network.recorder = null
+          return
+        }
+        if (this.recordingStarted) return
+        network.recorder = new Recorder(header, () => ({
+          turn: this.turnManager.turnNumber,
+          faction: this.turnManager.activeFaction,
+        }))
+        this.recordingStarted = true
+      },
+      export: () => {
+        const recorder = this.network?.recorder
+        if (!recorder || recorder.eventCount === 0) return
+        downloadJson(recorder.filename(), recorder.toJSON())
+      },
+    }
+  }
+
+  /**
+   * Apply a recorded command as a spectator.
+   *
+   * Mostly the peer's own door, because a peer's command *is* a recorded one.
+   * Two of them are no-ops over the wire and cannot be here: a peer learns a
+   * reload's clip and an item's effect from replicated components, and a replay
+   * has no peer to replicate from — so the same rules are run locally instead.
+   */
+  applyRecordedCommand(command: NetworkMessage): void {
+    switch (command.type) {
+      case 'reload': {
+        const soldier = this.squads.byFaction[command.faction][command.squadIndex]
+        if (soldier) this.combatSystem.reload(soldier)
+        this.refreshHud()
+        return
+      }
+      case 'useItem': {
+        const soldier = this.squads.byFaction[command.faction][command.squadIndex]
+        if (soldier) this.itemSystem.use(soldier, command.itemId)
+        this.afterCombat()
+        return
+      }
+      default:
+        this.handleRemoteNetworkMessage(command)
+        // The played game picks the incoming side's first unit for the player;
+        // a replay does it so the camera follows whoever acts next.
+        if (command.type === 'endTurn') this.turnManager.autoSelectFirst()
+    }
+  }
+
+  /** True while a unit is still walking, which is what paces a replay. */
+  get anyUnitMoving(): boolean {
+    return this.squads.soldiers.some((soldier) => soldier.isMoving)
+  }
+
   /** Single place where a HUD press becomes a change to the game. */
   handleIntent(intent: HudIntent): void {
     if (this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) {
       return
     }
+    // A replay is not commanded. Only the view controls answer: the panels that
+    // would spend a unit's points are hidden, and this is what makes that a rule
+    // rather than a consequence of the layout.
+    if (this.spectating && !SPECTATOR_INTENTS[intent.type]) return
 
     switch (intent.type) {
       case 'selectUnit': {
@@ -283,7 +390,9 @@ export class InteractionController {
         const shooter = this.turnManager.selectedSoldier
         if (shooter) {
           const shotData = this.shoot.fire(shooter, intent.mode)
-          if (shotData && this.network && this.network.mode !== 'local') {
+          // `send` is a no-op in local play on its own; gating again here would
+          // leave a local recording missing every shot fired in it.
+          if (shotData && this.network) {
             this.network.send({
               type: 'fireShot',
               shooterFaction: shooter.faction,
@@ -291,8 +400,8 @@ export class InteractionController {
               targetFaction: shotData.target.faction,
               targetIndex: shotData.target.squadIndex,
               mode: intent.mode,
-              rolls: shotData.rolls,
-              hits: InteractionController.toWireHits(shotData.result.hits),
+              rolls: shotData.result.rolls,
+              hits: toWireHits(shotData.result.hits),
             })
           }
         }
@@ -350,13 +459,11 @@ export class InteractionController {
         if (selected && !selected.isDead) {
           this.turnManager.finishSoldierTurn(selected)
           this.refreshHud()
-          if (this.network && this.network.mode !== 'local') {
-            this.network.send({
-              type: 'endUnitTurn',
-              faction: selected.faction,
-              squadIndex: selected.squadIndex,
-            })
-          }
+          this.network?.send({
+            type: 'endUnitTurn',
+            faction: selected.faction,
+            squadIndex: selected.squadIndex,
+          })
         }
         break
       }
@@ -372,9 +479,7 @@ export class InteractionController {
         break
       case 'confirmTurnSwitch':
         this.hud.hideTurnOverlay()
-        if (this.network && this.network.mode !== 'local') {
-          this.network.send({ type: 'endTurn', faction: this.turnManager.activeFaction })
-        }
+        this.network?.send({ type: 'endTurn', faction: this.turnManager.activeFaction })
         this.turnManager.startNextTurn()
         this.onTurnSwitched()
         this.refreshHud()
@@ -476,18 +581,6 @@ export class InteractionController {
     }
   }
 
-  /** An attack's resolved effects, addressed by faction and squad index. */
-  private static toWireHits(hits: readonly ResolvedHit[]): WireHit[] {
-    return hits.map((hit) => ({
-      faction: hit.soldier.faction,
-      index: hit.soldier.squadIndex,
-      damage: hit.damage,
-      armorShred: hit.armorShred,
-      status: hit.status,
-      crit: hit.crit,
-    }))
-  }
-
   /**
    * Wire hits back to local soldiers. Anything missing or already dead on this
    * side is dropped: a unit this side has buried must not replay a death.
@@ -559,7 +652,7 @@ export class InteractionController {
       kind: thrown.kind,
       targetTile: thrown.targetTile,
       areaRadius: thrower.grenadeSpecs[thrown.kind].areaRadius,
-      hits: InteractionController.toWireHits(thrown.result.hits),
+      hits: toWireHits(thrown.result.hits),
     })
   }
 
@@ -618,6 +711,15 @@ export class InteractionController {
   }
 
   recomputeVisibility(): void {
+    // A replay is watched, not played: hiding half the fight from the only
+    // person in the room would be hiding it from nobody's advantage.
+    if (this.spectating) {
+      this.battlefield.ground.revealAll()
+      this.battlefield.blocks.revealAll()
+      for (const soldier of this.squads.soldiers) soldier.seen = true
+      return
+    }
+
     const fogFaction =
       this.network && this.network.mode !== 'local'
         ? this.network.myFaction
@@ -636,6 +738,7 @@ export class InteractionController {
   /** Right-click (not right-drag) turns the selected unit to face the cursor. */
   private readonly onPointerUp = (event: PointerEvent): void => {
     if (event.button !== 2) return
+    if (this.spectating) return
     if (this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) return
 
     const travel = Math.hypot(
@@ -652,15 +755,13 @@ export class InteractionController {
     if (!pt) return
 
     this.executeRightClickFacing(selected.squadIndex, selected.faction, pt.x, pt.z)
-    if (this.network && this.network.mode !== 'local') {
-      this.network.send({
-        type: 'rightClickFacing',
-        faction: selected.faction,
-        squadIndex: selected.squadIndex,
-        x: pt.x,
-        z: pt.z,
-      })
-    }
+    this.network?.send({
+      type: 'rightClickFacing',
+      faction: selected.faction,
+      squadIndex: selected.squadIndex,
+      x: pt.x,
+      z: pt.z,
+    })
   }
 
   executeRightClickFacing(squadIndex: number, faction: Faction, x: number, z: number): void {
@@ -687,6 +788,17 @@ export class InteractionController {
   private readonly onClick = (event: MouseEvent): void => {
     if (this.rig.isDragging) return
     if (this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) return
+
+    // Watching: picking a unit to inspect is welcome, ordering it anywhere is
+    // not. Selection is view state — `selectSoldier` refuses a unit whose side
+    // is not up, so this cannot desynchronise the replay either.
+    if (this.spectating) {
+      const picked =
+        this.pickSoldierUnderCursor(event, this.turnManager.activeFaction) ??
+        this.pickSoldierUnderCursor(event, this.enemyFaction)
+      if (picked) this.executeClickSoldier(picked.squadIndex, picked.faction)
+      return
+    }
 
     const selected = this.turnManager.selectedSoldier
 

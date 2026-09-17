@@ -10,6 +10,7 @@ import {
 import {
   type CharacterSheet,
   characterSheet,
+  derive,
   rollSquadSheets,
   sanitizeSheet,
 } from '../src/core/Characters'
@@ -62,6 +63,11 @@ function chanceOf(shooter: CombatantStats, target: CombatantStats): number {
  * holding only *usually* — the specialist margin was once a one-in-fourteen
  * failure — cannot slip through, and still fully deterministic.
  */
+/** A sheet whose attributes each test replaces with the ones it is about. */
+function stubSheet(): CharacterSheet {
+  return characterSheet(new Rng(1))
+}
+
 function sampleSheets(count = 300): CharacterSheet[] {
   const sheets: CharacterSheet[] = []
   for (let seed = 0; seed < count; seed++) sheets.push(characterSheet(new Rng(seed)))
@@ -124,16 +130,78 @@ describe('Folding traits', () => {
 })
 
 describe('Rolling a character', () => {
-  test('every stat lands inside the envelope it was drawn from', () => {
+  test('every attribute lands inside the scale it was drawn from', () => {
     for (const sheet of sampleSheets()) {
-      expect(sheet.maxHp).toBeGreaterThanOrEqual(CHARACTER.hp.min)
-      expect(sheet.maxHp).toBeLessThanOrEqual(CHARACTER.hp.max)
-      expect(sheet.maxAp).toBeGreaterThanOrEqual(CHARACTER.ap.min)
-      expect(sheet.maxAp).toBeLessThanOrEqual(CHARACTER.ap.max)
-      expect(sheet.evasion).toBeGreaterThanOrEqual(CHARACTER.evasion.min)
-      expect(sheet.evasion).toBeLessThanOrEqual(CHARACTER.evasion.max)
+      for (const value of Object.values(sheet.attributes)) {
+        expect(value).toBeGreaterThanOrEqual(CHARACTER.attribute.min)
+        expect(value).toBeLessThanOrEqual(CHARACTER.attribute.max)
+      }
       expect(Object.values(WeaponId)).toContain(sheet.specialism)
     }
+  })
+
+  test('every derived stat lands inside its band, for any attributes at all', () => {
+    // Includes the ends of the scale and past them: `derive` is handed peer
+    // data by way of `sanitizeSheet`, and a band is the promise the resolver
+    // is entitled to rely on.
+    const band = (range: { min: number; max: number }): [number, number] => [
+      Math.min(range.min, range.max),
+      Math.max(range.min, range.max),
+    ]
+    for (let attribute = -50; attribute <= 50; attribute++) {
+      const stats = derive({
+        ...stubSheet(),
+        attributes: { health: attribute, agility: attribute, strength: attribute, intelligence: attribute },
+      })
+      for (const [value, range] of [
+        [stats.maxHp, CHARACTER.hp],
+        [stats.maxAp, CHARACTER.ap],
+        [stats.evasion, CHARACTER.evasion],
+        [stats.throwRange, CHARACTER.throwRange],
+        [stats.carrySlots, CHARACTER.carrySlots],
+        [stats.itemApDelta, CHARACTER.itemApDelta],
+        [stats.healBonus, CHARACTER.healBonus],
+      ] as const) {
+        const [low, high] = band(range)
+        expect(value).toBeGreaterThanOrEqual(low)
+        expect(value).toBeLessThanOrEqual(high)
+      }
+    }
+  })
+
+  test('the ends of the scale reach the ends of every band', () => {
+    // Otherwise a band is decoration: the best possible character would still
+    // not be as good as the tunable says they can be.
+    const at = (attribute: number) =>
+      derive({
+        ...stubSheet(),
+        attributes: { health: attribute, agility: attribute, strength: attribute, intelligence: attribute },
+      })
+    const floor = at(CHARACTER.attribute.min)
+    const ceiling = at(CHARACTER.attribute.max)
+
+    expect(floor.maxHp).toBe(CHARACTER.hp.min)
+    expect(ceiling.maxHp).toBe(CHARACTER.hp.max)
+    expect(floor.maxAp).toBe(CHARACTER.ap.min)
+    expect(ceiling.maxAp).toBe(CHARACTER.ap.max)
+    expect(floor.evasion).toBe(CHARACTER.evasion.min)
+    expect(ceiling.evasion).toBe(CHARACTER.evasion.max)
+    expect(floor.carrySlots).toBe(CHARACTER.carrySlots.min)
+    expect(ceiling.carrySlots).toBe(CHARACTER.carrySlots.max)
+    // Inverted band: the clever end pays less, which is the whole point of it.
+    expect(ceiling.itemApDelta).toBeLessThan(floor.itemApDelta)
+  })
+
+  test('agility moves action points and evasion together', () => {
+    // A deliberate coupling rather than two dice, so "quick" means one thing.
+    const slow = derive({ ...stubSheet(), attributes: { health: 5, agility: 1, strength: 5, intelligence: 5 } })
+    const quick = derive({ ...stubSheet(), attributes: { health: 5, agility: 10, strength: 5, intelligence: 5 } })
+
+    expect(quick.maxAp).toBeGreaterThan(slow.maxAp)
+    expect(quick.evasion).toBeGreaterThan(slow.evasion)
+    // And nothing else moved with it.
+    expect(quick.maxHp).toBe(slow.maxHp)
+    expect(quick.carrySlots).toBe(slow.carrySlots)
   })
 
   test('the specialism is the one class carrying the bonus', () => {
@@ -191,10 +259,16 @@ describe('Sanitising a sheet off the wire', () => {
   test('junk yields a sheet this side can still play against', () => {
     for (const junk of [null, undefined, {}, 'not a sheet', 42, []]) {
       const sheet = sanitizeSheet(junk)
+      const stats = derive(sheet)
 
-      expect(sheet.maxHp).toBe(RULES.maxHp)
-      expect(sheet.maxAp).toBe(RULES.maxAp)
-      expect(sheet.evasion).toBe(0)
+      // The middle of the scale: a malformed sheet plays as an average
+      // soldier, which is a unit the rules can resolve.
+      for (const value of Object.values(sheet.attributes)) {
+        expect(value).toBeGreaterThan(CHARACTER.attribute.min)
+        expect(value).toBeLessThan(CHARACTER.attribute.max)
+      }
+      expect(stats.maxHp).toBeGreaterThan(CHARACTER.hp.min)
+      expect(stats.maxHp).toBeLessThan(CHARACTER.hp.max)
       expect(sheet.traits).toEqual([])
       expect(Object.values(WeaponId)).toContain(sheet.specialism)
       // Every class present, so the resolver never reads an undefined.
@@ -202,22 +276,43 @@ describe('Sanitising a sheet off the wire', () => {
     }
   })
 
-  test('numbers outside the envelope are pulled back into it', () => {
-    const sheet = sanitizeSheet({ maxHp: 1e9, maxAp: -40, evasion: -12 })
+  test('attributes outside the scale are pulled back into it', () => {
+    const sheet = sanitizeSheet({
+      attributes: { health: 1e9, agility: -40, strength: 999, intelligence: -1 },
+    })
 
-    expect(sheet.maxHp).toBe(CHARACTER.hp.max)
-    expect(sheet.maxAp).toBe(CHARACTER.ap.min)
-    expect(sheet.evasion).toBe(CHARACTER.evasion.min)
+    expect(sheet.attributes.health).toBe(CHARACTER.attribute.max)
+    expect(sheet.attributes.agility).toBe(CHARACTER.attribute.min)
+    expect(derive(sheet).maxHp).toBe(CHARACTER.hp.max)
+    expect(derive(sheet).maxAp).toBe(CHARACTER.ap.min)
   })
 
-  test('a number that is not one falls back rather than poisoning the maths', () => {
+  test('a peer cannot state a ceiling at all, only an attribute', () => {
+    // The point of deriving rather than sending. A sheet claiming 10^9 HP is
+    // not a number to clamp - it is a field that does not exist, so the only
+    // thing this side can be told is four attributes it has already bounded.
+    const sheet = sanitizeSheet({
+      maxHp: 1e9,
+      maxAp: 999,
+      evasion: 500,
+      carrySlots: 99,
+      attributes: { health: 5, agility: 5, strength: 5, intelligence: 5 },
+    })
+
+    expect(sheet).not.toHaveProperty('maxHp')
+    expect(derive(sheet).maxHp).toBeLessThanOrEqual(CHARACTER.hp.max)
+    expect(derive(sheet).carrySlots).toBeLessThanOrEqual(CHARACTER.carrySlots.max)
+  })
+
+  test('an attribute that is not a number falls back rather than poisoning the maths', () => {
     // NaN survives every clamp, so it has to be refused at the door: one NaN
     // hit chance is a shot nobody can take.
-    const sheet = sanitizeSheet({ maxHp: NaN, maxAp: Infinity, evasion: '9' })
+    const sheet = sanitizeSheet({
+      attributes: { health: NaN, agility: Infinity, strength: '9', intelligence: null },
+    })
 
-    expect(sheet.maxHp).toBe(RULES.maxHp)
-    expect(sheet.maxAp).toBe(RULES.maxAp)
-    expect(sheet.evasion).toBe(0)
+    for (const value of Object.values(sheet.attributes)) expect(Number.isFinite(value)).toBe(true)
+    for (const value of Object.values(derive(sheet))) expect(Number.isFinite(value)).toBe(true)
   })
 
   test('unknown traits are dropped and known ones survive', () => {

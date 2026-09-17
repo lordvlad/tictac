@@ -1,6 +1,6 @@
 import { System } from '../System'
 import { STATUSES } from '../../core/Arsenal'
-import { ITEMS, type ItemId } from '../../core/Items'
+import { ITEMS, type ItemId, itemApCost } from '../../core/Items'
 import { applyStatus } from '../../game/Combat'
 import type { Soldier } from '../../entities/Soldier'
 
@@ -27,7 +27,7 @@ export class ItemSystem extends System {
     // "using" it would consume the thing granting the trait.
     if (ITEMS[itemId].passive) return false
     if ((soldier.items[itemId] ?? 0) <= 0) return false
-    return soldier.ap >= ITEMS[itemId].apCost
+    return soldier.ap >= itemApCost(ITEMS[itemId], soldier.itemApDelta)
   }
 
   /**
@@ -46,7 +46,7 @@ export class ItemSystem extends System {
     if (spec.passive) return false
     if (!force && !this.canUse(soldier, itemId)) return false
 
-    soldier.ap = Math.max(0, soldier.ap - spec.apCost)
+    soldier.ap = Math.max(0, soldier.ap - itemApCost(spec, soldier.itemApDelta))
     soldier.items[itemId] = Math.max(0, (soldier.items[itemId] ?? 1) - 1)
     // Spending the last of something that granted a trait ends the trait. True
     // of no item today, but the pouch is the only source and this is where it
@@ -55,9 +55,15 @@ export class ItemSystem extends System {
 
     for (const effect of spec.effects) {
       switch (effect.kind) {
-        case 'restoreHp':
-          soldier.hp = Math.min(soldier.maxHp, soldier.hp + effect.amount)
+        case 'restoreHp': {
+          // Health is physiology, so it decides how well treatment takes on
+          // this body rather than how good the kit is. Rounded per use, and
+          // never below a point: a frail soldier is treated badly, not not at
+          // all.
+          const healed = Math.max(1, Math.round(effect.amount * (1 + soldier.healBonus / 100)))
+          soldier.hp = Math.min(soldier.maxHp, soldier.hp + healed)
           break
+        }
         case 'restoreArmor':
           soldier.armor = Math.min(soldier.maxArmor, soldier.armor + effect.amount)
           break
