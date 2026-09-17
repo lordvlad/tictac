@@ -4,6 +4,7 @@ import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
 import type { GrenadeId, ShotMode, StatusKind } from '../core/Arsenal'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
+import { MY_VERSION, versionRefusal } from '../version'
 import {
   type JsonRpcFrame,
   type JsonRpcNotification,
@@ -43,7 +44,11 @@ export interface WireHit {
  * shot, and the intent to start walking a particular route.
  */
 export type NetworkMessage =
-  | { type: 'init'; seed: number; seedLabel: string }
+  // Both first frames state the build they came from: the host's `init` and
+  // the joiner's `hello`. A match between two different builds is refused
+  // before it starts — see `src/version.ts`.
+  | { type: 'init'; seed: number; seedLabel: string; protocol: number; build: string }
+  | { type: 'hello'; protocol: number; build: string }
   | { type: 'moveUnit'; faction: Faction; squadIndex: number; path: { x: number; y: number }[] }
   | { type: 'fireShot'; shooterFaction: Faction; shooterIndex: number; targetFaction: Faction; targetIndex: number; mode: ShotMode; rolls: boolean[]; hits: WireHit[] }
   | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number }; areaRadius: number; hits: WireHit[] }
@@ -78,6 +83,8 @@ export class NetworkManager {
    */
   recorder: Recorder | null = null
 
+  /** Set once a peer has been turned away; nothing it sends is read again. */
+  private refused = false
   private world: World | null = null
   private owns: (entityId: number) => boolean = () => true
   private readonly peerReady = Promise.withResolvers<CharacterSheet[]>()
@@ -118,7 +125,27 @@ export class NetworkManager {
     })
   }
 
+  /**
+   * Refuse a peer, with a reason a player can act on.
+   *
+   * Closing the connection is the whole enforcement: there is no partial
+   * compatibility to negotiate, and playing on would produce a match whose
+   * result cannot be trusted or stored.
+   */
+  private refuse(reason: string): void {
+    // Latched: a peer that has been refused does not get to carry on by
+    // sending an acceptable frame afterwards. The closed channel is the
+    // enforcement in practice, but the decision is this side's and it is not
+    // re-litigated per frame.
+    this.refused = true
+    console.warn(`[p2p] Refusing the connection: ${reason}`)
+    this.onDisconnected?.(reason)
+    this.conn?.close()
+    this.conn = null
+  }
+
   private handleIncomingRpc(frame: JsonRpcFrame): void {
+    if (this.refused) return
     if (!('method' in frame)) return
     const { method } = frame
     const params = (frame as JsonRpcNotification).params as Record<string, unknown>
@@ -132,6 +159,21 @@ export class NetworkManager {
         this.onComponentUpdate?.()
       }
       return
+    }
+
+    // The version gate, checked at the edge on both of the frames that can
+    // carry it: the host's `init` and the joiner's `hello`. Before the seed is
+    // taken and before anything is forwarded as a command, because a peer on
+    // another build is not a peer whose commands mean anything here.
+    if (method === RpcMethods.init || method === RpcMethods.hello) {
+      const reason = versionRefusal(params)
+      if (reason) {
+        this.refuse(reason)
+        return
+      }
+      // `hello` states a version and nothing else, so there is nothing left to
+      // forward once it has been accepted.
+      if (method === RpcMethods.hello) return
     }
 
     // Never forwarded as a command: `ready` can land before this side has left
@@ -197,7 +239,7 @@ export class NetworkManager {
       this.setupConn(conn)
       conn.on('open', () => {
         console.info('[p2p] Client connected, sending init seed')
-        this.send({ type: 'init', seed, seedLabel })
+        this.send({ type: 'init', seed, seedLabel, ...MY_VERSION })
         this.onConnected?.()
       })
     })
@@ -211,7 +253,10 @@ export class NetworkManager {
     this.peer = new Peer()
     this.setupPeer(this.peer)
 
-    const { promise, resolve } = Promise.withResolvers<{ seed: number; seedLabel: string }>()
+    const { promise, resolve, reject } = Promise.withResolvers<{
+      seed: number
+      seedLabel: string
+    }>()
 
     this.peer.on('open', (id) => {
       this.myId = id
@@ -220,6 +265,9 @@ export class NetworkManager {
 
       conn.on('open', () => {
         console.info('[p2p] Connected to host')
+        // Sent past the recorder rather than through `send`: a version is a
+        // fact about this bundle, not an intent the match can replay.
+        this.sendRpc(this.messageToRpc({ type: 'hello', ...MY_VERSION }))
         this.onConnected?.()
       })
 
@@ -227,6 +275,14 @@ export class NetworkManager {
         if (!isJsonRpcFrame(data) || !('method' in data)) return
         if (data.method !== RpcMethods.init) return
         const params = (data as JsonRpcNotification).params as Record<string, unknown>
+        // Refused here as well as in `handleIncomingRpc`, because this is the
+        // promise the join screen is waiting on: a mismatch has to surface as a
+        // failure to join and not as a match that silently never starts.
+        const refusal = versionRefusal(params)
+        if (refusal) {
+          reject(new Error(refusal))
+          return
+        }
         if (typeof params.seed === 'number' && typeof params.seedLabel === 'string') {
           resolve({ seed: params.seed, seedLabel: params.seedLabel })
         }

@@ -70,9 +70,8 @@ reaction fire and a roster that survives a match.
   *enemy's* move, so `MovementSystem` and the wire protocol are both in scope. Under the
   "sender resolves, receiver replays" contract, every reaction must be authored by the
   reacting unit's owner and applied mid-path.
-- **`[ITEM-024]`**: Transport port. Cheap and independent: `peerjs` lives in one file behind a
-  two-method seam, and a port makes two peers drivable in a test with no broker — which the
-  network tests currently fake by hand.
+- **`[ITEM-024]`** is **deferred**: a port with one implementation is an abstraction waiting
+  for its second caller, and that caller is the referee. The transports come with it.
 - **`[ITEM-023]`**: Intent-only wire. **The agreed destination**
   ([RFC-0001](../design/rfc/0001-referee-and-transports.md) §2): full knowledge on both sides,
   intent across the wire, both peers recompute. `[ITEM-026]` (per-peer projection) is rejected

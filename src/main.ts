@@ -204,7 +204,13 @@ function showMenu(): void {
         equipThenStart(initData.seed, initData.seedLabel, network)
       } catch (err) {
         statusEl.style.color = '#ef4444'
-        statusEl.textContent = 'Failed to connect. Verify Peer ID.'
+        // The reason, when there is one: a refused build states why it was
+        // refused, and "verify Peer ID" would send the player to check the one
+        // thing that was not wrong.
+        statusEl.textContent =
+          err instanceof Error && err.message.length > 0
+            ? err.message
+            : 'Failed to connect. Verify Peer ID.'
       }
     })
   })

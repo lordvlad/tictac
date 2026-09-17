@@ -61,6 +61,7 @@ describe('JSON-RPC framing', () => {
   test('every command type has a method', () => {
     const types: NetworkMessage['type'][] = [
       'init',
+      'hello',
       'moveUnit',
       'fireShot',
       'throwGrenade',

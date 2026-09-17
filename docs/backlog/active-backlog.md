@@ -430,7 +430,7 @@ match actually feels: everything looks fine until nothing does.
 ### [ITEM-022] Determinism Audit: One Match RNG, a Version Gate, and Float Discipline
 **Type:** Refactor / Architecture  
 **Priority:** P1  
-**Status:** Ready  
+**Status:** In Progress — point 2 (the version gate) has landed  
 **Milestone:** M2 — Tactical Depth  
 
 #### Why
@@ -472,7 +472,11 @@ gate in point 2 is not optional.
 #### Acceptance Criteria
 - [ ] The match stream has exactly one set of callers, all inside the rules layer, enforced by
       a test.
-- [ ] Peers on different protocol versions refuse the connection with a stated reason.
+- [x] Peers on different protocol versions refuse the connection with a stated reason.
+      `src/version.ts` states a hand-maintained protocol number and the commit the bundle was
+      built from; the gate is checked on both first frames — the host's `init` and the joiner's
+      new `hello` — refuses with prose a player can act on, latches so a refused peer gets no
+      second chance, and the join screen shows the reason instead of blaming the peer id.
 - [ ] Every transcendental feeding a rules decision is identified, and each is either removed
       or quantised before it branches.
 - [ ] `bun run balance` reports byte-identically before and after: this item must move no rule.
@@ -533,8 +537,8 @@ a lie, it is a desynchronisation — which `ITEM-021` catches and a referee can 
 
 ### [ITEM-024] Transport Port: One Frame Channel, Three Implementations
 **Type:** Refactor / Architecture  
-**Priority:** P2  
-**Status:** Ready  
+**Priority:** P3  
+**Status:** Deferred  
 **Milestone:** M2 — Tactical Depth  
 
 #### Why
@@ -558,8 +562,17 @@ and the whole conversation is `sendRpc(frame)` out and `handleIncomingRpc(frame)
 6. `NetworkManager` takes a `Transport` rather than constructing a `Peer`.
 
 #### Notes
-Worth doing on its own merits before any referee exists: it makes two peers drivable in a test
-without a broker, which the existing network tests fake by hand today.
+**Deferred.** Nothing downstream needs it yet: the referee (`ITEM-025`) is the only consumer of
+`SocketTransport`, and `ITEM-020`-`ITEM-023` all work against the existing PeerJS channel. A
+port with one implementation is an abstraction looking for a second caller, so it waits until
+the referee is the second caller.
+
+The one argument that did get stronger, recorded because it is evidence rather than taste: a
+linked in-process pair is how a two-peer handshake gets tested. Verifying the version gate
+meant either a CDP script driving two real browser tabs through a public signalling broker, or
+wiring two `NetworkManager`s to each other by hand in a test file — which is a loopback
+transport written inline and not called one. The hand-wiring was the right call for one gate;
+the second or third time it is needed, this item has earned itself.
 
 #### Affected Files
 - `src/game/Transport.ts` (new)
