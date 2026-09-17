@@ -74,5 +74,5 @@ graph TD
 
 1. **Pure Rules are Headless**: `src/core/` and `src/ecs/` must never import from `src/render/`, `src/hud/`, or `src/camera/`.
 2. **Deterministic PRNG**: All gameplay calculations (rolls, spreads, hit checks, map seeds) use seeded PRNG from `src/core/rng.ts`.
-3. **Sender-Resolved Combat**: Attacking peer calculates hit/crit/damage rolls locally, packages results into `WireHit`, and sends them to the remote peer for replay.
+3. **Sender-Resolved Combat**: Attacking peer calculates hit/crit/damage rolls locally, packages results into `WireHit`, and sends them to the remote peer for replay. Accurate today, and **scheduled for replacement** by `ITEM-023`: the agreed destination is intent across the wire with both sides recomputing, which makes a match an event log rather than a stream of asserted outcomes. See [RFC-0001](../design/rfc/0001-referee-and-transports.md).
 4. **Component State Diffing**: Remote state synchronization occurs via `World.syncDirty()` emitting JSON-RPC delta notifications.

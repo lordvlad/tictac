@@ -17,9 +17,15 @@ tags: ["networking", "peerjs", "jsonrpc", "p2p", "replication"]
 # ADR-0003: P2P JSON-RPC 2.0 State Replication & Sender-Resolved Combat
 
 ## Status
-**Status:** Implemented
+**Status:** Implemented; the sender-resolved half is superseded by
+[ADR-0004](./0004-full-knowledge-lockstep.md)
 **Date:** 2026-09-14
 **Deciders:** Engineering
+
+> The JSON-RPC envelope and component-diff replication stand. Sender-resolved combat does not:
+> ADR-0004 moves to intent on the wire with both peers recomputing, because an attacker
+> needing facts about its target is a bug class rather than an optimisation. Accurate as a
+> description of today's code until `ITEM-023` lands.
 
 ---
 

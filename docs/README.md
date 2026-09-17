@@ -17,6 +17,8 @@ docs/
 │   └── rendering.md      # Three.js view pipeline, animations, FX
 │
 ├── design/               # Game Design & Architectural Decisions
+│   ├── rfc/              # Requests for Comments (open designs)
+│   │   └── 0001-referee-and-transports.md # Referee, worker/process hosts, transports
 │   ├── gdd/              # Game Design Document (GDD)
 │   │   ├── README.md     # GDD Overview & index
 │   │   ├── overview.md   # Lore, factions, world setting

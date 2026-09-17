@@ -26,7 +26,14 @@ reaction fire and a roster that survives a match.
 
 ### 🔄 In Progress / Next Up
 - Nothing in flight. **The next pull is `[ITEM-020]`**, then `[ITEM-021]` and `[ITEM-022]`.
-  Reason: three bugs have now shipped with the same shape — the attacker reading its own stock
+  Read them as **foundation work, not networking work**: per
+  [RFC-0001](../design/rfc/0001-referee-and-transports.md) §9, combat is one subsystem of the
+  GDD's game and peer-to-peer play, recording and replay are debug helpers and demo entry
+  points. What these three items actually buy is that a match is a *reproducible event log* —
+  which is what a roster, a rejoin and an audit are all derived from, and what `[ITEM-012]`
+  cannot be built on without. Two independent recomputations of the same log is simply the
+  cheapest test of that property available today, and P2P is where they live.
+  The immediate provocation was three bugs with the same shape — the attacker reading its own stock
   copy of a fact only the target's owner knows — and each was fixed one property at a time,
   silently, with no check that would have caught the next one. `[ITEM-020]` is the cheap half:
   re-derive a received attack and shout when the two answers differ. It changes no contract,
@@ -63,7 +70,23 @@ reaction fire and a roster that survives a match.
   *enemy's* move, so `MovementSystem` and the wire protocol are both in scope. Under the
   "sender resolves, receiver replays" contract, every reaction must be authored by the
   reacting unit's owner and applied mid-path.
-- **`[ITEM-023]`**: Intent-only wire. The payoff of `[ITEM-020]`-`[ITEM-022]`: a resolved
+- **`[ITEM-024]`**: Transport port. Cheap and independent: `peerjs` lives in one file behind a
+  two-method seam, and a port makes two peers drivable in a test with no broker — which the
+  network tests currently fake by hand.
+- **`[ITEM-023]`**: Intent-only wire. **The agreed destination**
+  ([RFC-0001](../design/rfc/0001-referee-and-transports.md) §2): full knowledge on both sides,
+  intent across the wire, both peers recompute. `[ITEM-026]` (per-peer projection) is rejected
+  with its reasoning kept — hiding state is one rule *per component* plus ghosts plus a HUD
+  story, for no effect on play.
+- **`[ITEM-025]`**: The referee, as a **witness rather than an authority** — it recomputes the
+  same intent stream, so it costs no latency and a match plays on unwatched without it. What it
+  buys is persistence, rejoin after a crashed tab, and *attribution*: two peers can detect a
+  disagreement but neither can prove whose fault it is. A foul aborts the match. One host, a
+  `Bun.serve` process — the worker referee is struck, since a witness inside one player's
+  process cannot attribute anything about that player.
+- `[ITEM-026]` and `[ITEM-027]` are **rejected**, with their reasoning kept: hiding state costs
+  a rule per component for no effect on play, and match provenance defends a debug utility
+  against a grind the server removes by rolling rosters itself. The payoff of `[ITEM-020]`-`[ITEM-022]`: a resolved
   outcome stops travelling, `WireHit` is deleted, and the asymmetry behind three bugs goes
   away structurally rather than by everyone remembering a rule. Gated on the first three
   running green across real matches, and it permanently forecloses protocol-level secrets.

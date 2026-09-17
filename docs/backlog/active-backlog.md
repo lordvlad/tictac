@@ -109,10 +109,22 @@ Genuinely invasive. It interleaves resolution into the *enemy's* turn, and under
 **Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why
-Squads are rolled randomly per match and forgotten upon exit.
+Squads are rolled randomly per match and forgotten upon exit — and per
+[RFC-0001](../design/rfc/0001-referee-and-transports.md) §9, persistence is the foundation the
+rest of the GDD stands on rather than a feature bolted onto combat. Base building, the economy
+and a campaign roster all need a store of record before any of them can begin.
 
 #### Change
-Character sheets persist in `localStorage` across matches, carrying XP, promotions, and untreated wounds.
+A store of record for rosters and for **matches as event logs**, not a save file.
+
+1. `localStorage` is the offline and demo store, not the store of record. Once a server exists
+   the roster lives there, and the handshake stops carrying saved sheets at all — which
+   *simplifies* the trust story rather than complicating it: a peer cannot send a tampered
+   roster if it does not send one.
+2. A match is stored as its intent log (`ITEM-023`), so what persists is what happened rather
+   than a summary of it. Replaying a log is how a roster is derived, how a crashed client
+   rejoins (`ITEM-025`) and how a disputed match is audited — one artefact, three uses.
+3. Character sheets carry XP, promotions and untreated wounds across matches.
 
 Also the rest of [GDD §5](../design/gdd/progression-and-meta.md), which only means anything
 once a roster outlives a match and is therefore filed here rather than as its own item:
@@ -127,10 +139,16 @@ once a roster outlives a match and is therefore filed here rather than as its ow
    lands in `sheet.attributes`, so what persists is four ints per character, not a stat block.
 
 #### Caveat
-Changes what the network handshake means: peers send *saved* rosters, making `sanitizeSheet` load-bearing against local tampering as well as hostile peers.
+In the serverless modes this changes what the handshake means: peers would send *saved*
+rosters, making `sanitizeSheet` load-bearing against local tampering as well as a hostile peer.
+With a server it goes the other way — nobody sends a roster.
+
+Depends on `ITEM-022`: a stored log that cannot be replayed deterministically is not a store of
+record, it is a diary.
 
 #### Affected Files
 - `src/core/Characters.ts`
+- `src/game/Recording.ts`
 - `src/game/NetworkManager.ts`
 - `src/hud/LoadoutScreen.ts`
 
@@ -488,13 +506,16 @@ authorities must not both write: this item removes the resolved payload *and* na
 `World.syncDirty`, or replication and local simulation will fight over the same state.
 
 #### Notes
-This forecloses one thing permanently and it should be a deliberate choice, not a discovery:
-under intent-only, both clients hold all state, so **no information can be secret at the
-protocol level** — only at the UI level. That is already true today (sheets arrive in the
-`ready` handshake and `FogOfWar` computes both sides' visibility locally), so nothing
-regresses; but the stealth draft's enemy awareness and any future hidden-information mechanic
-can then never be more than a polite fiction without a referee. See
-[Noise & Stealth](../design/gdd/noise-and-stealth.md).
+**This is the agreed destination**, not one of two options — see
+[RFC-0001](../design/rfc/0001-referee-and-transports.md) §2. The trade was taken with eyes
+open: both clients hold all state, so nothing is secret at the protocol level and fog of war
+is a filter over what a client *draws*. That is already true today, so nothing regresses, and
+the alternative — an entitlement rule, a ghost policy and a HUD story per component — was
+rejected as machinery with no effect on play (`ITEM-026`).
+
+Consequence worth stating: once a resolved outcome no longer travels, a client cannot fake a
+die quietly. Dice come from the match stream in an order the rules fix, so a faked roll is not
+a lie, it is a desynchronisation — which `ITEM-021` catches and a referee can attribute.
 
 #### Affected Files
 - `src/game/NetworkManager.ts`
@@ -508,3 +529,178 @@ can then never be more than a polite fiction without a referee. See
 - [ ] Two peers play a full match with no digest mismatch and no resolved payloads.
 - [ ] A recording and a peer consume the same frames.
 - [ ] `bun run balance` reports byte-identically: the rules must not move.
+---
+
+### [ITEM-024] Transport Port: One Frame Channel, Three Implementations
+**Type:** Refactor / Architecture  
+**Priority:** P2  
+**Status:** Ready  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+[RFC-0001](../design/rfc/0001-referee-and-transports.md). Everything that arrives from another
+process is a JSON-RPC frame, and everything that leaves is too — but the only way to move one
+is PeerJS. That forecloses a referee in a worker, a referee in a process, and any test that
+wants to drive two peers without a signalling broker.
+
+The seam is already narrow, which is why this is cheap: `peerjs` appears in exactly one file,
+and the whole conversation is `sendRpc(frame)` out and `handleIncomingRpc(frame)` in.
+
+#### Change
+1. A `Transport` port — `send(frame)`, `onFrame(handler)`, `onClosed(handler)`, `close()`.
+2. `DataChannelTransport` wrapping today's PeerJS connection, with behaviour unchanged.
+3. `SocketTransport` over `WebSocket`, browser side and `Bun.serve` side.
+4. `LoopbackTransport`: a linked pair in one process, for tests. The network tests already
+   hand-build a fake channel to observe what a peer would have transmitted — that is a
+   transport implementation living in a test file without being called one.
+5. **One codec: a JSON string, on every transport.** A socket needs a string anyway, so every
+   frame is byte-identical however it travelled, and nothing has a per-transport branch.
+6. `NetworkManager` takes a `Transport` rather than constructing a `Peer`.
+
+#### Notes
+Worth doing on its own merits before any referee exists: it makes two peers drivable in a test
+without a broker, which the existing network tests fake by hand today.
+
+#### Affected Files
+- `src/game/Transport.ts` (new)
+- `src/game/NetworkManager.ts`
+- `tests/network.test.ts`
+
+#### Acceptance Criteria
+- [ ] `peerjs` is imported in exactly one file, and it is not `NetworkManager`.
+- [ ] A match plays out over `LoopbackTransport` with no PeerJS and no broker, in a test.
+- [ ] Frames are byte-identical across transports.
+- [ ] Peer-to-peer play is behaviourally unchanged.
+
+---
+
+### [ITEM-025] Referee: The Rules, Hosted
+**Type:** Feature / Architecture  
+**Priority:** P2  
+**Status:** Backlog  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+[RFC-0001](../design/rfc/0001-referee-and-transports.md). A campaign roster needs a home that
+is not one player's tab, a crashed tab needs rebuilding, and a disagreement between two peers
+needs a third opinion to become an accusation rather than a shrug.
+
+**A witness, not an authority.** Since nothing is secret (RFC-0001 §2), the referee does not
+need to be in the data path: clients still resolve locally and instantly, and the referee
+recomputes the same intent stream at its own pace. It costs no latency, and a match plays on
+unwatched when there is no referee at all.
+
+What it adds is **attribution**. Two peers can already detect a disagreement (`ITEM-020`,
+`ITEM-021`); neither can prove which side is wrong. A third recomputation makes it two against
+one. It cannot see a maphack — that is a read, and no recomputation observes a read — and it
+cannot see anything that happened before the first intent (`ITEM-027`).
+
+#### Change
+1. A referee module that drives the **existing** ECS world and systems from peer intents
+   instead of from an AI policy. Not a second rule set: the resolvers already speak to narrow
+   ports, `tests/headless.test.ts` already deploys a squad with no engine or canvas, and
+   `src/sim/` already runs whole matches headlessly.
+2. One entry point containing no rules: a `Bun.serve` process with a `websocket` handler. A
+   referee in a `Worker` was struck — a witness inside one player's process cannot attribute
+   anything about that player, and local versus already runs the rules in-page.
+3. **Rejoin**: a client that lost its tab reconnects, receives the intent log and replays it.
+   The same log the recorder already writes, which is why `ITEM-022`'s determinism work is
+   load-bearing here and not merely tidy — a client that cannot reproduce the log cannot
+   rejoin.
+4. **Persistence**: the log and the roster are probably one store. `bun:sqlite` is built in.
+5. **Abort on a foul**, per RFC-0001 §8.3: the log is kept as evidence, the abort names a side
+   and a reason, and `ITEM-022`'s version gate ships first so the first player accused is not
+   somebody running a stale bundle.
+
+#### Blocker
+Not blocked, but **ordered**: `ITEM-024` supplies the channel, `ITEM-022` supplies the
+determinism that both attribution and rejoin stand on, and `ITEM-023` is what makes the log
+the whole truth of a match. A referee over a wire that still carries resolved outcomes would
+be verifying the sender's own arithmetic.
+
+One hazard to handle before the first accusation: this project deploys on every push, so two
+peers on different builds diverge innocently. Without `ITEM-022`'s version gate, the first
+player this feature names as a cheat will be somebody whose browser cached yesterday's
+bundle.
+
+#### Affected Files
+- `src/server/Referee.ts` (new)
+- `src/server/worker.ts` (new)
+- `scripts/serve-match.ts` (new)
+- `src/game/NetworkManager.ts`
+- `src/ecs/World.ts`
+
+#### Acceptance Criteria
+- [ ] A full match plays out with both clients as clients: no client resolves an attack.
+- [ ] A client that disconnects mid-match rejoins and reaches the same state from the log.
+- [ ] A foul aborts the match, names a side and a reason, and keeps the log.
+- [ ] `bun run balance` still measures the same game, and says so byte-identically.
+
+---
+
+### [ITEM-026] Per-Peer Projection — REJECTED
+**Type:** Feature  
+**Priority:** —  
+**Status:** Rejected  
+**Milestone:** —  
+
+#### Why it was proposed
+[RFC-0001](../design/rfc/0001-referee-and-transports.md) §3.4, in its first draft. Fog of war
+is a rendering filter: a client holds everything it declines to draw, which is the same
+position every deterministic-lockstep RTS is in and the reason maphacks are that genre's
+oldest cheat. A referee filtering `componentUpdate` frames per client would have made withheld
+information actually withheld.
+
+#### Why it is rejected
+Hiding information is not one decision, it is one decision **per piece of state** — position,
+sheet, action points, ammunition, statuses, grenade counts — and each needs an entitlement
+rule, a ghost policy for state that has gone stale, and a HUD story for showing uncertainty. A
+client that is simply *missing* an enemy leaks that the enemy moved, so ghosts are mandatory
+rather than an optimisation. That is a large, permanent body of machinery, and its effect on
+two friends playing each other is approximately nil.
+
+It also costs the thing that made the accepted design cheap. Secrecy requires the referee to
+be in the data path, which is a round trip per action, prediction and reconciliation on the
+clients, and a match that cannot proceed when the referee is away. Dropping secrecy makes the
+referee a witness instead: no latency, nothing to predict, and play continues unwatched.
+
+Recorded rather than deleted because the reasoning is the valuable part: the accepted design
+(RFC-0001 §2) knowingly accepts that a maphack is possible and unobservable, and a future
+competitive mode that cannot accept that would have to reopen exactly this item.
+
+#### Superseded by
+- `ITEM-023` — intent-only wire, full knowledge on both sides.
+- `ITEM-025` — the referee as a witness that attributes fouls rather than preventing peeking.
+
+---
+
+### [ITEM-027] Match Provenance — REJECTED
+**Type:** Feature  
+**Priority:** —  
+**Status:** Rejected  
+**Milestone:** —  
+
+#### Why it was proposed
+[RFC-0001](../design/rfc/0001-referee-and-transports.md) §8.1. Once outcomes stop travelling,
+nothing after the first intent can be faked quietly — but everything before it can. The host
+picks the match seed, so a host could reroll until it liked the map; each peer rolls its own
+squad and sends the sheets, so a peer could roll ten squads and keep the best. Both are legal
+from the first intent onward and no recomputation would ever see them. The fix was one
+committed nonce each and a derived seed.
+
+#### Why it is rejected
+It defends peer-to-peer play, and peer-to-peer play is a debug utility and demo entry point —
+not a mode anybody is scored in. Nothing is at stake in a match between two friends who can
+both already read each other's state by design (`ITEM-026`).
+
+And the premise expires anyway: going forward **the server rolls a new player's roster**, so
+there is nothing for a client to grind. A squad becomes something a player is dealt and then
+keeps, which is also what makes permadeath mean anything (`ITEM-012`) — the provenance problem
+dissolves into the persistence design rather than needing a protocol of its own.
+
+Recorded rather than deleted because the reasoning is the reusable part: a commitment scheme is
+the right tool for a secret that has to be *fixed before* it is revealed, and if a competitive
+mode ever needs client-chosen setup to be unforgeable, this is the shape it wants.
+
+#### Superseded by
+- `ITEM-012` — the server holds the roster, so a client never chooses one.
