@@ -120,3 +120,17 @@ graph TD
 - **Explosives are trained too.** A soldier schooled in demolitions gets a wider blast and
   strips more armour out of the same grenade — it is the charge that is better set, not the
   arm, so throwing distance stays a matter of strength.
+
+### 2.7 Proposed, not built
+
+Three design drafts extend the pillars above. None of them is implemented; each states what
+already exists in the code and what it would still need, so a reader can tell a plan from a
+rule.
+
+- [Melee Combat](melee-combat.md) — contact fighting as a *contest* rather than a hit roll,
+  where cover stops mattering and a blade can kill quietly.
+- [Noise & Stealth](noise-and-stealth.md) — crouching as sneaking, a loudness per action,
+  enemy awareness as a third state beside seen and read, and breaking glass as both a cost
+  and a tool.
+- [Interaction & Environment](interaction-and-environment.md) — the item verb pointed at
+  tiles and objects as well as people: keys and locks, doors, fire.

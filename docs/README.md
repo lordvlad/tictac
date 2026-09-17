@@ -21,6 +21,9 @@ docs/
 │   │   ├── README.md     # GDD Overview & index
 │   │   ├── overview.md   # Lore, factions, world setting
 │   │   ├── combat-mechanics.md # Turn-based tactical combat rules
+│   │   ├── melee-combat.md   # Contact fighting (draft)
+│   │   ├── noise-and-stealth.md # Loudness, awareness, sneaking (draft)
+│   │   ├── interaction-and-environment.md # Item verbs on people, tiles, objects (draft)
 │   │   ├── status-and-trait-catalog.md # Generated: every status, trait and worn item
 │   │   ├── economy-and-bases.md# Base building, resource management
 │   │   └── progression-and-meta.md# RPG progression, wounds, permadeath
@@ -62,6 +65,7 @@ docs/
 - 📐 **Architecture**: [System Architecture Overview](architecture/overview.md)
 - 🎮 **Game Design**: [GDD: Tactical Combat Mechanics](design/gdd/combat-mechanics.md)
 - 📋 **Reference**: [Status, Trait & Worn Kit Catalogue](design/gdd/status-and-trait-catalog.md) — generated from the code by `bun run docs:catalog`
+- 🧪 **Proposed**: [Melee](design/gdd/melee-combat.md), [Noise & Stealth](design/gdd/noise-and-stealth.md) and [Interaction & Environment](design/gdd/interaction-and-environment.md) — drafts, not built; each lists what already exists and what it would need
 - 📋 **Active Tasks**: [Active Backlog](backlog/active-backlog.md)
 - 🎯 **Active Focus**: [Current Kanban Focus](plans/active-focus.md)
 - 🚀 **Milestones**: [Capability Roadmap](plans/roadmap.md)

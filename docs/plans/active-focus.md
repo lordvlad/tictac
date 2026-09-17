@@ -25,13 +25,25 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- Nothing in flight. **The next pull is `[ITEM-004]`**: it is the queue's only P1, and it is
-  now the item with somewhere to write — utility proficiency and the four attributes are
-  rolled per character and nothing yet makes either rise, which is precisely what
-  learn-by-doing is for. Measure first (see below); `[ITEM-010]` is the cheap pull if the
-  measurement says growth cannot be earned inside a match.
+- Nothing in flight. **The next pull is `[ITEM-020]`**, then `[ITEM-021]` and `[ITEM-022]`.
+  Reason: three bugs have now shipped with the same shape — the attacker reading its own stock
+  copy of a fact only the target's owner knows — and each was fixed one property at a time,
+  silently, with no check that would have caught the next one. `[ITEM-020]` is the cheap half:
+  re-derive a received attack and shout when the two answers differ. It changes no contract,
+  adds no latency, deletes nothing, and it is a test for a property the recorder *already*
+  assumes, since a recording is an intent stream with no outcomes in it.
+- `[ITEM-004]` moves behind them. Progression widens peer-supplied input, and widening the
+  wire before there is any check that both sides agree on what crossed it is the wrong order.
 
 ### 📋 Ready (Pull Queue)
+- **`[ITEM-020]`**: Shadow resolution and divergence detection. Observation only; the mismatch
+  rate it measures is what decides whether `[ITEM-023]` is safe to attempt at all.
+- **`[ITEM-021]`**: State checksum at the turn boundary. Catches drift, which is what a
+  desynchronised match actually looks like — fine until nothing is. Useful on its own.
+- **`[ITEM-022]`**: Determinism audit. One match RNG drawn only by the rules, a build/protocol
+  gate in the handshake (this project deploys on every push, so mismatched peers are the
+  ordinary case), and a float audit of anything transcendental feeding a decision. Must move
+  no rule: `bun run balance` byte-identical is the acceptance test.
 - **`[ITEM-004]`**: In-match progression, now also the home for the GDD's learn-by-doing
   growth. **Measure before building**: the harness reports a median of 3.5 turns per match, so
   count kills per unit per match first and site the XP threshold where it can actually be
@@ -51,11 +63,29 @@ reaction fire and a roster that survives a match.
   *enemy's* move, so `MovementSystem` and the wire protocol are both in scope. Under the
   "sender resolves, receiver replays" contract, every reaction must be authored by the
   reacting unit's owner and applied mid-path.
+- **`[ITEM-023]`**: Intent-only wire. The payoff of `[ITEM-020]`-`[ITEM-022]`: a resolved
+  outcome stops travelling, `WireHit` is deleted, and the asymmetry behind three bugs goes
+  away structurally rather than by everyone remembering a rule. Gated on the first three
+  running green across real matches, and it permanently forecloses protocol-level secrets.
 - **`[ITEM-012]`**: Permadeath, lasting wounds and roster persistence. Changes what the
   handshake means: a peer would be sending a *saved* roster, so `sanitizeSheet` becomes
   load-bearing against your own stored data as well as a hostile peer. Wants `ITEM-004`
   first — growth is what there would be to persist. Lasting wounds would be the first
   modifier that outlives a match, unlike `ITEM-005`'s health-derived ones.
+- **`[ITEM-017]`**: Item verbs on tiles and objects — keys, locks, doors. The cheap half of
+  [Interaction & Environment](../design/gdd/interaction-and-environment.md): walls are
+  already replicated entities whose `kind` every consumer reads, so a door costs no new wire
+  message. Fire is deliberately *not* in it — a burning tile is a per-tile effect with a
+  clock, and every effect today is a status on a unit.
+- **`[ITEM-018]`**: Melee. First combat consumer of Strength and the answer to a unit that
+  is unshootable in cover and trivially reachable. Blocked less by the swing than by the
+  game around it: the sweep's policy never closes, so it would measure as worthless the way
+  the shotgun once did, and without `[ITEM-011]` crossing open ground goes unpunished.
+- **`[ITEM-019]`**: Noise, awareness and the quiet kill. Sound as the second information
+  channel, with awareness sitting beside `seen` and `known` exactly as intel fog does. The
+  real cost is an AI that can be *fooled* — a thrown stone is worth nothing against a policy
+  that ignores information — plus enemy patrol behaviour, without which sneaking is walking
+  around statues.
 
 ### ✅ Completed
 - **`[ITEM-001]`**: Narrow ports (`Combatant`, `CombatFx`, focus port for `TurnManager`).
