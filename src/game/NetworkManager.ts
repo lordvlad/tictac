@@ -4,6 +4,7 @@ import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
 import type { GrenadeId, ShotMode, StatusKind } from '../core/Arsenal'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
+import type { StateDigest } from './StateDigest'
 import { MY_VERSION, versionRefusal } from '../version'
 import {
   type JsonRpcFrame,
@@ -49,6 +50,12 @@ export type NetworkMessage =
   // before it starts — see `src/version.ts`.
   | { type: 'init'; seed: number; seedLabel: string; protocol: number; build: string }
   | { type: 'hello'; protocol: number; build: string }
+  /**
+   * A fingerprint of the sender's whole world, sent immediately before it hands
+   * over. Not an intent: it asks the other side to *do* nothing, and it is not
+   * recorded, because a replay derives its state rather than checking it.
+   */
+  | { type: 'digest'; digest: StateDigest }
   | { type: 'moveUnit'; faction: Faction; squadIndex: number; path: { x: number; y: number }[] }
   | {
       type: 'fireShot'

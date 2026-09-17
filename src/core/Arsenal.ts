@@ -22,8 +22,28 @@ export type WeaponId = (typeof WeaponId)[keyof typeof WeaponId]
  *
  * A counter rather than anything random: a weapon's identity has to survive a
  * replay and a headless sweep, and nothing about it needs to be unguessable.
+ *
+ * It is *not* how a soldier's weapon gets its number. A counter is per-process
+ * state, so two peers only agree on it by luck of how many templates each
+ * happened to clone — and a loadout screen clones one on every press. Under
+ * ADR-0004 both sides recompute a match from shared state, so state that
+ * depends on a local count is state that cannot agree. {@link clone} therefore
+ * takes a serial, and a unit's weapon is stamped with one derived from who is
+ * carrying it. Found by the state digest, which went red on nothing but this.
  */
 let nextSerial = 1
+
+/**
+ * The serial the unit in this squad slot gives the weapon it is holding.
+ *
+ * A pure function of *who carries what*, so two peers agree without the number
+ * travelling, and so a replay reproduces it. Distinct per slot and per class,
+ * which is all a serial is for: telling one unit's rifle from another's.
+ */
+export function weaponSerial(faction: number, squadIndex: number, weaponId: WeaponId): number {
+  const classIndex = Object.values(WeaponId).indexOf(weaponId)
+  return (faction + 1) * 1000 + (squadIndex + 1) * 10 + classIndex
+}
 
 export abstract class Weapon {
   abstract readonly id: WeaponId
@@ -125,9 +145,9 @@ export abstract class Weapon {
    * Its own serial and its own rail: cloning a template is how a unit gets a
    * weapon, and two units must not share one array of fitted kit.
    */
-  clone(): this {
+  clone(serial: number = nextSerial++): this {
     const copy = Object.create(Object.getPrototypeOf(this)) as this
-    Object.assign(copy, this, { serial: nextSerial++, attachments: [...this.attachments] })
+    Object.assign(copy, this, { serial, attachments: [...this.attachments] })
     return copy
   }
 }

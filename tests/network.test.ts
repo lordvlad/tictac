@@ -62,6 +62,7 @@ describe('JSON-RPC framing', () => {
     const types: NetworkMessage['type'][] = [
       'init',
       'hello',
+      'digest',
       'moveUnit',
       'fireShot',
       'throwGrenade',

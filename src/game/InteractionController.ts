@@ -11,6 +11,8 @@ import type { Hud } from '../hud/Hud'
 import { buildHudModel, type HudIntent } from '../hud/HudModel'
 import { applyHitEffects, calculateHitChance, type ResolvedHit } from './Combat'
 import { reportDivergence, shadowShot, shadowThrow } from './Divergence'
+import { compareDigests, digestWorld, type StateDigest } from './StateDigest'
+import { RpcMethods } from './JsonRpc'
 import { toWireHits, Recorder, type RecordingHeader } from './Recording'
 import { settleTurn } from './Turn'
 import type { OffscreenPortraits } from '../render/Portraits'
@@ -510,6 +512,7 @@ export class InteractionController {
       }
       case 'requestTurnSwitch':
         if (this.network && this.network.mode !== 'local') {
+          this.sendStateDigest()
           this.network.send({ type: 'endTurn', faction: this.turnManager.activeFaction })
           this.turnManager.startNextTurn()
           this.onTurnSwitched()
@@ -520,6 +523,7 @@ export class InteractionController {
         break
       case 'confirmTurnSwitch':
         this.hud.hideTurnOverlay()
+        this.sendStateDigest()
         this.network?.send({ type: 'endTurn', faction: this.turnManager.activeFaction })
         this.turnManager.startNextTurn()
         this.onTurnSwitched()
@@ -639,6 +643,16 @@ export class InteractionController {
         if (Math.hypot(dx, dz) > 0.01) soldier.targetYaw = Math.atan2(dx, dz)
         break
       }
+      case 'digest': {
+        // Compared before `endTurn` is applied, because that is the state the
+        // sender fingerprinted: it took its digest immediately before handing
+        // over, and this side has not advanced past that point yet.
+        reportDivergence(
+          `state at the end of turn ${msg.digest.turn}`,
+          compareDigests(this.localDigest(), msg.digest, (entityId) => this.unitName(entityId)),
+        )
+        break
+      }
       case 'useItem': {
         // The peer already spent the item and applied its effect; HP, AP,
         // armour, statuses and the item counts all replicate from its side.
@@ -670,6 +684,41 @@ export class InteractionController {
       })
     }
     return resolved
+  }
+
+  /**
+   * This side's fingerprint of the world, as of now.
+   *
+   * The soldiers are named in detail because they are what a match moves; the
+   * terrain and the rule tables fold into a number each, which is enough to say
+   * *that* they differ.
+   */
+  private localDigest(): StateDigest {
+    return digestWorld(
+      this.world,
+      this.squads.soldiers.map((unit) => unit.entityId),
+      this.turnManager.turnNumber,
+    )
+  }
+
+  private unitName(entityId: number): string {
+    return this.squads.soldiers.find((unit) => unit.entityId === entityId)?.name ?? `#${entityId}`
+  }
+
+  /**
+   * Publish the fingerprint, then hand over.
+   *
+   * Past the recorder deliberately: a digest is a claim about state, and a
+   * replay rebuilds state from the intents rather than checking it. Recording
+   * it would put a number in the log that the log itself has to reproduce.
+   */
+  private sendStateDigest(): void {
+    if (!this.network || this.network.mode === 'local') return
+    this.network.sendRpc({
+      jsonrpc: '2.0',
+      method: RpcMethods.digest,
+      params: { digest: this.localDigest() },
+    })
   }
 
   /** Shared post-combat refresh: damage can reveal, kill, and re-cover. */

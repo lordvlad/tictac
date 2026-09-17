@@ -86,6 +86,26 @@ export class World {
     this.snapshots.delete(id)
   }
 
+  /**
+   * Every live entity.
+   *
+   * Exposed for the state digest, which has to account for *all* of a world
+   * rather than the entities a caller happens to know about — a divergence in
+   * a wall or in the rule tables is exactly as fatal as one in a soldier.
+   */
+  entityIds(): Iterable<number> {
+    return this.activeEntities
+  }
+
+  /** The components on one entity, serialised, or null if it has none. */
+  componentData(entityId: number): Record<string, Record<string, unknown>> | null {
+    const components = this.entityComponents.get(entityId)
+    if (!components) return null
+    const data: Record<string, Record<string, unknown>> = {}
+    for (const [name, component] of components) data[name] = component.serialize()
+    return data
+  }
+
   hasEntity(id: number): boolean {
     return this.activeEntities.has(id)
   }

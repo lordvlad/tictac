@@ -25,9 +25,17 @@ export class WeaponComponent extends Component {
   }
 
   /** Re-stamp from the shared template, discarding per-unit tuning. */
-  equip(weaponId: WeaponId): void {
+  /**
+   * Put a weapon in these hands.
+   *
+   * `serial` identifies the instance. Passed in rather than counted, because a
+   * counter is per-process and two peers must reach the same number for the
+   * same gun: a soldier's weapon is numbered after the soldier, not after how
+   * many times a screen cloned a template.
+   */
+  equip(weaponId: WeaponId, serial?: number): void {
     this.weaponId = weaponId
-    this.weapon = WEAPONS[weaponId].clone()
+    this.weapon = WEAPONS[weaponId].clone(serial)
   }
 
   serialize(): Record<string, unknown> {

@@ -56,6 +56,7 @@ export function parseComponentUpdateMethod(method: string): string | null {
 export const RpcMethods = {
   init: 'tictac/system/session/init',
   hello: 'tictac/system/session/hello',
+  digest: 'tictac/system/session/digest',
   moveUnit: 'tictac/system/movement/moveUnit',
   fireShot: 'tictac/system/combat/fireShot',
   throwGrenade: 'tictac/system/combat/throwGrenade',

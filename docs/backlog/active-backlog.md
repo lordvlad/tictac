@@ -399,7 +399,7 @@ Turn silent wrongness into a loud error, without changing the contract.
 ### [ITEM-021] State Checksum at the Turn Boundary
 **Type:** Refactor / Architecture  
 **Priority:** P1  
-**Status:** Ready  
+**Status:** In Progress — landed; live two-peer observation still outstanding  
 **Milestone:** M2 — Tactical Depth  
 
 #### Why
@@ -430,11 +430,26 @@ match actually feels: everything looks fine until nothing does.
 - `tests/network.test.ts`
 
 #### Acceptance Criteria
-- [ ] Both peers agree on a digest for an identical world, and the digest is stable across
-      component insertion order.
-- [ ] A single mutated component on one side is reported at the next handover, naming the
-      component and the entity.
-- [ ] Digesting a match costs no measurable frame time, being once per handover.
+- [x] Both peers agree on a digest for an identical world, and the digest is stable across
+      component insertion order — keys are sorted before hashing, and the fold over entities is
+      commutative because the entities a world holds are a set.
+- [x] A single mutated component on one side is reported at the next handover, naming the
+      component and the entity. Units carry a hash per component; everything else folds into
+      one number for terrain and one for the rule tables, so a wall drifting says *terrain*
+      rather than costing a hash per wall per turn.
+- [x] Digesting a match costs no measurable frame time: 40 digests — a whole match — are
+      pinned under a single frame's budget, and it runs once per handover rather than per frame.
+- [ ] Observed live between two peers. Same tooling block as `ITEM-020`; the send and compare
+      sites in `InteractionController` are typechecked and unexercised.
+
+#### Found by this item
+The digest went red between two *identical* worlds, and the only thing differing was a weapon's
+**serial**. It came from a process-local counter, so two peers agreed on it only by luck of how
+many templates each had cloned — and the loadout screen clones one on every press. A serial is
+now derived from who carries the weapon (`weaponSerial(faction, squadIndex, weaponId)`), which
+both sides compute without it travelling, and a 400-match sweep is byte-identical across the
+change. This is exactly the class of drift `ITEM-022` exists to remove, found by the check
+built to notice it.
 
 ---
 

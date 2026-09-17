@@ -8,6 +8,7 @@ import {
   GrenadeId,
   Weapon,
   WeaponId,
+  weaponSerial,
 } from '../core/Arsenal'
 import { effectiveMaxAp, type StatusState } from '../core/Ballistics'
 import {
@@ -609,7 +610,11 @@ export class Soldier {
 
   /** Re-stamp the loadout from the shared templates. */
   equip(weaponId: WeaponId, ammoId: AmmoId): void {
-    this.weaponComponent.equip(weaponId)
+    // Numbered after its carrier, so both peers reach the same serial for the
+    // same gun without it having to travel: `Blue 2's rifle` is the same weapon
+    // on either side of the wire, and re-equipping changes the number because
+    // it is a different weapon.
+    this.weaponComponent.equip(weaponId, weaponSerial(this.faction, this.squadIndex, weaponId))
     this.ammoComponent.load(ammoId)
     // A different weapon is a different rail: what was fitted to the last one
     // is not in force any more.
