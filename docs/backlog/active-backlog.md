@@ -387,12 +387,17 @@ Turn silent wrongness into a loud error, without changing the contract.
 - [x] The comparison consumes no match randomness and changes no applied outcome — the crit
       outcomes are replayed from the sender's own flags, and a test snapshots every unit's hp,
       armour, AP, clip, statuses and reveal state across a shadow run.
-- [ ] Observed live between two peers. Blocked on tooling, not on code: the browser device is
-      failing with a filesystem `ELOOP` this session and headful Chrome has no X server, so a
-      two-tab run over the signalling broker was not possible. The two call sites in
-      `InteractionController` are typechecked but unexercised; a headless replay runner over a
-      recorded intent stream would close this without a browser at all, since playback already
-      goes through the same remote path.
+- [x] Exercised end to end, without a browser. `bun run replay` (`src/sim/Replay.ts`) runs a
+      recorded intent stream through the real systems, and every shot in the file arrives
+      exactly as a peer's does — resolved numbers, the dice that produced them, the chance they
+      were rolled against. A recorded 57-event match replays with **no divergence**, and two
+      tampering tests prove the check is not vacuous: one point added to a single hit is caught
+      and named, and a claimed hit chance the state does not support is caught on a shot that
+      missed.
+- [ ] Observed between two live browser peers. Still blocked on tooling rather than code
+      (browser device `ELOOP`, no X server for headful Chrome), and now largely redundant: the
+      replay path and the peer path are the same two call sites' worth of logic, and the replay
+      runs in CI.
 
 ---
 
@@ -439,8 +444,10 @@ match actually feels: everything looks fine until nothing does.
       rather than costing a hash per wall per turn.
 - [x] Digesting a match costs no measurable frame time: 40 digests — a whole match — are
       pinned under a single frame's budget, and it runs once per handover rather than per frame.
-- [ ] Observed live between two peers. Same tooling block as `ITEM-020`; the send and compare
-      sites in `InteractionController` are typechecked and unexercised.
+- [x] Exercised end to end by the replay runner: two runs of one recorded match reach the same
+      digest, which is the property a stored match must have before a roster can be derived
+      from it — and the one rejoin will stand on.
+- [ ] Observed between two live browser peers. Same tooling block as `ITEM-020`.
 
 #### Found by this item
 The digest went red between two *identical* worlds, and the only thing differing was a weapon's

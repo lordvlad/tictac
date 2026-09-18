@@ -16,7 +16,8 @@
     "build:public": "bun scripts/copy-public.mjs",
     "build:character": "bun scripts/build-character.mjs",
     "build:icons": "bun scripts/build-icons.mjs",
-    "icons": "bun run build:icons"
+    "icons": "bun run build:icons",
+    "replay": "bun scripts/replay.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.18.2",
