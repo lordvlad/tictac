@@ -10,6 +10,7 @@ import type { CombatSystem } from '../ecs/systems/CombatSystem'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
 import { FX } from '../config'
+import { distance } from '../core/math'
 
 const BLAST_TINT = 0xff9a3c
 const BLAST_CENTRE = 0xffd166
@@ -205,7 +206,7 @@ export class GrenadePlanner {
         const x = at.x + dx
         const y = at.y + dy
         if (!this.grid.inBounds(x, y)) continue
-        const falloff = blastFalloff(Math.hypot(dx, dy), spec.areaRadius)
+        const falloff = blastFalloff(distance(dx, dy), spec.areaRadius)
         if (falloff === 0) continue
         ground.paintTile(x, y, dx === 0 && dy === 0 ? BLAST_CENTRE : BLAST_TINT, 0.15 + falloff * 0.3)
       }

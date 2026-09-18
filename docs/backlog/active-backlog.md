@@ -456,7 +456,7 @@ built to notice it.
 ### [ITEM-022] Determinism Audit: One Match RNG, a Version Gate, and Float Discipline
 **Type:** Refactor / Architecture  
 **Priority:** P1  
-**Status:** In Progress — point 2 (the version gate) has landed  
+**Status:** In Progress — all four points landed; symmetric drawing waits on `ITEM-023`  
 **Milestone:** M2 — Tactical Depth  
 
 #### Why
@@ -496,16 +496,30 @@ gate in point 2 is not optional.
 - `src/sim/SimMatch.ts`
 
 #### Acceptance Criteria
-- [ ] The match stream has exactly one set of callers, all inside the rules layer, enforced by
-      a test.
+- [x] The match stream has exactly one set of callers, all inside the rules layer, enforced by
+      a test. `matchDice(seed)` is the only source; `Math.random` is gone from `src/core`,
+      `src/ecs`, `src/sim` and `src/game`, with `resolveSeed` the single stated exception
+      (choosing a seed is what *creates* the stream). The defaults that hid the problem are
+      gone too: a resolver without dice no longer compiles.
+      **Still asymmetric**: only the acting side draws, because outcomes still travel. Both
+      sides draw in step when `ITEM-023` lands, which is the point of having the stream now.
 - [x] Peers on different protocol versions refuse the connection with a stated reason.
       `src/version.ts` states a hand-maintained protocol number and the commit the bundle was
       built from; the gate is checked on both first frames — the host's `init` and the joiner's
       new `hello` — refuses with prose a player can act on, latches so a refused peer gets no
       second chance, and the join screen shows the reason instead of blaming the peer id.
-- [ ] Every transcendental feeding a rules decision is identified, and each is either removed
-      or quantised before it branches.
-- [ ] `bun run balance` reports byte-identically before and after: this item must move no rule.
+- [x] Every transcendental feeding a rules decision is identified, and each is either removed
+      or quantised before it branches. Inventory: `Math.hypot` (every distance, so every range
+      check, hit chance and blast radius) and `Math.atan2` (facing). `sqrt` is correctly
+      rounded by IEEE 754 and `hypot` is a library routine with implementation-defined
+      accuracy, so distance is now squares and one root; a facing is quantised to a thousandth
+      of a radian, far finer than anything visible, because it is replicated *and* digested.
+      A test refuses both functions anywhere the rules can see them, and was proven red by
+      putting each back.
+- [x] Identical entity ids and iteration order, with a test: two peers dealt the same match
+      number their entities the same and reach the same digest.
+- [x] `bun run balance` reports byte-identically before and after: 400 matches at seed 1000,
+      unchanged across the dice threading and the float work.
 
 ---
 

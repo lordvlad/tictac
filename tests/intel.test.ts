@@ -10,6 +10,7 @@ import { TraitId } from '../src/core/Traits'
 import { fireWeapon, throwGrenade } from '../src/game/Combat'
 import { Squads } from '../src/game/Squads'
 import { settleTurn } from '../src/game/Turn'
+import { matchDice } from '../src/core/rng'
 
 function field(): { world: World; grid: Grid; squads: Squads } {
   const world = new World()
@@ -28,6 +29,9 @@ function field(): { world: World; grid: Grid; squads: Squads } {
   return { world, grid, squads }
 }
 
+/** This file's dice: seeded, so a rolled shot is the same shot every run. */
+const dice = matchDice(1)
+
 describe('What a unit gives away', () => {
   test('nobody starts read', () => {
     // The opening position: two squads that have not met. A sheet legible from
@@ -40,7 +44,7 @@ describe('What a unit gives away', () => {
     const shooter = squads.byFaction[Faction.Blue][0]!
     const target = squads.byFaction[Faction.Red][0]!
 
-    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [false])
+    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [false])
 
     // A miss still tells you how hard they were to hit.
     expect(target.known).toBe(true)
@@ -53,7 +57,7 @@ describe('What a unit gives away', () => {
     const shooter = squads.byFaction[Faction.Blue][0]!
     const target = squads.byFaction[Faction.Red][0]!
 
-    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [true])
 
     expect(shooter.known).toBe(true)
   })
@@ -64,7 +68,7 @@ describe('What a unit gives away', () => {
     const target = squads.byFaction[Faction.Red][1]!
     quiet.fitAttachment(AttachmentId.Suppressor)
 
-    fireWeapon(grid, quiet, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+    fireWeapon(grid, quiet, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [true])
 
     expect(quiet.known).toBe(false)
     // The unit on the receiving end is read regardless: being shot at is being
@@ -92,7 +96,7 @@ describe('What a unit gives away', () => {
     const { grid, squads } = field()
     const shooter = squads.byFaction[Faction.Blue][0]!
     const target = squads.byFaction[Faction.Red][0]!
-    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [true])
 
     settleTurn(squads.soldiers, Faction.Red)
     settleTurn(squads.soldiers, Faction.Blue)
@@ -108,7 +112,7 @@ describe('What a unit gives away', () => {
     const { grid, squads } = field()
     const shooter = squads.byFaction[Faction.Blue][0]!
     const target = squads.byFaction[Faction.Red][0]!
-    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [true])
 
     expect(squads.byFaction[Faction.Red][2]!.known).toBe(false)
     expect(squads.byFaction[Faction.Blue][2]!.known).toBe(false)
@@ -121,7 +125,7 @@ describe('What a unit gives away', () => {
     target.sheet.traits.push(TraitId.Inscrutable)
     target.refreshTraits()
 
-    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [true])
 
     expect(target.known).toBe(false)
     // It hides what the unit *is*, not what it does: the shooter still gave
@@ -140,7 +144,7 @@ describe('What a unit gives away', () => {
     inscrutable.sheet.traits.push(TraitId.Inscrutable)
     inscrutable.refreshTraits()
 
-    fireWeapon(grid, inscrutable, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+    fireWeapon(grid, inscrutable, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [true])
 
     expect(inscrutable.known).toBe(true)
   })
@@ -174,7 +178,7 @@ describe('What a unit gives away', () => {
     // refolded, and the reveal still has to be deflected.
     traits.unreadable = true
 
-    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [true])
+    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [true])
 
     expect(target.known).toBe(false)
   })

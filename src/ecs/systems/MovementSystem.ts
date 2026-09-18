@@ -8,6 +8,7 @@ import { HealthComponent } from '../components/HealthComponent'
 import { RULES } from '../../config'
 import { stepCost } from '../../game/Movement'
 import type { Grid, Tile } from '../../core/Grid'
+import { distance, facingYaw } from '../../core/math'
 
 /**
  * Walks units along their planned route, one tile at a time.
@@ -112,9 +113,9 @@ export class MovementSystem extends System {
         const dx = targetWorld.x - pos.targetPos.x
         const dy = targetWorld.y - pos.targetPos.y
         const dz = targetWorld.z - pos.targetPos.z
-        const dist = Math.hypot(dx, dy, dz)
+        const dist = distance(dx, dy, dz)
 
-        if (Math.hypot(dx, dz) > 0.001) pos.targetYaw = Math.atan2(dx, dz)
+        if (distance(dx, dz) > 0.001) pos.targetYaw = facingYaw(dx, dz)
 
         if (dist > budget) {
           pos.targetPos.x += (dx / dist) * budget

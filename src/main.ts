@@ -4,7 +4,7 @@ import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
 import { createEngineContext } from './engine'
 import { Faction, SIM } from './config'
-import { resolveSeed } from './core/rng'
+import { matchDice, resolveSeed } from './core/rng'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
 import { Battlefield } from './game/Battlefield'
@@ -268,6 +268,10 @@ function start(
 ): void {
   const engine = createEngineContext(Game.instance())
 
+  // The match's dice, from the match's seed — so both peers, a replay and a
+  // sweep draw the same numbers in the same order.
+  const dice = matchDice(seed)
+
   const world = new World()
   createGlobalRules(world)
 
@@ -317,6 +321,7 @@ function start(
     hud,
     portraits,
     seedLabel,
+    dice,
     tracers,
     engine,
     network,
@@ -465,6 +470,10 @@ function startPlayback(recording: CombatRecording): void {
     hud,
     portraits,
     header.seedLabel,
+    // A playback resolves nothing itself — every outcome comes off the file —
+    // but the resolvers still need a stream, and the recording's own seed is
+    // the one the match was fought with.
+    matchDice(header.seed),
     tracers,
     engine,
     null,

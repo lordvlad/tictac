@@ -9,6 +9,7 @@ import { World } from '../src/ecs/World'
 import { HealthComponent, StanceComponent } from '../src/ecs/components'
 import { fireWeapon } from '../src/game/Combat'
 import { Squads } from '../src/game/Squads'
+import { matchDice } from '../src/core/rng'
 
 /**
  * No canvas stub in this file, on purpose.
@@ -31,6 +32,8 @@ function flatWorld(): { world: World; grid: Grid; squads: Squads } {
   }
   return { world, grid, squads: new Squads(world, grid, spawns, undefined, Faction.Blue, sheets) }
 }
+
+const dice = matchDice(1)
 
 describe('A squad with no scene to stand in', () => {
   test('deploys both sides, with components, and no body', () => {
@@ -76,6 +79,7 @@ describe('A squad with no scene to stand in', () => {
       NO_FX,
       squads.soldiers,
       ShotMode.Aimed,
+      dice,
       [true, true, true],
     )
 

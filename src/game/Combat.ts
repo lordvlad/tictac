@@ -14,6 +14,7 @@ import {
 import { type GrenadeId, ShotMode, STATUSES, StatusKind } from '../core/Arsenal'
 import { type Casualty, type Combatant, type CombatFx, NO_FX } from '../core/Combatant'
 import type { Roll } from '../core/rng'
+import { distance, facingYaw } from '../core/math'
 
 export interface ShotResult {
   hit: boolean
@@ -118,8 +119,10 @@ export function executeShot(
   fx: CombatFx,
   soldiers: readonly Combatant[],
   mode: ShotMode = ShotMode.Snap,
+  /** The match's dice. Not optional: a shot without dice is not a shot. */
+  roll: Roll,
+  /** Hit dice already decided — a peer's, a replay's, or a test's. */
   overrideRolls?: boolean[],
-  roll: Roll = Math.random,
 ): ShotResult {
   const eff = effectiveWeapon(shooter, mode)
   if (!canShoot(grid, shooter, target, mode)) {
@@ -158,7 +161,7 @@ export function executeShot(
   // Face the target. Same yaw convention as movement: forward = (sin y, cos y).
   const dx = targetWorld.x - shooterWorld.x
   const dz = targetWorld.z - shooterWorld.z
-  if (Math.hypot(dx, dz) > 0.01) shooter.targetYaw = Math.atan2(dx, dz)
+  if (distance(dx, dz) > 0.01) shooter.targetYaw = facingYaw(dx, dz)
 
   const bullets = eff.weapon.bulletConsumption(mode)
   const hits: ResolvedHit[] = []
@@ -251,15 +254,15 @@ export function fireWeapon(
   fx: CombatFx,
   soldiers: readonly Combatant[],
   mode: ShotMode = ShotMode.Snap,
+  roll: Roll,
   overrideRolls?: boolean[],
-  roll: Roll = Math.random,
 ): ShotResult | null {
   if (!canShoot(grid, shooter, target, mode)) return null
 
   const consumption = shooter.weapon.bulletConsumption(mode)
   shooter.weapon.currentClip = Math.max(0, shooter.weapon.currentClip - consumption)
 
-  const result = executeShot(grid, shooter, target, fx, soldiers, mode, overrideRolls, roll)
+  const result = executeShot(grid, shooter, target, fx, soldiers, mode, roll, overrideRolls)
   return result.apSpent ? result : null
 }
 

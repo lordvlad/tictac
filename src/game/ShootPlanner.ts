@@ -1,4 +1,5 @@
 import type { Grid } from '../core/Grid'
+import type { Roll } from '../core/rng'
 import type { Soldier } from '../entities/Soldier'
 import { DamageIndicators } from '../render/DamageIndicators'
 import type { Ground } from '../render/Ground'
@@ -78,6 +79,8 @@ export class ShootPlanner {
     private readonly squads: Squads,
     private readonly combat: CombatSystem,
     engine: EngineContext,
+    /** The match's dice — the same stream the resolver rolls crits from. */
+    private readonly roll: Roll,
   ) {
     this.damageIndicators = new DamageIndicators(engine)
   }
@@ -193,7 +196,7 @@ export class ShootPlanner {
     const bullets = shooter.weapon.bulletConsumption(mode)
     const rolls: boolean[] = []
     for (let i = 0; i < bullets; i++) {
-      rolls.push(Math.random() * 100 <= chance)
+      rolls.push(this.roll() * 100 <= chance)
     }
 
     const result = this.combat.fireShot(shooter, target, mode, rolls)

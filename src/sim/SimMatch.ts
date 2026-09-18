@@ -359,7 +359,6 @@ export class SimMatch {
       NO_FX,
       this.units,
       shot.mode,
-      undefined,
       this.roll,
     )
     if (!result) return false

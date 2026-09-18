@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { Scene, Vector3 } from 'three'
 import { Grid } from '../src/core/Grid'
+import { matchDice } from '../src/core/rng'
 import { AMMO, AmmoId, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { Faction } from '../src/config'
 import type { ShotResult } from '../src/game/Combat'
@@ -50,6 +51,9 @@ function harness(soldiers: Soldier[]): ShootPlanner {
     { soldiers } as unknown as Squads,
     {} as unknown as CombatSystem,
     { scene: new Scene() } as unknown as EngineContext,
+    // Seeded: a planner that rolls its own hit dice must roll the same ones
+    // every run, or a preview test measures the weather.
+    matchDice(1),
   )
 }
 

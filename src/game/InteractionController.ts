@@ -13,6 +13,7 @@ import { applyHitEffects, calculateHitChance, type ResolvedHit } from './Combat'
 import { reportDivergence, shadowShot, shadowThrow } from './Divergence'
 import { compareDigests, digestWorld, type StateDigest } from './StateDigest'
 import { RpcMethods } from './JsonRpc'
+import type { Roll } from '../core/rng'
 import { toWireHits, Recorder, type RecordingHeader } from './Recording'
 import { settleTurn } from './Turn'
 import type { OffscreenPortraits } from '../render/Portraits'
@@ -34,6 +35,7 @@ import type { Tracers } from '../render/Tracers'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
 import { MovementSystem, CombatSystem, ItemSystem, RenderSystem, WallSystem } from '../ecs/systems'
 import { ITEMS, type ItemId, itemTargetsAlly } from '../core/Items'
+import { distance, facingYaw } from '../core/math'
 
 /**
  * The intents a spectator may still press.
@@ -132,6 +134,16 @@ export class InteractionController {
     private readonly hud: Hud,
     private readonly portraits: OffscreenPortraits,
     private readonly seedLabel: string,
+    /**
+     * The match's dice.
+     *
+     * Passed in from the seed rather than reached for, so that both peers, a
+     * replay and a sweep all resolve the same fight from the same stream. The
+     * one rule about it: only the rules may draw from it — a tracer's scatter
+     * or a puff of smoke takes its own randomness, because a draw here moves
+     * every later roll in the match.
+     */
+    private readonly dice: Roll,
     tracers: Tracers,
     private readonly engine: EngineContext,
     public network: NetworkManager | null = null,
@@ -146,7 +158,12 @@ export class InteractionController {
     this.renderSystem = new RenderSystem()
     // Bodies before the systems that announce to them.
     this.views = new SquadViews(engine, squads, this.renderSystem)
-    this.combatSystem = new CombatSystem(battlefield.grid, squads, new SceneCombatFx(tracers, this.views))
+    this.combatSystem = new CombatSystem(
+      battlefield.grid,
+      squads,
+      new SceneCombatFx(tracers, this.views),
+      dice,
+    )
     this.wallSystem = new WallSystem(battlefield.grid)
 
     this.world.addSystem(this.movementSystem)
@@ -205,7 +222,7 @@ export class InteractionController {
     }
 
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
-    this.shoot = new ShootPlanner(battlefield.grid, squads, this.combatSystem, engine)
+    this.shoot = new ShootPlanner(battlefield.grid, squads, this.combatSystem, engine, dice)
     this.combatSystem.onShotResolved = (shooter, target, result) => {
       this.shoot.reportShot(shooter, target, result)
     }
@@ -640,7 +657,7 @@ export class InteractionController {
         if (!soldier || soldier.isDead) break
         const dx = msg.x - soldier.position.x
         const dz = msg.z - soldier.position.z
-        if (Math.hypot(dx, dz) > 0.01) soldier.targetYaw = Math.atan2(dx, dz)
+        if (distance(dx, dz) > 0.01) soldier.targetYaw = facingYaw(dx, dz)
         break
       }
       case 'digest': {
@@ -958,7 +975,7 @@ export class InteractionController {
     if (this.spectating) return
     if (this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) return
 
-    const travel = Math.hypot(
+    const travel = distance(
       event.clientX - this.rightDownPos.x,
       event.clientY - this.rightDownPos.y,
     )
@@ -986,7 +1003,7 @@ export class InteractionController {
     if (!soldier || soldier.isMoving || soldier.isDead) return
     const dx = x - soldier.position.x
     const dz = z - soldier.position.z
-    if (Math.hypot(dx, dz) > 0.01) soldier.targetYaw = Math.atan2(dx, dz)
+    if (distance(dx, dz) > 0.01) soldier.targetYaw = facingYaw(dx, dz)
   }
 
 
@@ -1225,9 +1242,9 @@ export class InteractionController {
     if (targetAt) {
       const dx = targetAt.x - shooterAt.x
       const dz = targetAt.z - shooterAt.z
-      if (Math.hypot(dx, dz) > 0.01) {
+      if (distance(dx, dz) > 0.01) {
         // Stand behind the shot line and centre the target's chest in frame.
-        yaw = Math.atan2(dx, dz)
+        yaw = facingYaw(dx, dz)
         lookAt = this.aimPoint.copy(targetAt).setY(targetAt.y + CAM.shoulderAimHeight)
       }
     }

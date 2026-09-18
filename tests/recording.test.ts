@@ -247,8 +247,8 @@ describe('A shot reports the dice it used', () => {
       NO_FX,
       squads.soldiers,
       ShotMode.Burst,
-      dice,
       () => 0,
+      dice,
     )
 
     expect(result?.rolls).toEqual(dice)
@@ -270,7 +270,6 @@ describe('A shot reports the dice it used', () => {
       NO_FX,
       squads.soldiers,
       ShotMode.Burst,
-      undefined,
       () => 0,
     )
 

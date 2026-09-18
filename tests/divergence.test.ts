@@ -12,7 +12,7 @@ import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { TraitsComponent } from '../src/ecs/components'
 import { rollSquadSheets } from '../src/core/Characters'
-import { Rng } from '../src/core/rng'
+import { matchDice, Rng } from '../src/core/rng'
 
 /** A world with two squads in line of sight, no engine and no canvas. */
 function field() {
@@ -54,6 +54,9 @@ function wire(hits: readonly ResolvedHit[]): WireHit[] {
   }))
 }
 
+/** This file's dice: seeded, so a resolved shot is the same shot every run. */
+const dice = matchDice(1)
+
 describe("Checking a peer's arithmetic by doing it again", () => {
   test('a shot both sides resolve the same way is silent', () => {
     const { grid, squads } = field()
@@ -63,9 +66,7 @@ describe("Checking a peer's arithmetic by doing it again", () => {
     // Resolve it exactly as the acting peer would, then hand this side the
     // numbers and the dice that produced them.
     const before = { hp: target.hp, armor: target.armor }
-    const result = executeShot(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [
-      true,
-    ])
+    const result = executeShot(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [true])
     // Put the target back: the shadow has to see the state the shot was fired
     // at, which is what the receiving side holds before it applies anything.
     target.hp = before.hp
@@ -95,9 +96,7 @@ describe("Checking a peer's arithmetic by doing it again", () => {
     const target = squads.byFaction[Faction.Red][0]!
 
     const before = { hp: target.hp, armor: target.armor }
-    const result = executeShot(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [
-      true,
-    ])
+    const result = executeShot(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [true])
     target.hp = before.hp
     target.armor = before.armor
     expect(result.damage).toBeGreaterThan(0)

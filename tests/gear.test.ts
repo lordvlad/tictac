@@ -13,6 +13,7 @@ import { applyStatus, calculateHitChance, fireWeapon } from '../src/game/Combat'
 import { settleTurn } from '../src/game/Turn'
 import { Squads } from '../src/game/Squads'
 import { Faction as F } from '../src/config'
+import { matchDice } from '../src/core/rng'
 
 /**
  * Body-worn kit: it goes in a pocket and belongs to the soldier.
@@ -46,6 +47,9 @@ function give(soldier: Squads['soldiers'][number], item: ItemId): void {
 function fit(soldier: Squads['soldiers'][number], id: AttachmentId): void {
   expect(soldier.fitAttachment(id)).toBe(true)
 }
+
+/** This file's dice: seeded, so a rolled shot is the same shot every run. */
+const dice = matchDice(1)
 
 describe('Worn kit', () => {
   test('every worn piece is worn, not used, and grants something', () => {
@@ -242,8 +246,8 @@ describe('A suppressor', () => {
     }
     fit(quiet, AttachmentId.Suppressor)
 
-    fireWeapon(grid, loud, target, NO_FX, squads.soldiers, ShotMode.Snap, [false])
-    fireWeapon(grid, quiet, target, NO_FX, squads.soldiers, ShotMode.Snap, [false])
+    fireWeapon(grid, loud, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [false])
+    fireWeapon(grid, quiet, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [false])
 
     expect(loud.firedThisTurn).toBe(true)
     expect(quiet.firedThisTurn).toBe(false)
@@ -258,7 +262,7 @@ describe('A suppressor', () => {
     shooter.equip(WeaponId.Rifle, AmmoId.Standard)
     shooter.tile = { x: target.tile.x, y: target.tile.y - 3 }
 
-    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, [false])
+    fireWeapon(grid, shooter, target, NO_FX, squads.soldiers, ShotMode.Snap, dice, [false])
     expect(shooter.firedThisTurn).toBe(true)
 
     // The enemy's turn: still showing.

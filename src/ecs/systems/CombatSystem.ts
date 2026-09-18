@@ -33,7 +33,11 @@ export class CombatSystem extends System {
     private readonly grid: Grid,
     private readonly squads: Squads,
     private readonly fx: CombatFx = NO_FX,
-    private readonly roll: Roll = Math.random,
+    /**
+     * The match's dice. Required, not defaulted: a default is how a match ends
+     * up drawing from a source the other side cannot reproduce.
+     */
+    private readonly roll: Roll,
   ) {
     super()
   }
@@ -63,8 +67,8 @@ export class CombatSystem extends System {
       this.fx,
       this.squads.soldiers,
       mode,
-      rolls,
       this.roll,
+      rolls,
     )
     if (!result) return null
     this.onShotResolved?.(shooter, target, result)

@@ -283,8 +283,8 @@ export function shadowShot(
     NO_FX,
     [...mirrors.values()],
     mode,
-    [...rolls],
     critsFrom(hits.map((hit) => hit.crit)),
+    [...rolls],
   )
 
   return [...out, ...compareHits(result.hits, hits, nameOf)]

@@ -73,8 +73,27 @@ export function resolveSeed(): { seed: number; label: string } {
 /**
  * A source of uniform floats in [0, 1).
  *
- * `Math.random` in a match, a seeded {@link Rng} in a simulation. Injected
- * rather than reached for so that resolving a fight twice with the same dice is
- * possible at all — which is what a balance sweep and a replay both need.
+ * Always a seeded {@link Rng} — in a match, in a simulation and in a replay.
+ * Injected rather than reached for, so resolving a fight twice with the same
+ * dice is possible at all, which is what a sweep, a replay and a peer all need.
+ *
+ * It used to default to `Math.random`, and that default was the problem: a
+ * match's dice came from a source neither side could reproduce, so the only way
+ * a peer could agree about a shot was to be *told* its outcome. Under
+ * [ADR-0004](../../docs/design/adr/0004-full-knowledge-lockstep.md) both sides
+ * recompute instead, which needs the dice to be a function of the seed.
  */
 export type Roll = () => number
+
+/**
+ * The dice for one match.
+ *
+ * One stream per match, drawn only by the rules. Anything else that wants a
+ * random number — a puff of smoke, a tracer's scatter — takes its own, because
+ * a draw from *this* stream moves every later roll in the match and a peer
+ * cannot know how many sparks the other side drew.
+ */
+export function matchDice(seed: number): Roll {
+  const rng = new Rng(seed)
+  return () => rng.next()
+}

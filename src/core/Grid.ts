@@ -1,6 +1,7 @@
 import { Vector3 } from 'three'
 import { GRID_SIZE, HALF_BLOCK_HEIGHT, LEVEL_HEIGHT, RULES, TILE } from '../config'
 import { WALLS, wallHidesSight, WallKind } from './Walls'
+import { distance } from './math'
 
 /**
  * What occupies a tile's floor.
@@ -665,7 +666,7 @@ export class Grid {
 
   /** Euclidean distance between tile centres, in metres. */
   distance(a: Tile, b: Tile): number {
-    return Math.hypot(a.x - b.x, a.y - b.y) * TILE
+    return distance(a.x - b.x, a.y - b.y) * TILE
   }
 
   forEach(fn: (x: number, y: number, block: Block) => void): void {
