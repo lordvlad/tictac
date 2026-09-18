@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
-import { WeaponId } from '../src/core/Arsenal'
+import { ShotMode, WeaponId } from '../src/core/Arsenal'
 import { AmmoId } from '../src/core/Arsenal'
 import type { CombatRecording } from '../src/game/Recording'
 import { SimMatch, type MatchOutcome, type SquadPlan } from '../src/sim/SimMatch'
@@ -35,16 +35,17 @@ describe('Running a recorded match with nobody watching', () => {
     expect(result.skipped).toEqual([])
   })
 
-  test('nothing in the file disagrees with what this build resolves', () => {
-    // This is the end-to-end exercise of `ITEM-020`. Every shot in the file
-    // arrives exactly as a peer's shot arrives — resolved numbers, the dice
-    // that produced them, the chance they were rolled against — and the shadow
-    // re-derives all of it against the state at the time.
+  test('a recorded match replays into the same match, from its seed alone', () => {
+    // The end-to-end exercise of intent-only. A file names who did what; the
+    // outcome is whatever this build resolves from the match's dice — so a
+    // replay that applies every command and refuses none is the whole wire
+    // working: the same intents, the same stream, the same match.
     for (const seed of [4242, 77, 1000]) {
       const { recording } = recorded(seed)
       const result = replay(recording)
 
-      expect(result.divergences).toEqual([])
+      expect(result.skipped).toEqual([])
+      expect(result.applied).toBe(result.events)
     }
   })
 
@@ -70,61 +71,45 @@ describe('Running a recorded match with nobody watching', () => {
     expect(living(Faction.Red)).toBe(outcome.survivors[Faction.Red])
   })
 
-  test('a tampered number is caught', () => {
-    // Proof the check is not vacuous. One hit in the file is inflated by a
-    // point — the smallest lie available — and the replay must say so, name the
-    // unit, and still be able to finish the match.
+  test('a file holds intents and nothing to disagree with', () => {
+    // What replaced the tampering tests. Under intent-only there is no number
+    // in a file to falsify: an attack is a shooter, a target and a mode, and
+    // the outcome is whatever this build resolves from the match's dice. The
+    // check that used to catch a doctored hit is gone because the thing it
+    // caught cannot be expressed any more.
     const { recording } = recorded(4242)
-    const shot = recording.events.find(
-      (event) => event.command.type === 'fireShot' && event.command.hits.length > 0,
-    )
-    expect(shot).toBeDefined()
+    const attacks = recording.events
+      .map((event) => event.command)
+      .filter((command) => command.type === 'fireShot' || command.type === 'throwGrenade')
 
-    const target = shot!
-    const command = target.command as Extract<typeof target.command, { type: 'fireShot' }>
-    const tampered: CombatRecording = {
-      header: recording.header,
-      events: recording.events.map((event) =>
-        event === target
-          ? {
-              ...event,
-              command: {
-                ...command,
-                hits: command.hits.map((hit, at) =>
-                  at === 0 ? { ...hit, damage: hit.damage + 1 } : hit,
-                ),
-              },
-            }
-          : event,
-      ),
+    expect(attacks.length).toBeGreaterThan(0)
+    for (const command of attacks) {
+      expect(Object.keys(command).sort()).not.toContain('hits')
     }
-
-    const result = replay(tampered)
-
-    expect(result.divergences).toHaveLength(1)
-    expect(result.divergences[0]!.found.map((d) => d.what)).toContain('damage')
-    expect(result.divergences[0]!.found[0]!.unit).toBeDefined()
-    // And it kept going: a disagreement is reported, not thrown.
-    expect(result.applied).toBe(result.events)
   })
 
-  test('a claimed hit chance that the state does not support is caught', () => {
-    // The check that covers a miss, which carries no damage to disagree about.
+  test('a doctored *intent* changes the match rather than lying about it', () => {
+    // The remaining way to tamper with a file: change what somebody did. That
+    // is not a lie a check can catch — it is a different match, and it replays
+    // as one. Worth pinning, because it is the honest limit of the format.
     const { recording } = recorded(4242)
     const shot = recording.events.find((event) => event.command.type === 'fireShot')
     expect(shot).toBeDefined()
+    const target = shot!
 
-    const tampered: CombatRecording = {
+    const swapped: CombatRecording = {
       header: recording.header,
       events: recording.events.map((event) =>
-        event === shot
-          ? { ...event, command: { ...event.command, chance: 99 } as typeof event.command }
+        event === target
+          ? { ...event, command: { ...event.command, mode: ShotMode.Aimed } as typeof event.command }
           : event,
       ),
     }
 
-    const found = replay(tampered).divergences.flatMap((d) => d.found.map((f) => f.what))
+    const original = replay(recording)
+    const altered = replay(swapped)
 
-    expect(found).toContain('hitChance')
+    expect(altered.applied).toBe(altered.events)
+    expect(altered.digest.total).not.toBe(original.digest.total)
   })
 })

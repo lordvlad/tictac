@@ -98,8 +98,8 @@ entry points, and persistence is the foundation the rest stands on.
 - Two peers on different builds must be refused rather than tolerated.
 - The log becomes a schema, needing a drift guard and a version policy.
 
-**Documents this will retire when the work lands**
-- `AGENTS.md`'s sender-resolved invariant.
+**Documents this retired when the work landed** (all three updated with `ITEM-023`)
+- `AGENTS.md`'s sender-resolved invariant, now "intent on the wire, resolved on both sides".
 - `docs/architecture/overview.md`'s `WireHit` description.
 - The sender-resolved half of ADR-0003.
 
@@ -109,10 +109,10 @@ Staged, in this order, and tracked in the [backlog](../../backlog/active-backlog
 
 | Item | What | State |
 | --- | --- | --- |
-| `ITEM-022` | Determinism audit; **version gate first**, as the precondition | In progress |
-| `ITEM-020` | Shadow resolution: re-derive a received attack and report disagreement | Ready |
-| `ITEM-021` | State digest at the turn boundary, for drift | Ready |
-| `ITEM-024` | Transport port: PeerJS behind a seam, plus socket and loopback | Ready |
-| `ITEM-023` | Intent-only wire; `WireHit` deleted | Ready |
+| `ITEM-022` | Determinism audit: version gate, one match stream, float discipline | **Landed** |
+| `ITEM-020` | Shadow resolution: re-derive a received attack and report disagreement | **Landed, then retired by `ITEM-023`** — with no numbers on the wire there is nothing to re-derive |
+| `ITEM-021` | State digest at the turn boundary, for drift | **Landed** — and now the only check on agreement |
+| `ITEM-023` | Intent-only wire; `WireHit` deleted | **Landed** |
+| `ITEM-024` | Transport port: PeerJS behind a seam, plus socket and loopback | Deferred until the referee is its second caller |
 | `ITEM-025` | The referee: witness, persistence, rejoin, abort on foul | Backlog |
 | `ITEM-028` | Log and store schema drift guard | Ready |

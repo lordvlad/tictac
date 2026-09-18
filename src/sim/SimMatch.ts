@@ -7,7 +7,7 @@ import { type Grid, type Tile, tileEquals } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { generateMap } from '../core/MapGenerator'
 import { findPathSegment } from '../core/Pathfinding'
-import { Rng } from '../core/rng'
+import { matchDice, Rng, type Roll } from '../core/rng'
 import { hasLineOfSight } from '../core/Visibility'
 import {
   calculateHitChance,
@@ -25,7 +25,6 @@ import {
   RECORDING_VERSION,
   Recorder,
   type RecordingHeader,
-  toWireHits,
 } from '../game/Recording'
 import { SimUnit } from './SimUnit'
 
@@ -158,7 +157,19 @@ export class SimMatch {
   readonly recorder: Recorder | null
 
   private readonly rng: Rng
-  private readonly roll = (): number => this.rng.next()
+  /**
+   * The match's dice, and nothing else.
+   *
+   * Separate from the stream that deals the people on purpose. When setup and
+   * dice shared one stream, *how many numbers a sheet consumed* decided every
+   * roll that followed — which is why adding one attribute per character once
+   * shifted every die in a 400-match sweep, and why a replay could not
+   * reproduce a recorded match at all: it deals nobody, so it starts the dice
+   * where the sim had already finished dealing.
+   *
+   * Under ADR-0004 the dice are a function of the seed alone.
+   */
+  private readonly roll: Roll
   private readonly tally = new Map<string, WeaponTally>()
   private readonly turnCap: number
   private grenadesThrown = 0
@@ -169,6 +180,9 @@ export class SimMatch {
     this.turnCap = setup.turnCap ?? DEFAULT_TURN_CAP
     // One stream for the whole match: the map, the sheets and every die.
     this.rng = new Rng(setup.seed >>> 0)
+    // Derived from the same seed, so a match is still one number — but its own
+    // stream, so the dice do not depend on what setup drew before them.
+    this.roll = matchDice(setup.seed >>> 0)
 
     const map = generateMap(setup.seed)
     this.grid = map.grid
@@ -373,8 +387,6 @@ export class SimMatch {
       targetFaction: shot.target.faction,
       targetIndex: shot.target.squadIndex,
       mode: shot.mode,
-      rolls: result.rolls,
-      hits: toWireHits(result.hits),
     })
 
     tally.shots += 1
@@ -418,8 +430,6 @@ export class SimMatch {
         shooterIndex: unit.squadIndex,
         kind: 'frag' as GrenadeId,
         targetTile: { x: centre.tile.x, y: centre.tile.y },
-        areaRadius: spec.areaRadius,
-        hits: toWireHits(result.hits),
       })
       return true
     }

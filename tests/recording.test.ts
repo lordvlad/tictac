@@ -81,26 +81,22 @@ describe('A simulated match writes down what it did', () => {
     expect(move.command.path.length).toBeGreaterThan(1)
   })
 
-  test('the wire hits account for every point of damage the match dealt', () => {
-    const { match, recording } = recorded(7)
+  test('an attack in the file carries an intent and no outcome', () => {
+    // The shape intent-only gives a recording: who shot at whom, in what mode.
+    // What it did is not in the file, because a replay resolves it from the
+    // match's seeded dice — which is what makes a recording and the wire the
+    // same frames rather than two formats that have to agree.
+    const { recording } = recorded(7)
 
-    const taken = new Map<string, number>()
-    for (const event of recording.events) {
-      const command = event.command
-      if (command.type !== 'fireShot' && command.type !== 'throwGrenade') continue
-      for (const hit of command.hits) {
-        const key = `${hit.faction}:${hit.index}`
-        taken.set(key, (taken.get(key) ?? 0) + hit.damage)
-      }
-    }
+    const attacks = recording.events
+      .map((event) => event.command)
+      .filter((command) => command.type === 'fireShot' || command.type === 'throwGrenade')
 
-    // Nothing in the sim heals, so the damage a unit lost is exactly the damage
-    // addressed to it — capped, because a killing blow overshoots zero. This is
-    // the property playback depends on: the file, not a re-roll, is the record.
-    for (const unit of match.units) {
-      const key = `${unit.faction}:${unit.squadIndex}`
-      const lost = unit.maxHp - Math.max(0, unit.hp)
-      expect(taken.get(key) ?? 0).toBeGreaterThanOrEqual(lost)
+    expect(attacks.length).toBeGreaterThan(0)
+    for (const command of attacks) {
+      expect(command).not.toHaveProperty('hits')
+      expect(command).not.toHaveProperty('rolls')
+      expect(command).not.toHaveProperty('areaRadius')
     }
   })
 

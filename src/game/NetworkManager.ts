@@ -25,17 +25,6 @@ export type NetworkMode = 'local' | 'host' | 'join'
  * grenades — the chosen loadout is stamped before replication starts — so an
  * attack's numbers travel with it and are applied verbatim.
  */
-export interface WireHit {
-  faction: Faction
-  index: number
-  damage: number
-  armorShred: number
-  status: StatusKind | null
-  /** Whether the sender resolved this one as a critical. Display only: the
-   *  multiplier is already inside `damage`. */
-  crit: boolean
-}
-
 /**
  * Commands: things one peer asks the other to *do*.
  *
@@ -64,20 +53,8 @@ export type NetworkMessage =
       targetFaction: Faction
       targetIndex: number
       mode: ShotMode
-      rolls: boolean[]
-      hits: WireHit[]
-      /**
-       * The hit chance the sender resolved against.
-       *
-       * Sent for one reason: it is the number the receiver can check. Rounds
-       * that missed carry no damage to disagree about, and the chance is the
-       * term every bug of this class has moved — target evasion, cover, a
-       * defensive trait the shooter could not see. Optional, so a peer that
-       * predates the check is merely unverifiable rather than refused.
-       */
-      chance?: number
     }
-  | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number }; areaRadius: number; hits: WireHit[] }
+  | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number } }
   | { type: 'reload'; faction: Faction; squadIndex: number }
   | { type: 'toggleCover'; faction: Faction; squadIndex: number }
   | { type: 'endUnitTurn'; faction: Faction; squadIndex: number }

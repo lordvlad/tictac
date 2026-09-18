@@ -89,22 +89,6 @@ describe('Command transport', () => {
       targetFaction: Faction.Red,
       targetIndex: 2,
       mode: ShotMode.Aimed,
-      rolls: [true, false],
-      // The number the receiver checks its own state against. A shot that
-      // missed carries no damage to disagree about, so without this a whole
-      // class of divergence is unobservable.
-      chance: 64,
-      hits: [
-        { faction: Faction.Red, index: 2, damage: 34, armorShred: 5, status: null, crit: true },
-        {
-          faction: Faction.Red,
-          index: 3,
-          damage: 12,
-          armorShred: 0,
-          status: StatusKind.Shredded,
-          crit: false,
-        },
-      ],
     }
 
     net.send(original)
@@ -144,7 +128,7 @@ describe('Command transport', () => {
     expect(received).toBeNull()
   })
 
-  test("a grenade's resolved effects survive the round trip", () => {
+  test("a grenade's intent survives the round trip", () => {
     const { net, sent } = harness()
     const original: NetworkMessage = {
       type: 'throwGrenade',
@@ -152,18 +136,6 @@ describe('Command transport', () => {
       shooterIndex: 1,
       kind: GrenadeId.Frag,
       targetTile: { x: 4, y: 7 },
-      areaRadius: 2.5,
-      hits: [
-        {
-          faction: Faction.Blue,
-          index: 0,
-          damage: 40,
-          armorShred: 10,
-          status: StatusKind.Shredded,
-          crit: false,
-        },
-        { faction: Faction.Red, index: 1, damage: 0, armorShred: 0, status: null, crit: false },
-      ],
     }
 
     net.send(original)

@@ -3,43 +3,41 @@ import { NO_FOCUS, NO_FX } from '../core/Combatant'
 import { generateMap } from '../core/MapGenerator'
 import { distance, facingYaw } from '../core/math'
 import { matchDice } from '../core/rng'
-import { applyHitEffects, throwGrenade, type ResolvedHit } from '../game/Combat'
-import {
-  reportDivergence,
-  shadowShot,
-  shadowThrow,
-  type Divergence,
-} from '../game/Divergence'
+import { throwGrenade } from '../game/Combat'
 import type { CombatRecording, RecordedEvent } from '../game/Recording'
 import { Squads } from '../game/Squads'
-import { compareDigests, digestWorld, type StateDigest } from '../game/StateDigest'
+import { compareDigests, digestWorld, type Divergence, type StateDigest } from '../game/StateDigest'
 import { TurnManager } from '../game/TurnManager'
 import { CombatSystem, ItemSystem, MovementSystem, TurnSystem } from '../ecs/systems'
 import { createGlobalRules } from '../ecs/globals'
 import { World } from '../ecs/World'
-import type { WireHit } from '../game/NetworkManager'
 
 /**
  * Replay a recorded match over the real ECS, with nothing watching.
  *
  * Why this exists rather than the rendered playback that already does it: a
  * replay is the one way to exercise the **receiving** side of the wire without
- * two browsers, a signalling broker and a second pair of hands. Every shot in
- * a recording arrives here exactly as a peer's shot arrives — resolved numbers,
- * hit dice, a stated hit chance — so the divergence check from `ITEM-020` and
- * the digest from `ITEM-021` are exercised end to end by running a file.
+ * two browsers, a signalling broker and a second pair of hands. A recording is
+ * an intent stream and so is the wire — the same frames, verbatim — so running
+ * a file *is* receiving a match.
+ *
+ * Under intent-only there is nothing in a file to compare against: a shot is a
+ * shooter, a target and a mode, and the outcome is whatever this build resolves
+ * from the match's seeded dice. What a replay proves is therefore stronger and
+ * simpler than a comparison — that the same intents over the same seed produce
+ * the same world, every time. If they did not, a roster could not be derived
+ * from a stored match and a client could not rejoin one.
  *
  * Two things it is deliberately not:
  *
  * - **Not a second implementation of the rules.** Every command goes through
  *   the same systems a match uses: `CombatSystem.replayShot`, `throwGrenade`,
  *   `MovementSystem`, `TurnManager`.
- * - **Not the controller's applier.** It mirrors it, and the difference is
- *   stated where it matters: a *peer's* `reload` and `useItem` apply nothing,
- *   because HP, AP, clips and pouches arrive by component replication. A file
- *   replicates nothing, so a replay has to re-run them. That duplication is the
- *   honest cost of the controller's applier being tangled up with a HUD, and it
- *   is what `ITEM-025`'s referee would extract.
+ * - **Not the controller's applier.** It mirrors it — and since intent-only
+ *   landed, it mirrors it almost exactly: both sides now *resolve* every
+ *   command rather than applying numbers somebody else resolved. The remaining
+ *   duplication is the honest cost of the controller's applier being tangled up
+ *   with a HUD, and extracting it is what `ITEM-025`'s referee wants.
  */
 
 /** What happened when the file was run. */
@@ -51,11 +49,6 @@ export interface ReplayOutcome {
   applied: number
   /** Events skipped, and why — an unknown command is a finding, not a no-op. */
   skipped: { seq: number; type: string; reason: string }[]
-  /**
-   * Disagreements between the numbers in the file and what this build resolves
-   * from the same dice. Empty is the whole point.
-   */
-  divergences: { seq: number; at: string; found: Divergence[] }[]
   /** The final fingerprint, so two runs can be compared in one number. */
   digest: StateDigest
   /** Where everybody ended up. */
@@ -118,32 +111,9 @@ export function replay(recording: CombatRecording, options: ReplayOptions = {}):
   turnManager.autoSelectFirst()
 
   const skipped: ReplayOutcome['skipped'] = []
-  const divergences: ReplayOutcome['divergences'] = []
   let applied = 0
 
   const unitAt = (faction: Faction, index: number) => squads.byFaction[faction][index]
-  const localHits = (hits: readonly WireHit[]): ResolvedHit[] =>
-    hits.flatMap((hit) => {
-      const soldier = unitAt(hit.faction, hit.index)
-      if (!soldier) return []
-      return [
-        {
-          soldier,
-          damage: hit.damage,
-          armorShred: hit.armorShred,
-          killed: false,
-          status: hit.status,
-          crit: hit.crit,
-        },
-      ]
-    })
-
-  const note = (seq: number, at: string, found: Divergence[]): void => {
-    if (found.length === 0) return
-    divergences.push({ seq, at, found })
-    if (options.verbose) reportDivergence(`${at} (event ${seq})`, found)
-  }
-
   /** Advance time until nothing is walking, so the next command sees the arrival. */
   const settleMovement = (): void => {
     for (let i = 0; i < maxSteps; i++) {
@@ -173,21 +143,9 @@ export function replay(recording: CombatRecording, options: ReplayOptions = {}):
           skipped.push({ seq: event.seq, type: command.type, reason: 'shooter or target missing' })
           break
         }
-        note(
-          event.seq,
-          `${shooter.name}'s shot at ${target.name}`,
-          shadowShot(
-            map.grid,
-            shooter,
-            target,
-            squads.soldiers,
-            command.mode,
-            command.rolls,
-            command.hits,
-            command.chance,
-          ),
-        )
-        combat.replayShot(shooter, target, command.rolls, localHits(command.hits))
+        // Resolved from the match's dice, exactly as the peer that sent it did
+        // and exactly as the side receiving it does.
+        combat.fireShot(shooter, target, command.mode)
         applied++
         break
       }
@@ -197,18 +155,11 @@ export function replay(recording: CombatRecording, options: ReplayOptions = {}):
           skipped.push({ seq: event.seq, type: command.type, reason: 'no such thrower' })
           break
         }
-        note(
-          event.seq,
-          `${thrower.name}'s ${command.kind}`,
-          shadowThrow(map.grid, thrower, command.targetTile, command.kind, squads.soldiers, command.hits),
-        )
-        for (const hit of localHits(command.hits)) {
-          applyHitEffects(hit.soldier, hit.damage, hit.armorShred, hit.status)
+        const result = throwGrenade(map.grid, thrower, command.targetTile, command.kind, squads.soldiers)
+        if (!result.thrown) {
+          skipped.push({ seq: event.seq, type: command.type, reason: 'throw refused by the rules' })
+          break
         }
-        // The thrower's own costs. A peer's arrive by replication; a file's do
-        // not, so the grenade is spent here as the thrower spent it.
-        thrower.grenades[command.kind] = Math.max(0, (thrower.grenades[command.kind] ?? 1) - 1)
-        thrower.ap = Math.max(0, thrower.ap - thrower.grenadeSpecs[command.kind].apCost)
         applied++
         break
       }
@@ -286,7 +237,6 @@ export function replay(recording: CombatRecording, options: ReplayOptions = {}):
     events: events.length,
     applied,
     skipped,
-    divergences,
     digest: digestWorld(world, squads.soldiers.map((unit) => unit.entityId), turnManager.turnNumber),
     units: squads.soldiers.map((unit) => ({
       name: unit.name,

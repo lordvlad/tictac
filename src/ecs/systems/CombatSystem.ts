@@ -53,11 +53,17 @@ export class CombatSystem extends System {
   onShotResolved?: (shooter: Soldier, target: Soldier, result: ShotResult) => void
 
   /**
-   * Fire at a target this side owns. `rolls` are the shooter's dice, pre-rolled
-   * by the planner so the HUD and the resolution agree on the same outcome.
+   * Fire at a target.
    *
-   * A peer's shot never comes through here — it arrives already resolved and
-   * goes to {@link replayShot}.
+   * One door for both sides now. A peer's shot used to arrive already resolved
+   * and go through a second path that applied its numbers verbatim; under
+   * [ADR-0004](../../../docs/design/adr/0004-full-knowledge-lockstep.md) the
+   * wire carries the *intent* and both peers resolve it, from the same seeded
+   * stream, against state they both hold. There is nothing left for a second
+   * path to do, and nothing left for an attacker to get wrong about its target.
+   *
+   * `rolls` remains for a test that wants a shot to land, and for nothing else:
+   * neither the planner nor the wire supplies it any more.
    */
   fireShot(shooter: Soldier, target: Soldier, mode: ShotMode, rolls?: boolean[]): ShotResult | null {
     const result = fireWeapon(
@@ -75,63 +81,6 @@ export class CombatSystem extends System {
     return result
   }
 
-  /**
-   * Replay a peer's shot.
-   *
-   * The peer resolved it against its own loadout and sent the outcome, so
-   * nothing here is recomputed: this side holds only the stock copy of that
-   * weapon and must not consult it. The shooter's clip and AP arrive by
-   * component replication, not from these numbers.
-   */
-  replayShot(
-    shooter: Soldier,
-    target: Soldier,
-    rolls: readonly boolean[],
-    hits: readonly ResolvedHit[],
-  ): ShotResult {
-    const from = this.grid.tileToWorld(shooter.tile)
-    const to = this.grid.tileToWorld(target.tile)
-
-    for (let i = 0; i < rolls.length; i++) {
-      this.fx.tracer(from, to, rolls[i] ?? false)
-      if (i === 0) this.fx.shoot(shooter)
-    }
-
-    let damage = 0
-    let armorShred = 0
-    for (const hit of hits) {
-      applyHitEffects(hit.soldier, hit.damage, hit.armorShred, hit.status, this.fx)
-      damage += hit.damage
-      armorShred += hit.armorShred
-    }
-
-    // The other half of the reveal, from this side's point of view: a unit that
-    // has just fired on us has shown us what it is. Derived rather than sent,
-    // like suppression below - the shot itself is the evidence.
-    if (!shooter.silenced) shooter.known = true
-    if (!target.unreadable) target.known = true
-
-    // Derived from the rolls rather than sent: a miss carries no numbers to
-    // replay, so both sides count the same rounds going past the same head.
-    suppress(target, rolls.filter((landed) => !landed).length)
-
-    const result: ShotResult = {
-      hit: rolls.some(Boolean),
-      damage,
-      armorShred,
-      killed: hits.some((hit) => hit.soldier.isDead),
-      hitChance: 0,
-      apSpent: 0,
-      // Read off the peer's hits, never re-rolled: the crit is in the damage
-      // they already resolved.
-      crits: hits.filter((hit) => hit.crit).length,
-      hits: [...hits],
-      rolls: [...rolls],
-    }
-    // Same door as a local shot, so damage numbers and the HUD refresh follow.
-    this.onShotResolved?.(shooter, target, result)
-    return result
-  }
   throwGrenade(thrower: Soldier, at: Tile, kind: GrenadeId): GrenadeResult {
     return throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx)
   }

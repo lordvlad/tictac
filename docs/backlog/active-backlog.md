@@ -533,7 +533,7 @@ gate in point 2 is not optional.
 ### [ITEM-023] Intent-Only Wire
 **Type:** Refactor / Architecture  
 **Priority:** P2  
-**Status:** Backlog  
+**Status:** Done — pending archive  
 **Milestone:** M2 — Tactical Depth  
 
 #### Why
@@ -549,6 +549,15 @@ fact it does not own.
 2. Replication narrows to state that genuinely is not derivable.
 3. Recordings become the same thing as the wire: a replay and a remote peer consume one format,
    which is already how the recorder behaves.
+
+#### What it took, beyond the deletion
+The replay runner refused three events on the first attempt, and the cause was the finding of
+this item: `SimMatch` drew its squads *and* its dice from one stream, so how many numbers a
+sheet consumed decided every roll that followed. A replay deals nobody, so it started the dice
+where the sim had finished dealing and resolved a different match. That is the same fragility
+measured back in the attribute refactor, when adding one attribute per character shifted every
+die in a 400-match sweep. The sim now derives its dice from the seed by its own stream
+(`matchDice`), setup keeps its own, and a recorded match replays into itself.
 
 #### Blocker
 `ITEM-020` and `ITEM-021` must have run green across real matches first — the mismatch rate is
@@ -576,10 +585,22 @@ a lie, it is a desynchronisation — which `ITEM-021` catches and a referee can 
 - `tests/network.test.ts`
 
 #### Acceptance Criteria
-- [ ] A shot and a grenade replicate with intent only; `WireHit` no longer exists.
-- [ ] Two peers play a full match with no digest mismatch and no resolved payloads.
-- [ ] A recording and a peer consume the same frames.
-- [ ] `bun run balance` reports byte-identically: the rules must not move.
+- [x] A shot and a grenade replicate with intent only; `WireHit` no longer exists, along with
+      `toWireHits`, `fromWireHits`, `CombatSystem.replayShot`, `GrenadePlanner.replayThrow` and
+      the whole of `Divergence.ts`.
+- [x] A recording and a peer consume the same frames — demonstrably, since the replay runner
+      applies a recorded stream through the same door the peer path uses and refuses nothing.
+- [x] A full match agrees end to end: a 55-event recorded match replays with every command
+      applied, and the replay reaches the same survivors as the match that produced it. Two
+      carriers of the rules, one answer.
+- [ ] Two *live browser* peers play a full match with no digest mismatch. Same tooling block as
+      before; the replay is the standing substitute and runs in CI.
+- [~] `bun run balance` byte-identical: **not achievable, and it should not be.** Splitting the
+      sim's setup stream from its dice (below) re-phases every die by construction, so the
+      files differ. What the sweep had to show instead is that the *balance* did not move, and
+      it does not: across disjoint blocks 1000/5000/9000, blue 236/237/235 → 226/247/238 and
+      red 136/142/132 → 150/131/133. Block-to-block variance is larger than the shift in either
+      mean (blue 236 → 237, red 137 → 138).
 ---
 
 ### [ITEM-024] Transport Port: One Frame Channel, Three Implementations

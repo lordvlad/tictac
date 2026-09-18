@@ -1,6 +1,41 @@
 import { foldHashes, hashData, hashString } from '../core/digest'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
-import type { Divergence } from './Divergence'
+
+/**
+ * One thing two copies of a world do not agree about.
+ *
+ * Lived in `Divergence.ts` until intent-only landed. That file existed to check
+ * a peer's *arithmetic*: when an attack arrived with its numbers already
+ * resolved, this side re-derived them and reported a disagreement. There are no
+ * numbers on the wire any more, so there is nothing left to check that way —
+ * both peers resolve the same intent and a disagreement shows up as state that
+ * differs, which is what the digest below is for.
+ */
+export interface Divergence {
+  /** What disagreed, in the terms a reader debugging it would search for. */
+  what: string
+  /** The unit it concerned, when it concerned one. */
+  unit?: string
+  mine: number | string | boolean | null
+  theirs: number | string | boolean | null
+}
+
+/**
+ * Say so, once, loudly enough to be noticed in a live match.
+ *
+ * Prose rather than a thrown error: a match that has desynchronised is still a
+ * match somebody is playing, and crashing it would turn a divergence into a
+ * lost game. Under ADR-0004 a *refereed* match aborts on a foul — that is a
+ * verdict a third party reaches, not something a client decides about its peer.
+ */
+export function reportDivergence(what: string, found: readonly Divergence[]): void {
+  if (found.length === 0) return
+  console.warn(
+    `%c[desync] ${what}: this side and the peer disagree`,
+    'color: #f97316; font-weight: bold;',
+    found.map((d) => `${d.unit ? `${d.unit} ` : ''}${d.what}: mine ${d.mine}, theirs ${d.theirs}`),
+  )
+}
 
 /**
  * A fingerprint of a whole world, taken at a handover.

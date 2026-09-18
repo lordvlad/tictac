@@ -25,10 +25,11 @@ Welcome to **TicTac (No Way Home)**. This document establishes guidelines, archi
 - All dice rolls, spread calculations, hit probabilities, and map generation must use the seeded PRNG in `src/core/rng.ts`.
 - Never use `Math.random()` for gameplay-affecting logic.
 
-### 3. Sender-Resolved Combat Contract
-- Combat attacks are calculated and resolved on the **acting peer's client**.
-- Hits, damage numbers, armor shredding, critical statuses, and wound debuffs are packaged into `WireHit` structures and transmitted over the wire (`fireShot`, `throwGrenade`).
-- The receiving peer applies the exact numbers verbatim to avoid dice desynchronization.
+### 3. Intent on the Wire, Resolved on Both Sides
+- A command carries what a player **decided**, never what it produced: `fireShot` is a shooter, a target and a mode. `WireHit` is gone.
+- Both peers resolve every command through the same rules, from one seeded stream per match (`matchDice(seed)`), against state they both hold. See [ADR-0004](docs/design/adr/0004-full-knowledge-lockstep.md).
+- Therefore: **only the rules may draw from the match stream**, and they must draw the same numbers in the same order on both sides. Setup (dealing squads) and presentation (tracer scatter, smoke) take their own randomness. Enforced by `tests/determinism.test.ts`.
+- Disagreement is no longer a wrong number applied quietly; it is a desynchronisation, reported by the state digest exchanged at every handover.
 
 ### 4. Component Dirty-State Synchronization
 - Replicated entity state changes travel via `World.syncDirty()`, which diffs serialized component state against previous snapshots and broadcasts JSON-RPC `componentUpdate` frames.

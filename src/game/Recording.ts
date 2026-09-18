@@ -6,7 +6,7 @@ import { ITEMS, type ItemId } from '../core/Items'
 import type { ResolvedHit } from './Combat'
 import { RpcMethods } from './JsonRpc'
 import type { SquadLoadout, UnitLoadout } from './Loadout'
-import type { NetworkMessage, WireHit } from './NetworkManager'
+import type { NetworkMessage } from './NetworkManager'
 
 /**
  * A match, written down as the commands that produced it.
@@ -76,18 +76,6 @@ export type RecordingClock = () => { turn: number; faction: Faction }
 const SESSION_COMMANDS: Partial<Record<NetworkMessage['type'], true>> = {
   init: true,
   ready: true,
-}
-
-/** An attack's resolved effects, addressed by faction and squad index. */
-export function toWireHits(hits: readonly ResolvedHit[]): WireHit[] {
-  return hits.map((hit) => ({
-    faction: hit.soldier.faction,
-    index: hit.soldier.squadIndex,
-    damage: hit.damage,
-    armorShred: hit.armorShred,
-    status: hit.status,
-    crit: hit.crit,
-  }))
 }
 
 export class Recorder {

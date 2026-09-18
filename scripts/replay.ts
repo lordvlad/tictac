@@ -6,15 +6,14 @@
  *   bun scripts/replay.ts recordings/seed-4242.json --json
  *   bun scripts/replay.ts recordings/seed-4242.json --twice
  *
- * A recording is an intent stream: commands and their resolved numbers, no
- * outcomes derived. Running one through the real systems is how the receiving
- * side of the wire gets exercised without two browsers and a signalling
- * broker — every shot in the file arrives here exactly as a peer's shot does,
- * so the divergence check and the state digest are tested by running a match
- * somebody already played.
+ * A recording is an intent stream, and so is the wire — the same frames,
+ * verbatim. Running one through the real systems is therefore how the receiving
+ * side gets exercised without two browsers and a signalling broker: every shot
+ * in the file arrives here exactly as a peer's does, and the outcome is
+ * whatever this build resolves from the match's seeded dice.
  *
- * Exits non-zero when the file disagrees with this build, so it can be a check
- * rather than a thing to read.
+ * Exits non-zero when an intent is refused or two runs of one file disagree,
+ * so it can be a check rather than a thing to read.
  */
 import { parseRecording } from '../src/game/Recording'
 import { replay, replayIsReproducible } from '../src/sim/Replay'
@@ -58,17 +57,11 @@ if (asJson) {
   }
   console.log(`  digest ${outcome.digest.total}`)
 
-  if (outcome.divergences.length === 0) {
-    console.log('  no divergence: every number in the file is one this build reaches too')
-  } else {
-    console.log(`  ${outcome.divergences.length} event(s) disagree with this build:`)
-    for (const { seq, at, found } of outcome.divergences) {
-      for (const d of found) {
-        const unit = d.unit ? `${d.unit} ` : ''
-        console.log(`    #${seq} ${at}: ${unit}${d.what} — file ${d.theirs}, here ${d.mine}`)
-      }
-    }
-  }
+  console.log(
+    outcome.skipped.length === 0
+      ? '  every intent in the file is one this build could carry out'
+      : `  ${outcome.skipped.length} intent(s) this build refused — see above`,
+  )
 }
 
 if (process.argv.includes('--twice')) {
@@ -83,4 +76,4 @@ if (process.argv.includes('--twice')) {
   if (!reproducible) process.exit(1)
 }
 
-if (outcome.divergences.length > 0) process.exit(1)
+if (outcome.skipped.length > 0) process.exit(1)

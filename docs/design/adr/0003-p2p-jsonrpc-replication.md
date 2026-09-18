@@ -22,10 +22,10 @@ tags: ["networking", "peerjs", "jsonrpc", "p2p", "replication"]
 **Date:** 2026-09-14
 **Deciders:** Engineering
 
-> The JSON-RPC envelope and component-diff replication stand. Sender-resolved combat does not:
-> ADR-0004 moves to intent on the wire with both peers recomputing, because an attacker
-> needing facts about its target is a bug class rather than an optimisation. Accurate as a
-> description of today's code until `ITEM-023` lands.
+> The JSON-RPC envelope and component-diff replication stand. **Sender-resolved combat is
+> gone**: `ITEM-023` landed, `WireHit` is deleted, and a command now carries intent that both
+> peers resolve. Kept for the reasoning — an attacker needing facts about its target turned out
+> to be a bug class rather than an optimisation, three times over.
 
 ---
 
