@@ -172,7 +172,7 @@ describe('The recorder keeps the fight and drops the handshake', () => {
     )
 
     recorder.record({ type: 'init', protocol: 1, build: 'test', seed: 1, seedLabel: '1' })
-    recorder.record({ type: 'ready', sheets: [] })
+    recorder.record({ type: 'ready', sheets: [], loadout: [] })
     expect(recorder.eventCount).toBe(0)
 
     recorder.record({ type: 'endTurn', faction: Faction.Blue })

@@ -3,7 +3,9 @@ import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
 import type { GrenadeId, ShotMode, StatusKind } from '../core/Arsenal'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
-import type { RecordedEvent, RecordingHeader } from './Recording'
+import { squadLoadoutFrom, type RecordedEvent, type RecordingHeader } from './Recording'
+import type { SquadLoadout } from './Loadout'
+import { SocketTransport } from './SocketTransport'
 import type { StateDigest } from './StateDigest'
 import { MY_VERSION, versionRefusal } from '../version'
 import {
@@ -22,6 +24,12 @@ import {
 import type { Transport } from './Transport'
 
 export type NetworkMode = 'local' | 'host' | 'join'
+
+/** What a peer brought: its people, and its kit if this build could read it. */
+export interface PeerSquad {
+  sheets: CharacterSheet[]
+  loadout: SquadLoadout | null
+}
 
 /**
  * One unit's share of an attack, exactly as the acting peer resolved it.
@@ -96,7 +104,16 @@ export type NetworkMessage =
   | { type: 'useItem'; faction: Faction; squadIndex: number; itemId: ItemId; targetFaction?: Faction; targetIndex?: number }
   | { type: 'endTurn'; faction: Faction }
   | { type: 'rightClickFacing'; faction: Faction; squadIndex: number; x: number; z: number }
-  | { type: 'ready'; sheets: CharacterSheet[] }
+  /**
+   * This side has finished equipping: its people, and what they are carrying.
+   *
+   * The kit rides along because a referee refights the match from its intents
+   * and a loadout is not one of them — it reaches a *peer* as replicated
+   * component state, which is state its owner is authoritative for rather than
+   * something anybody declared. Both sides know who they brought at exactly
+   * this moment, and not before.
+   */
+  | { type: 'ready'; sheets: CharacterSheet[]; loadout: SquadLoadout }
 
 export class NetworkManager {
   /** The channel this side plays over, once there is one. */
@@ -125,7 +142,7 @@ export class NetworkManager {
   private refused = false
   private world: World | null = null
   private owns: (entityId: number) => boolean = () => true
-  private readonly peerReady = Promise.withResolvers<CharacterSheet[]>()
+  private readonly peerReady = Promise.withResolvers<PeerSquad>()
 
   /**
    * A joiner's wait for the frame that opens the match, while there is one.
@@ -244,7 +261,18 @@ export class NetworkManager {
     // whether a peer's numbers are numbers.
     if (method === RpcMethods.ready) {
       const raw = Array.isArray(params.sheets) ? params.sheets : []
-      this.peerReady.resolve(raw.slice(0, SQUAD_SIZE).map(sanitizeSheet))
+      const sheets = raw.slice(0, SQUAD_SIZE).map(sanitizeSheet)
+      // The kit is *refused* rather than defaulted, unlike the sheets: a wrong
+      // sheet costs display accuracy, a wrong weapon changes what every shot
+      // does. A peer that cannot state its loadout deploys on the stock spread,
+      // which is what this side already assumed.
+      let loadout: SquadLoadout | null = null
+      try {
+        loadout = squadLoadoutFrom(params.loadout, "a peer's loadout")
+      } catch (err) {
+        console.warn('[net] ignoring a peer loadout this build cannot read:', err)
+      }
+      this.peerReady.resolve({ sheets, loadout })
       return
     }
 
@@ -266,6 +294,27 @@ export class NetworkManager {
       if (name === method) return { ...params, type } as NetworkMessage
     }
     return null
+  }
+
+  /**
+   * Play through a referee at `url`, as the side that opens the match.
+   *
+   * The referee relays between clients as well as watching, so the handshake
+   * below is the same one two peers do directly — which is the point of the
+   * transport port: a socket to a referee and a data channel to a peer are the
+   * same match from here. What a referee adds is that a third recomputation is
+   * watching, that the log outlives the tab, and that a client which loses its
+   * tab can come back.
+   */
+  hostOnServer(url: string, seed: number, seedLabel: string): void {
+    this.attach(new SocketTransport(new WebSocket(url)))
+    this.hostMatch(seed, seedLabel)
+  }
+
+  /** Join a refereed match at `url`, and wait for its opening frame. */
+  joinOnServer(url: string): Promise<{ seed: number; seedLabel: string }> {
+    this.attach(new SocketTransport(new WebSocket(url)))
+    return this.joinMatch()
   }
 
   /**
@@ -368,7 +417,7 @@ export class NetworkManager {
    * know who they brought: any later and a shot could be resolved against a
    * squad this side had guessed at.
    */
-  waitForPeerReady(): Promise<CharacterSheet[] | null> {
+  waitForPeerReady(): Promise<PeerSquad | null> {
     return this.mode === 'local' ? Promise.resolve(null) : this.peerReady.promise
   }
 

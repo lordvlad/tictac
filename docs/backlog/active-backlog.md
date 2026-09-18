@@ -436,11 +436,28 @@ bundle.
 - `scripts/serve-match.ts` (new), `bun run serve:match`
 - `src/game/NetworkManager.ts`, `src/game/JsonRpc.ts`, `src/game/Recording.ts`
 
-#### What remains
-The referee is complete and exercised, but **no browser client joins one yet**: the client-side
-choice of "play peer-to-peer or join a referee at a URL" is menu and wiring, not protocol —
-`NetworkManager.attach` takes a `SocketTransport` already. Filed as the next step rather than
-claimed here.
+#### The client side, which landed after the referee
+"Play on a Match Server" is in the start menu: a URL, *Open a Match* or *Join the Match*, and
+`hostOnServer`/`joinOnServer` on `NetworkManager`. The referee relays as well as watches, so the
+handshake over a socket is the same one two peers do directly — which is what the transport port
+bought.
+
+One protocol addition was needed and is the interesting part: **`ready` now carries the sender's
+loadout** beside its sheets. A referee refights a match from its intents, and a loadout is not
+one of them — it reaches a *peer* as replicated component state, which is state its owner is
+authoritative for rather than something anybody declared. So both sides now state their kit at
+the one moment both know what they brought, and the host states the opening position to the
+referee as `matchHeader`.
+
+The kit is **refused rather than defaulted**, unlike the sheets next to it: a wrong sheet costs
+display accuracy, a wrong weapon changes what every shot does. A peer whose loadout this build
+cannot read deploys on the stock spread, which is what this side had already assumed.
+
+Verified with two real `NetworkManager`s over real sockets against a real referee: the seed
+reaches the joiner through the server, both sides exchange sheets and kit, intents are relayed
+to the other side and never echoed to the sender, and the referee's own log refights to the
+digest the referee itself holds. `tests/refereed.test.ts` runs that in CI against a `Bun.serve`
+on port 0.
 
 #### Acceptance Criteria
 - [x] ~~A full match plays out with both clients as clients: no client resolves an attack.~~

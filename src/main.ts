@@ -88,6 +88,7 @@ function showMenu(): void {
         <button id="btn-local" style="padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Local Versus (Same Screen)</button>
         <button id="btn-host-mode" style="padding: 12px; background: #0ea5e9; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Host P2P Match</button>
         <button id="btn-join-mode" style="padding: 12px; background: #6366f1; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Join P2P Match</button>
+        <button id="btn-server-mode" style="padding: 12px; background: #14b8a6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Play on a Match Server</button>
         <button id="btn-load-recording" style="padding: 12px; background: #475569; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Load Recording (Spectate)</button>
         <input id="recording-file" type="file" accept="application/json,.json" style="display: none;" />
       </div>
@@ -165,6 +166,71 @@ function showMenu(): void {
       // Only once a peer is attached, which is what makes `ready` deliverable.
       equipThenStart(seed, label, network)
     }
+  })
+
+  // Refereed play. Both sides connect to the same referee, which relays between
+  // them as well as recomputing the match: one of them opens it, the other
+  // joins. What the referee adds is a third opinion when the two disagree, a
+  // log that outlives the tab, and a way back in after losing one.
+  container.querySelector('#btn-server-mode')?.addEventListener('click', () => {
+    actionsEl.style.display = 'none'
+    detailsEl.style.display = 'block'
+    detailsEl.innerHTML = `
+      <p style="font-size: 14px; color: #2dd4bf; margin-bottom: 8px;">Play on a Match Server</p>
+      <input id="server-url" value="ws://localhost:5174/" style="width: 100%; box-sizing: border-box; padding: 8px; background: #0f172a; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; font-family: monospace; font-size: 12px; margin-bottom: 12px;" />
+      <div style="display: flex; gap: 8px;">
+        <button id="btn-server-host" style="flex: 1; padding: 10px; background: #0d9488; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Open a Match</button>
+        <button id="btn-server-join" style="flex: 1; padding: 10px; background: #14b8a6; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Join the Match</button>
+        <button id="btn-server-back" style="padding: 10px; background: #475569; color: white; border: none; border-radius: 4px; cursor: pointer;">Back</button>
+      </div>
+      <p id="server-status" style="font-size: 12px; color: #94a3b8; margin-top: 8px;">Run one with <code>bun run serve:match</code>.</p>
+    `
+
+    const urlOf = () => (container.querySelector('#server-url') as HTMLInputElement).value.trim()
+    const statusEl = () => container.querySelector('#server-status') as HTMLElement
+
+    container.querySelector('#btn-server-back')?.addEventListener('click', () => {
+      detailsEl.style.display = 'none'
+      actionsEl.style.display = 'flex'
+    })
+
+    container.querySelector('#btn-server-host')?.addEventListener('click', () => {
+      const url = urlOf()
+      if (!url) return
+      const { seed, label } = resolveSeed()
+      const network = new NetworkManager()
+      statusEl().style.color = '#38bdf8'
+      statusEl().textContent = 'Waiting for an opponent to join…'
+      // No `onConnected` here: a socket opens as soon as the referee answers,
+      // long before anybody is on the other side of it. The barrier that
+      // matters is `ready`, which `equipThenStart` already waits on.
+      network.onDisconnected = (reason) => {
+        statusEl().style.color = '#ef4444'
+        statusEl().textContent = reason ?? 'The match server closed the connection.'
+      }
+      network.hostOnServer(url, seed, label)
+      container.remove()
+      equipThenStart(seed, label, network)
+    })
+
+    container.querySelector('#btn-server-join')?.addEventListener('click', async () => {
+      const url = urlOf()
+      if (!url) return
+      statusEl().style.color = '#38bdf8'
+      statusEl().textContent = 'Connecting…'
+      const network = new NetworkManager()
+      try {
+        const opening = await network.joinOnServer(url)
+        container.remove()
+        equipThenStart(opening.seed, opening.seedLabel, network)
+      } catch (err) {
+        statusEl().style.color = '#ef4444'
+        statusEl().textContent =
+          err instanceof Error && err.message.length > 0
+            ? err.message
+            : 'Could not join a match there.'
+      }
+    })
   })
 
   // Join Mode
@@ -247,15 +313,25 @@ function equipThenStart(seed: number, label: string, network: NetworkManager): v
   }
 
   void screen.show().then(async (loadout) => {
-    network.send({ type: 'ready', sheets: mySheets })
+    network.send({ type: 'ready', sheets: mySheets, loadout })
     if (network.mode !== 'local') screen.markWaiting('Waiting for opponent to deploy…')
-    const peerSheets = await network.waitForPeerReady()
+    const peer = await network.waitForPeerReady()
     screen.dispose()
     const other = faction === Faction.Blue ? Faction.Red : Faction.Blue
-    start(seed, label, network, loadout, {
-      [faction]: mySheets,
-      [other]: peerSheets ?? localEnemySheets,
-    } as Record<Faction, CharacterSheet[]>)
+    start(
+      seed,
+      label,
+      network,
+      loadout,
+      {
+        [faction]: mySheets,
+        [other]: peer?.sheets ?? localEnemySheets,
+      } as Record<Faction, CharacterSheet[]>,
+      // The peer's kit, when it sent kit this build could read. Without it the
+      // other squad deploys on the stock spread — which is what every match
+      // did before a referee needed to know what both sides were carrying.
+      peer?.loadout ?? undefined,
+    )
   })
 }
 
@@ -265,6 +341,7 @@ function start(
   network: NetworkManager,
   loadout?: SquadLoadout,
   sheets?: Record<Faction, CharacterSheet[]>,
+  peerLoadout?: SquadLoadout,
 ): void {
   const engine = createEngineContext(Game.instance())
 
@@ -279,6 +356,12 @@ function start(
   const battlefield = new Battlefield(generateMap(seed), engine)
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
   const squads = new Squads(world, battlefield.grid, battlefield.spawns, loadout, myFaction, sheets)
+  // The other squad's kit, when the peer sent some. It arrives in `ready`
+  // rather than only as replicated component state so that a referee — which
+  // holds no components until the intents start — can refight the match.
+  if (peerLoadout) {
+    squads.equipFaction(myFaction === Faction.Blue ? Faction.Red : Faction.Blue, peerLoadout)
+  }
 
   // The opening position, captured before anything can move it. A recording
   // armed later still replays from here, which is the only point a stream can
@@ -296,6 +379,11 @@ function start(
       [Faction.Red]: squads.loadoutOf(Faction.Red),
     },
   }
+
+  // A referee is told the opening position once, by the side hosting the
+  // match: it needs the seed, both squads' people and both squads' kit, none of
+  // which is derivable from the stream of intents that follows.
+  if (network.mode === 'host') network.send({ type: 'matchHeader', header: recordingHeader })
 
   const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,

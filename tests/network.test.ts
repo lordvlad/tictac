@@ -5,6 +5,7 @@ import { createGlobalRules } from '../src/ecs/globals'
 import { CHARACTER, Faction, RULES, SQUAD_SIZE } from '../src/config'
 import { GrenadeId, ShotMode, StatusKind, WeaponId } from '../src/core/Arsenal'
 import { derive, rollSquadSheets } from '../src/core/Characters'
+import { defaultLoadout } from '../src/game/Loadout'
 import { TraitId } from '../src/core/Traits'
 import { Rng } from '../src/core/rng'
 import { HealthComponent, MatchRulesComponent } from '../src/ecs/components'
@@ -312,7 +313,8 @@ describe('The start handshake carries each peer its own squad', () => {
   test('a squad sent with `ready` arrives as the sheets that were rolled', async () => {
     const { net, sent } = peered()
     const mine = rollSquadSheets(new Rng(7))
-    net.send({ type: 'ready', sheets: mine })
+    const kit = defaultLoadout()
+    net.send({ type: 'ready', sheets: mine, loadout: kit })
 
     expect(sent[0]?.method).toBe(RpcMethods.ready)
 
@@ -322,7 +324,31 @@ describe('The start handshake carries each peer its own squad', () => {
     // Locally rolled sheets are already inside the envelope, so sanitising at
     // the edge must leave them untouched — the barrier is for hostile input,
     // not a filter every honest squad has to survive.
-    expect(await receiver.net.waitForPeerReady()).toEqual(mine)
+    const peer = await receiver.net.waitForPeerReady()
+    expect(peer?.sheets).toEqual(mine)
+    // And the kit arrives with them: a referee rebuilds the match from its
+    // intents, and what a squad is carrying is not one of them.
+    expect(peer?.loadout).toEqual(kit)
+  })
+
+  test('kit this build cannot read is refused, and the squad still arrives', async () => {
+    // Deliberately harsher than the sheets beside it: a wrong sheet costs
+    // display accuracy, a wrong weapon changes what every shot does. So the
+    // loadout is dropped rather than patched, and the other side deploys on the
+    // stock spread it had already assumed.
+    const { net, send } = peered('join')
+    send({
+      jsonrpc: '2.0',
+      method: RpcMethods.ready,
+      params: {
+        sheets: rollSquadSheets(new Rng(5)),
+        loadout: [{ weaponId: 'railgun', ammoId: 'standard' }],
+      },
+    })
+
+    const peer = await net.waitForPeerReady()
+    expect(peer?.sheets).toHaveLength(SQUAD_SIZE)
+    expect(peer?.loadout).toBeNull()
   })
 
   test('`ready` is never delivered as a command', async () => {
@@ -340,7 +366,7 @@ describe('The start handshake carries each peer its own squad', () => {
       params: { sheets: rollSquadSheets(new Rng(11)) },
     })
 
-    expect(await net.waitForPeerReady()).toHaveLength(SQUAD_SIZE)
+    expect((await net.waitForPeerReady())?.sheets).toHaveLength(SQUAD_SIZE)
     expect(commands).toEqual([])
   })
 
@@ -366,7 +392,7 @@ describe('The start handshake carries each peer its own squad', () => {
 
     const peer = await net.waitForPeerReady()
     expect(peer).not.toBeNull()
-    const first = peer![0]!
+    const first = peer!.sheets[0]!
     expect(first.attributes.health).toBe(CHARACTER.attribute.max)
     expect(first.attributes.agility).toBe(CHARACTER.attribute.max)
     expect(first.attributes.intelligence).toBe(CHARACTER.attribute.min)
@@ -386,7 +412,7 @@ describe('The start handshake carries each peer its own squad', () => {
     const { net, send } = peered('join')
     send({ jsonrpc: '2.0', method: RpcMethods.ready, params: {} })
 
-    expect(await net.waitForPeerReady()).toEqual([])
+    expect((await net.waitForPeerReady())?.sheets).toEqual([])
   })
 
   test('local play has no peer to wait for', async () => {
@@ -421,8 +447,8 @@ describe('A match over a linked pair, with no broker', () => {
     expect([joiner.mode, joiner.myFaction]).toEqual(['join', Faction.Red])
 
     const squad = rollSquadSheets(new Rng(3))
-    host.send({ type: 'ready', sheets: squad })
-    expect(await joiner.waitForPeerReady()).toEqual(squad)
+    host.send({ type: 'ready', sheets: squad, loadout: defaultLoadout() })
+    expect((await joiner.waitForPeerReady())?.sheets).toEqual(squad)
 
     host.send({ type: 'endTurn', faction: Faction.Blue })
 

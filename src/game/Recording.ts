@@ -169,8 +169,13 @@ function counts<Id extends string>(table: Record<string, unknown>, raw: unknown)
  * Weapon and ammo ids are refused rather than defaulted: a replay resolves its
  * own damage from the weapon named here, so substituting a rifle for an id this
  * build does not know would quietly show a different fight.
+ *
+ * Exported because a *peer's* kit needs exactly the same check as a file's. It
+ * arrives in `ready` now rather than only as replicated component state,
+ * because a referee has to rebuild the match from its intents and a loadout is
+ * not derivable from them.
  */
-function squadLoadoutFrom(raw: unknown, what: string): SquadLoadout {
+export function squadLoadoutFrom(raw: unknown, what: string): SquadLoadout {
   if (!Array.isArray(raw)) throw new Error(`${what}: loadout must be an array`)
 
   return raw.slice(0, SQUAD_SIZE).map((entry, i) => {
