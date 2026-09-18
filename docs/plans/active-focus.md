@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M4 Competitive & Meta Roster"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-17"
+lastReviewed: "2026-09-18"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -25,41 +25,29 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- Nothing in flight. **The next pull is `[ITEM-020]`**, then `[ITEM-021]` and `[ITEM-022]`.
-  Read them as **foundation work, not networking work**: per
-  [RFC-0001](../design/rfc/0001-referee-and-transports.md) §9, combat is one subsystem of the
-  GDD's game and peer-to-peer play, recording and replay are debug helpers and demo entry
-  points. What these three items actually buy is that a match is a *reproducible event log* —
-  which is what a roster, a rejoin and an audit are all derived from, and what `[ITEM-012]`
-  cannot be built on without. Two independent recomputations of the same log is simply the
-  cheapest test of that property available today, and P2P is where they live.
-  The immediate provocation was three bugs with the same shape — the attacker reading its own stock
-  copy of a fact only the target's owner knows — and each was fixed one property at a time,
-  silently, with no check that would have caught the next one. `[ITEM-020]` is the cheap half:
-  re-derive a received attack and shout when the two answers differ. It changes no contract,
-  adds no latency, deletes nothing, and it is a test for a property the recorder *already*
-  assumes, since a recording is an intent stream with no outcomes in it.
-- `[ITEM-004]` moves behind them. Progression widens peer-supplied input, and widening the
-  wire before there is any check that both sides agree on what crossed it is the wrong order.
+- **`[ITEM-025]`: the referee.** In flight. A `Bun.serve` process that recomputes the same
+  intent stream as a **witness rather than an authority** — not in the data path, no latency,
+  and a match plays on unwatched without it. What it buys is persistence, rejoin after a lost
+  client, and *attribution*: two peers can detect a disagreement, neither can prove whose fault
+  it is until a third recomputation makes it two against one. A foul aborts the match.
+- Half of it already exists: `src/sim/Replay.ts` rebuilds a whole match from an intent stream
+  headlessly and proves it reproducible, which is exactly what rejoin needs. What remains is a
+  channel, a store and the verdict.
+- `[ITEM-024]` (transport port) comes with it rather than before it — the referee is the second
+  caller that justifies the abstraction, which is why it was deferred until now.
 
 ### 📋 Ready (Pull Queue)
-- **`[ITEM-020]`**: Shadow resolution and divergence detection. Observation only; the mismatch
-  rate it measures is what decides whether `[ITEM-023]` is safe to attempt at all.
-- **`[ITEM-021]`**: State checksum at the turn boundary. Catches drift, which is what a
-  desynchronised match actually looks like — fine until nothing is. Useful on its own.
-- **`[ITEM-022]`**: Determinism audit. One match RNG drawn only by the rules, a build/protocol
-  gate in the handshake (this project deploys on every push, so mismatched peers are the
-  ordinary case), and a float audit of anything transcendental feeding a decision. Must move
-  no rule: `bun run balance` byte-identical is the acceptance test.
+- **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for
+  rosters *and* matches as event logs. It is what the whole lockstep arc was for: a match is
+  now a reproducible event log, so what persists is what happened rather than a summary of it.
 - **`[ITEM-004]`**: In-match progression, now also the home for the GDD's learn-by-doing
-  growth. **Measure before building**: the harness reports a median of 3.5 turns per match, so
+  growth. **Measure before building**: the harness reports a median of four turns per match, so
   count kills per unit per match first and site the XP threshold where it can actually be
-  reached — and note the GDD explicitly rejects a menu XP pool, so measure what a unit *does*
-  in 3.5 turns before deciding growth can be earned in one match at all. This one widens
-  peer-supplied input, so it needs its own sanitiser and regression pins rather than trusting
-  `sanitizeSheet`.
-- **`[ITEM-010]`**: Roles on the loadout screen. Mostly UI over the existing
-  `LOADOUT_LIMITS` machinery.
+  reached.
+- **`[ITEM-010]`**: Roles on the loadout screen. Mostly UI over the existing `LOADOUT_LIMITS`
+  machinery.
+- **`[ITEM-028]`**: Log and store schema drift guard. Wants doing *with* `[ITEM-012]`: the
+  moment a roster is derived from a stored log, the log is a schema.
 
 ### 🧊 Backlog (needs its own pass)
 - **`[ITEM-014]`**: Morale, stress and predispositions. The unbuilt half of M3. Wants its own

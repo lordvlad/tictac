@@ -3,7 +3,7 @@ title: "Completed Work Archive"
 id: "BACKLOG-COMPLETED"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-17"
+lastReviewed: "2026-09-18"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -397,3 +397,246 @@ discipline wanted exactly the same thing, so one item unblocked both.
       the only door that path goes through.
 - [x] At least one item exists that is worth gating, so no currently-usable kit was removed:
       the gate applies to the new `RepairKit` and to nothing that already existed.
+
+---
+
+### [ITEM-020] Shadow Resolution & Divergence Detection
+**Completed Date:** 2026-09-18  
+**Type:** Refactor / Architecture  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+Combat was sender-resolved: the acting peer rolled, resolved and shipped the numbers, and the
+receiver applied them verbatim. That trade bought instant feedback and one code path for local
+play and the headless sim, and it carried a standing cost — the attacker had to know things
+about the *target* that only the target's owner truly knew. Three bugs of exactly that shape
+had shipped and been fixed one property at a time (the target's evasion, the plate carrier's
+`damageTaken`/`evasionCrouched`, and `unreadable`), each silently: the wrong number was applied
+and nothing complained. The rule written in those commits — *a defensive property must live in
+`TraitsComponent`* — existed because the architecture pointed the wrong way, and it held only
+as long as everyone remembered it.
+
+#### Key Changes
+- On receiving a resolved attack, the receiver re-derived the outcome from the intent plus its
+  own state and compared it against the payload, reporting the first disagreement with both
+  answers and the unit it concerned. The applied result stayed the sender's: the item observed
+  and changed nothing about who was authoritative.
+- The comparison drew nothing from the match stream — it replayed the sender's own crit flags —
+  so it could not desynchronise the thing it was measuring.
+
+#### Retired by `ITEM-023`, as intended
+This was the interim check **and** the evidence that intent-only was safe to attempt: the item
+was self-validating by design, and the mismatch rate it measured across real matches is what
+decided `ITEM-023`. Once a resolved outcome no longer travels there is nothing left to
+re-derive *against* — a shot is a shooter, a target and a mode — so `src/game/Divergence.ts`
+was deleted with the payload it existed to check. The `Divergence` type and `reportDivergence`
+survived the file: they moved into `src/game/StateDigest.ts`, which is what reports a
+disagreement now. Recorded as the planned end of a staging item, not as a regression.
+
+#### What it found
+The shadow could not be a rebuild. The first implementation reconstructed the unit from its
+sheet and kit, which re-folds its traits and therefore could not see a *replicated* property at
+all — so the test that withheld a defensive property from replication failed, which is exactly
+the bug class the item existed to catch, reproduced against the check itself. The shadow became
+a delegate over the live unit instead.
+
+#### Acceptance Criteria
+- [x] A received `fireShot` was re-derived locally and compared; agreement was silent.
+- [x] A deliberately unreplicated defensive property made the comparison fire, in a test.
+      Proven red the useful way — see above.
+- [x] A received `throwGrenade` was compared per victim, including the receiver's own units.
+- [x] The comparison consumed no match randomness and changed no applied outcome, with a test
+      snapshotting every unit's hp, armour, AP, clip, statuses and reveal state across a run.
+- [x] Exercised end to end without a browser, by `bun run replay` over a recorded intent
+      stream: a recorded match replayed with no divergence, and two tampering tests proved the
+      check was not vacuous — one point added to a single hit was caught and named, and a
+      claimed hit chance the state did not support was caught on a shot that missed.
+- [ ] **Not ticked: observed between two live browser peers.** Blocked on tooling rather than
+      code — the browser device fails with a filesystem `ELOOP` and there is no X server for
+      headful Chrome. The headless replay is the standing substitute and runs in CI.
+
+---
+
+### [ITEM-021] State Digest at the Turn Boundary
+**Completed Date:** 2026-09-18  
+**Type:** Refactor / Architecture  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+`ITEM-020` caught an attack two peers resolved differently. It could not catch *drift* — two
+states that diverged with no single action revealing it, which is how a desynchronised match
+actually feels: everything looks fine until nothing does. Since `ITEM-023` took the numbers off
+the wire there is nothing left to compare per action, so this is now the **only** check on two
+peers agreeing at all.
+
+#### Key Changes
+- `src/game/StateDigest.ts`: `digestWorld` fingerprints a world from the component
+  serialisations replication already produces. Keys are sorted before hashing and the fold over
+  entities is commutative, because the entities a world holds are a set — so the digest does not
+  depend on insertion order.
+- **The shape is deliberately uneven.** Units carry a hash *per component*, so a mismatch names
+  the entity and the component; everything else folds into one number for terrain and one for
+  the rule tables. There are hundreds of wall entities, and paying a hash per wall per turn to
+  diagnose a thing that has never drifted would be paying every turn for a report nobody has
+  needed. A terrain mismatch still says *terrain*, which is enough to start.
+- Exchanged immediately before `endTurn` and compared *before* the handover is applied, because
+  that is the state the sender fingerprinted. Sent past the recorder on purpose: a digest is a
+  claim about state, and a replay derives state from the intents rather than checking it, so
+  recording one would put a number in the log that the log itself has to reproduce.
+- Detection is not repair. The item stops at reporting; resynchronising from a designated
+  authority reintroduces a host and is a decision to take on purpose (`ITEM-025`).
+
+#### What it found
+The digest went red between two *identical* worlds, and the only thing differing was a weapon's
+**serial**. It came from a process-local counter, so two peers agreed on it only by luck of how
+many templates each had cloned — and the loadout screen clones one on every press. A serial is
+now derived from who carries the weapon (`weaponSerial(faction, squadIndex, weaponId)`), which
+both sides compute without it travelling and a replay reproduces. A 400-match sweep was
+byte-identical across the change. Exactly the class of silent drift `ITEM-022` exists to remove,
+found by the check built to notice it — and the reason the digest was worth building *before*
+the wire narrowed rather than after.
+
+#### Acceptance Criteria
+- [x] Both peers agree on a digest for an identical world, and the digest is stable across
+      component insertion order.
+- [x] A single mutated component on one side is reported at the next handover, naming the
+      component and the entity; a non-unit entity is reported as *terrain* and a drifted rule
+      table changes the fingerprint.
+- [x] Digesting a match costs no measurable frame time: 40 digests — a whole match — are pinned
+      under a single frame's budget, and it runs once per handover rather than per frame.
+- [x] Exercised end to end by the replay runner: two runs of one recorded match reach the same
+      digest, which is the property a stored match must have before a roster can be derived from
+      it, and the one rejoin will stand on.
+- [ ] **Not ticked: observed between two live browser peers.** Same tooling block as
+      `ITEM-020`; the headless replay is the standing substitute.
+
+---
+
+### [ITEM-022] Determinism Audit: One Match RNG, a Version Gate, and Float Discipline
+**Completed Date:** 2026-09-18  
+**Type:** Refactor / Architecture  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+Prerequisite for `ITEM-023`. Re-deriving a fight from intent alone only works if both peers
+take exactly the same steps, and three things made that untrue or unproven: only the acting
+peer drew from the dice, two peers on different bundles diverged innocently, and the rules
+branched on functions whose last bit is implementation-defined.
+
+#### Key Changes
+- **One match stream, drawn only by the rules.** `matchDice(seed)` in `src/core/rng.ts` is the
+  only source, injected into `CombatSystem` and `ShootPlanner` rather than reached for.
+  `Math.random` is gone from `src/core`, `src/ecs`, `src/sim` and `src/game`, with `resolveSeed`
+  the single stated exception — choosing a seed is what *creates* the stream. The defaults that
+  hid the problem went too: a resolver without dice no longer compiles. Presentation keeps its
+  own randomness, because a draw from the match stream moves every later roll and a peer cannot
+  know how many sparks the other side drew.
+- **A version gate.** `src/version.ts` states a hand-maintained `PROTOCOL_VERSION` and a
+  `BUILD_ID` injected by `scripts/build-bundle.ts`. Two numbers rather than one because they
+  say *how* two peers failed to match: a protocol difference means one side cannot parse the
+  other, a build difference means they agree on the envelope and might still resolve a shot
+  differently. Checked on both first frames — the host's `init` and the joiner's new `hello` —
+  refused with prose a player can act on, latched so a refused peer gets no second chance, and
+  surfaced on the join screen instead of blaming the peer id. A peer that states no version at
+  all is refused too: a build old enough to omit it is old enough to disagree about the rules.
+- **Float discipline.** The inventory of transcendentals feeding a rules decision came to two:
+  `Math.hypot` (every distance, so every range check, hit chance and blast radius) and
+  `Math.atan2` (facing). `sqrt` is correctly rounded by IEEE 754 while `hypot` is a library
+  routine with implementation-defined accuracy, so `distance()` in `src/core/math.ts` is squares
+  and one root; overflow — the reason `hypot` exists — cannot happen on a grid tens of units
+  across. `facingYaw()` keeps `atan2` and quantises to a thousandth of a radian, far finer than
+  anything visible, because a facing is replicated *and* digested.
+- **Identical entity ids and iteration order** as a stated invariant, with a test: two peers
+  dealt the same match number their entities the same and reach the same digest.
+
+#### What it found
+The stream's fragility was already measured rather than hypothetical — adding one attribute
+roll per character had once shifted every die in a 400-match sweep and nearly caused a balance
+result to be mis-attributed. What this item established is that under intent-only that
+fragility stops being an ordering problem and becomes a *version* problem, which is why the
+gate is not optional: once disagreement is grounds for naming a cheat, a stale cache would be
+the first thing accused. `tests/determinism.test.ts` now enforces the whole audit by reading
+the rules directories, and was proven red by putting each banned function back.
+
+#### Acceptance Criteria
+- [x] The match stream has exactly one set of callers, all inside the rules layer, enforced by
+      a test.
+- [x] Peers on different protocol or build versions refuse the connection with a stated reason,
+      latched, shown on the join screen.
+- [x] Every transcendental feeding a rules decision is identified and either removed or
+      quantised before it branches, with a test that refuses both functions anywhere the rules
+      can see them.
+- [x] Identical entity ids and iteration order, with a test.
+- [x] `bun run balance` byte-identical before and after: 400 matches at seed 1000, unchanged
+      across the dice threading and the float work.
+- [x] **Symmetric drawing**, which this item could only set up and not finish: it landed
+      asymmetric on purpose, because outcomes still travelled. Both sides draw in step from
+      `ITEM-023`, which is the point of having built the stream first.
+
+---
+
+### [ITEM-023] Intent-Only Wire
+**Completed Date:** 2026-09-18  
+**Type:** Refactor / Architecture  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+The payoff of the three items above. With identical state, identical steps and a check that
+notices drift, a resolved outcome no longer needs to travel: intent produces the same fight on
+both sides. The wire shrinks to what one peer *decided*, and the asymmetry behind three bugs
+goes away because the attacker never needs a fact it does not own — structurally, rather than
+because everyone remembers a rule.
+
+#### Key Changes
+- `fireShot` is `{shooterFaction, shooterIndex, targetFaction, targetIndex, mode}` and
+  `throwGrenade` is `{shooterFaction, shooterIndex, kind, targetTile}`. `WireHit`, `toWireHits`,
+  `fromWireHits`, the resolved-hit replay path and the whole of `src/game/Divergence.ts` are
+  deleted rather than deprecated.
+- A peer's attack is now *resolved* on arrival rather than applied: the remote handler calls the
+  same `CombatSystem.fireShot` and `GrenadePlanner.executeThrowAt` the acting side calls.
+  `reload` is re-run for the same reason — a peer's clip is a number this side can work out.
+- Replication narrows to state the receiver is not authoritative for. `NetworkManager.bindWorld`
+  takes an ownership predicate: each peer transmits only its own faction's units, the host owns
+  the rule tables and the walls, and an inbound update for an entity this side owns is dropped.
+  Both sides now simulate, so without an owner each would broadcast its own guess and the two
+  would overwrite each other mid-step.
+- A recording and the wire became the same thing, which is what made `src/sim/Replay.ts` and
+  `bun run replay` possible: running a file *is* receiving a match.
+- Consequence worth stating: a client can no longer fake a die quietly. Dice come from the match
+  stream in an order the rules fix, so a faked roll is not a lie but a desynchronisation — which
+  the digest catches and a referee (`ITEM-025`) can attribute.
+
+#### What it found
+The replay runner refused three events on the first attempt, and the cause was the finding of
+this item: `SimMatch` drew its squads *and* its dice from one stream, so *how many numbers a
+sheet consumed* decided every roll that followed. A replay deals nobody, so it began the dice
+where the sim had finished dealing and resolved a different match. That is the same fragility
+measured back in the attribute refactor. The sim now derives its dice from the seed by their own
+stream (`matchDice`) and setup keeps its own, so a match is still one number and a recorded
+match replays into itself.
+
+#### Measured
+The `bun run balance` byte-identical criterion could not be met, **and it was the wrong test**:
+re-phasing the dice re-phases them, so the files differ by construction. What the sweep had to
+show instead is that the *balance* did not move, and it does not. Across disjoint seed blocks
+1000 / 5000 / 9000: blue 236 / 237 / 235 → 226 / 247 / 238, red 136 / 142 / 132 →
+150 / 131 / 133. Block-to-block variance is larger than the shift in either mean (blue
+236 → 237, red 137 → 138), so the report is a different sample of the same game rather than a
+different game.
+
+#### Acceptance Criteria
+- [x] A shot and a grenade replicate with intent only; `WireHit`, `toWireHits`, `fromWireHits`,
+      the resolved-hit replay path and `Divergence.ts` no longer exist.
+- [x] A recording and a peer consume the same frames — demonstrably, since the replay runner
+      applies a recorded stream through the same door the peer path uses and refuses nothing.
+- [x] A full match agrees end to end: the 55-event recorded match in `recordings/` replays with
+      every command applied and no skips, reproducibly, and reaches the same survivors as the
+      sweep match that produced it. Two carriers of the rules, one answer.
+- [~] **`bun run balance` byte-identical: not achievable, and it should not be.** Replaced by
+      the sweep above, which is the honest form of the question.
+- [ ] **Not ticked: two live browser peers play a full match with no digest mismatch.** Same
+      tooling block as `ITEM-020` and `ITEM-021`; the headless replay is the standing
+      substitute and runs in CI. One thing only a live match would exercise: a replay is handed
+      **both** squads' loadouts by the recording header, whereas a live match never sends a
+      peer's loadout at all — see the standing gap in
+      [P2P Networking §7](../architecture/networking.md).

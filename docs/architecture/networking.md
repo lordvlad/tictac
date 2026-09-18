@@ -3,7 +3,7 @@ title: "P2P Networking & JSON-RPC Wire Protocol"
 id: "ARCH-NETWORKING"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-09-18"
 appliesTo:
   - "src/game/NetworkManager.ts"
   - "src/game/JsonRpc.ts"
@@ -39,58 +39,112 @@ sequenceDiagram
 
 ## 2. Wire Protocol: JSON-RPC 2.0 Notifications
 
-All messages over the WebRTC DataChannel use JSON-RPC 2.0 frames (`src/game/JsonRpc.ts`):
+All messages over the WebRTC DataChannel use JSON-RPC 2.0 frames (`src/game/JsonRpc.ts`).
+A command carries what a player **decided**, never what it produced:
 
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "networkMessage",
+  "method": "tictac/system/combat/fireShot",
   "params": {
     "type": "fireShot",
     "shooterFaction": "blue",
     "shooterIndex": 0,
     "targetFaction": "red",
     "targetIndex": 1,
-    "mode": "snap",
-    "rolls": [true],
-    "hits": [
-      {
-        "faction": "red",
-        "index": 1,
-        "damage": 24,
-        "armorShred": 1,
-        "status": null,
-        "crit": false
-      }
-    ]
+    "mode": "snap"
   }
 }
 ```
+
+That is the whole frame. There are no dice in it and no damage: both peers
+resolve the shot through the same rules, from one seeded stream per match,
+against state they both hold. See
+[ADR-0004](../design/adr/0004-full-knowledge-lockstep.md) for why, and
+[ADR-0003](../design/adr/0003-p2p-jsonrpc-replication.md) for what it replaced.
+
+### What intent-only demands in return
+
+- **Only the rules may draw from the match stream** (`matchDice(seed)`), and
+  both sides must draw the same numbers in the same order. Setup — dealing
+  squads — and presentation — a tracer's scatter, a puff of smoke — take their
+  own randomness, because a draw from the match stream moves every later roll
+  in the match and a peer cannot know how many sparks the other side drew.
+  Enforced by `tests/determinism.test.ts`.
+- **No float two engines may disagree about can feed a decision.** `Math.hypot`
+  and `Math.atan2` are refused in the rules layers: `sqrt` is correctly rounded
+  by IEEE 754 and those two are implementation-defined. `distance()` and
+  `facingYaw()` in `src/core/math.ts` replace them; a facing is quantised
+  because it is replicated *and* digested.
+- **Identical entity ids.** A command addresses a unit by faction and slot, but
+  a component update and a digest address it by entity id.
 
 ---
 
 ## 3. Message Categories
 
 ### 1. Match Lifecycle
-- `init`: Transmits match seed and map parameters.
-- `ready`: Transmits sanitized `CharacterSheet[]` rosters.
-- `endTurn`: Hands over turn priority to the opposing faction.
+- `hello` / `init`: the joiner states its build, the host answers with the seed
+  and its own. Mismatched builds refuse to *start* — see §5.
+- `ready`: transmits sanitized `CharacterSheet[]` rosters.
+- `endTurn`: hands over turn priority to the opposing faction.
+- `digest`: a fingerprint of the sender's whole world, sent immediately before
+  it hands over. Not a command: it asks the other side to do nothing.
 
 ### 2. Player Tactical Actions (`NetworkMessage`)
-- `moveUnit`: Transmits starting faction, squad index, and waypoint array `{x, y}[]`.
-- `fireShot`: Transmits shooter/target coordinates, shot mode, hit rolls, and resolved `WireHit[]`.
-- `throwGrenade`: Transmits grenade type, target tile, radius, and resulting `WireHit[]`.
-- `reload` / `toggleCover` / `useItem`: Replicates immediate unit ability triggers.
+- `moveUnit`: faction, squad index, and waypoint array `{x, y}[]`.
+- `fireShot`: shooter, target, and shot mode. Nothing else.
+- `throwGrenade`: thrower, grenade kind, and the aimed tile.
+- `reload` / `toggleCover` / `useItem`: the intent to use an ability, with
+  `useItem` naming a target when the kit is being used on somebody else.
 
 ### 3. Component Dirty State Synchronization
-- `componentUpdate/<EntityId>/<ComponentName>`: Emitted by `World.syncDirty()` to synchronize mutated component state across peers without transmitting whole entity objects.
+- `componentUpdate/<EntityId>/<ComponentName>`: emitted by `World.syncDirty()`
+  for state the sender is authoritative for. Both sides now simulate, so
+  ownership decides who may transmit what: `bindWorld` takes a predicate, each
+  peer sends only its own faction's units, and an inbound update for an entity
+  this side owns is dropped. Without that, two simulating peers would overwrite
+  each other mid-step.
 
-## 4. Combat Recording & Spectator Playback
+## 4. Agreement, and what happens when it fails
 
-A recording is the wire command stream, written down. Nothing is invented for
-it: under the sender-resolved contract every attack already travels with its
-dice (`WireHit[]`, `ShotResult.rolls`), so the stream is a complete account of a
-fight and the peer-replay path is already a replay engine.
+With no outcomes on the wire, nothing about an attack can arrive *wrong* — but
+two peers can still drift apart, and nothing about a single action would reveal
+it. The check is therefore about state rather than about messages:
+
+- **A state digest at every handover** (`src/game/StateDigest.ts`). Soldiers are
+  hashed per component, so a mismatch names the unit and the component;
+  everything else folds into one number for terrain and one for the rule tables,
+  because there are hundreds of wall entities and a hash per wall per turn would
+  be paying every turn for a report nobody has needed.
+- **A faked die is no longer a lie.** Dice come from the stream in an order the
+  rules fix, so a client that rolls differently does not get a better outcome —
+  it gets a different world, which the next digest reports.
+- **Detection, not attribution.** Two peers can see that they disagree; neither
+  can prove which is wrong. That is what the referee in `ITEM-025` adds, and why
+  a foul aborts only in a refereed match.
+
+## 5. Refusing a peer this build cannot agree with
+
+`src/version.ts` states a hand-maintained `PROTOCOL_VERSION` and a `BUILD_ID`
+injected at build time from the commit. Both first frames carry them — the
+host's `init` and the joiner's `hello` — and a mismatch refuses the connection
+with prose the join screen shows.
+
+This is a precondition rather than hygiene: the project deploys on every push,
+so two peers on different bundles diverge for entirely innocent reasons. Turning
+that into a connection error with a stated cause is what stops it becoming a
+foul with a wronged party once divergence is grounds for naming a side.
+
+## 6. Combat Recording & Spectator Playback
+
+A recording *is* the wire command stream, written down — the same frames,
+verbatim. Nothing is invented for it and nothing is resolved in it: an attack in
+a file is an intent, and playback works out what it did from the match's seed.
+
+Which means running a file is the same exercise as receiving a match, and that
+is how the receiving side gets tested without two browsers and a signalling
+broker: `src/sim/Replay.ts` and `bun run replay <file>`.
 
 - **Format** (`src/game/Recording.ts`): `{ header, events[] }`, version
   `RECORDING_VERSION = 1`. The header carries `seed`, both squads'

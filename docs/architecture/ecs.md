@@ -3,7 +3,7 @@ title: "Entity Component System (ECS) Architecture"
 id: "ARCH-ECS"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-17"
+lastReviewed: "2026-09-18"
 appliesTo:
   - "src/ecs/**"
 relatedDocs:
@@ -87,7 +87,7 @@ Current values for every status and trait are in the generated
 Systems execute business logic across entities on each tick or action:
 
 - **`MovementSystem`**: Steps entities along A* waypoints, deducts AP per tile, updates stance animations.
-- **`CombatSystem`**: Processes shot declarations, evaluates cover/LOS, applies `WireHit` damage, shreds armor, triggers death.
+- **`CombatSystem`**: One door for every attack, whoever intended it. It evaluates cover and LOS, rolls from the match stream, resolves damage, shreds armour and kills. A peer's shot arrives as an *intent* and goes through the same call the acting side makes — there is no second path that applies numbers somebody else resolved.
 - **`ItemSystem`**: Command-driven, not ticked. Applies an item's ordered effect list to a target that defaults to the user; charges the turn's price and the pouch to the *user* whoever is being worked on. The only place that knows what an effect does.
 - **`TurnSystem`**: Manages round handovers, resets AP pools, decrements status durations.
 - **`WallSystem`**: Updates structural integrity and occlusion of destructible barricades.
