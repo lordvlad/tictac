@@ -1,20 +1,25 @@
-import { Peer, DataConnection } from 'peerjs'
 import { Faction, SQUAD_SIZE } from '../config'
 import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
 import type { GrenadeId, ShotMode, StatusKind } from '../core/Arsenal'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
+import type { RecordedEvent, RecordingHeader } from './Recording'
 import type { StateDigest } from './StateDigest'
 import { MY_VERSION, versionRefusal } from '../version'
 import {
   type JsonRpcFrame,
   type JsonRpcNotification,
   componentUpdateMethod,
-  isJsonRpcFrame,
   parseComponentUpdateMethod,
   RpcMethods,
 } from './JsonRpc'
 import type { Recorder } from './Recording'
+import {
+  hostDataChannel,
+  joinDataChannel,
+  type DataChannelHost,
+} from './DataChannelTransport'
+import type { Transport } from './Transport'
 
 export type NetworkMode = 'local' | 'host' | 'join'
 
@@ -45,6 +50,34 @@ export type NetworkMessage =
    * recorded, because a replay derives its state rather than checking it.
    */
   | { type: 'digest'; digest: StateDigest }
+  /**
+   * The opening position, stated to a referee.
+   *
+   * A referee refights the match from its intents, so it needs what the
+   * intents are *about*: the seed, both squads' people and both squads' kit.
+   * None of that is derivable from the stream — a loadout reaches a peer as
+   * replicated component state, which is state its owner is authoritative for
+   * rather than something anybody declared — so a refereed match declares it
+   * once, at the start.
+   */
+  | { type: 'matchHeader'; header: RecordingHeader }
+  /**
+   * A client that lost its tab, asking for the rest of the log.
+   *
+   * `afterSeq` is the last intent it is sure of; -1 means it has nothing and
+   * wants the match from the beginning.
+   */
+  | { type: 'resume'; matchId: string; afterSeq: number }
+  /** The log a resuming client replays to catch up. */
+  | { type: 'log'; matchId: string; header: RecordingHeader; events: RecordedEvent[] }
+  /**
+   * The match is over because it stopped being one match.
+   *
+   * Named side and stated reason, because "desynchronised" is not something a
+   * player can act on — and because a verdict nobody can read is indistinguishable
+   * from a crash.
+   */
+  | { type: 'abort'; reason: string; side: Faction | null }
   | { type: 'moveUnit'; faction: Faction; squadIndex: number; path: { x: number; y: number }[] }
   | {
       type: 'fireShot'
@@ -66,8 +99,10 @@ export type NetworkMessage =
   | { type: 'ready'; sheets: CharacterSheet[] }
 
 export class NetworkManager {
-  peer: Peer | null = null
-  conn: DataConnection | null = null
+  /** The channel this side plays over, once there is one. */
+  transport: Transport | null = null
+  /** A peer waiting to be joined, which outlives a channel that never came. */
+  private hosting: DataChannelHost | null = null
   mode: NetworkMode = 'local'
   myId: string = ''
   myFaction: Faction = Faction.Blue
@@ -93,6 +128,16 @@ export class NetworkManager {
   private readonly peerReady = Promise.withResolvers<CharacterSheet[]>()
 
   /**
+   * A joiner's wait for the frame that opens the match, while there is one.
+   *
+   * Held here rather than passed around because the gate that can refuse the
+   * match sits at the edge, and this promise has to learn its verdict: a
+   * mismatch is owed to the join screen as a failure to join, not as a match
+   * that silently never starts.
+   */
+  private opening: PromiseWithResolvers<{ seed: number; seedLabel: string }> | null = null
+
+  /**
    * Replicate component mutations for the entities this peer owns.
    *
    * Both peers run the same simulation, so without an owner each side would
@@ -113,18 +158,25 @@ export class NetworkManager {
     })
   }
 
-  private setupConn(conn: DataConnection): void {
-    this.conn = conn
-    conn.on('data', (data) => {
-      if (isJsonRpcFrame(data)) this.handleIncomingRpc(data)
-    })
-    conn.on('close', () => {
-      console.warn('[p2p] Connection closed by remote peer')
-      this.onDisconnected?.('Connection closed by remote peer')
-    })
-    conn.on('error', (err) => {
-      console.warn('[p2p] Connection error:', err)
-      this.onDisconnected?.(err.message || 'Connection error')
+  /**
+   * Play over `transport`: every channel arrives here.
+   *
+   * A data channel between two peers, a socket to a referee, or a linked pair
+   * in a test — nothing below this line knows which, because the version gate
+   * and the refusal latch are properties of this manager and not of the
+   * medium. That is what makes "a mismatched build cannot start a match" true
+   * on all three
+   * ([RFC-0001](../../docs/design/rfc/0001-referee-and-transports.md) §6).
+   */
+  attach(transport: Transport): void {
+    this.transport = transport
+    transport.onFrame((frame) => this.handleIncomingRpc(frame))
+    transport.onClosed((reason) => {
+      // A channel that dropped is not a peer that was turned away, so this
+      // does not go through `refuse`: a player told the build was refused
+      // would go looking for a version to fix.
+      this.opening?.reject(new Error(reason))
+      this.onDisconnected?.(reason)
     })
   }
 
@@ -141,10 +193,11 @@ export class NetworkManager {
     // enforcement in practice, but the decision is this side's and it is not
     // re-litigated per frame.
     this.refused = true
-    console.warn(`[p2p] Refusing the connection: ${reason}`)
+    console.warn(`[net] Refusing the connection: ${reason}`)
     this.onDisconnected?.(reason)
-    this.conn?.close()
-    this.conn = null
+    this.opening?.reject(new Error(reason))
+    this.transport?.close()
+    this.transport = null
   }
 
   private handleIncomingRpc(frame: JsonRpcFrame): void {
@@ -177,6 +230,12 @@ export class NetworkManager {
       // `hello` states a version and nothing else, so there is nothing left to
       // forward once it has been accepted.
       if (method === RpcMethods.hello) return
+      // Only now, past the gate: the seed is the first thing a match is built
+      // from, and a joiner is waiting on exactly this frame to have arrived
+      // from a build it can play against.
+      if (typeof params.seed === 'number' && typeof params.seedLabel === 'string') {
+        this.opening?.resolve({ seed: params.seed, seedLabel: params.seedLabel })
+      }
     }
 
     // Never forwarded as a command: `ready` can land before this side has left
@@ -191,7 +250,7 @@ export class NetworkManager {
 
     const msg = this.rpcToMessage(method, params)
     if (msg) {
-      console.info(`%c[P2P 📥 IN: ${msg.type}]`, 'color: #a855f7; font-weight: bold;', msg)
+      console.info(`%c[NET 📥 IN: ${msg.type}]`, 'color: #a855f7; font-weight: bold;', msg)
       this.onMessage?.(msg)
     }
   }
@@ -209,15 +268,36 @@ export class NetworkManager {
     return null
   }
 
-  private setupPeer(peer: Peer): void {
-    peer.on('error', (err) => {
-      console.warn('[p2p] Peer error:', err)
-      if (this.mode !== 'local') this.onDisconnected?.(err.message || 'Peer error')
-    })
-    peer.on('close', () => {
-      console.warn('[p2p] Peer closed')
-      if (this.mode !== 'local') this.onDisconnected?.('Peer closed')
-    })
+  /**
+   * Open the match this side is hosting, over whatever is attached.
+   *
+   * The host is Blue and Blue moves first, which is why the role comes with
+   * the announcement rather than with the channel: a socket to a referee and a
+   * data channel to a peer are the same match from here.
+   */
+  hostMatch(seed: number, seedLabel: string): void {
+    this.mode = 'host'
+    this.myFaction = Faction.Blue
+    this.send({ type: 'init', seed, seedLabel, ...MY_VERSION })
+  }
+
+  /**
+   * Take the joining side over whatever is attached, and wait for the match.
+   *
+   * Resolves with the seed the opening frame carried, and rejects on anything
+   * that makes a match impossible: a build this side will not play against, or
+   * a channel that died before the opening frame ever came. The second is the
+   * ordinary way an unreachable referee shows up, since an intent stream has
+   * no acknowledgements to time out against.
+   */
+  joinMatch(): Promise<{ seed: number; seedLabel: string }> {
+    this.mode = 'join'
+    this.myFaction = Faction.Red
+    this.opening = Promise.withResolvers()
+    // Sent past the recorder rather than through `send`: a version is a fact
+    // about this bundle, not an intent the match can replay.
+    this.sendRpc(this.messageToRpc({ type: 'hello', ...MY_VERSION }))
+    return this.opening.promise
   }
 
   isMyTurn(activeFaction: Faction): boolean {
@@ -225,78 +305,46 @@ export class NetworkManager {
     return activeFaction === this.myFaction
   }
 
+  /**
+   * Host a peer-to-peer match: returns the id to hand the other player, and
+   * opens the match once somebody joins with it.
+   */
   async initHost(seed: number, seedLabel: string): Promise<string> {
-    this.mode = 'host'
-    this.myFaction = Faction.Blue
-    this.peer = new Peer()
-    this.setupPeer(this.peer)
+    const hosting = await hostDataChannel()
+    this.hosting = hosting
+    this.myId = hosting.id
 
-    const { promise, resolve } = Promise.withResolvers<string>()
-
-    this.peer.on('open', (id) => {
-      this.myId = id
-      resolve(id)
-    })
-
-    this.peer.on('connection', (conn) => {
-      this.setupConn(conn)
-      conn.on('open', () => {
+    void hosting.joined.then(
+      (transport) => {
         console.info('[p2p] Client connected, sending init seed')
-        this.send({ type: 'init', seed, seedLabel, ...MY_VERSION })
+        this.attach(transport)
+        this.hostMatch(seed, seedLabel)
         this.onConnected?.()
-      })
-    })
+      },
+      (err: Error) => {
+        // Nothing is attached yet, so there is no channel whose close could
+        // report this: the menu waiting for a joiner is all there is to tell.
+        console.warn(`[p2p] Hosting failed: ${err.message}`)
+        this.onDisconnected?.(err.message)
+      },
+    )
 
-    return promise
+    return hosting.id
   }
 
+  /** Join a peer-to-peer match by the host's broker id. */
   async initJoin(hostId: string): Promise<{ seed: number; seedLabel: string }> {
-    this.mode = 'join'
-    this.myFaction = Faction.Red
-    this.peer = new Peer()
-    this.setupPeer(this.peer)
-
-    const { promise, resolve, reject } = Promise.withResolvers<{
-      seed: number
-      seedLabel: string
-    }>()
-
-    this.peer.on('open', (id) => {
-      this.myId = id
-      const conn = this.peer!.connect(hostId)
-      this.setupConn(conn)
-
-      conn.on('open', () => {
-        console.info('[p2p] Connected to host')
-        // Sent past the recorder rather than through `send`: a version is a
-        // fact about this bundle, not an intent the match can replay.
-        this.sendRpc(this.messageToRpc({ type: 'hello', ...MY_VERSION }))
-        this.onConnected?.()
-      })
-
-      conn.on('data', (data) => {
-        if (!isJsonRpcFrame(data) || !('method' in data)) return
-        if (data.method !== RpcMethods.init) return
-        const params = (data as JsonRpcNotification).params as Record<string, unknown>
-        // Refused here as well as in `handleIncomingRpc`, because this is the
-        // promise the join screen is waiting on: a mismatch has to surface as a
-        // failure to join and not as a match that silently never starts.
-        const refusal = versionRefusal(params)
-        if (refusal) {
-          reject(new Error(refusal))
-          return
-        }
-        if (typeof params.seed === 'number' && typeof params.seedLabel === 'string') {
-          resolve({ seed: params.seed, seedLabel: params.seedLabel })
-        }
-      })
-    })
-
-    return promise
+    const transport = await joinDataChannel(hostId)
+    this.myId = transport.localId
+    console.info('[p2p] Connected to host')
+    this.attach(transport)
+    const opening = this.joinMatch()
+    this.onConnected?.()
+    return opening
   }
 
   sendRpc(frame: JsonRpcFrame): void {
-    if (this.conn?.open) this.conn.send(frame)
+    this.transport?.send(frame)
   }
 
   send(msg: NetworkMessage): void {
@@ -304,7 +352,7 @@ export class NetworkManager {
     // and in local play nothing is transmitted but everything still happened.
     this.recorder?.record(msg)
     if (this.mode === 'local') return
-    console.info(`%c[P2P 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
+    console.info(`%c[NET 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
     this.sendRpc(this.messageToRpc(msg))
   }
 
@@ -325,7 +373,8 @@ export class NetworkManager {
   }
 
   dispose(): void {
-    this.conn?.close()
-    this.peer?.destroy()
+    this.transport?.close()
+    // The broker peer too, which is still waiting when nobody ever joined.
+    this.hosting?.close()
   }
 }

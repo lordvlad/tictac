@@ -1,53 +1,35 @@
 import { describe, expect, test } from 'bun:test'
 import { BUILD_ID, MY_VERSION, PROTOCOL_VERSION, versionRefusal } from '../src/version'
 import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
-import { RpcMethods } from '../src/game/JsonRpc'
+import { RpcMethods, type JsonRpcFrame } from '../src/game/JsonRpc'
+import { loopback } from '../src/game/Transport'
 
-/** A manager wired to a fake channel, capturing what it would transmit. */
+/** A manager with nothing attached yet, watching what it decides. */
 function harness(mode: 'host' | 'join' = 'host') {
   const net = new NetworkManager()
   net.mode = mode
-  const sent: unknown[] = []
-  net.sendRpc = (frame) => {
-    sent.push(frame)
-  }
   const refusals: string[] = []
   net.onDisconnected = (reason) => refusals.push(reason ?? 'no reason given')
   const received: NetworkMessage[] = []
   net.onMessage = (msg) => received.push(msg)
-  return { net, sent, refusals, received }
+  return { net, refusals, received }
 }
 
 /**
- * Attach one fake channel and return a way to push frames down it.
+ * Attach one channel and return a way to push frames down it.
  *
  * One channel per link, deliberately: a helper that re-attaches per frame
  * cannot tell "this side stopped listening" from "this side got a fresh
  * connection", and that difference is the subject of a test below.
  */
-function link(net: NetworkManager): (frame: unknown) => void {
-  let onData: ((data: unknown) => void) | undefined
-  let closed = false
-  const conn = {
-    open: true,
-    close: () => {
-      closed = true
-    },
-    on: (event: string, cb: (data: unknown) => void) => {
-      if (event === 'data') onData = cb
-    },
-  }
-  ;(net as unknown as { setupConn: (c: typeof conn) => void }).setupConn(conn)
-  return (frame) => {
-    // A real channel delivers nothing after it is closed; the point of the
-    // test is what this side does if one somehow does.
-    void closed
-    onData?.(frame)
-  }
+function link(net: NetworkManager): (frame: JsonRpcFrame) => void {
+  const [ours, theirs] = loopback()
+  net.attach(ours)
+  return (frame) => theirs.send(frame)
 }
 
-/** Feed a single frame in as though it arrived on the data channel. */
-function receive(net: NetworkManager, frame: unknown): void {
+/** Feed a single frame in as though it arrived on a channel of its own. */
+function receive(net: NetworkManager, frame: JsonRpcFrame): void {
   link(net)(frame)
 }
 
@@ -137,16 +119,18 @@ describe('The gate on the wire', () => {
     expect(received).toEqual([])
   })
 
-  test('a refused peer does not get a second chance on the same channel', () => {
+  test('a refused peer does not get a second chance, on that channel or a new one', () => {
     // There is no partial compatibility to negotiate, so the decision latches:
     // a peer turned away cannot follow up with an acceptable frame and be
     // heard. Closing the channel is what stops this in practice; the latch is
-    // what stops it mattering whether the close was honoured.
+    // what stops it mattering whether the close was honoured — or whether the
+    // peer came back on a channel of its own.
     const { net, received, refusals } = harness('join')
     const send = link(net)
 
     send(init({ protocol: PROTOCOL_VERSION + 5 }))
     send(init())
+    link(net)(init())
 
     expect(refusals).toHaveLength(1)
     expect(received).toEqual([])
@@ -160,32 +144,17 @@ describe('The gate on the wire', () => {
  * This is the handshake end to end, minus WebRTC — which is the part neither a
  * test nor a browser on this machine can exercise, and the part least likely to
  * be where a version check goes wrong.
+ *
+ * The hand-built fake connection this used to need is gone: it was a loopback
+ * transport written inline and not called one, which is the argument the port
+ * was eventually built on. Both sides attach before either speaks, because
+ * that is what an open channel means — neither `hello` nor `init` can be first
+ * past a channel only one end is listening to.
  */
 function couple(a: NetworkManager, b: NetworkManager): void {
-  // A fake *connection*, not a fake `sendRpc`: stubbing the send method would
-  // step over the check that a closed channel transmits nothing, which is
-  // half of what refusing a peer does.
-  const channel = (deliver: () => ((frame: unknown) => void) | undefined) => {
-    let inbound: ((data: unknown) => void) | undefined
-    const conn = {
-      open: true,
-      send: (frame: unknown) => deliver()?.(frame),
-      close: () => {
-        conn.open = false
-      },
-      on: (event: string, cb: (data: unknown) => void) => {
-        if (event === 'data') inbound = cb
-      },
-    }
-    return { conn, feed: (frame: unknown) => inbound?.(frame) }
-  }
-
-  // Each side's outbound frames become the other's inbound. The closures are
-  // lazy so the two halves can name each other.
-  const sideA = channel(() => (frame) => sideB.feed(frame))
-  const sideB = channel(() => (frame) => sideA.feed(frame))
-  ;(a as unknown as { setupConn: (c: unknown) => void }).setupConn(sideA.conn)
-  ;(b as unknown as { setupConn: (c: unknown) => void }).setupConn(sideB.conn)
+  const [left, right] = loopback()
+  a.attach(left)
+  b.attach(right)
 }
 
 describe('A whole handshake between two managers', () => {

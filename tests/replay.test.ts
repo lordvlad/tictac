@@ -109,7 +109,12 @@ describe('Running a recorded match with nobody watching', () => {
     const original = replay(recording)
     const altered = replay(swapped)
 
-    expect(altered.applied).toBe(altered.events)
-    expect(altered.digest.total).not.toBe(original.digest.total)
+    // Either outcome is acceptable and both are honest: an aimed shot costs
+    // more than a snap one, so the doctored intent is either refused by the
+    // rules or carried out and resolves differently. What must not happen is
+    // the file being changed and the match coming out the same.
+    const sameMatch =
+      altered.skipped.length === 0 && altered.digest.total === original.digest.total
+    expect(sameMatch).toBe(false)
   })
 })

@@ -22,9 +22,9 @@ import type { NetworkMessage } from './NetworkManager'
  * `generateMap`, so storing it would only create a second truth to disagree
  * with.
  *
- * Deliberately free of `peerjs`, the DOM and `three` — the type imports from
- * {@link NetworkManager} are erased at build — so a headless simulation can
- * record without dragging a transport or a scene behind it.
+ * Deliberately free of any transport, the DOM and `three` — the type imports
+ * from {@link NetworkManager} are erased at build — so a headless simulation
+ * can record without dragging a channel or a scene behind it.
  */
 export const RECORDING_VERSION = 1
 
@@ -75,7 +75,13 @@ export type RecordingClock = () => { turn: number; faction: Faction }
  */
 const SESSION_COMMANDS: Partial<Record<NetworkMessage['type'], true>> = {
   init: true,
+  hello: true,
   ready: true,
+  digest: true,
+  matchHeader: true,
+  resume: true,
+  log: true,
+  abort: true,
 }
 
 export class Recorder {

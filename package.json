@@ -17,7 +17,8 @@
     "build:character": "bun scripts/build-character.mjs",
     "build:icons": "bun scripts/build-icons.mjs",
     "icons": "bun run build:icons",
-    "replay": "bun scripts/replay.ts"
+    "replay": "bun scripts/replay.ts",
+    "serve:match": "bun scripts/serve-match.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.18.2",

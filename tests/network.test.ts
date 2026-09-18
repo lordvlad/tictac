@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
+import { NetworkManager, type NetworkMessage, type NetworkMode } from '../src/game/NetworkManager'
 import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { CHARACTER, Faction, RULES, SQUAD_SIZE } from '../src/config'
@@ -8,35 +8,35 @@ import { derive, rollSquadSheets } from '../src/core/Characters'
 import { TraitId } from '../src/core/Traits'
 import { Rng } from '../src/core/rng'
 import { HealthComponent, MatchRulesComponent } from '../src/ecs/components'
+import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
+import { loopback } from '../src/game/Transport'
+import { SocketTransport } from '../src/game/SocketTransport'
 import {
   componentUpdateMethod,
   isJsonRpcFrame,
+  type JsonRpcFrame,
   type JsonRpcNotification,
   parseComponentUpdateMethod,
   RpcMethods,
 } from '../src/game/JsonRpc'
 
-/** A manager wired to a fake channel, capturing everything it would transmit. */
-function harness(mode: 'host' | 'join' = 'host') {
+/**
+ * A manager on one end of a linked pair: everything it puts on the wire, and a
+ * way to push frames back down as the other side would.
+ *
+ * The far end rather than a stubbed `sendRpc`: what a peer transmits is what
+ * arrives at the other end of a transport, and stubbing the send method steps
+ * over the channel that carries it — including the fact that a closed one
+ * carries nothing.
+ */
+function peered(mode: NetworkMode = 'host') {
   const net = new NetworkManager()
   net.mode = mode
+  const [ours, theirs] = loopback()
+  net.attach(ours)
   const sent: JsonRpcNotification[] = []
-  net.sendRpc = (frame) => {
-    sent.push(frame as JsonRpcNotification)
-  }
-  return { net, sent }
-}
-
-/** Feed a frame in as though it arrived on the data channel. */
-function receive(net: NetworkManager, frame: unknown): void {
-  let onData: ((data: unknown) => void) | undefined
-  const conn = {
-    on: (event: string, cb: (data: unknown) => void) => {
-      if (event === 'data') onData = cb
-    },
-  }
-  ;(net as unknown as { setupConn: (c: typeof conn) => void }).setupConn(conn)
-  onData?.(frame)
+  theirs.onFrame((frame) => sent.push(frame as JsonRpcNotification))
+  return { net, sent, peer: theirs, send: (frame: JsonRpcFrame) => theirs.send(frame) }
 }
 
 describe('JSON-RPC framing', () => {
@@ -63,6 +63,10 @@ describe('JSON-RPC framing', () => {
       'init',
       'hello',
       'digest',
+      'matchHeader',
+      'resume',
+      'log',
+      'abort',
       'moveUnit',
       'fireShot',
       'throwGrenade',
@@ -81,7 +85,7 @@ describe('JSON-RPC framing', () => {
 
 describe('Command transport', () => {
   test('a command survives the round trip unchanged', () => {
-    const { net, sent } = harness()
+    const { net, sent } = peered()
     const original: NetworkMessage = {
       type: 'fireShot',
       shooterFaction: Faction.Blue,
@@ -94,22 +98,20 @@ describe('Command transport', () => {
     net.send(original)
     expect(sent[0]?.method).toBe(RpcMethods.fireShot)
 
-    const receiver = new NetworkManager()
-    receiver.mode = 'join'
+    const receiver = peered('join')
     // Collected rather than assigned: a single `let` narrows to `null` here,
     // which silently picks the `toEqual(null)` overload and asserts nothing.
     const received: NetworkMessage[] = []
-    receiver.onMessage = (msg) => {
+    receiver.net.onMessage = (msg) => {
       received.push(msg)
     }
-    receive(receiver, sent[0])
+    receiver.send(sent[0]!)
 
     expect(received[0]).toEqual(original)
   })
 
   test('local play transmits nothing', () => {
-    const { net, sent } = harness()
-    net.mode = 'local'
+    const { net, sent } = peered('local')
 
     net.send({ type: 'endTurn', faction: Faction.Blue })
 
@@ -117,19 +119,19 @@ describe('Command transport', () => {
   })
 
   test('an unknown method is ignored rather than dispatched', () => {
-    const net = new NetworkManager()
+    const { net, send } = peered()
     let received: NetworkMessage | null = null
     net.onMessage = (msg) => {
       received = msg
     }
 
-    receive(net, { jsonrpc: '2.0', method: 'tictac/system/nope', params: {} })
+    send({ jsonrpc: '2.0', method: 'tictac/system/nope', params: {} })
 
     expect(received).toBeNull()
   })
 
   test("a grenade's intent survives the round trip", () => {
-    const { net, sent } = harness()
+    const { net, sent } = peered()
     const original: NetworkMessage = {
       type: 'throwGrenade',
       shooterFaction: Faction.Red,
@@ -141,24 +143,22 @@ describe('Command transport', () => {
     net.send(original)
     expect(sent[0]?.method).toBe(RpcMethods.throwGrenade)
 
-    const receiver = new NetworkManager()
-    receiver.mode = 'join'
+    const receiver = peered('join')
     const received: NetworkMessage[] = []
-    receiver.onMessage = (msg) => {
+    receiver.net.onMessage = (msg) => {
       received.push(msg)
     }
-    receive(receiver, sent[0])
+    receiver.send(sent[0]!)
 
     expect(received[0]).toEqual(original)
   })
 
   test('a ready frame is recorded even before a match is listening', async () => {
-    const net = new NetworkManager()
-    net.mode = 'join'
+    const { net, send } = peered('join')
     const received: NetworkMessage[] = []
 
     // No `onMessage` yet: this side is still on its own loadout screen.
-    receive(net, { jsonrpc: '2.0', method: RpcMethods.ready, params: {} })
+    send({ jsonrpc: '2.0', method: RpcMethods.ready, params: {} })
     net.onMessage = (msg) => {
       received.push(msg)
     }
@@ -178,7 +178,7 @@ describe('Component replication', () => {
   const ownAll = () => true
 
   test('a component mutation is transmitted without being announced', () => {
-    const { net, sent } = harness()
+    const { net, sent } = peered()
     const world = new World()
     net.bindWorld(world, ownAll)
 
@@ -199,7 +199,7 @@ describe('Component replication', () => {
   })
 
   test('a global rules edit rides the same channel as unit state', () => {
-    const { net, sent } = harness()
+    const { net, sent } = peered()
     const world = new World()
     createGlobalRules(world)
     net.bindWorld(world, ownAll)
@@ -219,8 +219,7 @@ describe('Component replication', () => {
   })
 
   test('local play replicates nothing', () => {
-    const { net, sent } = harness()
-    net.mode = 'local'
+    const { net, sent } = peered('local')
     const world = new World()
     net.bindWorld(world, ownAll)
 
@@ -231,7 +230,7 @@ describe('Component replication', () => {
   })
 
   test('state for an entity this peer does not own is never transmitted', () => {
-    const { net, sent } = harness()
+    const { net, sent } = peered()
     const world = new World()
     const mine = world.createEntity()
     const theirs = world.createEntity()
@@ -249,13 +248,13 @@ describe('Component replication', () => {
   })
 
   test('a peer may not rewrite state this side is authoritative for', () => {
-    const { net } = harness()
+    const { net, send } = peered()
     const world = new World()
     const mine = world.createEntity()
     net.bindWorld(world, (entityId) => entityId === mine)
     world.addComponent(mine, new HealthComponent(100, 100))
 
-    receive(net, {
+    send({
       jsonrpc: '2.0',
       method: componentUpdateMethod('health'),
       params: { entityId: mine, hp: 1, maxHp: 100 },
@@ -265,7 +264,7 @@ describe('Component replication', () => {
   })
 
   test('an inbound component update lands in the world and is not echoed', () => {
-    const { net, sent } = harness('join')
+    const { net, sent, send } = peered('join')
     const world = new World()
     const theirs = world.createEntity()
     net.bindWorld(world, () => false)
@@ -277,7 +276,7 @@ describe('Component replication', () => {
       notified = true
     }
 
-    receive(net, {
+    send({
       jsonrpc: '2.0',
       method: componentUpdateMethod('health'),
       params: { entityId: theirs, hp: 30, maxHp: 100 },
@@ -290,7 +289,7 @@ describe('Component replication', () => {
   })
 
   test('an update for an unknown entity is dropped quietly', () => {
-    const { net } = harness('join')
+    const { net, send } = peered('join')
     const world = new World()
     net.bindWorld(world, () => false)
 
@@ -299,7 +298,7 @@ describe('Component replication', () => {
       notified = true
     }
 
-    receive(net, {
+    send({
       jsonrpc: '2.0',
       method: componentUpdateMethod('health'),
       params: { entityId: 999, hp: 30, maxHp: 100 },
@@ -311,47 +310,44 @@ describe('Component replication', () => {
 
 describe('The start handshake carries each peer its own squad', () => {
   test('a squad sent with `ready` arrives as the sheets that were rolled', async () => {
-    const { net, sent } = harness()
+    const { net, sent } = peered()
     const mine = rollSquadSheets(new Rng(7))
     net.send({ type: 'ready', sheets: mine })
 
     expect(sent[0]?.method).toBe(RpcMethods.ready)
 
-    const receiver = new NetworkManager()
-    receiver.mode = 'join'
-    receive(receiver, sent[0])
+    const receiver = peered('join')
+    receiver.send(sent[0]!)
 
     // Locally rolled sheets are already inside the envelope, so sanitising at
     // the edge must leave them untouched — the barrier is for hostile input,
     // not a filter every honest squad has to survive.
-    expect(await receiver.waitForPeerReady()).toEqual(mine)
+    expect(await receiver.net.waitForPeerReady()).toEqual(mine)
   })
 
   test('`ready` is never delivered as a command', async () => {
     // It can land while the peer is still on its loadout screen, where there
     // is no `onMessage` to receive it: the barrier has to resolve regardless.
-    const receiver = new NetworkManager()
-    receiver.mode = 'join'
+    const { net, send } = peered('join')
     const commands: NetworkMessage[] = []
-    receiver.onMessage = (msg) => {
+    net.onMessage = (msg) => {
       commands.push(msg)
     }
 
-    receive(receiver, {
+    send({
       jsonrpc: '2.0',
       method: RpcMethods.ready,
       params: { sheets: rollSquadSheets(new Rng(11)) },
     })
 
-    expect(await receiver.waitForPeerReady()).toHaveLength(SQUAD_SIZE)
+    expect(await net.waitForPeerReady()).toHaveLength(SQUAD_SIZE)
     expect(commands).toEqual([])
   })
 
   test('a squad of nonsense is taken apart before it can be played against', async () => {
-    const receiver = new NetworkManager()
-    receiver.mode = 'join'
+    const { net, send } = peered('join')
 
-    receive(receiver, {
+    send({
       jsonrpc: '2.0',
       method: RpcMethods.ready,
       params: {
@@ -368,7 +364,7 @@ describe('The start handshake carries each peer its own squad', () => {
       },
     })
 
-    const peer = await receiver.waitForPeerReady()
+    const peer = await net.waitForPeerReady()
     expect(peer).not.toBeNull()
     const first = peer![0]!
     expect(first.attributes.health).toBe(CHARACTER.attribute.max)
@@ -387,16 +383,224 @@ describe('The start handshake carries each peer its own squad', () => {
     // A peer that sends `ready` with nothing in it must not hang the match
     // behind a promise that never resolves; the units keep the sheets this side
     // rolled for them.
-    const receiver = new NetworkManager()
-    receiver.mode = 'join'
-    receive(receiver, { jsonrpc: '2.0', method: RpcMethods.ready, params: {} })
+    const { net, send } = peered('join')
+    send({ jsonrpc: '2.0', method: RpcMethods.ready, params: {} })
 
-    expect(await receiver.waitForPeerReady()).toEqual([])
+    expect(await net.waitForPeerReady()).toEqual([])
   })
 
   test('local play has no peer to wait for', async () => {
     const net = new NetworkManager()
     net.mode = 'local'
     expect(await net.waitForPeerReady()).toBeNull()
+  })
+})
+
+describe('A match over a linked pair, with no broker', () => {
+  test('two managers exchange a handshake, a squad and a command', async () => {
+    const [ours, theirs] = loopback()
+    const host = new NetworkManager()
+    const joiner = new NetworkManager()
+    // Both attached before either speaks, which is what an open channel means:
+    // each side's `open` fires before the other has said anything.
+    host.attach(ours)
+    joiner.attach(theirs)
+
+    const seen: NetworkMessage[] = []
+    joiner.onMessage = (msg) => seen.push(msg)
+    const refusals: string[] = []
+    host.onDisconnected = (reason) => refusals.push(reason ?? '')
+    joiner.onDisconnected = (reason) => refusals.push(reason ?? '')
+
+    const opening = joiner.joinMatch()
+    host.hostMatch(42, 'forty-two')
+    expect(await opening).toEqual({ seed: 42, seedLabel: 'forty-two' })
+    // The roles come with the handshake, not with the channel: Blue moves
+    // first and the host is Blue.
+    expect([host.mode, host.myFaction]).toEqual(['host', Faction.Blue])
+    expect([joiner.mode, joiner.myFaction]).toEqual(['join', Faction.Red])
+
+    const squad = rollSquadSheets(new Rng(3))
+    host.send({ type: 'ready', sheets: squad })
+    expect(await joiner.waitForPeerReady()).toEqual(squad)
+
+    host.send({ type: 'endTurn', faction: Faction.Blue })
+
+    expect(seen.map((m) => m.type)).toEqual(['init', 'endTurn'])
+    expect(refusals).toEqual([])
+  })
+
+  test('a channel that goes away is reported once, and carries nothing after', () => {
+    const { net, sent, peer } = peered('join')
+    const reasons: string[] = []
+    net.onDisconnected = (reason) => reasons.push(reason ?? '')
+
+    peer.close()
+    net.send({ type: 'endTurn', faction: Faction.Red })
+
+    expect(reasons).toHaveLength(1)
+    expect(sent).toEqual([])
+  })
+})
+
+/**
+ * A socket server standing in for a referee.
+ *
+ * A real `Bun.serve`, not a fake socket: the codec, the queue in front of a
+ * socket that has not opened yet and a close that carries a reason are only
+ * worth asserting against something that genuinely needs a string and
+ * genuinely takes a moment to connect.
+ */
+function refereeSocket(onOpen: (client: SocketClient) => void) {
+  const heard: string[] = []
+  const waiting: (() => void)[] = []
+  const server = Bun.serve({
+    port: 0,
+    fetch: (request, self) =>
+      self.upgrade(request) ? undefined : new Response('expected a websocket', { status: 400 }),
+    websocket: {
+      open: (ws) =>
+        onOpen({
+          send: (frame) => ws.send(JSON.stringify(frame)),
+          sendRaw: (text) => ws.send(text),
+          sendBytes: (bytes) => ws.send(bytes),
+          close: (code, reason) => ws.close(code, reason),
+        }),
+      message(_ws, message) {
+        // Kept as the exact text, never parsed here: one codec means a frame is
+        // the same bytes on every transport, and that is only observable from
+        // the far end of a real socket.
+        heard.push(typeof message === 'string' ? message : '<not text>')
+        for (const resume of waiting.splice(0)) resume()
+      },
+    },
+  })
+  return {
+    heard,
+    url: `ws://localhost:${server.port}`,
+    /** Resolves on the next frame this server is told. */
+    nextHeard: () => new Promise<void>((resolve) => waiting.push(resolve)),
+    stop: () => server.stop(true),
+  }
+}
+
+interface SocketClient {
+  send(frame: JsonRpcFrame): void
+  sendRaw(text: string): void
+  sendBytes(bytes: Uint8Array): void
+  close(code: number, reason: string): void
+}
+
+const openingFrame = (over: Record<string, unknown> = {}): JsonRpcFrame => ({
+  jsonrpc: '2.0',
+  method: RpcMethods.init,
+  params: { seed: 21, seedLabel: '21', ...MY_VERSION, ...over },
+})
+
+describe('A match over a socket, as a referee would host one', () => {
+  test('the handshake crosses as JSON text, including what was written before the socket opened', async () => {
+    const server = refereeSocket((client) => client.send(openingFrame()))
+    const net = new NetworkManager()
+    try {
+      const hello = server.nextHeard()
+      net.attach(new SocketTransport(new WebSocket(server.url)))
+      // `hello` goes out while the socket is still connecting: queued, because
+      // a dropped opening word is a handshake that never completes.
+      const opening = net.joinMatch()
+
+      expect(await opening).toEqual({ seed: 21, seedLabel: '21' })
+      await hello
+      expect(server.heard).toEqual([
+        JSON.stringify({ jsonrpc: '2.0', method: RpcMethods.hello, params: { ...MY_VERSION } }),
+      ])
+    } finally {
+      net.dispose()
+      server.stop()
+    }
+  })
+
+  test('a mismatched build is refused over a socket exactly as over a data channel', async () => {
+    const server = refereeSocket((client) => client.send(openingFrame({ build: 'c0ffee1' })))
+    const net = new NetworkManager()
+    const refused = Promise.withResolvers<string>()
+    net.onDisconnected = (reason) => refused.resolve(reason ?? '')
+    const seen: NetworkMessage[] = []
+    net.onMessage = (msg) => seen.push(msg)
+    try {
+      net.attach(new SocketTransport(new WebSocket(server.url)))
+
+      // The seed rode in that same frame and is not taken: a peer on another
+      // build is not a peer whose numbers mean anything here.
+      await expect(net.joinMatch()).rejects.toThrow('c0ffee1')
+      expect(seen).toEqual([])
+
+      // And the same frame over a linked pair, which is what "exactly as"
+      // means: the gate belongs to the manager, so the medium does not get a
+      // say in the verdict or in how it is worded for the player.
+      const linked = peered('join')
+      const overLinked: string[] = []
+      linked.net.onDisconnected = (reason) => overLinked.push(reason ?? '')
+      linked.send(openingFrame({ build: 'c0ffee1' }))
+      expect(await refused.promise).toBe(overLinked[0]!)
+    } finally {
+      net.dispose()
+      server.stop()
+    }
+  })
+
+  test('a protocol this build cannot parse is refused too', async () => {
+    const server = refereeSocket((client) =>
+      client.send(openingFrame({ protocol: PROTOCOL_VERSION + 1 })),
+    )
+    const net = new NetworkManager()
+    try {
+      net.attach(new SocketTransport(new WebSocket(server.url)))
+      await expect(net.joinMatch()).rejects.toThrow('Protocol')
+    } finally {
+      net.dispose()
+      server.stop()
+    }
+  })
+
+  test('junk on the socket is dropped and the match still opens', async () => {
+    const server = refereeSocket((client) => {
+      client.sendRaw('half a frame {')
+      client.sendRaw(JSON.stringify({ not: 'a frame' }))
+      client.sendBytes(new Uint8Array([1, 2, 3]))
+      client.send(openingFrame())
+    })
+    const net = new NetworkManager()
+    try {
+      net.attach(new SocketTransport(new WebSocket(server.url)))
+
+      expect(await net.joinMatch()).toEqual({ seed: 21, seedLabel: '21' })
+    } finally {
+      net.dispose()
+      server.stop()
+    }
+  })
+
+  test('a socket that closes mid-match reports the reason it was given', async () => {
+    const clients: SocketClient[] = []
+    const server = refereeSocket((client) => {
+      clients.push(client)
+      client.send(openingFrame())
+    })
+    const net = new NetworkManager()
+    const dropped = Promise.withResolvers<string>()
+    net.onDisconnected = (reason) => dropped.resolve(reason ?? '')
+    try {
+      net.attach(new SocketTransport(new WebSocket(server.url)))
+      await net.joinMatch()
+
+      clients[0]!.close(4001, 'the referee stopped')
+
+      // The stated reason, not a code: a player told "disconnected" cannot act
+      // on it, and an abort names a side and a cause.
+      expect(await dropped.promise).toBe('the referee stopped')
+    } finally {
+      net.dispose()
+      server.stop()
+    }
   })
 })

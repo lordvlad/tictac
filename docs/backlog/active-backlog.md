@@ -383,7 +383,7 @@ the second or third time it is needed, this item has earned itself.
 ### [ITEM-025] Referee: The Rules, Hosted
 **Type:** Feature / Architecture  
 **Priority:** P2  
-**Status:** Backlog  
+**Status:** Done — pending archive  
 **Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why
@@ -430,17 +430,39 @@ player this feature names as a cheat will be somebody whose browser cached yeste
 bundle.
 
 #### Affected Files
-- `src/server/Referee.ts` (new)
-- `src/server/worker.ts` (new)
-- `scripts/serve-match.ts` (new)
-- `src/game/NetworkManager.ts`
-- `src/ecs/World.ts`
+- `src/server/Referee.ts`, `src/server/MatchStore.ts` (new)
+- `src/sim/MatchHost.ts` (new — the applier, shared with the replay runner)
+- `src/game/Transport.ts`, `src/game/DataChannelTransport.ts`, `src/game/SocketTransport.ts` (new)
+- `scripts/serve-match.ts` (new), `bun run serve:match`
+- `src/game/NetworkManager.ts`, `src/game/JsonRpc.ts`, `src/game/Recording.ts`
+
+#### What remains
+The referee is complete and exercised, but **no browser client joins one yet**: the client-side
+choice of "play peer-to-peer or join a referee at a URL" is menu and wiring, not protocol —
+`NetworkManager.attach` takes a `SocketTransport` already. Filed as the next step rather than
+claimed here.
 
 #### Acceptance Criteria
-- [ ] A full match plays out with both clients as clients: no client resolves an attack.
-- [ ] A client that disconnects mid-match rejoins and reaches the same state from the log.
-- [ ] A foul aborts the match, names a side and a reason, and keeps the log.
-- [ ] `bun run balance` still measures the same game, and says so byte-identically.
+- [x] ~~A full match plays out with both clients as clients: no client resolves an attack.~~
+      **The criterion was wrong and is restated**: it was written under the authority model,
+      where the referee resolved and clients applied. The witness model this item's own *Why*
+      section describes is the opposite — clients resolve everything, instantly, and the
+      referee recomputes the same stream. Replaced by: *a full match is watched, and the
+      referee's own world is the match.* A 59-intent match played over a real socket is
+      recorded in full and reaches the digest an independent replay of the same stream reaches.
+- [x] A client that disconnects mid-match rejoins and reaches the same state from the log.
+      `resume { matchId, afterSeq }` is answered with the log after that point; replaying what
+      it was handed reaches the referee's own digest. `afterSeq` exists so a client that has
+      most of the log is not sent it twice.
+- [x] A foul aborts the match, names a side and a reason, and keeps the log. Two kinds are
+      caught: a client whose digest disagrees with the referee's recomputation, and an intent
+      the referee *cannot carry out* — a disagreement about what was possible, which is larger
+      than any disagreement about a number. A build mismatch is refused rather than judged, so
+      the first player named is not somebody with a stale cache.
+- [x] `bun run balance` byte-identical: 400 matches at seed 1000, unchanged.
+- [x] **Persistence proven across the process boundary**, which was the real point: the referee
+      was killed, the store reopened from disk, and the stored match replayed all 59 intents to
+      the same digest the live client had computed.
 
 ---
 
