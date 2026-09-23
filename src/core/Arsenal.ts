@@ -196,12 +196,14 @@ export class Shotgun extends Weapon {
     // Nine lines, each wide. Point blank most of them land and the shell is
     // the hardest-hitting round in the game; across a room a few do; at the
     // end of its range one might. Its damage falls with distance because its
-    // pellets do, not because of a rule saying so. Tuned to out-damage a rifle
-    // about twofold inside a room and to draw level with it at about 6 m.
+    // pellets do, not because of a rule saying so. Twice a rifle's expected
+    // damage inside a room, level with it at about 7 m. Pellets at 14, not 12:
+    // at 12 four shotguns won 13% against a mixed squad; at 16 they started
+    // taking their fights out to 7.5 m and the mirror tilted.
     this.sway = 0
     this.spread = 0.05
     this.pellets = 9
-    this.damage = 12
+    this.damage = 14
     // Barely penetrates — but armour is taken off the *round*, not each
     // pellet, so it is impact rather than punch-through.
     this.armorPen = 0.05

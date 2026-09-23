@@ -64,8 +64,8 @@ the round does. Multiplication and division only, so both peers compute the same
   zeroing it.
 - **Consequence, not rule**: a shotgun's damage falls with distance because fewer pellets
   land. Calibrated so it out-damages a rifle about twofold inside a room and draws level at
-  about 6 m. The rifle, gatling and sniper were fitted to the additive model this replaced,
-  within a few points at 4–20 m.
+  about 7 m (9 pellets × 14). The rifle, gatling and sniper were fitted to the additive model
+  this replaced, within a few points at 4–20 m.
 - **What a player sees** is the round's chance and its damage when it lands (for a shell, with
   the pellets expected at that distance), plus AP and rounds. `expectedRoundDamage` is the same
   estimate for the AI. Spread, pellets and crit are on the loadout screen and in the

@@ -141,7 +141,7 @@ subtracted once per round, not per projectile.
 | Weapon | AP | Damage | Pellets | Armour pen | Sway (m) | Spread (m per m) | Max range | Clip | Crit | Crit × | Modes (error ×, AP ×) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Rifle | 4 | 55 | 1 | 25% | 0.075 | 0.02 | 22 m | 15 | 12% | 1.5 | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2), Burst Fire (×1.1, ×1.25) |
-| Shotgun | 4 | 12 | 9 | 5% | 0 | 0.05 | 12 m | 4 | 20% | 1.8 | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
+| Shotgun | 4 | 14 | 9 | 5% | 0 | 0.05 | 12 m | 4 | 20% | 1.8 | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
 | Sniper Rifle | 6 | 70 | 1 | 50% | 0.11 | 0.0015 | 40 m | 5 | 25% | 2.2 | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
 | Gatling | 5 | 35 | 1 | 25% | 0.11 | 0.014 | 22 m | 30 | 5% | 1.3 | Burst Fire (×1.1, ×1.25) |
 

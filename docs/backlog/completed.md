@@ -912,3 +912,19 @@ Blocks 1000/5000/9000, wins summed:
       AI and the map rarely produce a fight inside it.
 - [x] Mirror stays even (576 / 569).
 - [x] The shot panel shows only chance, damage, AP and rounds; verified in the browser.
+
+**Follow-up (same day).** Tried and reverted, all measured on the same three blocks:
+- *A quality bar for taking a shot* (expected damage as a share of the weapon's point-blank best,
+  instead of a flat 50% chance): identical results — the far shots came from the policy's
+  last-resort fire, not from the bar.
+- *Holding very poor shots as a watch*: four shotguns 155 → 160, within noise.
+- *Multi-turn flanking* (`planApproach`: a firing position scored on the target's cover from
+  that side, walked to across turns): no gain for the shotgun (49 vs 46 on one block), shotgun
+  kills in the mirror down, the sweep 4.4× slower. Any tile inside 4 m of an enemy is also where
+  it shoots back point blank next turn, so every weapon's best position came out near 6 m; a
+  shotgun's real edge — arriving and firing before the target can answer — is not something a
+  static position score can see.
+
+Kept: **pellets 12 → 14**. Four shotguns 155 → 201 (17%, back to before this item), shotgun
+kills in the mirror up (~339 → ~356 a block), fights still at 6.9 m, mirror 575 / 583. At 16
+they won 224 but took their fights out to 7.5 m and the mirror tilted to 598 / 567.
