@@ -339,9 +339,10 @@ describe('MovementSystem', () => {
     expect(world.getComponent(entity, ActionPointsComponent)?.ap).toBe(10 - RULES.stepDiagonal)
   })
 
-  test('moving breaks cover', () => {
+  test('a crouched unit moves crouched, and pays for it', () => {
     const world = new World()
     const system = new MovementSystem(grid)
+    world.addSystem(system)
     const entity = walker(world, 10)
     world.getComponent(entity, StanceComponent)!.isCrouching = true
 
@@ -349,8 +350,11 @@ describe('MovementSystem', () => {
       { x: 0, y: 0 },
       { x: 1, y: 0 },
     ])
+    world.update(5)
 
-    expect(world.getComponent(entity, StanceComponent)?.isCrouching).toBe(false)
+    expect(world.getComponent(entity, PositionComponent)?.tile).toEqual({ x: 1, y: 0 })
+    expect(world.getComponent(entity, StanceComponent)?.isCrouching).toBe(true)
+    expect(world.getComponent(entity, ActionPointsComponent)?.ap).toBe(10 - RULES.stepOrthogonal * RULES.crouchStepCost)
   })
 
   test('refuses a route with nowhere to go', () => {

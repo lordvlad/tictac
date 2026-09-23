@@ -120,9 +120,9 @@ export class SoldierView extends Entity3D {
     action.setEffectiveTimeScale(timeScale)
   }
 
-  /** Locomotion clip synced so its stride matches MOVE_SPEED (no foot sliding). */
-  private playLocomotion(key: 'walk' | 'run' | 'crouchWalk'): void {
-    this.playLoop(key, RULES.moveSpeed / CLIP_GROUND_SPEED[key])
+  /** Locomotion clip synced so its stride matches the unit's pace (no foot sliding). */
+  private playLocomotion(key: 'walk' | 'run' | 'crouchWalk', speed: number): void {
+    this.playLoop(key, speed / CLIP_GROUND_SPEED[key])
   }
 
   /**
@@ -133,8 +133,10 @@ export class SoldierView extends Entity3D {
    */
   playStanceClip(): void {
     if (this.unit.isDead) return
-    if (this.unit.isMoving) this.playLocomotion('run')
-    else if (this.unit.isCrouching) this.playLoop('crouch')
+    if (this.unit.isMoving) {
+      if (this.unit.isCrouching) this.playLocomotion('crouchWalk', RULES.crouchMoveSpeed)
+      else this.playLocomotion('run', RULES.moveSpeed)
+    } else if (this.unit.isCrouching) this.playLoop('crouch')
     else this.playLoop('idle')
   }
 

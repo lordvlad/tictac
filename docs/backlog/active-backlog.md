@@ -231,8 +231,8 @@ Built in slices, mechanics before noise (agreed 2026-09-24):
 
 0. ✅ **The policy knows only what it has seen** (`src/sim/Intel.ts`). A stealth mechanic
    measured against an AI that reads every enemy's position measures as nothing.
-1. **Crouched movement.** A crouched unit stays crouched when it moves, and pays a premium
-   per step. No loudness yet.
+1. ✅ **Crouched movement.** A crouched unit stays crouched when it moves, and pays
+   `RULES.crouchStepCost` (1.5×) per step. No loudness yet.
 2. **Attacks from behind.** An integer heading on the position (`targetYaw` is a float from
    `atan2`, banned from rules code). A blow or a shot from behind ignores every defence —
    evasion, parry, defence bonuses — except cover. A knife from behind does a great deal

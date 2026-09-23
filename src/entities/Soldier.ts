@@ -408,11 +408,12 @@ export class Soldier {
   /**
    * What every step costs this unit, as a multiple of the terrain's own price.
    *
-   * One when whole. A wound adds to it, so the same route across the same
-   * ground costs a limping soldier more.
+   * One when whole and standing. A wound adds to it, so the same route across
+   * the same ground costs a limping soldier more, and crouching multiplies it:
+   * a crouched unit moves crouched.
    */
   get moveCostMul(): number {
-    return this.traitsComponent.moveCostMul
+    return this.traitsComponent.moveCostMul * (this.isCrouching ? RULES.crouchStepCost : 1)
   }
 
   /** Percentage points this soldier's traits add to its own crit chance. */
@@ -593,7 +594,7 @@ export class Soldier {
   get isMoving(): boolean {
     return this.stance.isMoving
   }
-  /** Hunkered-down cover stance. Persists across turns until the unit moves or stands. */
+  /** Crouched: in cover when still, moving low when not. Persists across turns until the unit stands. */
   get isCrouching(): boolean {
     return this.stance.isCrouching
   }
@@ -662,7 +663,7 @@ export class Soldier {
     return true
   }
 
-  /** Hunker down. A unit mid-stride has not stopped to do it. */
+  /** Get low. A unit mid-stride has not stopped to do it. */
   enterCover(): void {
     if (this.isDead || this.isMoving) return
     this.stance.isCrouching = true

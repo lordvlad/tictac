@@ -350,7 +350,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
     }
     actions.push({
       id: 'cover',
-      label: selected.isCrouching ? 'Stand Up' : 'Take Cover',
+      label: selected.isCrouching ? 'Stand Up' : 'Crouch',
       icon: 'ui-cover',
       tag: selected.isCrouching ? 'Free' : `${RULES.coverApCost} AP`,
       active: selected.isCrouching,

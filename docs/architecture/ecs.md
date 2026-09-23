@@ -60,7 +60,7 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | `HealthComponent` | Current and maximum HP. The maximum is `derive(sheet).maxHp` — read off the character's Health attribute, not stated by the sheet — with traits moving it from there | Yes |
 | `ArmorComponent` | Current and maximum armour. Worn plate raises the maximum; shred takes the current down for the rest of the match, and a repair kit is the one thing that puts it back, capped at the maximum | Yes |
 | `ActionPointsComponent` | Points left and the ceiling (`derive(sheet).maxAp`, from Agility, then traits, then the share of gear's AP bite Strength carries for free), plus `spentThisTurn` and `exhaustedTurns` — what a unit *used*, which is what exhaustion is judged on | Yes |
-| `StanceComponent` | Crouched, moving, the route being walked, corner peek, and `firedThisTurn` — a muzzle flash gives a position away until the unit's own next turn | Yes |
+| `StanceComponent` | Crouched (and a crouched unit moves crouched, at `RULES.crouchStepCost` a step), moving, the route being walked, corner peek, and `firedThisTurn` — a muzzle flash gives a position away until the unit's own next turn | Yes |
 | `WeaponComponent` | Equipped weapon id; the instance it clones carries the serial and the fitted rail. Only the id replicates — a peer's fitted kit shows up in the numbers they resolve, never in this side's copy | Yes (id only) |
 | `AmmoComponent` | Loaded round id; clip state lives on the weapon instance | Yes |
 | `InventoryComponent` | Grenades carried, by kind | Yes |

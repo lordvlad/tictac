@@ -89,7 +89,11 @@ graph TD
   being hidden behind — crouching in the open shows half a soldier, crouching behind a wall
   barely any. Values in `COVER` (`docs/architecture/combat-and-rules.md`).
 - **Stances**: standing (ordinary mobility) versus crouched (cover is worth more, and some kit
-  — the bipod — pays only while down).
+  — the bipod — pays only while down). Crouching costs `RULES.coverApCost` and standing is free.
+  **A crouched unit moves crouched**: every step costs `RULES.crouchStepCost` (1.5) times its
+  standing price, at a slower walk, and it arrives still down. Moving used to stand a unit up,
+  so crouching was something done between moves and never while making one; it is now the
+  quiet way to cross ground ([Noise & Stealth](noise-and-stealth.md) will price the difference).
 - **Overwatch.** A unit may go on watch for a snap shot's price, paid at once. The first time an
   enemy *arrives* on a tile it can shoot at during the other side's turn, it fires a reaction
   shot (its aim 1.4× as wide as a snap shot's) and stops watching. The shot itself costs

@@ -166,10 +166,18 @@ export const RULES = {
   /** Climbing a ladder costs more AP than standard walking. */
   ladderStepCost: 3,
   /**
+   * What every step costs a crouched unit, as a multiple of its standing
+   * price. Moving low is slow; it is also the stance the unit arrives in,
+   * where standing to move and crouching again would cost the cover price.
+   */
+  crouchStepCost: 1.5,
+  /**
    * Metres per second while moving. Tuned to sit close to the natural pace of
    * the `run` (Jog_Fwd_Loop) clip so the feet do not visibly slide.
    */
   moveSpeed: 3.4,
+  /** Metres per second while moving crouched; twice the crouch-walk clip's own pace. */
+  crouchMoveSpeed: 1.5,
 }
 
 /**

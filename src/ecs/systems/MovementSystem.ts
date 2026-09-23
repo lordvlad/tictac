@@ -36,8 +36,8 @@ export class MovementSystem extends System {
 
     stance.movingPath = path.map((t) => ({ x: t.x, y: t.y }))
     stance.isMoving = true
-    // Moving breaks cover — stand up to run.
-    stance.isCrouching = false
+    // A crouched unit moves crouched. It used to be stood up to run, which
+    // made crouching a thing you did between moves and never while making one.
     this.pathIndices.set(entityId, 1)
     return true
   }
@@ -86,7 +86,7 @@ export class MovementSystem extends System {
       // Distance budget for this tick. Leftover carries across tile boundaries,
       // otherwise the remainder is discarded on every arrival and the unit
       // travels measurably slower than moveSpeed.
-      let budget = RULES.moveSpeed * delta
+      let budget = (stance.isCrouching ? RULES.crouchMoveSpeed : RULES.moveSpeed) * delta
 
       while (budget > 0) {
         let index = this.pathIndices.get(entityId) ?? 1
@@ -101,8 +101,10 @@ export class MovementSystem extends System {
         const prev = stance.movingPath[index - 1] ?? pos.tile
         // Read per step: a watcher can wound a unit mid-walk now, and a limp
         // changes what the next step costs. Absent for anything that is not a
-        // soldier, and whole units cost 1.
-        const cost = stepCost(this.grid, prev, nextTile, traits?.moveCostMul ?? 1)
+        // soldier, and whole units cost 1. The crouch premium is the same one
+        // `Soldier.moveCostMul` plans with.
+        const mul = (traits?.moveCostMul ?? 1) * (stance.isCrouching ? RULES.crouchStepCost : 1)
+        const cost = stepCost(this.grid, prev, nextTile, mul)
         if (ap.ap < cost) {
           this.stopMovement(world, entityId)
           break
