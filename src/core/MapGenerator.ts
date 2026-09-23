@@ -97,12 +97,16 @@ export interface MapOptions {
   /** Tiles per side. The furniture — buildings, wall runs, crates — scales with the area. */
   size?: number
   /**
-   * Where the squads deploy along their own edge.
+   * Where the squads deploy along their own edge. `edge` is the game's.
    *
-   * - `centre`: facing each other across the middle, a few tiles of jitter apart.
    * - `edge`: anywhere along the edge, each side drawn independently — so the
    *   two squads can start well off each other's line and the fight has to be
-   *   found before it can be had.
+   *   found before it can be had. Chosen over `centre` on measurement: facing
+   *   squads 29 tiles apart meet on the first mover's walk every time, and the
+   *   side that walks into view loses — the second mover won 62% of mirror
+   *   matches centred and 53% along the edge.
+   * - `centre`: facing each other across the middle, a few tiles of jitter
+   *   apart. Kept so the sweep can still ask the question.
    */
   spawns?: 'centre' | 'edge'
 }
@@ -117,15 +121,14 @@ export function generateMap(seed: number, options: MapOptions = {}): GeneratedMa
   const scaled = (count: number): number => Math.round(count * area)
 
   // --- Deployment zones -----------------------------------------------------
-  // Blue deploys along the low-Y edge, Red along the high-Y edge. Centred with
-  // a random lateral jitter by default, so games do not always look identical;
-  // anywhere along the edge when asked to be.
+  // Blue deploys along the low-Y edge, Red along the high-Y edge: anywhere
+  // along it by default, or centred with a few tiles of jitter when asked.
   const zoneW = SQUAD_SIZE + 3
   const zoneH = 3
   const alongEdge = (): number => rng.int(2, size - 2 - zoneW)
   const centred = (): number => Math.round(size / 2 - zoneW / 2 + rng.range(-4, 4))
-  const blueX = options.spawns === 'edge' ? alongEdge() : centred()
-  const redX = options.spawns === 'edge' ? alongEdge() : centred()
+  const blueX = options.spawns === 'centre' ? centred() : alongEdge()
+  const redX = options.spawns === 'centre' ? centred() : alongEdge()
   const blueZone: Rect = { x: clamp(blueX, 2, size - 2 - zoneW), y: 2, w: zoneW, h: zoneH }
   const redZone: Rect = {
     x: clamp(redX, 2, size - 2 - zoneW),

@@ -258,9 +258,12 @@ describe('Rooms, doors and windows', () => {
               // Head high on the roof, and nothing hanging below the deck.
               expect(grid.wallOpenAt(x, y, side, deck)).toBe(false)
               expect(coverLevelInDir(grid, { x, y }, dx, dy)).toBe(CoverLevel.Tall)
-              // Both sides of it are still part of the one walkable map.
-              expect(reachable[grid.index(x, y)]).toBeTruthy()
-              expect(reachable[grid.index(x + dx, y + dy)]).toBeTruthy()
+              // Both sides of it are still part of the one walkable map — where
+              // they are walkable at all: a deck tile can carry a block, and
+              // a block is nobody's floor.
+              for (const side of [{ x, y }, { x: x + dx, y: y + dy }]) {
+                if (grid.isWalkable(side.x, side.y)) expect(reachable[grid.index(side.x, side.y)]).toBeTruthy()
+              }
             }
           }
         }

@@ -134,7 +134,9 @@ describe('The report says what happened', () => {
     const report = sweep({ seed: 1, matches: 10 })
     for (const weapon of report.weapons) {
       expect(weapon.hits).toBeLessThanOrEqual(weapon.shots)
-      expect(weapon.rounds).toBeGreaterThanOrEqual(weapon.shots)
+      // A gun spends at least a round a shot; a sidearm spends none.
+      const gun = (Object.values(WeaponId) as string[]).includes(weapon.weapon)
+      expect(weapon.rounds).toBe(gun ? Math.max(weapon.rounds, weapon.shots) : 0)
       if (weapon.shots === 0) expect(weapon.hitRate).toBe(0)
     }
   })

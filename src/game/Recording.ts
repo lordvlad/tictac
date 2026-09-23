@@ -28,7 +28,14 @@ import type { NetworkMessage } from './NetworkManager'
  * from {@link NetworkManager} are erased at build — so a headless simulation
  * can record without dragging a channel or a scene behind it.
  */
-export const RECORDING_VERSION = 1
+/**
+ * Bumped whenever the same header would regenerate a different match.
+ *
+ * 2: squads deploy anywhere along their own edge rather than centred, which
+ * moves every building a seed produces — so a version-1 file replayed today
+ * would refight its commands on terrain it was never fought on.
+ */
+export const RECORDING_VERSION = 2
 
 export interface RecordingHeader {
   version: number

@@ -102,9 +102,10 @@ spawn centroids ~29 tiles apart, ~1270 walkable tiles):
 
 `generateMap(seed, { size, spawns })` takes a size (the furniture — buildings, wall runs, crate
 clusters — scales with the area, so a bigger map is not an emptier one) and a deployment:
-`centre` (the game's, squads facing each other across the middle with a few tiles of jitter) or
-`edge` (each squad anywhere along its own edge, drawn from the map's seeded `Rng`). Both default
-to the game as played. `bun run balance -- --mapSize=72 --spawns=edge`. The options travel in a
+`edge` (each squad anywhere along its own edge, drawn from the map's seeded `Rng`) or `centre`
+(squads facing each other across the middle with a few tiles of jitter). **`edge` is the game's
+layout since 2026-09-19**, on the measurement below; `centre` remains so the question can still
+be asked (`--spawns=centre`). `bun run balance -- --mapSize=72 --spawns=edge`. The options travel in a
 recording's `header.map`, because the same seed under other options is another map; absent
 means default, and a value this build does not know refuses the file.
 
@@ -112,8 +113,8 @@ Measured 2026-09-19, three disjoint blocks of 400, stock mirror (wins summed ove
 
 | Layout | Blue | Red | Draws | Median turns | Forward b/r | Sideways b/r | Sweep time |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 36, centre (the game) | 445 | 723 | 32 | 4 | 13.7 / 9.1 | 3.4 / 3.4 | 13 s |
-| 36, edge | 550 | 611 | 39 | 5 | 14.7 / 10.4 | 4.2 / 3.9 | 13 s |
+| 36, centre (the game until 2026-09-19) | 445 | 723 | 32 | 4 | 13.7 / 9.1 | 3.4 / 3.4 | 13 s |
+| 36, edge (the game since) | 550 | 611 | 39 | 5 | 14.7 / 10.4 | 4.2 / 3.9 | 13 s |
 | 72, centre | 581 | 510 | 109 | 7 | 31.8 / 28.0 | 5.1 / 4.9 | 45 s |
 | 72, edge | 520 | 531 | 149 | 7–8 | 33.9 / 30.8 | 6.1 / 5.9 | 47 s |
 
