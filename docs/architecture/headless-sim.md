@@ -107,6 +107,17 @@ losers' ~102, where before the two were the same. A second term — scoring an a
 cover the target would have against it — was measured alongside and dropped: alone it moved
 neither ground nor result, and together with this one it only skewed the split to Blue.
 
+**Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
+outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles
+walked indoors and the share of unit-turns *ended* indoors; the weapon table reports each
+weapon's mean shot distance, share of shots fired from indoors, and damage per shot from inside
+and outside. First reading (blocks 1000 and 5000): units walk 13–16% of their tiles indoors and
+end 22–26% of their turns there — roughly in proportion, with no difference between winners and
+losers. Every weapon does *worse* from indoors (rifle ~37 damage a shot against ~50 outside,
+shotgun ~14 against ~22), and the shotgun already fights closest (6 m mean). Its problem is not
+where it is taken: at 6 m/metre of falloff from 95 it is less accurate than a rifle (3/metre
+from 85) beyond 3.3 m, and its 0.05 armour penetration gives most of its 85 damage to plate.
+
 ### Another battlefield
 
 `generateMap(seed, { size, spawns })` takes a size (the furniture — buildings, wall runs, crate

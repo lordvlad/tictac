@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Grid } from '../src/core/Grid'
-import { GroundTracker } from '../src/sim/Ground'
+import { GroundTracker, isIndoors } from '../src/sim/Ground'
 import { Faction, SQUAD_SIZE } from '../src/config'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
 import { ItemId } from '../src/core/Items'
@@ -185,6 +185,26 @@ describe('Ground covered', () => {
     const red = ground.of(Faction.Red)
     expect(red.forward).toBeCloseTo(0)
     expect(red.sideways).toBeCloseTo(3)
+  })
+
+  test('indoors is under a roof: a rooftop and open ground are not', () => {
+    const grid = new Grid(16)
+    // A ground-floor room with a roof slab over it at storey one.
+    grid.setRoof(3, 3, 1)
+    // A deck at storey one with open sky: a rooftop.
+    grid.setLevel(8, 8, 1)
+    expect(isIndoors(grid, { x: 3, y: 3 })).toBe(true)
+    expect(isIndoors(grid, { x: 8, y: 8 })).toBe(false)
+    expect(isIndoors(grid, { x: 12, y: 12 })).toBe(false)
+
+    const ground = new GroundTracker(grid, spawns)
+    ground.step(Faction.Blue, 0, { x: 3, y: 3 })
+    ground.step(Faction.Blue, 0, { x: 4, y: 3 })
+    ground.turnEnded(Faction.Blue, { x: 3, y: 3 })
+    const blue = ground.of(Faction.Blue)
+    expect(blue.walkedIndoors).toBeCloseTo(0.5)
+    expect(blue.tilesIndoors).toBe(1)
+    expect(blue.turnsIndoors).toBe(1)
   })
 
   test('a tile stood on twice is one tile of ground, and a retreat is not an advance', () => {

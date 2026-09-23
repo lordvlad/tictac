@@ -21,6 +21,26 @@ export interface GroundCovered {
   forward: number
   /** Mean over units of the furthest each got sideways of its own spawn, in tiles. */
   sideways: number
+  /** Share of the tiles walked that were indoors. */
+  walkedIndoors: number
+  /** Distinct indoor tiles the squad stood on. */
+  tilesIndoors: number
+  /** Share of unit-turns that ended indoors: where a unit waited and fought from. */
+  turnsIndoors: number
+  /** Share of the map's walkable ground that is indoors — the baseline the others are read against. */
+  mapIndoors: number
+}
+
+/**
+ * Under a roof: a slab stands over the floor this tile is at.
+ *
+ * Rooftops are not indoors — they are the most exposed ground on the map —
+ * and neither is a courtyard inside a footprint. Indoors is where walls are
+ * close on every side and a fight is at arm's length, which is the ground a
+ * shotgun is for.
+ */
+export function isIndoors(grid: Grid, tile: Tile): boolean {
+  return grid.roofAt(tile.x, tile.y) > grid.levelAt(tile.x, tile.y)
 }
 
 interface UnitReach {
@@ -32,6 +52,13 @@ interface UnitReach {
 /** Keeps the tally for both sides as the policy walks units about. */
 export class GroundTracker {
   private readonly walked: Record<Faction, number> = { [Faction.Blue]: 0, [Faction.Red]: 0 }
+  private readonly walkedIn: Record<Faction, number> = { [Faction.Blue]: 0, [Faction.Red]: 0 }
+  private readonly indoorTiles: Record<Faction, Set<number>> = {
+    [Faction.Blue]: new Set(),
+    [Faction.Red]: new Set(),
+  }
+  private readonly turnEnds: Record<Faction, number> = { [Faction.Blue]: 0, [Faction.Red]: 0 }
+  private readonly turnEndsIn: Record<Faction, number> = { [Faction.Blue]: 0, [Faction.Red]: 0 }
   private readonly visited: Record<Faction, Set<number>> = {
     [Faction.Blue]: new Set(),
     [Faction.Red]: new Set(),
@@ -40,6 +67,7 @@ export class GroundTracker {
   /** Unit vector towards the enemy, per side. */
   private readonly axis: Record<Faction, { x: number; y: number }>
   private readonly walkable: number
+  private readonly walkableIndoors: number
 
   constructor(
     private readonly grid: Grid,
@@ -64,16 +92,24 @@ export class GroundTracker {
       }
     }
     let walkable = 0
+    let indoors = 0
     grid.forEach((x, y) => {
-      if (grid.isWalkable(x, y)) walkable++
+      if (!grid.isWalkable(x, y)) return
+      walkable++
+      if (isIndoors(grid, { x, y })) indoors++
     })
     this.walkable = walkable
+    this.walkableIndoors = indoors
   }
 
   /** A unit of `faction`, `squadIndex`, arrived on `tile`. */
   step(faction: Faction, squadIndex: number, tile: Tile): void {
     this.walked[faction] += 1
     this.visited[faction].add(this.grid.index(tile.x, tile.y))
+    if (isIndoors(this.grid, tile)) {
+      this.walkedIn[faction] += 1
+      this.indoorTiles[faction].add(this.grid.index(tile.x, tile.y))
+    }
     const unit = this.reach[faction][squadIndex]
     if (!unit) return
     const axis = this.axis[faction]
@@ -81,6 +117,12 @@ export class GroundTracker {
     const dy = tile.y - unit.spawn.y
     unit.forward = Math.max(unit.forward, dx * axis.x + dy * axis.y)
     unit.sideways = Math.max(unit.sideways, Math.abs(dx * axis.y - dy * axis.x))
+  }
+
+  /** A unit of `faction` ended its own turn standing on `tile`. */
+  turnEnded(faction: Faction, tile: Tile): void {
+    this.turnEnds[faction] += 1
+    if (isIndoors(this.grid, tile)) this.turnEndsIn[faction] += 1
   }
 
   of(faction: Faction): GroundCovered {
@@ -93,6 +135,10 @@ export class GroundTracker {
       share: this.walkable === 0 ? 0 : this.visited[faction].size / this.walkable,
       forward: mean((u) => u.forward),
       sideways: mean((u) => u.sideways),
+      walkedIndoors: this.walked[faction] === 0 ? 0 : this.walkedIn[faction] / this.walked[faction],
+      tilesIndoors: this.indoorTiles[faction].size,
+      turnsIndoors: this.turnEnds[faction] === 0 ? 0 : this.turnEndsIn[faction] / this.turnEnds[faction],
+      mapIndoors: this.walkable === 0 ? 0 : this.walkableIndoors / this.walkable,
     }
   }
 }

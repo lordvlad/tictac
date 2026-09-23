@@ -46,6 +46,13 @@ export interface WeaponReport extends WeaponTally {
   damagePerShot: number
   /** Crits per round that landed, not per shot: a burst gets several chances. */
   critRate: number
+  /** Mean metres to the target. */
+  meanDistance: number
+  /** Share of shots fired from indoors. */
+  indoorRate: number
+  /** Damage per shot fired from indoors, and from outside. */
+  damagePerShotIndoors: number
+  damagePerShotOutdoors: number
 }
 
 /**
@@ -100,6 +107,10 @@ function meanGround(samples: readonly GroundCovered[]): GroundCovered {
     share: mean((g) => g.share, 3),
     forward: mean((g) => g.forward),
     sideways: mean((g) => g.sideways),
+    walkedIndoors: mean((g) => g.walkedIndoors, 3),
+    tilesIndoors: mean((g) => g.tilesIndoors),
+    turnsIndoors: mean((g) => g.turnsIndoors, 3),
+    mapIndoors: mean((g) => g.mapIndoors, 3),
   }
 }
 
@@ -164,8 +175,14 @@ export function sweep(options: SweepOptions): SweepReport {
         kills: 0,
         crits: 0,
         rounds: 0,
+        distance: 0,
+        indoorShots: 0,
+        indoorDamage: 0,
       }
       total.shots += tally.shots
+      total.distance += tally.distance
+      total.indoorShots += tally.indoorShots
+      total.indoorDamage += tally.indoorDamage
       total.hits += tally.hits
       total.damage += tally.damage
       total.kills += tally.kills
@@ -223,6 +240,13 @@ export function sweep(options: SweepOptions): SweepReport {
         hitRate: tally.shots === 0 ? 0 : round(tally.hits / tally.shots, 3),
         damagePerShot: tally.shots === 0 ? 0 : round(tally.damage / tally.shots, 1),
         critRate: tally.hits === 0 ? 0 : round(tally.crits / tally.hits, 3),
+        meanDistance: tally.shots === 0 ? 0 : round(tally.distance / tally.shots, 1),
+        indoorRate: tally.shots === 0 ? 0 : round(tally.indoorShots / tally.shots, 3),
+        damagePerShotIndoors: tally.indoorShots === 0 ? 0 : round(tally.indoorDamage / tally.indoorShots, 1),
+        damagePerShotOutdoors:
+          tally.shots === tally.indoorShots
+            ? 0
+            : round((tally.damage - tally.indoorDamage) / (tally.shots - tally.indoorShots), 1),
       }))
       .sort((a, b) => b.kills - a.kills),
     traits: [...traitDecided.entries()]
@@ -259,7 +283,9 @@ export function formatReport(report: SweepReport): string {
     `overwatch: ${report.watchesPerMatch} watches per match, ${report.reactionsPerMatch} reactions fired`,
   )
   lines.push('')
-  lines.push('ground      walked   tiles   map%   forward   sideways')
+  lines.push(
+    `ground      walked   tiles   map%   forward   sideways   walked in   turns in   (map ${pct(report.ground.blue.mapIndoors)} indoors)`,
+  )
   for (const side of ['blue', 'red', 'winners', 'losers'] as const) {
     const g = report.ground[side]
     lines.push(
@@ -270,11 +296,13 @@ export function formatReport(report: SweepReport): string {
         pad(pct(g.share), 7),
         pad(g.forward, 10),
         pad(g.sideways, 11),
+        pad(pct(g.walkedIndoors), 12),
+        pad(pct(g.turnsIndoors), 11),
       ].join(''),
     )
   }
   lines.push('')
-  lines.push('weapon      shots   hit%   dmg/shot   kills   crit%   rounds')
+  lines.push('weapon      shots   hit%   dmg/shot   kills   crit%   rounds   dist   in%   dmg in   dmg out')
   for (const weapon of report.weapons) {
     lines.push(
       [
@@ -285,6 +313,10 @@ export function formatReport(report: SweepReport): string {
         pad(weapon.kills, 8),
         pad(pct(weapon.critRate), 8),
         pad(weapon.rounds, 9),
+        pad(weapon.meanDistance, 7),
+        pad(pct(weapon.indoorRate), 7),
+        pad(weapon.damagePerShotIndoors, 9),
+        pad(weapon.damagePerShotOutdoors, 10),
       ].join(''),
     )
   }

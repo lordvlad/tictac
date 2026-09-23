@@ -23,7 +23,7 @@ import {
   type RecordingHeader,
 } from '../game/Recording'
 import type { Carried } from '../ecs/systems/CommandSystem'
-import { type GroundCovered, GroundTracker } from './Ground'
+import { type GroundCovered, GroundTracker, isIndoors } from './Ground'
 import { MatchHost } from './MatchHost'
 
 /** What one squad brought, so a sweep can vary it. */
@@ -91,6 +91,11 @@ export interface WeaponTally {
   kills: number
   crits: number
   rounds: number
+  /** Metres to the target, summed over shots; divide by `shots` for the mean. */
+  distance: number
+  /** Shots fired by a shooter standing indoors, and what they did. */
+  indoorShots: number
+  indoorDamage: number
 }
 
 export interface MatchOutcome {
@@ -132,7 +137,7 @@ interface PlannedShot {
 }
 
 function emptyTally(): WeaponTally {
-  return { shots: 0, hits: 0, damage: 0, kills: 0, crits: 0, rounds: 0 }
+  return { shots: 0, hits: 0, damage: 0, kills: 0, crits: 0, rounds: 0, distance: 0, indoorShots: 0, indoorDamage: 0 }
 }
 
 /**
@@ -346,6 +351,7 @@ export class SimMatch {
     // A unit shot dead partway through its own move has no turn left to end,
     // and the host refuses the intent for one that is not alive.
     if (unit.isDead) return
+    this.ground.turnEnded(unit.faction, unit.tile)
     this.act({ type: 'endUnitTurn', faction: unit.faction, squadIndex: unit.squadIndex })
   }
 
@@ -403,6 +409,10 @@ export class SimMatch {
     const weapon = shot.mode === 'melee' ? unit.sidearm : unit.weapon.id
     const tally = this.tally.get(weapon) ?? emptyTally()
     const before = shot.target.hp
+    // Where it was fired from, before anything moves: a reaction to this shot
+    // cannot move the shooter, but the target can die and leave its tile.
+    const indoors = isIndoors(this.grid, unit.tile)
+    const range = this.grid.distance(unit.tile, shot.target.tile)
     const { shot: result } =
       shot.mode === 'melee'
         ? this.act({
@@ -425,6 +435,11 @@ export class SimMatch {
     if (shot.mode !== 'melee') tally.rounds += unit.weapon.bulletConsumption(shot.mode)
     if (result?.hit) tally.hits += 1
     tally.damage += before - shot.target.hp
+    tally.distance += range
+    if (indoors) {
+      tally.indoorShots += 1
+      tally.indoorDamage += before - shot.target.hp
+    }
     tally.crits += result?.crits ?? 0
     if (shot.target.isDead) tally.kills += 1
     this.tally.set(weapon, tally)
