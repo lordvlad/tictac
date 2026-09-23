@@ -25,7 +25,8 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- Nothing in flight. Next pull: **`[ITEM-012]`** persistence, with **`[ITEM-028]`** beside it.
+- **`[ITEM-032]`: projectile hit model.** One straight line per projectile with error; a
+  shotgun is a fan of them. The shot panel shows chance, damage, AP and rounds only.
 
 ### 📋 Ready (Pull Queue)
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for
