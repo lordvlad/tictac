@@ -23,6 +23,7 @@ ui-pool: cargo-crate by delapouite
 ui-deploy: check-mark by delapouite
 ui-shoot: targeting by lorc
 ui-cover: shield by sbed
+ui-overwatch: eye-target by delapouite
 ui-reload: reload-gun-barrel by delapouite
 ui-unit-turn: hourglass by lorc
 ui-end-turn: player-next by delapouite

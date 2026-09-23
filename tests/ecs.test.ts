@@ -397,7 +397,8 @@ describe('TurnSystem', () => {
     const red = squad(world, Faction.Red)
 
     expect(system.activeFaction).toBe(Faction.Blue)
-    system.endTurn(world)
+    system.advanceFaction()
+    system.replenish(world)
 
     expect(system.activeFaction).toBe(Faction.Red)
     expect(world.getComponent(red, ActionPointsComponent)?.ap).toBe(8)
@@ -410,7 +411,8 @@ describe('TurnSystem', () => {
     const unit = squad(world, Faction.Red)
     world.addComponent(unit, new StatusesComponent([{ kind: StatusKind.Stimmed, turnsLeft: 2 }]))
 
-    system.endTurn(world)
+    system.advanceFaction()
+    system.replenish(world)
 
     // 8 base, lifted a fifth by the stim.
     expect(world.getComponent(unit, ActionPointsComponent)?.ap).toBe(10)
@@ -421,7 +423,8 @@ describe('TurnSystem', () => {
     const system = new TurnSystem()
     const corpse = squad(world, Faction.Red, 0)
 
-    system.endTurn(world)
+    system.advanceFaction()
+    system.replenish(world)
 
     expect(world.getComponent(corpse, ActionPointsComponent)?.ap).toBe(0)
   })
@@ -430,10 +433,12 @@ describe('TurnSystem', () => {
     const world = new World()
     const system = new TurnSystem()
 
-    system.endTurn(world)
+    system.advanceFaction()
+    system.replenish(world)
     expect(system.turnNumber).toBe(1)
 
-    system.endTurn(world)
+    system.advanceFaction()
+    system.replenish(world)
     expect(system.turnNumber).toBe(2)
   })
 

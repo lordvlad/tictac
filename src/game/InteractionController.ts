@@ -14,7 +14,6 @@ import { compareDigests, digestWorld, reportDivergence, type StateDigest } from 
 import { RpcMethods } from './JsonRpc'
 import type { Roll } from '../core/rng'
 import { Recorder, type RecordingHeader } from './Recording'
-import { settleTurn } from './Turn'
 import type { OffscreenPortraits } from '../render/Portraits'
 import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
@@ -190,7 +189,12 @@ export class InteractionController {
     }
 
 
-    this.movementSystem.onStep = () => {
+    this.movementSystem.onStep = (entityId) => {
+      // Reactions first: a watcher shoots at the tile the mover just entered,
+      // and the fog and the HUD should show the result of that rather than the
+      // moment before it.
+      const mover = this.squads.byEntityId(entityId)
+      if (mover) this.combatSystem.reactTo(mover)
       this.recomputeVisibility()
       this.refreshHud()
     }
@@ -507,6 +511,17 @@ export class InteractionController {
         this.debugMap.refresh(this.battlefield.grid, this.squads, this.selectedLevelFilter, this.seedLabel)
         this.refreshHud()
         break
+      case 'overwatch': {
+        const soldier = this.turnManager.selectedSoldier
+        if (!soldier || !this.combatSystem.overwatch(soldier)) break
+        this.network?.send({
+          type: 'overwatch',
+          faction: soldier.faction,
+          squadIndex: soldier.squadIndex,
+        })
+        this.refreshHud()
+        break
+      }
       case 'toggleCover':
         this.toggleCover()
         break
@@ -605,10 +620,30 @@ export class InteractionController {
         this.refreshHud()
         break
       }
+      case 'overwatch': {
+        const soldier = this.turnManager.selectedSoldier
+        if (!soldier || !this.combatSystem.overwatch(soldier)) break
+        this.network?.send({
+          type: 'overwatch',
+          faction: soldier.faction,
+          squadIndex: soldier.squadIndex,
+        })
+        this.refreshHud()
+        break
+      }
       case 'toggleCover': {
         const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
         if (!soldier) break
         this.combatSystem.toggleCover(this.world, soldier.entityId)
+        this.refreshHud()
+        break
+      }
+      case 'overwatch': {
+        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
+        if (!soldier) break
+        // Resolved, not applied: the peer spent its own points and this side
+        // works out the same thing from the same state.
+        this.combatSystem.overwatch(soldier)
         this.refreshHud()
         break
       }
@@ -878,9 +913,6 @@ export class InteractionController {
     this.unitViewRequested = false
     if (this.rig.isShoulderViewActive) this.rig.exitShoulderView()
     this.exitShootMode()
-    // Statuses expire, and anyone who ran themselves into the ground pays for
-    // it. The incoming side has already been handed its points by `TurnSystem`.
-    settleTurn(this.squads.soldiers, this.turnManager.activeFaction)
     this.effects.tickTurn()
 
     if (this.network && this.network.mode !== 'local') {

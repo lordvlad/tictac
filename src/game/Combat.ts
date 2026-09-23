@@ -82,8 +82,18 @@ export function calculateHitChance(
   return shotBreakdown(grid, shooter, target, mode).chance
 }
 
-/** AP a shot would cost, with the loaded round and shot mode folded in. */
+/**
+ * AP a shot would cost, with the loaded round and shot mode folded in.
+ *
+ * A reaction costs nothing *here* because it was already paid for: going on
+ * watch charges a snap shot's price up front. The exemption has to be a rule
+ * rather than a multiplier — `effectiveWeapon` floors every shot at 1 AP, on
+ * purpose, so nothing during your own turn is ever free, and a watcher that
+ * correctly ends its turn with nothing left could otherwise never fire the
+ * shot it had bought.
+ */
 export function shotApCost(shooter: Combatant, mode: ShotMode = ShotMode.Snap): number {
+  if (mode === ShotMode.Reaction) return 0
   return effectiveWeapon(shooter, mode).apCost
 }
 
@@ -95,9 +105,8 @@ export function canShoot(
   mode: ShotMode = ShotMode.Snap,
 ): boolean {
   if (shooter.isDead || target.isDead) return false
-  const eff = effectiveWeapon(shooter, mode)
-  if (shooter.ap < eff.apCost) return false
-  return grid.distance(shooter.tile, target.tile) <= eff.maxRange
+  if (shooter.ap < shotApCost(shooter, mode)) return false
+  return grid.distance(shooter.tile, target.tile) <= effectiveWeapon(shooter, mode).maxRange
 }
 
 /**
@@ -139,7 +148,8 @@ export function executeShot(
     }
   }
 
-  shooter.ap = Math.max(0, shooter.ap - eff.apCost)
+  const apCost = shotApCost(shooter, mode)
+  shooter.ap = Math.max(0, shooter.ap - apCost)
   // Muzzle flash and noise: firing gives a position away until the handover,
   // unless the weapon is quiet. Fog reads it; nothing else does.
   if (!shooter.silenced) {
@@ -215,7 +225,7 @@ export function executeShot(
     armorShred: totalArmorShred,
     killed,
     hitChance: chance,
-    apSpent: eff.apCost,
+    apSpent: apCost,
     crits,
     hits,
     rolls,
@@ -262,8 +272,12 @@ export function fireWeapon(
   const consumption = shooter.weapon.bulletConsumption(mode)
   shooter.weapon.currentClip = Math.max(0, shooter.weapon.currentClip - consumption)
 
-  const result = executeShot(grid, shooter, target, fx, soldiers, mode, roll, overrideRolls)
-  return result.apSpent ? result : null
+  // Returned as resolved. This used to be `result.apSpent ? result : null`,
+  // reading the cost as a proxy for "the shot happened" — which quietly
+  // discarded every prepaid reaction *after* it had already done its damage,
+  // so a watcher shot people the caller was told nothing about. Legality was
+  // settled by `canShoot` above; nothing since can have changed it.
+  return executeShot(grid, shooter, target, fx, soldiers, mode, roll, overrideRolls)
 }
 
 /**

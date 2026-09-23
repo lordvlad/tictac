@@ -640,3 +640,51 @@ different game.
       **both** squads' loadouts by the recording header, whereas a live match never sends a
       peer's loadout at all — see the standing gap in
       [P2P Networking §7](../architecture/networking.md).
+
+---
+
+### [ITEM-011] Overwatch & Reaction Fire
+**Completed Date:** 2026-09-19  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Key Changes
+- `ShotMode.Reaction` (0.7× chance), `StanceComponent.watching` (replicated), `Combatant.watching`.
+- `src/game/Overwatch.ts`: `canWatch`, `watchCost` (a snap shot's price, paid up front) and
+  `reactToArrival`. A reaction is **prepaid**: `shotApCost` returns 0 for it, because
+  `effectiveWeapon` floors every other shot at 1 AP.
+- No new wire traffic. `overwatch` is an ordinary intent; a reaction is a consequence of a
+  `moveUnit` both peers already hold, triggered by `MovementSystem.onStep` per tile *arrival*
+  (an index into a path, not a moment in time). Watchers are sorted by faction and squad index
+  inside the rule, one reaction per watch, watches expire when their side's turn comes round.
+- HUD action and `ui-overwatch` icon; sweep AI holds a poor shot as a watch rather than firing it;
+  `bun run balance` reports watches and reactions per match.
+
+#### Found on the way
+Replaying recorded sweep matches through `MatchHost` and comparing unit state intent by intent
+found six disagreements between the two carriers of the rules. Four predate overwatch:
+- `MatchHost` never settled a turn, so statuses never expired in a replay. The settle now lives
+  inside `TurnManager.startNextTurn`, the one door every path already used.
+- Handover order differed: the game refilled then settled, the sweep the reverse. Both now
+  settle then refill (`TurnSystem.advanceFaction` / `replenish`), so a penalty that has just run
+  out no longer docks the allowance handed over after it.
+- `MovementSystem` wrote the AP component directly, so walking never counted toward exhaustion
+  in the played game.
+- `SimUnit` priced `maxAp` once at kit-up, so wounds never cost the sweep any action points.
+
+And two that overwatch caused: watchers iterated in caller order (the game interleaves squads,
+the sweep blocks them), and `fireWeapon` read `apSpent` as "the shot happened", silently
+discarding every prepaid reaction after it had done its damage.
+
+#### Measured
+Disjoint blocks 1000 / 5000 / 9000: blue 229 / 248 / 239, red 141 / 129 / 132 — the win split is
+where it was (blue mean 237 → 239). Matches run slightly longer (mean 5.96 → 6.26 turns) and
+winners keep more (2.51 → 2.68 of 4), consistent with movement now costing stamina. Reactions:
+0.2–0.26 per match, rare because the policy never crosses watched ground — filed as ITEM-029
+rather than claimed as exercised.
+
+#### Acceptance Criteria
+- [x] A unit may hold points to fire during the enemy's movement.
+- [x] Both peers agree on every reaction with no message: 10 recorded matches replay with no
+      skipped intent and the same survivors (`tests/replay.test.ts`).
+- [ ] Not verified live in two browsers — same tooling block as ITEM-020..023.

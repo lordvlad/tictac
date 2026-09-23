@@ -81,8 +81,7 @@ export class MovementSystem extends System {
 
       const pos = world.getComponent(entityId, PositionComponent)!
       const ap = world.getComponent(entityId, ActionPointsComponent)!
-      // Absent for anything that is not a soldier, and whole units cost 1.
-      const moveCostMul = world.getComponent(entityId, TraitsComponent)?.moveCostMul ?? 1
+      const traits = world.getComponent(entityId, TraitsComponent)
 
       // Distance budget for this tick. Leftover carries across tile boundaries,
       // otherwise the remainder is discarded on every arrival and the unit
@@ -100,7 +99,10 @@ export class MovementSystem extends System {
         // Never enter a tile the unit cannot pay for. Movement always halts on
         // a tile boundary, so stopping here leaves a valid grid position.
         const prev = stance.movingPath[index - 1] ?? pos.tile
-        const cost = stepCost(this.grid, prev, nextTile, moveCostMul)
+        // Read per step: a watcher can wound a unit mid-walk now, and a limp
+        // changes what the next step costs. Absent for anything that is not a
+        // soldier, and whole units cost 1.
+        const cost = stepCost(this.grid, prev, nextTile, traits?.moveCostMul ?? 1)
         if (ap.ap < cost) {
           this.stopMovement(world, entityId)
           break
@@ -130,7 +132,14 @@ export class MovementSystem extends System {
 
         pos.tile = { x: nextTile.x, y: nextTile.y }
         pos.level = this.grid.levelAt(nextTile.x, nextTile.y)
-        ap.ap = Math.max(0, ap.ap - cost)
+        // Counted, not just deducted. Exhaustion asks what a unit *used*, and
+        // writing the component behind `Soldier`'s accounting meant walking a
+        // squad into the ground cost it nothing while firing from cover did —
+        // the opposite of the rule, and a difference the headless runner did
+        // not share.
+        const spent = Math.min(ap.ap, cost)
+        ap.ap -= spent
+        ap.spentThisTurn += spent
 
         this.onStep?.(entityId, nextTile)
 

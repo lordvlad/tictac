@@ -4,6 +4,7 @@ import { ITEMS, type ItemEffect, ItemId, itemApCost, itemTargetsAlly } from '../
 import { UtilityId } from '../core/Characters'
 import { effectiveWeapon, type HitChanceBreakdown, statusStacks } from '../core/Ballistics'
 import { clamp } from '../core/math'
+import { canWatch, watchCost } from '../game/Overwatch'
 import { TRAITS, woundTraits } from '../core/Traits'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
@@ -30,6 +31,7 @@ export type HudIntent =
   | { type: 'confirmThrow' }
   | { type: 'cancelGrenade' }
   | { type: 'toggleCover' }
+  | { type: 'overwatch' }
   | { type: 'toggleWaypoints' }
   | { type: 'endUnitTurn' }
   | { type: 'requestTurnSwitch' }
@@ -331,6 +333,17 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       active: selected.isCrouching,
       disabled: !selected.isCrouching && selected.ap < RULES.coverApCost,
       intent: { type: 'toggleCover' },
+    })
+    actions.push({
+      id: 'overwatch',
+      label: selected.watching ? 'On Watch' : 'Overwatch',
+      icon: 'ui-overwatch',
+      // The cost is the shot being reserved, which is why it is the snap
+      // price and not a number of its own.
+      tag: selected.watching ? 'Holding fire' : `${watchCost(selected)} AP`,
+      active: selected.watching,
+      disabled: !canWatch(selected),
+      intent: { type: 'overwatch' },
     })
     // Only what the unit is actually carrying. A row for kit left in the crate
     // is a row the player has to read past every turn to find what they have.

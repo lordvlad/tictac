@@ -69,6 +69,15 @@ export interface SweepReport {
   turns: { mean: number; median: number; min: number; max: number }
   /** Mean survivors of the winning side: how decisive a win tends to be. */
   meanWinnerSurvivors: number
+  /**
+   * Watches set and reactions fired, per match.
+   *
+   * Reported because a mechanic the policy uses but nothing ever triggers is
+   * indistinguishable, in every other number here, from one that does not
+   * exist — and "it changed no win rate" is the answer either way.
+   */
+  watchesPerMatch: number
+  reactionsPerMatch: number
   weapons: WeaponReport[]
   traits: TraitReport[]
 }
@@ -173,6 +182,8 @@ export function sweep(options: SweepOptions): SweepReport {
       max: Math.max(...turns),
     },
     meanWinnerSurvivors: decided === 0 ? 0 : round(winnerSurvivors / decided),
+    watchesPerMatch: round(outcomes.reduce((n, o) => n + o.watches, 0) / outcomes.length),
+    reactionsPerMatch: round(outcomes.reduce((n, o) => n + o.reactions, 0) / outcomes.length),
     weapons: [...weapons.entries()]
       .map(([weapon, tally]) => ({
         weapon,
@@ -212,6 +223,9 @@ export function formatReport(report: SweepReport): string {
     `turns  mean ${report.turns.mean}  median ${report.turns.median}  range ${report.turns.min}-${report.turns.max}`,
   )
   lines.push(`winner keeps ${report.meanWinnerSurvivors} of 4 on average`)
+  lines.push(
+    `overwatch: ${report.watchesPerMatch} watches per match, ${report.reactionsPerMatch} reactions fired`,
+  )
   lines.push('')
   lines.push('weapon      shots   hit%   dmg/shot   kills   crit%   rounds')
   for (const weapon of report.weapons) {

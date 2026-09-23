@@ -98,6 +98,14 @@ export type NetworkMessage =
   | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number } }
   | { type: 'reload'; faction: Faction; squadIndex: number }
   | { type: 'toggleCover'; faction: Faction; squadIndex: number }
+  /**
+   * Hold fire for the other side's turn.
+   *
+   * An intent like any other, and notably *only* an intent: the reactions it
+   * provokes are resolved by both peers from the path the mover declares, so
+   * nothing about a reaction ever travels.
+   */
+  | { type: 'overwatch'; faction: Faction; squadIndex: number }
   | { type: 'endUnitTurn'; faction: Faction; squadIndex: number }
   // The target is optional because most uses are on the carrier: a frame with
   // no target named, or naming a unit this side cannot find, is a self-use.

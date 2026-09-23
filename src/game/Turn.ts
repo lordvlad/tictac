@@ -28,7 +28,25 @@ export function settleTurn(units: readonly Combatant[], incoming: Faction): void
     if (unit.faction !== incoming) continue
     unit.spentThisTurn = 0
     unit.firedThisTurn = false
+    // A watch is held for somebody else's turn. Coming round to your own is
+    // the end of it — the points are yours to spend again.
+    unit.watching = false
   }
+}
+
+/**
+ * A unit's own turn ends: whatever it did not spend is gone.
+ *
+ * Forfeited is not the same as spent, and the difference is exhaustion —
+ * standing still with points in hand is the opposite of running yourself into
+ * the ground, so the count must not move. `TurnSystem.endUnitTurn` gets that
+ * for free by writing the component behind the accounting; anything holding a
+ * {@link Combatant} has to say so.
+ */
+export function forfeitTurn(unit: Combatant): void {
+  const spent = unit.spentThisTurn
+  unit.ap = 0
+  unit.spentThisTurn = spent
 }
 
 /**

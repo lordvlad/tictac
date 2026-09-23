@@ -58,15 +58,50 @@ describe('Running a recorded match with nobody watching', () => {
   })
 
   test('the replay agrees with the match it is replaying about who lived', () => {
-    // Two different carriers of the same rules: the sweep fought this match
-    // with `SimUnit`s, the replay refights it with ECS soldiers and components.
-    // Agreement on the survivors is the cross-check neither side can fake.
-    const { outcome, recording } = recorded(4242)
-    const result = replay(recording)
+    // Two different carriers of the same rules: the sweep fought these matches
+    // with `SimUnit`s, the replay refights them with ECS soldiers and
+    // components. Agreement on the survivors is the cross-check neither side
+    // can fake, and a block of seeds rather than one because the disagreements
+    // this has actually caught — a handover that settled in the wrong order, a
+    // runner that never charged wounds their action points, movement that
+    // counted toward exhaustion on one side only — each showed up in a handful
+    // of matches and in none of the others.
+    for (const seed of [4242, 1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+      const { outcome, recording } = recorded(seed)
+      const result = replay(recording)
 
+      const living = (faction: Faction) =>
+        result.units.filter((unit) => unit.faction === faction && !unit.dead).length
+
+      expect({ seed, skipped: result.skipped }).toEqual({ seed, skipped: [] })
+      expect({ seed, blue: living(Faction.Blue), red: living(Faction.Red) }).toEqual({
+        seed,
+        blue: outcome.survivors[Faction.Blue],
+        red: outcome.survivors[Faction.Red],
+      })
+    }
+  })
+
+  test('a reaction nobody sent is reproduced from the intents alone', () => {
+    // The claim that lets overwatch cost no wire at all: a reaction is a
+    // consequence of a movement intent, so replaying the intents produces the
+    // same reactions — at the same points, from the same dice. Seed 7 is a
+    // match in which the AI both set watches and had somebody walk into one.
+    const { outcome, recording } = recorded(7)
+    expect(outcome.watches).toBeGreaterThan(0)
+    expect(outcome.reactions).toBeGreaterThan(0)
+    expect(recording.events.some((event) => event.command.type === 'overwatch')).toBe(true)
+
+    const first = replay(recording)
+    const second = replay(recording)
+
+    expect(first.skipped).toEqual([])
+    expect(first.digest.total).toBe(second.digest.total)
+    // And the refight reaches the same survivors as the match that produced
+    // it — a reaction that fired on one side and not the other would show up
+    // here as somebody still standing.
     const living = (faction: Faction) =>
-      result.units.filter((unit) => unit.faction === faction && !unit.dead).length
-
+      first.units.filter((unit) => unit.faction === faction && !unit.dead).length
     expect(living(Faction.Blue)).toBe(outcome.survivors[Faction.Blue])
     expect(living(Faction.Red)).toBe(outcome.survivors[Faction.Red])
   })

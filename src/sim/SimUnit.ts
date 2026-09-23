@@ -32,15 +32,16 @@ import { RULES, type Faction } from '../config'
 export class SimUnit implements Combatant {
   readonly weapon: Weapon
   ammo: AmmoSpec
-  maxHp: number
+  maxHp = 0
   private hpLeft = 0
-  maxAp: number
+  maxAp = 0
   private apLeft = 0
   armor: number
   isCrouching = false
   spentThisTurn = 0
   exhaustedTurns = 0
   firedThisTurn = false
+  watching = false
   known = false
   readonly isMoving = false
   targetYaw = 0
@@ -98,16 +99,14 @@ export class SimUnit implements Combatant {
         armorShred: Math.max(0, Math.round(base.armorShred * demolitions)),
       }
     }
+    // Twice, and the order is the point: the first pass resolves the sheet's
+    // own traits so `maxHp` can be worked out, the second judges wounds against
+    // a unit that is actually at full health rather than at zero.
     this.refreshTraits()
     this.maxHp = this.derived.maxHp + this.resolved.maxHp
-    // Gear's AP bite, minus what these shoulders take off it - the same
-    // arithmetic a real soldier does in `refreshTraits`.
-    const apRelief = Math.round(
-      -Math.min(0, this.gearResolved.maxAp) * (this.derived.gearRelief / 100),
-    )
-    this.maxAp = this.derived.maxAp + this.resolved.maxAp + apRelief
-    this.hp = this.maxHp
-    this.ap = this.maxAp
+    this.hpLeft = this.maxHp
+    this.refreshTraits()
+    this.apLeft = this.maxAp
   }
 
   /**
@@ -147,6 +146,25 @@ export class SimUnit implements Combatant {
     }
     resolveSourcedInto(this.resolved, this.sourcedTraits)
     resolveSourcedInto(this.gearResolved, this.sourcedTraits, TraitSource.Gear)
+
+    // Re-priced here rather than once at kit-up, because wounds are traits: a
+    // soldier whose arm stops working carries a `maxAp` penalty, and
+    // `Soldier.refreshTraits` recomputes its allowance the moment that lands.
+    // Computed once, this runner handed wounded units their whole turn back
+    // every round — a difference a replay of a recorded match found, and one
+    // that made every balance number about wounds a statement about the
+    // harness rather than the game.
+    const apRelief = Math.round(
+      -Math.min(0, this.gearResolved.maxAp) * (this.derived.gearRelief / 100),
+    )
+    const maxAp = this.derived.maxAp + this.resolved.maxAp + apRelief
+    if (maxAp !== this.maxAp) {
+      // A unit standing at full keeps standing at full; one mid-turn loses only
+      // what the ceiling dropped by. The same clamp a soldier applies.
+      const wasFull = this.apLeft >= this.maxAp
+      this.maxAp = maxAp
+      this.apLeft = wasFull ? maxAp : Math.min(this.apLeft, maxAp)
+    }
   }
 
   get traits(): ResolvedTraits {

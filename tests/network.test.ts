@@ -73,6 +73,7 @@ describe('JSON-RPC framing', () => {
       'throwGrenade',
       'reload',
       'toggleCover',
+      'overwatch',
       'endUnitTurn',
       'endTurn',
       'rightClickFacing',

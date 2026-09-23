@@ -3,7 +3,7 @@ title: "GDD: Status, Trait & Worn Kit Catalogue"
 id: "GDD-CATALOG"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-17"
+lastReviewed: "2026-09-23"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Traits.ts"

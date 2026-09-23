@@ -323,6 +323,15 @@ export const ShotMode = {
   Snap: 'snap',
   Aimed: 'aimed',
   Burst: 'burst',
+  /**
+   * A shot taken during somebody else's turn.
+   *
+   * A mode rather than a special case, because a mode already carries an AP
+   * multiplier and an accuracy multiplier and every term in the chain already
+   * respects them. No weapon lists it in `availableModes`, so it never appears
+   * as something a player picks — it is what overwatch fires.
+   */
+  Reaction: 'reaction',
 } as const
 export type ShotMode = (typeof ShotMode)[keyof typeof ShotMode]
 
@@ -339,6 +348,10 @@ export const SHOT_MODES: Record<ShotMode, ShotModeSpec> = {
   [ShotMode.Snap]: { id: ShotMode.Snap, name: 'Snap Shot', apMul: 1, chanceMul: 1 },
   [ShotMode.Aimed]: { id: ShotMode.Aimed, name: 'Aimed Shot', apMul: 2, chanceMul: 2 },
   [ShotMode.Burst]: { id: ShotMode.Burst, name: 'Burst Fire', apMul: 1.25, chanceMul: 0.9 },
+  // Cheaper in points than a snap shot and worse than one: the points were
+  // already paid when the unit went on watch, and a round snapped off at
+  // somebody crossing open ground is not an aimed one.
+  [ShotMode.Reaction]: { id: ShotMode.Reaction, name: 'Reaction Fire', apMul: 0, chanceMul: 0.7 },
 }
 
 // ---------------------------------------------------------------------------

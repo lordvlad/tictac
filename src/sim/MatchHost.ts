@@ -110,6 +110,14 @@ export class MatchHost {
     this.squads.equipFaction(Faction.Red, header.loadouts[Faction.Red])
 
     this.movement = new MovementSystem(map.grid)
+    // The reaction trigger, wired identically to a live match's: a unit that
+    // walked into somebody's watch is shot at by the rules rather than by a
+    // message. Both peers, a replay and a referee therefore provoke the same
+    // reactions from the same intent.
+    this.movement.onStep = (entityId) => {
+      const mover = this.squads.byEntityId(entityId)
+      if (mover) this.combat.reactTo(mover)
+    }
     this.combat = new CombatSystem(map.grid, this.squads, NO_FX, matchDice(header.seed))
     this.items = new ItemSystem()
     const turns = new TurnSystem()
@@ -183,6 +191,12 @@ export class MatchHost {
         const soldier = this.unitAt(command.faction, command.squadIndex)
         if (!soldier) return refuse('no such unit')
         this.combat.toggleCover(this.world, soldier.entityId)
+        return carried
+      }
+      case 'overwatch': {
+        const soldier = this.unitAt(command.faction, command.squadIndex)
+        if (!soldier) return refuse('no such unit')
+        if (!this.combat.overwatch(soldier)) return refuse('cannot afford a watch')
         return carried
       }
       case 'useItem': {

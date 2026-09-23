@@ -59,5 +59,5 @@ graph TD
 **Status:** Planned  
 **Focus:** High-level tactics, team composition, and long-term roster persistence.
 - `[ITEM-010]` Tactical role specializations on loadout screen (Medic, Scout, Marksman, Gunner).
-- `[ITEM-011]` Reaction fire and overwatch interleaving inside enemy movement paths.
+- ~~`[ITEM-011]` Reaction fire and overwatch interleaving inside enemy movement paths.~~ Done.
 - `[ITEM-012]` LocalStorage and P2P campaign roster persistence across matches.

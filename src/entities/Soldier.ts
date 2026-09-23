@@ -378,6 +378,13 @@ export class Soldier {
     this.stance.firedThisTurn = value
   }
 
+  get watching(): boolean {
+    return this.stance.watching
+  }
+  set watching(value: boolean) {
+    this.stance.watching = value
+  }
+
   /**
    * Percentage points off an attacker's hit chance.
    *

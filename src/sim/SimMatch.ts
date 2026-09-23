@@ -17,7 +17,8 @@ import {
   throwGrenade,
 } from '../game/Combat'
 import { stepCostFor } from '../game/Movement'
-import { settleTurn } from '../game/Turn'
+import { canWatch, reactToArrival, watchCost } from '../game/Overwatch'
+import { forfeitTurn, settleTurn } from '../game/Turn'
 import { effectiveWeapon, resolveDamage } from '../core/Ballistics'
 import type { SquadLoadout } from '../game/Loadout'
 import {
@@ -95,6 +96,9 @@ export interface MatchOutcome {
   traits: Record<Faction, string[]>
   byWeapon: Record<string, WeaponTally>
   grenadesThrown: number
+  /** Watches set, and the reactions they actually produced. */
+  watches: number
+  reactions: number
 }
 
 const DEFAULT_TURN_CAP = 40
@@ -173,6 +177,8 @@ export class SimMatch {
   private readonly tally = new Map<string, WeaponTally>()
   private readonly turnCap: number
   private grenadesThrown = 0
+  private watches = 0
+  private reactions = 0
   private activeFaction: Faction = Faction.Blue
   private turnNumber = 1
 
@@ -265,6 +271,8 @@ export class SimMatch {
       },
       byWeapon: Object.fromEntries(this.tally),
       grenadesThrown: this.grenadesThrown,
+      watches: this.watches,
+      reactions: this.reactions,
     }
   }
 
@@ -305,19 +313,31 @@ export class SimMatch {
 
       if (this.tryAdvance(unit)) continue
 
-      // Nowhere better to be: take the shot on offer, however poor.
+      // Nowhere better to be. A poor shot now is worth less than the same
+      // shot taken at somebody walking into the open, so hold it if there are
+      // points to hold it with.
       const lastResort = this.bestShot(unit)
+      if (lastResort && lastResort.chance < PREFERRED_CHANCE && this.tryWatch(unit)) continue
       if (lastResort) {
         this.fireAt(unit, lastResort)
         continue
       }
 
       if (this.tryCover(unit)) continue
+      if (this.tryWatch(unit)) continue
       break
     }
 
     // The same boundary the played game has: whatever is left is forfeited, and
-    // a replay uses it to hand selection on to the next unit.
+    // a replay uses it to hand selection on to the next unit. Forfeited here as
+    // well as recorded — a runner that records an intent it does not apply to
+    // itself writes a file that plays out as a different match.
+    //
+    // A unit shot dead partway through its own move has no turn left to end,
+    // and a match refuses the intent for one that is not alive. Recording it
+    // anyway would put a frame in the file that every replay skips.
+    if (unit.isDead) return
+    forfeitTurn(unit)
     this.recorder?.record({
       type: 'endUnitTurn',
       faction: unit.faction,
@@ -474,6 +494,14 @@ export class SimMatch {
       unit.exitCover()
       walked.push({ ...step })
       moved = true
+
+      // The same trigger a match wires to `MovementSystem.onStep`: arriving on
+      // a tile is what a watcher was waiting for. Per tile rather than per
+      // route, because that is the point both peers compute identically — and
+      // because walking the whole way past a rifle should cost more than
+      // stepping once into its lane.
+      this.reactions += reactToArrival(this.grid, unit, this.units, this.roll).length
+      if (unit.isDead) break
       // One tile at a time, then re-decide, and stop the moment there is a
       // shot to take rather than the moment something comes into view: a
       // shotgun reaches 12 m and sees 14, so breaking on sight left it frozen
@@ -507,8 +535,30 @@ export class SimMatch {
   }
 
   /**
-   * The game's own turn boundary, in the game's own order: hand over, refill
-   * the incoming side, then settle - which is what `InteractionController`
+   * Hold the points a unit has nothing better to do with.
+   *
+   * Last in the policy on purpose: a watch is what is left when there is
+   * nothing worth shooting and nowhere better to stand. Measuring it at all
+   * requires the AI to use it — a mechanic the sweep's policy ignores reads as
+   * worthless in every report, which is exactly how the shotgun once measured
+   * by never closing to its own range band.
+   */
+  private tryWatch(unit: SimUnit): boolean {
+    if (!canWatch(unit)) return false
+    unit.ap = Math.max(0, unit.ap - watchCost(unit))
+    unit.watching = true
+    this.watches += 1
+    this.recorder?.record({
+      type: 'overwatch',
+      faction: unit.faction,
+      squadIndex: unit.squadIndex,
+    })
+    return true
+  }
+
+  /**
+   * The game's own turn boundary, in the game's own order: hand over, settle,
+   * then refill the incoming side — which is what `TurnManager.startNextTurn`
    * does via `TurnSystem` and `settleTurn`.
    */
   private endTurn(): void {
@@ -517,11 +567,11 @@ export class SimMatch {
     this.recorder?.record({ type: 'endTurn', faction: this.activeFaction })
     this.activeFaction = this.activeFaction === Faction.Blue ? Faction.Red : Faction.Blue
     if (this.activeFaction === Faction.Blue) this.turnNumber++
+    settleTurn(this.units, this.activeFaction)
     for (const unit of this.byFaction[this.activeFaction]) {
       if (unit.isDead) continue
       unit.ap = unit.effectiveMaxAp
     }
-    settleTurn(this.units, this.activeFaction)
   }
 }
 

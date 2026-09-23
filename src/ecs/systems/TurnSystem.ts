@@ -21,10 +21,21 @@ export class TurnSystem extends System {
     if (ap) ap.ap = 0
   }
 
-  endTurn(world: World): void {
+  /**
+   * Hand the turn over, and give the incoming side its points.
+   *
+   * Separate halves because something has to happen *between* them: statuses
+   * expire and exhaustion is charged against the side going out, and doing
+   * that after the refill meant a penalty that had just run out still docked
+   * the allowance it was handed. `TurnManager.startNextTurn` is the one place
+   * that puts the three in order.
+   */
+  advanceFaction(): void {
     this.activeFaction = this.activeFaction === Faction.Blue ? Faction.Red : Faction.Blue
     if (this.activeFaction === Faction.Blue) this.turnNumber++
+  }
 
+  replenish(world: World): void {
     for (const entityId of world.query([
       IdentityComponent,
       ActionPointsComponent,

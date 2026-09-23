@@ -7,6 +7,7 @@ import type { Tile } from '../../core/Grid'
 import type { Grid } from '../../core/Grid'
 import type { Soldier } from '../../entities/Soldier'
 import type { Squads } from '../../game/Squads'
+import { canWatch, reactToArrival, watchCost } from '../../game/Overwatch'
 import { NO_FX, type CombatFx } from '../../core/Combatant'
 import type { Roll } from '../../core/rng'
 import {
@@ -91,6 +92,35 @@ export class CombatSystem extends System {
     soldier.ap = Math.max(0, soldier.ap - RULES.reloadApCost)
     soldier.weapon.currentClip = soldier.weapon.maxClip
     return true
+  }
+
+  /**
+   * Hold this unit's fire for the other side's turn.
+   *
+   * The points are spent now rather than when the reaction fires: a watch
+   * nobody walks past still cost something, or holding one would be strictly
+   * better than ending a turn.
+   *
+   * @returns false when the unit cannot afford the shot it is reserving.
+   */
+  overwatch(soldier: Soldier): boolean {
+    if (!canWatch(soldier)) return false
+    soldier.ap = Math.max(0, soldier.ap - watchCost(soldier))
+    soldier.watching = true
+    return true
+  }
+
+  /**
+   * Fire whatever a unit's arrival has provoked.
+   *
+   * Wired to `MovementSystem.onStep` by whoever owns the match — the
+   * controller in a live game, `MatchHost` in a replay or a referee — so a
+   * reaction is a consequence of the movement intent rather than something a
+   * client announces.
+   */
+  reactTo(mover: Soldier): void {
+    const fired = reactToArrival(this.grid, mover, this.squads.soldiers, this.roll, this.fx)
+    for (const { watcher, result } of fired) this.onShotResolved?.(watcher, mover, result)
   }
 
   /**

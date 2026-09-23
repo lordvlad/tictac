@@ -19,7 +19,16 @@ export class StanceComponent extends Component {
      * Replicated: the side being shot at has to know it was shot at, and fog is
      * recomputed from scratch on every action rather than told about events.
      */
-    public firedThisTurn: boolean = false
+    public firedThisTurn: boolean = false,
+    /**
+     * Holding fire for somebody else's turn.
+     *
+     * Replicated, like the flags above it: both peers resolve every intent, so
+     * both have to know which units are watching before a path is walked — a
+     * reaction that one side fires and the other does not is a desynchronised
+     * match, not a surprise.
+     */
+    public watching: boolean = false
   ) {
     super()
   }
@@ -30,6 +39,7 @@ export class StanceComponent extends Component {
       isMoving: this.isMoving,
       peek: this.peek,
       firedThisTurn: this.firedThisTurn,
+      watching: this.watching,
       movingPath: this.movingPath.map((t) => ({ x: t.x, y: t.y })),
     }
   }
@@ -39,6 +49,7 @@ export class StanceComponent extends Component {
     if (typeof data.isMoving === 'boolean') this.isMoving = data.isMoving
     if (typeof data.peek === 'boolean') this.peek = data.peek
     if (typeof data.firedThisTurn === 'boolean') this.firedThisTurn = data.firedThisTurn
+    if (typeof data.watching === 'boolean') this.watching = data.watching
     if (Array.isArray(data.movingPath)) {
       const path: Tile[] = []
       for (const entry of data.movingPath) {

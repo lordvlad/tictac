@@ -81,29 +81,31 @@ Medic, Scout, and Marksman roles gate which crate rows a unit may draw equipment
 
 ---
 
-### [ITEM-011] Overwatch & Reaction Fire
-**Type:** Feature  
-**Priority:** P1  
+### [ITEM-029] AI That Crosses Covered Ground
+**Type:** Tooling / AI  
+**Priority:** P2  
 **Status:** Backlog  
-**Milestone:** M4 — Competitive & Meta Roster  
+**Milestone:** M3 — Reconnaissance & Morale  
 
 #### Why
-The quintessential tactical ability: reserving AP to engage moving enemies during their turn.
+The sweep's policy advances until it has a shot and then stops, so it almost never walks
+*through* a watched lane. Overwatch ([ITEM-011](completed.md)) fires about 0.2 times per match in
+the sweep, and melee ([ITEM-018](#item-018-melee-fists-blades-and-bludgeons)) will measure as
+worthless for the same reason: any mechanic whose value is about crossing ground reads as noise
+to a policy that never crosses it.
 
 #### Change
-A unit may hold remaining AP to fire during an enemy's movement phase.
+Give the headless policy a notion of danger along a path: prefer routes out of enemy watch
+cones, and sometimes accept one — a flanking move, a rush to melee. Not a smarter game AI;
+a policy that exercises the rules the game already has.
 
-#### Cost & Complexity
-Genuinely invasive. It interleaves resolution into the *enemy's* turn: under intent-only both
-peers resolve a reaction from the same dice, so the hard part is agreeing *when* it fired — the
-trigger has to be a point on the path both sides compute identically, not a moment one side
-noticed. So both `MovementSystem` and the wire protocol are in scope.
+#### Acceptance Criteria
+- [ ] `bun run balance` reports reactions per match an order of magnitude above today's ~0.2.
+- [ ] A watch's value is measurable: a squad that may not watch loses a measurable share of
+      matches against one that may.
 
 #### Affected Files
-- `src/ecs/systems/MovementSystem.ts`
-- `src/ecs/systems/CombatSystem.ts`
-- `src/game/NetworkManager.ts`
-- `src/hud/Hud.ts`
+- `src/sim/SimMatch.ts`
 
 ---
 

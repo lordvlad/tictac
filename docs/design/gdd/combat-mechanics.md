@@ -86,6 +86,13 @@ graph TD
   (`docs/architecture/combat-and-rules.md`).
 - **Stances**: standing (ordinary mobility) versus crouched (cover is worth more, and some kit
   — the bipod — pays only while down).
+- **Overwatch.** A unit may go on watch for a snap shot's price, paid at once. The first time an
+  enemy *arrives* on a tile it can shoot at during the other side's turn, it fires a reaction
+  shot (0.7× the chance) and stops watching. The shot itself costs nothing more — it was bought
+  when the watch was set — and a watch that nobody walks into is simply spent, which is what
+  keeps it from being strictly better than ending a turn. A watch ends when its own side's turn
+  comes round. This is the counter to crossing open ground: walking the whole way past a rifle
+  costs more than stepping once into its lane, because the trigger is each tile, not the route.
 
 ### 2.5 Ballistics, Armor, and Wounds
 - **Hit roll**: the shooter's training with the weapon in hand against the target's evasion,

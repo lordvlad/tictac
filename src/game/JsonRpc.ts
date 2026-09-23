@@ -66,6 +66,7 @@ export const RpcMethods = {
   throwGrenade: 'tictac/system/combat/throwGrenade',
   reload: 'tictac/system/combat/reload',
   toggleCover: 'tictac/system/combat/toggleCover',
+  overwatch: 'tictac/system/combat/overwatch',
   endUnitTurn: 'tictac/system/turn/endUnitTurn',
   endTurn: 'tictac/system/turn/endTurn',
   useItem: 'tictac/system/items/useItem',

@@ -1,6 +1,7 @@
 import type { Faction } from '../config'
 import type { Soldier } from '../entities/Soldier'
 import type { Squads } from './Squads'
+import { settleTurn } from './Turn'
 import { NO_FOCUS, type FocusPort } from '../core/Combatant'
 import type { World } from '../ecs/World'
 import type { TurnSystem } from '../ecs/systems/TurnSystem'
@@ -56,9 +57,23 @@ export class TurnManager {
     }
   }
 
-  /** Hand over to the other faction, replenishing whoever is up next. */
+  /**
+   * Hand over to the other faction, replenishing whoever is up next.
+   *
+   * The settle happens here rather than in whatever noticed the switch. It
+   * used to be the caller's job, and the headless host — which has no
+   * `onTurnSwitched` to forget — simply never did it: statuses never expired
+   * in a replay and a watch was held forever, so a recorded match and its
+   * refight were two different games. A rule that every path must remember to
+   * call is a rule that one path will not.
+   */
   startNextTurn(): void {
-    this.turns.endTurn(this.world)
+    this.turns.advanceFaction()
+    // Settled before the refill: statuses expire and exhaustion is charged
+    // against the side going out, and a penalty that has just run out must not
+    // dock the allowance handed over immediately afterwards.
+    settleTurn(this.squads.soldiers, this.activeFaction)
+    this.turns.replenish(this.world)
     // Start turn with no character selected
     this.selectedSoldier = null
   }

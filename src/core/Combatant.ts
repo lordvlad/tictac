@@ -57,6 +57,14 @@ export interface Combatant extends CombatantStats, Casualty {
    * to ask after the fact.
    */
   firedThisTurn: boolean
+  /**
+   * Holding fire for somebody else's turn.
+   *
+   * State rather than a queued action, for the same reason `firedThisTurn` is:
+   * a reaction is triggered by something another unit does, and the rule that
+   * fires it has to be able to ask after the fact.
+   */
+  watching: boolean
   /** Firing does not give this unit away. */
   readonly silenced: boolean
   /** Being shot at does not give this unit's sheet away. */
