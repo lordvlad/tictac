@@ -121,6 +121,27 @@ export function peekOrigins(grid: Grid, from: Tile): Tile[] {
   return origins
 }
 
+/** Where a unit looks from: its own tile, and beside the wall it hugs when peeking. */
+export function eyesOf(grid: Grid, viewer: Viewer): Tile[] {
+  return viewer.peek ? [viewer.tile, ...peekOrigins(grid, viewer.tile)] : [viewer.tile]
+}
+
+/**
+ * Whether a unit at `origin`, looking from `eyes`, sees `to`.
+ *
+ * The one statement of what seeing is, shared by fog and by anything that may
+ * only act on what it can see — a watcher reacting included. Range is measured
+ * from the unit's own tile even for peeked sightlines: leaning round a corner
+ * must not extend how far it can see.
+ */
+export function sees(grid: Grid, origin: Tile, eyes: readonly Tile[], to: Tile): boolean {
+  if ((to.x - origin.x) ** 2 + (to.y - origin.y) ** 2 > RULES.sightRange ** 2) return false
+  for (const eye of eyes) {
+    if (hasLineOfSight(grid, eye, to)) return true
+  }
+  return false
+}
+
 /**
  * Recompute visibility map for a faction from its living units.
  *
@@ -143,7 +164,7 @@ export function computeFactionVisibility(
 
   for (const viewer of viewers) {
     const origin = viewer.tile
-    const eyes = [origin, ...(viewer.peek ? peekOrigins(grid, origin) : [])]
+    const eyes = eyesOf(grid, viewer)
 
     const minX = Math.max(0, origin.x - RULES.sightRange)
     const maxX = Math.min(size - 1, origin.x + RULES.sightRange)
@@ -152,17 +173,8 @@ export function computeFactionVisibility(
 
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
-        const distSq = (x - origin.x) ** 2 + (y - origin.y) ** 2
-        if (distSq > RULES.sightRange ** 2) continue
         if (existingVisMap[grid.index(x, y)] === VisState.Visible) continue
-
-        const targetTile = { x, y }
-        for (const eye of eyes) {
-          if (hasLineOfSight(grid, eye, targetTile)) {
-            existingVisMap[grid.index(x, y)] = VisState.Visible
-            break
-          }
-        }
+        if (sees(grid, origin, eyes, { x, y })) existingVisMap[grid.index(x, y)] = VisState.Visible
       }
     }
   }

@@ -4,6 +4,7 @@ import { NO_FX } from '../core/Combatant'
 import type { Grid, Tile } from '../core/Grid'
 import type { Roll } from '../core/rng'
 import { effectiveWeapon } from '../core/Ballistics'
+import { eyesOf, sees } from '../core/Visibility'
 import { canShoot, fireWeapon, type ShotResult } from './Combat'
 
 /**
@@ -91,9 +92,12 @@ export function reactToArrival<T extends Combatant>(
 
   const fired: ReactionFire<T>[] = []
   for (const watcher of watchers) {
-    // The ordinary legality of a shot, asked of a unit that is not on its own
-    // turn: line of sight, range, a loaded weapon. Nothing special is granted
-    // to a watcher — what it bought with its points was the *timing*.
+    // A watcher reacts to what it can see — the same sight fog grants — and
+    // then to the ordinary legality of a shot: range and points. Nothing
+    // special is granted; what it bought was the *timing*. (`canShoot` alone
+    // asks range, not sight, because a player's shots are already chosen from
+    // what is visible. Without this check a watcher fired through walls.)
+    if (!sees(grid, watcher.tile, eyesOf(grid, watcher), mover.tile)) continue
     if (!canShoot(grid, watcher, mover, ShotMode.Reaction)) continue
 
     // Spent before the shot, so a unit cannot react twice to one path even if

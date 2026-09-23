@@ -42,6 +42,8 @@ export interface Casualty extends UnitRef {
 export interface Combatant extends CombatantStats, Casualty {
   readonly isMoving: boolean
   tile: Tile
+  /** Corner peeking: also sees from the free tiles beside the wall it hugs. */
+  readonly peek: boolean
   ap: number
   /** Yaw the unit is turning towards. Facing is state; the turn is animation. */
   targetYaw: number

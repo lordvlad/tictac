@@ -3,7 +3,8 @@ import { Faction } from '../src/config'
 import { AmmoId, ShotMode, WeaponId } from '../src/core/Arsenal'
 import { rollSquadSheets } from '../src/core/Characters'
 import { NO_FX } from '../src/core/Combatant'
-import { Grid } from '../src/core/Grid'
+import { Grid, Side } from '../src/core/Grid'
+import { WallKind } from '../src/core/Walls'
 import { matchDice, Rng } from '../src/core/rng'
 import { createGlobalRules } from '../src/ecs/globals'
 import { World } from '../src/ecs/World'
@@ -84,6 +85,21 @@ describe('Walking into somebody’s watch', () => {
 
     expect(fired).toHaveLength(1)
     expect(fired[0]!.watcher).toBe(watcher)
+  })
+
+  test('a watcher does not react to what it cannot see', () => {
+    // Range alone is not sight. Behind a solid wall the arrival is invisible,
+    // and a watch that fired anyway would be shooting through the wall.
+    const { grid, squads, dice } = field()
+    const watcher = squads.byFaction[Faction.Blue][0]!
+    const mover = squads.byFaction[Faction.Red][0]!
+    watcher.watching = true
+    mover.tile = { x: watcher.tile.x, y: watcher.tile.y + 5 }
+    for (let x = 0; x < grid.size; x++) grid.setWall(x, watcher.tile.y + 2, Side.North, WallKind.Solid)
+
+    expect(reactToArrival(grid, mover, squads.soldiers, dice, NO_FX)).toHaveLength(0)
+    // Still watching: nothing was seen, so nothing was spent.
+    expect(watcher.watching).toBe(true)
   })
 
   test('one watch is one reaction, however far the unit walks', () => {
