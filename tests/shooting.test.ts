@@ -217,4 +217,27 @@ describe('A blow is offered beside the shots, in reach only', () => {
 
     shoot.dispose()
   })
+
+  test('Strike aims at the enemy in reach, even when another has better odds for a gun', () => {
+    // The bug this guards: Strike reused Shoot's pre-selection (best snap
+    // odds), so beside one enemy it opened on another three metres away —
+    // and with that target the Strike row was simply not there.
+    const attacker = fighter(Faction.Blue, { x: 4, y: 4 }, MeleeId.Knife)
+    const beside = fighter(Faction.Red, { x: 4, y: 5 })
+    const inTheOpen = fighter(Faction.Red, { x: 4, y: 7 })
+    // The one in reach is harder to hit with a rifle than the one further off.
+    beside.enterCover()
+    const shoot = harness([attacker, beside, inTheOpen])
+
+    expect(shoot.inReach(attacker)).toEqual([beside])
+    expect(shoot.enter(attacker, 'strike')).toBe(true)
+    expect(shoot.selectedTarget).toBe(beside)
+    expect(shoot.pending(attacker)?.strike).not.toBeNull()
+    shoot.dispose()
+
+    // With nobody in reach there is nothing to open.
+    const alone = harness([attacker, inTheOpen])
+    expect(alone.enter(attacker, 'strike')).toBe(false)
+    alone.dispose()
+  })
 })

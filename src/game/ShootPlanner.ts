@@ -147,21 +147,32 @@ export class ShootPlanner {
     return this.availableTargets(shooter).length > 0
   }
 
-  /** @returns true when shoot mode was entered (the unit can still afford it). */
-  enter(shooter: Soldier | null): boolean {
+  /** Enemies close enough to strike with the sidearm, right now. */
+  inReach(shooter: Soldier): Soldier[] {
+    return this.availableTargets(shooter).filter((s) => canMelee(this.grid, shooter, s))
+  }
+
+  /**
+   * Start aiming.
+   *
+   * `shoot` pre-selects the best snap odds, so the player usually only has to
+   * pick a card. `strike` pre-selects the best *blow* among the enemies in
+   * reach — without it, pressing Strike beside one enemy opened the panel on a
+   * different one three metres off, with the Strike row nowhere in it.
+   *
+   * @returns true when aiming started.
+   */
+  enter(shooter: Soldier | null, intent: 'shoot' | 'strike' = 'shoot'): boolean {
     if (!shooter || !this.canEnter(shooter)) return false
+    const targets = intent === 'strike' ? this.inReach(shooter) : this.availableTargets(shooter)
+    if (intent === 'strike' && targets.length === 0) return false
     this.activeOn = true
-    // Pre-select the best odds so the player usually only has to pick a card.
-    const targets = this.availableTargets(shooter)
+    const odds = (s: Soldier): number =>
+      intent === 'strike'
+        ? meleeChance(shooter, s).chance
+        : shotBreakdown(this.grid, shooter, s, ShotMode.Snap).chance
     this.target =
-      targets.length === 0
-        ? null
-        : targets.reduce((best, s) =>
-            shotBreakdown(this.grid, shooter, s, ShotMode.Snap).chance >
-            shotBreakdown(this.grid, shooter, best, ShotMode.Snap).chance
-              ? s
-              : best,
-          )
+      targets.length === 0 ? null : targets.reduce((best, s) => (odds(s) > odds(best) ? s : best))
     return true
   }
 

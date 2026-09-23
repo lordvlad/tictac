@@ -26,6 +26,8 @@ export type HudIntent =
   | { type: 'fireShot'; mode: ShotMode }
   /** The sidearm blow at the target being aimed at; offered only in reach. */
   | { type: 'meleeAttack' }
+  /** Start aiming a blow at the best enemy in reach. */
+  | { type: 'strike' }
   | { type: 'reload' }
   | { type: 'armGrenade'; kind: GrenadeId }
   | { type: 'useItem'; itemId: ItemId }
@@ -275,6 +277,11 @@ export interface HudModelSources {
    * needs the map.
    */
   shootReady: boolean
+  /**
+   * The sidearm, when an enemy is in reach of it — the only time a Strike
+   * button is worth a row in the panel.
+   */
+  strikeReady: { sidearm: MeleeId; name: string; apCost: number } | null
   waypointActive: boolean
   /** Shoot-mode state, when shoot mode is on. */
   shoot: ShootSnapshot | null
@@ -353,6 +360,21 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       disabled: !shootActive && !sources.shootReady,
       intent: shootActive ? { type: 'cancelShoot' } : { type: 'shoot' },
     })
+    // Beside Shoot and only while somebody is in reach: melee is a thing to do
+    // when standing next to an enemy, not a mode to go looking for. It opens
+    // the same panel as Shoot, on the enemy in reach, so the chance is read
+    // before anything is committed.
+    if (sources.strikeReady) {
+      actions.push({
+        id: 'strike',
+        label: `Strike · ${sources.strikeReady.name}`,
+        icon: `melee-${sources.strikeReady.sidearm}`,
+        tag: `${sources.strikeReady.apCost} AP`,
+        active: false,
+        disabled: false,
+        intent: { type: 'strike' },
+      })
+    }
     actions.push({
       id: 'cover',
       label: selected.isCrouching ? 'Stand Up' : 'Take Cover',

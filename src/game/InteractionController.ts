@@ -33,6 +33,7 @@ import type { Tracers } from '../render/Tracers'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
 import { MovementSystem, CombatSystem, CommandSystem, ItemSystem, RenderSystem, WallSystem } from '../ecs/systems'
 import { type Carried, type Command, type CommandOrigin, isCommand } from '../ecs/systems/CommandSystem'
+import { MELEE } from '../core/Melee'
 import { ITEMS, type ItemId, itemTargetsAlly } from '../core/Items'
 import { distance, facingYaw } from '../core/math'
 
@@ -343,6 +344,10 @@ export class InteractionController {
         seedLabel: this.seedLabel,
         shootActive: this.shoot.active,
         shootReady: this.shoot.canEnter(shooter),
+        strikeReady:
+          shooter && !this.shoot.active && this.shoot.inReach(shooter).length > 0
+            ? { sidearm: shooter.sidearm, name: MELEE[shooter.sidearm].name, apCost: MELEE[shooter.sidearm].apCost }
+            : null,
         waypointActive: this.planner.waypointMode,
         selectedLevelFilter: this.selectedLevelFilter,
         topLevel: this.topLevel,
@@ -446,6 +451,9 @@ export class InteractionController {
       }
       case 'shoot':
         this.enterShootMode()
+        break
+      case 'strike':
+        this.enterShootMode('strike')
         break
       case 'cancelShoot':
         this.exitShootMode()
@@ -718,8 +726,8 @@ export class InteractionController {
     this.debugMap.dispose()
     this.effects.dispose()
   }
-  enterShootMode(): void {
-    if (!this.shoot.enter(this.turnManager.selectedSoldier)) return
+  enterShootMode(intent: 'shoot' | 'strike' = 'shoot'): void {
+    if (!this.shoot.enter(this.turnManager.selectedSoldier, intent)) return
     this.planner.clear()
     this.renderOverlay()
     this.refreshHud()
