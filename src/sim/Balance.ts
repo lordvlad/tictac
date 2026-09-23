@@ -1,4 +1,5 @@
 import { Faction } from '../config'
+import type { GroundCovered } from './Ground'
 import { WeaponId } from '../core/Arsenal'
 import type { CombatRecording } from '../game/Recording'
 import { type MatchOutcome, SimMatch, type SquadPlan, type WeaponTally } from './SimMatch'
@@ -78,8 +79,25 @@ export interface SweepReport {
    */
   watchesPerMatch: number
   reactionsPerMatch: number
+  /**
+   * Ground used per match, by side and by result. The win rates say who won;
+   * this says whether anybody went round rather than through.
+   */
+  ground: Record<'blue' | 'red' | 'winners' | 'losers', GroundCovered>
   weapons: WeaponReport[]
   traits: TraitReport[]
+}
+
+function meanGround(samples: readonly GroundCovered[]): GroundCovered {
+  const mean = (pick: (g: GroundCovered) => number, digits = 1) =>
+    samples.length === 0 ? 0 : round(samples.reduce((sum, g) => sum + pick(g), 0) / samples.length, digits)
+  return {
+    walked: mean((g) => g.walked),
+    tiles: mean((g) => g.tiles),
+    share: mean((g) => g.share, 3),
+    forward: mean((g) => g.forward),
+    sideways: mean((g) => g.sideways),
+  }
 }
 
 function median(values: readonly number[]): number {
@@ -184,6 +202,16 @@ export function sweep(options: SweepOptions): SweepReport {
     meanWinnerSurvivors: decided === 0 ? 0 : round(winnerSurvivors / decided),
     watchesPerMatch: round(outcomes.reduce((n, o) => n + o.watches, 0) / outcomes.length),
     reactionsPerMatch: round(outcomes.reduce((n, o) => n + o.reactions, 0) / outcomes.length),
+    ground: {
+      blue: meanGround(outcomes.map((o) => o.ground[Faction.Blue])),
+      red: meanGround(outcomes.map((o) => o.ground[Faction.Red])),
+      winners: meanGround(outcomes.flatMap((o) => (o.winner === null ? [] : [o.ground[o.winner]]))),
+      losers: meanGround(
+        outcomes.flatMap((o) =>
+          o.winner === null ? [] : [o.ground[o.winner === Faction.Blue ? Faction.Red : Faction.Blue]],
+        ),
+      ),
+    },
     weapons: [...weapons.entries()]
       .map(([weapon, tally]) => ({
         weapon,
@@ -226,6 +254,21 @@ export function formatReport(report: SweepReport): string {
   lines.push(
     `overwatch: ${report.watchesPerMatch} watches per match, ${report.reactionsPerMatch} reactions fired`,
   )
+  lines.push('')
+  lines.push('ground      walked   tiles   map%   forward   sideways')
+  for (const side of ['blue', 'red', 'winners', 'losers'] as const) {
+    const g = report.ground[side]
+    lines.push(
+      [
+        side.padEnd(10),
+        pad(g.walked, 8),
+        pad(g.tiles, 8),
+        pad(pct(g.share), 7),
+        pad(g.forward, 10),
+        pad(g.sideways, 11),
+      ].join(''),
+    )
+  }
   lines.push('')
   lines.push('weapon      shots   hit%   dmg/shot   kills   crit%   rounds')
   for (const weapon of report.weapons) {

@@ -71,6 +71,33 @@ a few points of win rate to the side that has it.
 
 ---
 
+### Ground covered
+
+`bun run balance` reports how much of the map each side used (`src/sim/Ground.ts`), by side
+and by result: tiles walked, distinct tiles stood on and their share of the walkable map, and
+the mean over units of the furthest each got **forward** (along the line from its own spawn
+centroid to the enemy's) and **sideways** (perpendicular to it). Win rates cannot say how a
+fight was fought; this can.
+
+First reading (2026-09-19, three disjoint blocks of 400, stock mirror; maps 36 tiles wide,
+spawn centroids ~29 tiles apart, ~1270 walkable tiles):
+
+| | walked | tiles | map | forward | sideways |
+| --- | --- | --- | --- | --- | --- |
+| blue (moves first) | 64.5 | 53 | 4.2% | 13.7 | 3.4 |
+| red | 45.0 | 40 | 3.1% | 9.1 | 3.4 |
+| winners | 56 | 48 | 3.8% | 11.5 | 3.6 |
+| losers | 53 | 45 | 3.5% | 11.2 | 3.2 |
+
+- **Head-on**: units go four times as far forward as sideways, and a squad touches about 4%
+  of the map. Nothing in the policy rewards a lateral route before contact: exposure only
+  counts enemies that can *already* see a tile, so an approach out of sight is free whatever
+  shape it is, and closing is scored by straight-line distance.
+- **The first mover does the closing**: Blue walks 43% more and gets 50% further forward, then
+  ends its turn where Red can see it. Red — standing, shooting first — wins about 60% of mirror
+  matches. Winners and losers barely differ in ground, so it is not *how much* a side moves
+  that loses, but being the side that walks into view.
+
 ## 4. Determinism & Seed Pinning
 
 Simulations take a numeric seed and generate identical outcomes across runs:

@@ -22,6 +22,7 @@ import {
   type RecordingHeader,
 } from '../game/Recording'
 import type { Carried } from '../ecs/systems/CommandSystem'
+import { type GroundCovered, GroundTracker } from './Ground'
 import { MatchHost } from './MatchHost'
 
 /** What one squad brought, so a sweep can vary it. */
@@ -102,6 +103,8 @@ export interface MatchOutcome {
   /** Watches set, and the reactions they actually produced. */
   watches: number
   reactions: number
+  /** How much of the map each side used; see {@link GroundCovered}. */
+  ground: Record<Faction, GroundCovered>
 }
 
 const DEFAULT_TURN_CAP = 40
@@ -163,6 +166,7 @@ export class SimMatch {
   private readonly turnCap: number
   private grenadesThrown = 0
   private watches = 0
+  private readonly ground: GroundTracker
   /** Handovers since anybody lost a hit point; see `chooseDestination`. */
   private quiet = 0
 
@@ -191,6 +195,12 @@ export class SimMatch {
       loadouts: this.loadouts,
     }
     this.host = new MatchHost(header)
+    // Where the squads actually stood at the start, which is what forward and
+    // sideways are measured from.
+    this.ground = new GroundTracker(this.host.grid, {
+      [Faction.Blue]: this.host.squads.byFaction[Faction.Blue].map((unit) => ({ ...unit.tile })),
+      [Faction.Red]: this.host.squads.byFaction[Faction.Red].map((unit) => ({ ...unit.tile })),
+    })
     this.recorder = setup.record
       ? new Recorder(header, () => ({ turn: this.host.turnNumber, faction: this.host.activeFaction }))
       : null
@@ -235,6 +245,10 @@ export class SimMatch {
       grenadesThrown: this.grenadesThrown,
       watches: this.watches,
       reactions: this.host.reactions,
+      ground: {
+        [Faction.Blue]: this.ground.of(Faction.Blue),
+        [Faction.Red]: this.ground.of(Faction.Red),
+      },
     }
   }
 
@@ -477,6 +491,7 @@ export class SimMatch {
           { x: step.x, y: step.y },
         ],
       })
+      this.ground.step(unit.faction, unit.squadIndex, unit.tile)
       if (unit.isDead) break
     }
     return true

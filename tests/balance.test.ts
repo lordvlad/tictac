@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { Grid } from '../src/core/Grid'
+import { GroundTracker } from '../src/sim/Ground'
 import { Faction, SQUAD_SIZE } from '../src/config'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
 import { ItemId } from '../src/core/Items'
@@ -157,5 +159,42 @@ describe('The report says what happened', () => {
     expect(text).toContain('5 matches, seeds 1..5')
     expect(text).toContain('weapon')
     expect(text).toContain(`blue ${report.wins.blue}`)
+  })
+})
+
+describe('Ground covered', () => {
+  // Blue deploys along the bottom, Red along the top: forward for Blue is +y,
+  // for Red it is -y, and sideways is x for both.
+  const spawns = {
+    [Faction.Blue]: [{ x: 5, y: 1 }],
+    [Faction.Red]: [{ x: 5, y: 15 }],
+  }
+
+  test('walking at the enemy is forward, walking across the field is sideways', () => {
+    const ground = new GroundTracker(new Grid(16), spawns)
+    for (let y = 2; y <= 6; y++) ground.step(Faction.Blue, 0, { x: 5, y })
+    for (let x = 4; x >= 2; x--) ground.step(Faction.Red, 0, { x, y: 15 })
+
+    const blue = ground.of(Faction.Blue)
+    expect(blue.walked).toBe(5)
+    expect(blue.forward).toBeCloseTo(5)
+    expect(blue.sideways).toBeCloseTo(0)
+
+    const red = ground.of(Faction.Red)
+    expect(red.forward).toBeCloseTo(0)
+    expect(red.sideways).toBeCloseTo(3)
+  })
+
+  test('a tile stood on twice is one tile of ground, and a retreat is not an advance', () => {
+    const ground = new GroundTracker(new Grid(16), spawns)
+    ground.step(Faction.Blue, 0, { x: 5, y: 2 })
+    ground.step(Faction.Blue, 0, { x: 5, y: 1 })
+    ground.step(Faction.Blue, 0, { x: 5, y: 2 })
+
+    const blue = ground.of(Faction.Blue)
+    expect(blue.walked).toBe(3)
+    // The spawn and one tile forward.
+    expect(blue.tiles).toBe(2)
+    expect(blue.forward).toBeCloseTo(1)
   })
 })
