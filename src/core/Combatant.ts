@@ -45,8 +45,14 @@ export interface Combatant extends CombatantStats, Casualty {
   /** Corner peeking: also sees from the free tiles beside the wall it hugs. */
   readonly peek: boolean
   ap: number
-  /** Yaw the unit is turning towards. Facing is state; the turn is animation. */
+  /** Yaw the unit is turning towards. The view's facing; no rule may read it. */
   targetYaw: number
+  /**
+   * Which way the unit faces for the rules, an index into `HEADINGS`
+   * (`core/Facing`). Set by whatever turns it — a step, a shot, a blow, an
+   * order — and read by anything that asks whether an attack came from behind.
+   */
+  heading: number
   /** The AP ceiling with live statuses folded in. */
   readonly effectiveMaxAp: number
   /** What a step costs this unit, as a multiple of the terrain's own price. */

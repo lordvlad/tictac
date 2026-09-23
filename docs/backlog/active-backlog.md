@@ -233,10 +233,11 @@ Built in slices, mechanics before noise (agreed 2026-09-24):
    measured against an AI that reads every enemy's position measures as nothing.
 1. ✅ **Crouched movement.** A crouched unit stays crouched when it moves, and pays
    `RULES.crouchStepCost` (1.5×) per step. No loudness yet.
-2. **Attacks from behind.** An integer heading on the position (`targetYaw` is a float from
-   `atan2`, banned from rules code). A blow or a shot from behind ignores every defence —
-   evasion, parry, defence bonuses — except cover. A knife from behind does a great deal
-   more damage: only a very high-health target survives it. Not an outright kill.
+2. ✅ **Attacks from behind.** `PositionComponent.heading`, one of eight directions set by
+   steps, attacks and facing orders without trigonometry (`src/core/Facing.ts`). A blow or a
+   shot from behind ignores evasion, parry and status defence — cover still counts. A knife
+   from behind does five times its damage: lethal through plate to the ordinary health band,
+   survivable only by a very large, plated soldier against a weak knifer.
 3. **Noise.** Not a radius with equal ears: each source has a **loudness** that falls off with
    distance, and each listener has its **own threshold**. Loudness per weapon, with the
    suppressor muffling it. A frag grenade wakes the whole map; smoke and flash are far

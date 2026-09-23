@@ -1,5 +1,6 @@
 import type { Faction } from '../../config'
 import { distance, facingYaw } from '../../core/math'
+import { headingToward } from '../../core/Facing'
 import type { Soldier } from '../../entities/Soldier'
 import type { GrenadeResult, ShotResult } from '../../game/Combat'
 import type { NetworkMessage } from '../../game/NetworkManager'
@@ -281,6 +282,9 @@ export class CommandSystem extends System {
         const dx = command.x - soldier.position.x
         const dz = command.z - soldier.position.z
         if (distance(dx, dz) > 0.01) soldier.targetYaw = facingYaw(dx, dz)
+        // World x runs with tile x and world z with tile y, so the same offset
+        // names the heading; comparisons only, so both peers agree.
+        soldier.heading = headingToward(dx, dz, soldier.heading)
         return carried
       }
     }

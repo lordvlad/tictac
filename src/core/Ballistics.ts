@@ -193,6 +193,10 @@ export interface ShotOdds {
  * tightens the error and a status penalty widens it; cover and stance hide
  * body, and evasion or a status's defence hide a little more.
  *
+ * From behind, evasion and defence count for nothing: dodging is something
+ * you do about a shot you can see coming. Cover still counts — a wall does
+ * not care which way the man behind it is facing.
+ *
  * A round of several projectiles lands if any of them does, so a shotgun's
  * chance to land *something* stays high across a room while what lands falls
  * off — which is its damage falling with distance, with no rule of its own.
@@ -203,6 +207,7 @@ export function hitChance(
   distance: number,
   cover: CoverLevel,
   mode: ShotMode,
+  fromBehind = false,
 ): ShotOdds {
   const eff = effectiveWeapon(shooter, mode)
   if (distance > eff.maxRange) {
@@ -211,7 +216,7 @@ export function hitChance(
   const shooterStatus = statusTotals(shooter.statuses)
   const targetStatus = statusTotals(target.statuses)
 
-  const hidden = AIM.evasionShrink * (Math.max(0, target.evasion) + targetStatus.defenceBonus)
+  const hidden = fromBehind ? 0 : AIM.evasionShrink * (Math.max(0, target.evasion) + targetStatus.defenceBonus)
   const w = AIM.targetSize * visibleShare(cover, target.isCrouching) * Math.max(0.05, 1 - hidden)
   const tighten = clamp(
     1 - AIM.trainingTighten * (shooter.proficiency - shooterStatus.accuracyPenalty),
@@ -427,22 +432,20 @@ export interface MeleeBreakdown {
  * That absence is what melee is *for*: a soldier in good cover is close to
  * unshootable and completely reachable.
  *
+ * From behind, the defender has no say at all: no parry, no dodge, no status
+ * to brace with. Only the attacker's own condition still counts.
+ *
  * One number drawn from the match stream rather than two opposed rolls: the
  * same shape of answer for half the dice.
  */
-export function meleeChance(attacker: CombatantStats, defender: CombatantStats): MeleeBreakdown {
+export function meleeChance(attacker: CombatantStats, defender: CombatantStats, fromBehind = false): MeleeBreakdown {
   const spec = MELEE[attacker.sidearm]
   const attackerStatus = statusTotals(attacker.statuses)
   const defenderStatus = statusTotals(defender.statuses)
-  const parry = MELEE[defender.sidearm].parry + LONG_GUN_PARRY[defender.weapon.id]
-  const evasion = Math.max(0, defender.evasion)
-  const raw =
-    spec.accuracy +
-    attacker.meleeSkill -
-    parry -
-    evasion -
-    attackerStatus.accuracyPenalty -
-    defenderStatus.defenceBonus
+  const parry = fromBehind ? 0 : MELEE[defender.sidearm].parry + LONG_GUN_PARRY[defender.weapon.id]
+  const evasion = fromBehind ? 0 : Math.max(0, defender.evasion)
+  const defenderBonus = fromBehind ? 0 : defenderStatus.defenceBonus
+  const raw = spec.accuracy + attacker.meleeSkill - parry - evasion - attackerStatus.accuracyPenalty - defenderBonus
   return {
     chance: clamp(Math.round(raw), AIM.min, AIM.max),
     base: spec.accuracy,
@@ -450,7 +453,7 @@ export function meleeChance(attacker: CombatantStats, defender: CombatantStats):
     parry,
     evasion,
     attackerPenalty: attackerStatus.accuracyPenalty,
-    defenderBonus: defenderStatus.defenceBonus,
+    defenderBonus,
   }
 }
 
@@ -461,9 +464,10 @@ export function meleeChance(attacker: CombatantStats, defender: CombatantStats):
  * armour subtracts and penetration decides how much of it counts, a crit
  * multiplies before armour, exactly as for a round. Reach and range bias are
  * zero, so the crit chance has no distance term; the unit's own crit traits
- * apply, because they are about where the unit puts its blows.
+ * apply, because they are about where the unit puts its blows. A blow from
+ * behind is multiplied by the sidearm's own `fromBehind`.
  */
-export function meleeWeapon(attacker: CombatantStats): EffectiveWeapon {
+export function meleeWeapon(attacker: CombatantStats, fromBehind = false): EffectiveWeapon {
   const spec = MELEE[attacker.sidearm]
   return {
     weapon: attacker.weapon,
@@ -471,7 +475,7 @@ export function meleeWeapon(attacker: CombatantStats): EffectiveWeapon {
     sway: 0,
     spread: 0,
     pellets: 1,
-    damage: spec.damage * (1 + attacker.meleePower / 100),
+    damage: spec.damage * (1 + attacker.meleePower / 100) * (fromBehind ? spec.fromBehind : 1),
     armorPen: spec.armorPen,
     armorShred: spec.armorShred,
     areaRadius: 0,

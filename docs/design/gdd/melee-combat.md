@@ -119,7 +119,7 @@ damage ladder.
 | Weapon table with modes and AP costs | `WEAPONS`, `ShotMode` in `src/core/Arsenal.ts` | Every entry assumes a clip and a range band |
 | Damage resolution with armour and crits | `resolveDamage` in `src/core/Ballistics.ts` | Reusable as-is; melee changes the terms feeding it, not the arithmetic |
 | Hit chance with cover and range terms | `hitChance` | The terms melee needs to *drop*, which is why it is a sibling path rather than a mode |
-| Facing | `PositionComponent.targetYaw` | Already replicated; "from behind" is computable today |
+| Facing | `PositionComponent.heading` | Built (ITEM-019): a blow from behind is unparried and undodged, and a knife there does five times its damage |
 | Per-side visibility | `SightedComponent.seen` | Already answers "can this unit see me" |
 | Quiet weapons | `silenced` trait, `firedThisTurn` on stance | The existing model of a weapon that does not announce its user |
 | Adjacency | `Grid.distance` | Used by treatment reach already |

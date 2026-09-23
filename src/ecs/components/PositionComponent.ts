@@ -21,7 +21,13 @@ export class PositionComponent extends Component {
     public tile: Tile = { x: 0, y: 0 },
     targetPos: Vector3 = new Vector3(),
     public targetYaw: number = 0,
-    public level: number = 0
+    public level: number = 0,
+    /**
+     * Which way the unit faces, as the rules read it: an index into
+     * {@link HEADINGS}. `targetYaw` is the view's; this is the one a rule may
+     * branch on, because it is worked out without trigonometry.
+     */
+    public heading: number = 0,
   ) {
     super()
     this.targetPos = targetPos
@@ -33,6 +39,7 @@ export class PositionComponent extends Component {
       targetPos: { x: this.targetPos.x, y: this.targetPos.y, z: this.targetPos.z },
       targetYaw: this.targetYaw,
       level: this.level,
+      heading: this.heading,
     }
   }
 
@@ -49,5 +56,6 @@ export class PositionComponent extends Component {
     }
     if (typeof data.targetYaw === 'number') this.targetYaw = data.targetYaw
     if (typeof data.level === 'number') this.level = data.level
+    if (typeof data.heading === 'number') this.heading = data.heading
   }
 }

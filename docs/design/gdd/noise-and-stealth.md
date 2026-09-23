@@ -137,7 +137,7 @@ awareness to be real: a distraction is meaningless if nobody can be distracted.
 | Quiet weapons | `silenced` trait (suppressor) | The precedent: an action whose noise can be removed |
 | Per-side visibility | `SightedComponent.seen`, `FogOfWar` | Where a `heard` flag belongs, beside `seen` and `known` |
 | Knowledge vs sight | `SightedComponent.known` (intel fog) | Proof the codebase can carry a second, separate kind of knowing |
-| Facing | `PositionComponent.targetYaw` | "From behind" is computable today |
+| Facing | `PositionComponent.heading` (`src/core/Facing.ts`) | Built: eight directions, set by steps, attacks and orders; attacks from behind already ignore defence and a knife there is nearly always lethal |
 | Glass walls as entities | `WallKind.Glass`, `WallComponent` | A breakable, replicated object with no new wire message |
 | Grid distance and DDA rays | `src/core/Grid.ts`, `src/core/Visibility.ts` | The geometry a noise radius needs; sound wants distance, not line of sight |
 | Suppression | `Suppressed` status | Shows a per-unit "has been shot near" already works |

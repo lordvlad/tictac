@@ -9,6 +9,7 @@ import { RULES } from '../../config'
 import { stepCost } from '../../game/Movement'
 import type { Grid, Tile } from '../../core/Grid'
 import { distance, facingYaw } from '../../core/math'
+import { headingToward } from '../../core/Facing'
 
 /**
  * Walks units along their planned route, one tile at a time.
@@ -134,6 +135,8 @@ export class MovementSystem extends System {
 
         pos.tile = { x: nextTile.x, y: nextTile.y }
         pos.level = this.grid.levelAt(nextTile.x, nextTile.y)
+        // Facing the way it walked, from the tiles rather than the yaw.
+        pos.heading = headingToward(nextTile.x - prev.x, nextTile.y - prev.y, pos.heading)
         // Counted, not just deducted. Exhaustion asks what a unit *used*, and
         // writing the component behind `Soldier`'s accounting meant walking a
         // squad into the ground cost it nothing while firing from cover did —

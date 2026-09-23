@@ -346,14 +346,16 @@ function build(): string {
   lines.push(
     'neighbouring tile on the same level, and its chance has no range and no cover term. The',
   )
-  lines.push("defender's parry is their sidearm's plus their primary weapon's handling.")
+  lines.push("defender's parry is their sidearm's plus their primary weapon's handling. From behind")
+  lines.push("the defender's parry, evasion and status defence do not count, and the damage is")
+  lines.push('multiplied by the sidearm\'s own "From behind".')
   lines.push('')
-  lines.push('| Sidearm | AP | Chance | Parry | Damage | Armour pen | Shred | Crit | Crit × | Loud |')
-  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+  lines.push('| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Loud |')
+  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
   for (const id of Object.values(MeleeId)) {
     const m = MELEE[id]
     lines.push(
-      `| ${m.name} | ${m.apCost} | ${m.accuracy}% | ${points(m.parry)} | ${m.damage} | ${share(m.armorPen)} | ${m.armorShred} | ${m.critChance}% | ${m.critMultiplier} | ${m.loud ? 'yes' : 'no'} |`,
+      `| ${m.name} | ${m.apCost} | ${m.accuracy}% | ${points(m.parry)} | ${m.damage} | ×${m.fromBehind} | ${share(m.armorPen)} | ${m.armorShred} | ${m.critChance}% | ${m.critMultiplier} | ${m.loud ? 'yes' : 'no'} |`,
     )
   }
   lines.push('')

@@ -141,6 +141,13 @@ not seen; units walk less (~100 tiles a match, from ~125) and range a little les
 6.5 tiles, from 7.6 / 7.8); matches are a turn shorter (median 7, from 8). The sweep takes ~36 s
 a block, from ~20, most of it walking-cost fields for the search.
 
+**Attacks from behind** (2026-09-24, same blocks): mirror 598 / 570 / 32. On block 1000, 12.6%
+of shots come from the target's rear half-plane. With knives in Blue's sidearm slot, 112 of 150
+blows land from behind and 89 of 101 knife kills are from behind — the policy prices a rear
+tile above a front one through the contact's last known heading — but the knife squad's wins
+do not move (201 / 183 against 204 / 181 before), because a blow happens in fewer than half of
+matches at all.
+
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles
 walked indoors and the share of unit-turns *ended* indoors; the weapon table reports each

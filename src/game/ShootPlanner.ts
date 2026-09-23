@@ -12,6 +12,7 @@ import {
   resolveDamage,
 } from '../core/Ballistics'
 import { MELEE, type MeleeId } from '../core/Melee'
+import { fromBehind } from '../core/Facing'
 import { canMelee, canShoot, shotApCost, shotBreakdown, type ShotResult } from './Combat'
 import type { ShotOdds } from '../core/Ballistics'
 import type { Squads } from './Squads'
@@ -163,7 +164,7 @@ export class ShootPlanner {
     this.activeOn = true
     const odds = (s: Soldier): number =>
       intent === 'strike'
-        ? meleeChance(shooter, s).chance
+        ? meleeChance(shooter, s, fromBehind(s, shooter.tile)).chance
         : shotBreakdown(this.grid, shooter, s, ShotMode.Snap).chance
     this.target =
       targets.length === 0 ? null : targets.reduce((best, s) => (odds(s) > odds(best) ? s : best))
@@ -275,22 +276,20 @@ export class ShootPlanner {
 }
 
 /**
- * What a hit would do, without touching anything. Uses the same resolver the
- * shot itself uses, so the number on the panel is the number that lands.
- */
-/**
  * The blow on offer, priced and rated through the same terms the resolver
  * uses — {@link meleeChance} for the odds and {@link meleeWeapon} for what
- * lands — so the row on the panel is the blow that is struck.
+ * lands, both judged from where the attacker stands relative to the target's
+ * back — so the row on the panel is the blow that is struck.
  */
 function strikeOption(attacker: Soldier, target: Soldier): StrikeOption {
   const spec = MELEE[attacker.sidearm]
-  const damage = resolveDamage(meleeWeapon(attacker), target)
+  const behind = fromBehind(target, attacker.tile)
+  const damage = resolveDamage(meleeWeapon(attacker, behind), target)
   return {
     sidearm: spec.id,
     name: spec.name,
     apCost: spec.apCost,
-    breakdown: meleeChance(attacker, target),
+    breakdown: meleeChance(attacker, target, behind),
     damage: damage.damage,
     armorShred: damage.armorShred,
   }

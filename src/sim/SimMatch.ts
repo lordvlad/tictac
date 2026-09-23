@@ -8,6 +8,7 @@ import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
 import { hasLineOfSight } from '../core/Visibility'
+import { fromBehind } from '../core/Facing'
 import { effectiveWeapon, expectedRoundDamage, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
 import type { Soldier } from '../entities/Soldier'
 import { canMelee, canShoot, shotApCost, shotBreakdown } from '../game/Combat'
@@ -408,8 +409,9 @@ export class SimMatch {
 
     for (const target of this.visibleEnemies(unit)) {
       if (canMelee(this.grid, unit, target)) {
-        const chance = meleeChance(unit, target).chance / 100
-        const damage = resolveDamage(meleeWeapon(unit), target).damage
+        const behind = fromBehind(target, unit.tile)
+        const chance = meleeChance(unit, target, behind).chance / 100
+        const damage = resolveDamage(meleeWeapon(unit, behind), target).damage
         const value = (chance * damage) / MELEE[unit.sidearm].apCost
         if (!best || value > best.value) best = { target, mode: 'melee', chance, value }
       }

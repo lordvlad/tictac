@@ -423,14 +423,15 @@ export class LoadoutScreen {
    * some armour penetration, so listing both on each would make three lines
    * that look alike; the crit note goes to whichever crits best, the armour
    * note to whatever strips plate or, at the other end, to whatever plate
-   * stops entirely. Noise is always named, because it is a yes/no a player
-   * plans around.
+   * stops entirely. A sidearm made for backs says so. Noise is always named,
+   * because it is a yes/no a player plans around.
    */
   private static sidearmCharacter(id: MeleeId): string {
     const spec = MELEE[id]
     const notes: string[] = []
     const bestCrit = Object.values(MELEE).every((other) => spec.critChance >= other.critChance)
     if (bestCrit && spec.critChance > 0) notes.push(`crits ${spec.critChance}% ×${spec.critMultiplier}`)
+    if (spec.fromBehind > 1) notes.push(`×${spec.fromBehind} from behind`)
     if (spec.armorShred > 0) notes.push(`shreds ${spec.armorShred} armour`)
     else if (spec.armorPen === 0) notes.push('armour stops it')
     notes.push(spec.loud ? 'loud' : 'quiet')

@@ -29,8 +29,8 @@ reaction fire and a roster that survives a match.
   1. ✅ The sweep's policy knows only what its side has seen (`src/sim/Intel.ts`): contacts
      where an enemy was last seen, and a search when there are none.
   2. ✅ Crouched movement: a crouched unit stays crouched when it moves, at 1.5× a step.
-  3. Attacks from behind: an integer heading, blows and shots from behind ignore defence and
-     parry (cover still counts), and a knife from behind hits far harder.
+  3. ✅ Attacks from behind: an integer heading; blows and shots from behind ignore evasion,
+     parry and defence (cover still counts), and a knife from behind does 5× its damage.
   4. Noise: loudness per source (per weapon, muffled by a suppressor) falling off with
      distance against each listener's own threshold; a frag is heard map-wide, smoke and
      flash much less. Then awareness, glass and the stone.

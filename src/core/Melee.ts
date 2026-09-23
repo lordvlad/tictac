@@ -52,6 +52,13 @@ export interface MeleeSpec {
    * A knife in the dark does not; a hammer on a plate carrier does.
    */
   loud: boolean
+  /**
+   * What the blow's damage is multiplied by when it lands from behind. Every
+   * blow from behind already gets past parry and dodge; this is the weapon
+   * being *for* it. A knife there is lethal to anyone but a very large, very
+   * well-plated soldier; a fist or a club is merely unopposed.
+   */
+  fromBehind: number
 }
 
 export const MELEE: Record<MeleeId, MeleeSpec> = {
@@ -67,6 +74,7 @@ export const MELEE: Record<MeleeId, MeleeSpec> = {
     critChance: 5,
     critMultiplier: 1.5,
     loud: false,
+    fromBehind: 1,
   },
   [MeleeId.Knife]: {
     id: MeleeId.Knife,
@@ -80,6 +88,7 @@ export const MELEE: Record<MeleeId, MeleeSpec> = {
     critChance: 25,
     critMultiplier: 2,
     loud: false,
+    fromBehind: 5,
   },
   [MeleeId.Club]: {
     id: MeleeId.Club,
@@ -95,6 +104,7 @@ export const MELEE: Record<MeleeId, MeleeSpec> = {
     critChance: 0,
     critMultiplier: 1,
     loud: true,
+    fromBehind: 1,
   },
 }
 

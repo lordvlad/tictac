@@ -153,13 +153,15 @@ Overwatch fires as Reaction Fire (×1.4 error, ×0 AP), which no weapon lists as
 
 Carried in their own slot beside the primary weapon; an empty slot is fists. A blow reaches a
 neighbouring tile on the same level, and its chance has no range and no cover term. The
-defender's parry is their sidearm's plus their primary weapon's handling.
+defender's parry is their sidearm's plus their primary weapon's handling. From behind
+the defender's parry, evasion and status defence do not count, and the damage is
+multiplied by the sidearm's own "From behind".
 
-| Sidearm | AP | Chance | Parry | Damage | Armour pen | Shred | Crit | Crit × | Loud |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Fists | 3 | 75% | 0 | 14 | 0% | 0 | 5% | 1.5 | no |
-| Knife | 3 | 80% | +10 | 32 | 50% | 0 | 25% | 2 | no |
-| Club | 4 | 70% | +5 | 36 | 90% | 12 | 0% | 1 | yes |
+| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Loud |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Fists | 3 | 75% | 0 | 14 | ×1 | 0% | 0 | 5% | 1.5 | no |
+| Knife | 3 | 80% | +10 | 32 | ×5 | 50% | 0 | 25% | 2 | no |
+| Club | 4 | 70% | +5 | 36 | ×1 | 90% | 12 | 0% | 1 | yes |
 
 | Primary weapon | Parry when held |
 | --- | --- |

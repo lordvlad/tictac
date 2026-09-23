@@ -13,9 +13,9 @@ import { shotCoverLevel } from '../core/Cover'
 import type { Grid, Tile } from '../core/Grid'
 import { reachable, routeTo } from '../core/Pathfinding'
 import { MELEE } from '../core/Melee'
+import { fromBehind } from '../core/Facing'
 import { eyesOf, hasLineOfSight, sees } from '../core/Visibility'
 import { shotApCost } from '../game/Combat'
-import { moveBudget } from '../game/Movement'
 
 /**
  * Where to stand, for the sweep's policy.
@@ -68,14 +68,15 @@ export interface Destination {
 /**
  * An enemy as the side choosing believes it to be.
  *
- * Where it was last seen and whether it was watching then — not where it is.
- * Its sheet and kit are taken as read: what a policy may know about a unit's
- * *gun* is a separate question from where it is standing, and only the second
- * is what hiding is about.
+ * Where it was last seen, which way it was facing and whether it was watching
+ * then — not where it is. Its sheet and kit are taken as read: what a policy
+ * may know about a unit's *gun* is a separate question from where it is
+ * standing, and only the second is what hiding is about.
  */
 export interface Contact {
   unit: Combatant
   tile: Tile
+  heading: number
   watching: boolean
 }
 
@@ -91,24 +92,24 @@ function inReach(grid: Grid, a: Tile, b: Tile): boolean {
 }
 
 /** Expected damage from a blow by `attacker` on `defender`. */
-function blow(attacker: Combatant, defender: Combatant): number {
-  return (meleeChance(attacker, defender).chance / 100) * resolveDamage(meleeWeapon(attacker), defender).damage
+function blow(attacker: Combatant, defender: Combatant, behind = false): number {
+  return (
+    (meleeChance(attacker, defender, behind).chance / 100) *
+    resolveDamage(meleeWeapon(attacker, behind), defender).damage
+  )
 }
 
-/** Expected damage from spending `ap` on `target` standing on `at`, from `from`: by gun, or by hand when in reach. */
-function offenseFrom(
-  grid: Grid,
-  shooter: Combatant,
-  from: Tile,
-  target: Combatant,
-  at: Tile,
-  distance: number,
-  ap: number,
-): number {
-  const cover = shotCoverLevel(grid, from, at)
+/**
+ * Expected damage from spending `ap` on `target` from `from`: by gun, or by
+ * hand when in reach. From behind the contact's last known facing, both are
+ * worth more — which is what makes going round worth a walk.
+ */
+function offenseFrom(grid: Grid, shooter: Combatant, from: Tile, target: Contact, distance: number, ap: number): number {
+  const cover = shotCoverLevel(grid, from, target.tile)
+  const behind = fromBehind(target, from)
   let best = 0
-  if (inReach(grid, from, at)) {
-    best = blow(shooter, target) * Math.floor(ap / MELEE[shooter.sidearm].apCost)
+  if (inReach(grid, from, target.tile)) {
+    best = blow(shooter, target.unit, behind) * Math.floor(ap / MELEE[shooter.sidearm].apCost)
   }
   for (const mode of shooter.weapon.availableModes) {
     const cost = shotApCost(shooter, mode)
@@ -117,7 +118,8 @@ function offenseFrom(
     const eff = effectiveWeapon(shooter, mode)
     if (distance > eff.maxRange) continue
     const shots = Math.min(Math.floor(ap / cost), Math.floor(shooter.weapon.currentClip / bullets))
-    const value = expectedRoundDamage(eff, target, hitChance(shooter, target, distance, cover, mode)) * bullets * shots
+    const odds = hitChance(shooter, target.unit, distance, cover, mode, behind)
+    const value = expectedRoundDamage(eff, target.unit, odds) * bullets * shots
     if (value > best) best = value
   }
   return best
@@ -211,7 +213,8 @@ export function chooseDestination(
     let offense = 0
     let exposure = 0
     let nearest = toSearch ? toSearch[grid.index(at.x, at.y)]! : Infinity
-    for (const { unit: enemy, tile } of contacts) {
+    for (const contact of contacts) {
+      const { unit: enemy, tile } = contact
       const distance = grid.distance(at, tile)
       if (distance < nearest) nearest = distance
       if (distance > RULES.sightRange || !hasLineOfSight(grid, at, tile)) {
@@ -220,7 +223,7 @@ export function chooseDestination(
         exposure += NEXT_TURN * nextTurnThreat(grid, enemy, tile, unit, at)
         continue
       }
-      offense = Math.max(offense, offenseFrom(grid, unit, at, enemy, tile, distance, ap))
+      offense = Math.max(offense, offenseFrom(grid, unit, at, contact, distance, ap))
       // What they would do to it on their turn: shoot it, or, standing next to
       // it, hit it — whichever is worse for the unit.
       exposure += Math.max(

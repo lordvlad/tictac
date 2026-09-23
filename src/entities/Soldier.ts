@@ -119,14 +119,16 @@ export class Soldier {
     this.sheet = sheet
     this.derived = derive(sheet)
 
-    // Blue team faces North (+Z), Red team faces South (-Z)
+    // Blue team faces North (+Z), Red team faces South (-Z): the same facing as
+    // a yaw for the view and as a heading for the rules.
     const initialYaw = faction === Faction.Blue ? 0 : Math.PI
+    const initialHeading = faction === Faction.Blue ? 0 : 4
 
     this.entityId = world.createEntity()
     world.addComponent(this.entityId, new IdentityComponent(faction, squadIndex, name))
     this.positionComponent = world.addComponent(
       this.entityId,
-      new PositionComponent({ ...initialTile }, grid.tileToWorld(initialTile), initialYaw),
+      new PositionComponent({ ...initialTile }, grid.tileToWorld(initialTile), initialYaw, 0, initialHeading),
     )
     // The sheet's own trait bonuses are in these ceilings from the start; gear
     // picked up later lifts them through `refreshTraits`.
@@ -586,6 +588,14 @@ export class Soldier {
   }
   set targetYaw(value: number) {
     this.positionComponent.targetYaw = value
+  }
+
+  /** Which way the unit faces for the rules: an index into `HEADINGS`. */
+  get heading(): number {
+    return this.positionComponent.heading
+  }
+  set heading(value: number) {
+    this.positionComponent.heading = value
   }
 
   get movingPath(): Tile[] {

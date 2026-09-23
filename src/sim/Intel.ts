@@ -86,7 +86,7 @@ export class Intel {
         continue
       }
       if (enemy.firedThisTurn || inView(enemy.tile)) {
-        this.last.set(enemy, { unit: enemy, tile: { ...enemy.tile }, watching: enemy.watching })
+        this.last.set(enemy, { unit: enemy, tile: { ...enemy.tile }, heading: enemy.heading, watching: enemy.watching })
         continue
       }
       const contact = this.last.get(enemy)

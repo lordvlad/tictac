@@ -54,7 +54,9 @@ the round does. Multiplication and division only, so both peers compute the same
 - **Target**: `AIM.targetSize` (0.3 m) × the **visible share** for its stance and the cover the
   line crosses (`COVER`: open crouched 0.55, low cover 0.6 standing / 0.33 crouched, tall cover
   0.27 / 0.14) × `1 − AIM.evasionShrink × (evasion + status defence)`. Evasion below zero is
-  treated as zero.
+  treated as zero. **From behind** — the shooter in the target's rear half-plane by its
+  `heading` (`fromBehind`, `src/core/Facing.ts`) — evasion and status defence count for
+  nothing; cover still does.
 - **Clamps**: one projectile never exceeds `AIM.max`; the *round* never falls below `AIM.min`.
   A floor per pellet would make a shell at the far end of its range land a third of the time.
 - **A round** lands if any projectile does. Each projectile is its own roll from the match
@@ -194,6 +196,11 @@ Every soldier carries a **sidearm** in its own loadout slot, beside the primary 
   primary weapon is worth held across them (`LONG_GUN_PARRY`: a scoped rifle is a liability).
   Status penalties apply as for a shot. No range term and **no cover term**: that absence is
   what melee is for. One draw, a contest folded into one roll.
+- **From behind** (the attacker on one of the three tiles at the defender's back): no parry,
+  no evasion, no status defence — only the attacker's own condition counts — and the blow's
+  damage is multiplied by the sidearm's `fromBehind`: **5× for a knife**, 1× for fists and the
+  club. A knife from behind kills anyone in the ordinary health band through a full plate
+  carrier; a very large, plated soldier can survive a weak knifer. It is not an outright kill.
 - **Damage** (`meleeWeapon` → `resolveDamage`): the same armour arithmetic as a round. Strength
   scales the blow (`meleePower`); armour penetration and shred are what separate the families —
   fists barely dent plate, a club keeps its damage through it and strips it. Crits use
@@ -202,9 +209,12 @@ Every soldier carries a **sidearm** in its own loadout slot, beside the primary 
   `firedThisTurn` like a shot. No suppression. At most two draws from the match stream in a fixed
   order — the blow, then the crit if it landed and the weapon can crit.
 
-Deferred on purpose: attacks from behind and silent kills need a deterministic facing (today's
-`targetYaw` is a float from `atan2`, banned from rules code) and an awareness model — both belong
-to ITEM-019. A non-lethal knockout belongs with the campaign roster (ITEM-012).
+**Facing is a rule quantity.** `PositionComponent.heading` is one of eight compass directions
+(`HEADINGS`), set by a step (the direction walked), a shot or a blow (toward the target) and a
+facing order — each worked out from tile or world offsets by comparison alone, since
+`targetYaw` is a float from `atan2` and banned from rules code. It replicates and is in the
+state digest. Awareness (and with it a *silent* kill) is still to come in ITEM-019; a non-lethal
+knockout belongs with the campaign roster (ITEM-012).
 
 ## 3. Damage Resolution & Armor
 

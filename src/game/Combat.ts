@@ -18,6 +18,7 @@ import { type GrenadeId, ShotMode, STATUSES, StatusKind } from '../core/Arsenal'
 import { type Casualty, type Combatant, type CombatFx, NO_FX } from '../core/Combatant'
 import type { Roll } from '../core/rng'
 import { distance, facingYaw } from '../core/math'
+import { fromBehind, headingToward } from '../core/Facing'
 
 export interface ShotResult {
   hit: boolean
@@ -59,7 +60,10 @@ export interface GrenadeResult {
   hits: ResolvedHit[]
 }
 
-/** The odds of a round from `shooter` landing on `target`, from where they stand. */
+/**
+ * The odds of a round from `shooter` landing on `target`, from where they
+ * stand and which way the target is facing.
+ */
 export function shotBreakdown(
   grid: Grid,
   shooter: Combatant,
@@ -72,6 +76,7 @@ export function shotBreakdown(
     grid.distance(shooter.tile, target.tile),
     shotCoverLevel(grid, shooter.tile, target.tile),
     mode,
+    fromBehind(target, shooter.tile),
   )
 }
 
@@ -175,6 +180,7 @@ export function executeShot(
   const dx = targetWorld.x - shooterWorld.x
   const dz = targetWorld.z - shooterWorld.z
   if (distance(dx, dz) > 0.01) shooter.targetYaw = facingYaw(dx, dz)
+  shooter.heading = headingToward(target.tile.x - shooter.tile.x, target.tile.y - shooter.tile.y, shooter.heading)
 
   const bullets = eff.weapon.bulletConsumption(mode)
   const hits: ResolvedHit[] = []
@@ -281,7 +287,10 @@ export function executeMelee(
 ): ShotResult | null {
   if (!canMelee(grid, attacker, target)) return null
   const spec = MELEE[attacker.sidearm]
-  const eff = meleeWeapon(attacker)
+  // Judged before anybody turns: it is the target's back that matters, and
+  // the target does not turn to take the blow.
+  const behind = fromBehind(target, attacker.tile)
+  const eff = meleeWeapon(attacker, behind)
 
   attacker.ap = Math.max(0, attacker.ap - spec.apCost)
   // Contact tells both sides what they are dealing with. A quiet blow gives
@@ -293,8 +302,9 @@ export function executeMelee(
   const dx = target.tile.x - attacker.tile.x
   const dz = target.tile.y - attacker.tile.y
   if (distance(dx, dz) > 0) attacker.targetYaw = facingYaw(dx, dz)
+  attacker.heading = headingToward(dx, dz, attacker.heading)
 
-  const chance = meleeChance(attacker, target).chance
+  const chance = meleeChance(attacker, target, behind).chance
   const hit = roll() * 100 <= chance
   const hits: ResolvedHit[] = []
   let crits = 0
