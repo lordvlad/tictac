@@ -217,7 +217,7 @@ should be its own item, so locks can ship without waiting for it.
 ### [ITEM-019] Noise, Awareness and the Quiet Kill
 **Type:** Feature  
 **Priority:** P2  
-**Status:** Backlog  
+**Status:** In Progress  
 **Milestone:** M3 — Reconnaissance & Morale  
 
 #### Why
@@ -227,24 +227,29 @@ quietly. Sound is the second information channel, and the codebase already separ
 from *read* — awareness is a third state of the same kind.
 
 #### Change
-1. Awareness per unit, per side — unaware, alerted, engaged — beside `seen` and `known`, so
-   it replicates the way intel fog already does.
-2. Noise events: a tile, a loudness, and whoever is within earshot is alerted. Distance, not
-   ray-marching. Crouching is silent; sprinting and gunfire are not; the suppressor's quiet
-   is the existing precedent.
-3. Breakable glazing — `WallKind.Glass` already stops nothing and is already a replicated
-   entity — and a thrown stone that makes its noise where it *lands*, which is the first
-   mechanic in the game that manipulates enemy information rather than enemy hit points.
-4. A silent kill: an unaware target, from behind, with a quiet weapon, unobserved. The blow
-   itself exists (ITEM-018: `executeMelee`, and a knife is already quiet); what is missing is
-   *from behind*, which needs an integer heading — `targetYaw` is a float from `atan2`, banned
-   from rules code — and *unaware*, which is this item's awareness state.
+Built in slices, mechanics before noise (agreed 2026-09-24):
+
+0. ✅ **The policy knows only what it has seen** (`src/sim/Intel.ts`). A stealth mechanic
+   measured against an AI that reads every enemy's position measures as nothing.
+1. **Crouched movement.** A crouched unit stays crouched when it moves, and pays a premium
+   per step. No loudness yet.
+2. **Attacks from behind.** An integer heading on the position (`targetYaw` is a float from
+   `atan2`, banned from rules code). A blow or a shot from behind ignores every defence —
+   evasion, parry, defence bonuses — except cover. A knife from behind does a great deal
+   more damage: only a very high-health target survives it. Not an outright kill.
+3. **Noise.** Not a radius with equal ears: each source has a **loudness** that falls off with
+   distance, and each listener has its **own threshold**. Loudness per weapon, with the
+   suppressor muffling it. A frag grenade wakes the whole map; smoke and flash are far
+   quieter.
+4. Awareness per unit — unaware, alerted, engaged — as replicated, digested state resolved
+   by the rules on both peers (the GDD's "the attacker's answer must be believed" predates
+   ADR-0004 and no longer applies).
+5. Breakable glazing and a thrown stone that makes its noise where it *lands*.
 
 #### Blocker
 Enemies cannot currently be unaware, so there is nothing to sneak past and nothing to
-distract. The AI is the real cost: a policy that ignores awareness makes a thrown stone
-measure as doing nothing. Turn-based stealth also needs the enemy to *act* on its own turn, or
-sneaking degenerates into walking around statues — patrol behaviour is part of this item, not
+distract. Turn-based stealth also needs the enemy to *act* on its own turn, or sneaking
+degenerates into walking around statues — patrol behaviour is part of this item, not
 separate from it.
 
 #### Affected Files

@@ -44,22 +44,49 @@ graph TD
 
 ## 3. Scripted AI Decision Loop
 
+### What the policy knows
+
+The policy sees what a player on its side would see and nothing more
+(`src/sim/Intel.ts`, one per side). It keeps a **contact** for each enemy: the tile it was last
+seen on, and whether it was watching then. Seen is what fog grants: any living unit of the side
+sees the tile, or the enemy fired this turn. A contact stays where it was made until that tile is
+looked at and found empty, and then it is dropped: the side knows the enemy is not *there*, and
+nothing about where it went. Both sides look after every intent, so an enemy walking past between
+two of a side's own actions is still noticed. Sheets and kit are taken as read; position is what
+hiding is about.
+
+With no contacts a unit **searches**: it heads for the nearest ground its side has not seen,
+pulled toward the middle of the map, walked by path cost rather than straight-line distance (a
+goal behind a wall is a building away on foot). Ground seen three or more turns ago counts as
+unseen again once everything has been looked at. A searching unit keeps a snap shot's points in
+hand, and a walk that spots an enemy the side did not know about stops so the unit can choose
+again knowing it.
+
+Both of those came from measurement. Without the reserve, the side that walked into view had spent
+its turn walking and the other side answered with everything, so turn order decided who found whom
+and Blue won 58% of decided mirror matches; without path-cost search, 9% of matches were draws
+between squads standing either side of a wall.
+
+### The loop
+
 Each unit, in squad order, spends its points in this order until nothing applies:
 
 1. **Reload** if nothing its weapon can fire is loaded.
 2. **Grenade** a cluster of two or more enemies that catches no friend.
 3. **Shoot** if a shot of at least 50% is on offer (best expected damage per AP).
 4. **Reposition**, once per turn, to where `src/sim/Tactics.ts` says. Every tile
-   reachable this turn is scored in expected hit points: what the unit could do
-   from there with the points left, minus the reactions the route provokes
-   (once per watcher, at the first tile that watcher sees), minus what the
-   enemies who can see the tile would do to it on their turn — and, at half weight, what an enemy
-   that *cannot* see it yet could do after walking its points less a snap shot straight at it. While nothing is
-   shootable from anywhere reachable, closing the distance counts instead, and
-   counts for more with every handover in which nobody was hurt — two squads
-   that each price the other's watch above a few metres of ground otherwise
-   wait each other out to the turn cap. The walk is issued one tile per intent,
-   so a reaction can interrupt it.
+   reachable this turn is scored in expected hit points against the side's
+   *contacts*: what the unit could do from there with the points left, minus
+   the reactions the route provokes (once per known watcher, at the first tile
+   that watcher sees), minus what the enemies who can see the tile would do to
+   it on their turn — and, at half weight, what an enemy that *cannot* see it
+   yet could do after walking its points less a snap shot straight at it.
+   While nothing is shootable from anywhere reachable, closing the distance
+   counts instead, and counts for more with every handover in which nobody was
+   hurt — two squads that each price the other's watch above a few metres of
+   ground otherwise wait each other out to the turn cap. The walk is issued one
+   tile per intent, so a reaction can interrupt it, and so can spotting an
+   enemy (the unit then chooses again).
 5. **Shoot** the best poor shot, if any.
 6. **Reload** at half a magazine, **get low** when hurt, and **go on watch**
    with whatever is left.
@@ -106,6 +133,13 @@ longer (median 7 turns, from 5). And ground now separates results: winners walk 
 losers' ~102, where before the two were the same. A second term — scoring an approach by the
 cover the target would have against it — was measured alongside and dropped: alone it moved
 neither ground nor result, and together with this one it only skewed the split to Blue.
+
+**Knowing only what it has seen** (2026-09-24, same blocks, edge deployment, wins summed): blue
+608, red 563, draws 29, from 575 / 583 / 42 omniscient. On block 1000: watches pay — **3.1
+reactions fired a match, from 0.95** — because a side no longer routes around watchers it has
+not seen; units walk less (~100 tiles a match, from ~125) and range a little less sideways (7.1 /
+6.5 tiles, from 7.6 / 7.8); matches are a turn shorter (median 7, from 8). The sweep takes ~36 s
+a block, from ~20, most of it walking-cost fields for the search.
 
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles

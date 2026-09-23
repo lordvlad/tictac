@@ -66,6 +66,20 @@ export interface Destination {
 }
 
 /**
+ * An enemy as the side choosing believes it to be.
+ *
+ * Where it was last seen and whether it was watching then — not where it is.
+ * Its sheet and kit are taken as read: what a policy may know about a unit's
+ * *gun* is a separate question from where it is standing, and only the second
+ * is what hiding is about.
+ */
+export interface Contact {
+  unit: Combatant
+  tile: Tile
+  watching: boolean
+}
+
+/**
  * Whether a unit standing on `a` could strike one standing on `b`: the
  * adjacency and level half of `canMelee`, for tiles nobody is standing on yet.
  * Sight between them is the caller's check, which it has already made.
@@ -81,18 +95,19 @@ function blow(attacker: Combatant, defender: Combatant): number {
   return (meleeChance(attacker, defender).chance / 100) * resolveDamage(meleeWeapon(attacker), defender).damage
 }
 
-/** Expected damage from spending `ap` on `target`, from `from`: by gun, or by hand when in reach. */
+/** Expected damage from spending `ap` on `target` standing on `at`, from `from`: by gun, or by hand when in reach. */
 function offenseFrom(
   grid: Grid,
   shooter: Combatant,
   from: Tile,
   target: Combatant,
+  at: Tile,
   distance: number,
   ap: number,
 ): number {
-  const cover = shotCoverLevel(grid, from, target.tile)
+  const cover = shotCoverLevel(grid, from, at)
   let best = 0
-  if (inReach(grid, from, target.tile)) {
+  if (inReach(grid, from, at)) {
     best = blow(shooter, target) * Math.floor(ap / MELEE[shooter.sidearm].apCost)
   }
   for (const mode of shooter.weapon.availableModes) {
@@ -108,38 +123,44 @@ function offenseFrom(
   return best
 }
 
-/** Expected damage from one `mode` shot by `shooter` at `target` standing on `at`. */
-function threat(grid: Grid, shooter: Combatant, target: Combatant, at: Tile, mode: ShotMode): number {
+/** Expected damage from one `mode` shot by `shooter` on `from` at `target` standing on `at`. */
+function threat(grid: Grid, shooter: Combatant, from: Tile, target: Combatant, at: Tile, mode: ShotMode): number {
   const eff = effectiveWeapon(shooter, mode)
-  const distance = grid.distance(shooter.tile, at)
+  const distance = grid.distance(from, at)
   if (distance > eff.maxRange || shooter.weapon.currentClip <= 0) return 0
-  const odds = hitChance(shooter, target, distance, shotCoverLevel(grid, shooter.tile, at), mode)
+  const odds = hitChance(shooter, target, distance, shotCoverLevel(grid, from, at), mode)
   return expectedRoundDamage(eff, target, odds) * shooter.weapon.bulletConsumption(mode)
 }
 
 /**
- * What `shooter` could do to `target` standing on `at` after spending its next
- * turn closing: its points less a snap shot's, walked straight at the tile, then
- * the shot — from the direction it stands in now, so cover facing it counts.
+ * What `shooter` on `from` could do to `target` standing on `at` after
+ * spending its next turn closing: its points less a snap shot's, walked
+ * straight at the tile, then the shot — from the direction it stands in now,
+ * so cover facing it counts.
  *
  * Straight-line and wall-blind on purpose: this prices *where a unit ends its
  * turn*, not a route, and it only has to be right about the thing that was
  * losing matches — stopping in the open inside what an enemy can reach and
  * shoot.
  */
-function nextTurnThreat(grid: Grid, shooter: Combatant, target: Combatant, at: Tile): number {
+function nextTurnThreat(grid: Grid, shooter: Combatant, from: Tile, target: Combatant, at: Tile): number {
   if (shooter.weapon.currentClip <= 0) return 0
   const eff = effectiveWeapon(shooter, ShotMode.Snap)
   const walk = Math.max(0, shooter.effectiveMaxAp - shotApCost(shooter, ShotMode.Snap)) / shooter.moveCostMul
-  const distance = Math.max(1, grid.distance(shooter.tile, at) - walk)
+  const distance = Math.max(1, grid.distance(from, at) - walk)
   if (distance > eff.maxRange) return 0
-  const odds = hitChance(shooter, target, distance, shotCoverLevel(grid, shooter.tile, at), ShotMode.Snap)
+  const odds = hitChance(shooter, target, distance, shotCoverLevel(grid, from, at), ShotMode.Snap)
   return expectedRoundDamage(eff, target, odds) * shooter.weapon.bulletConsumption(ShotMode.Snap)
 }
 
 /**
  * The best place for `unit` to be this turn, or `null` when that is where it
  * already stands.
+ *
+ * Judged against `contacts` — where the side believes the enemy is — never
+ * against where the enemy actually is. With nothing believed, the unit heads
+ * for `search` instead, which is how a side that has lost the enemy finds it
+ * again rather than standing still until the turn cap.
  *
  * Reactions are charged once per watcher per route — the rule's own "one
  * reaction per watch" — at the first tile of the route that watcher sees. They
@@ -149,7 +170,7 @@ function nextTurnThreat(grid: Grid, shooter: Combatant, target: Combatant, at: T
 export function chooseDestination(
   grid: Grid,
   unit: Combatant,
-  enemies: readonly Combatant[],
+  contacts: readonly Contact[],
   occupied: Set<number>,
   /**
    * Handovers since anybody was hurt. Each one makes closing worth more: two
@@ -158,14 +179,29 @@ export function chooseDestination(
    * player breaks by getting impatient.
    */
   quiet = 0,
+  /**
+   * With nothing believed, the walking cost from every tile to where the unit
+   * should look — walked, not measured, because ground behind a wall is a
+   * metre away as the crow flies and a building away on foot, and a unit that
+   * closed on it by the crow would stand against the wall for the rest of the
+   * match. Null to stay put.
+   */
+  search: Float32Array | null = null,
 ): Destination | null {
-  const living = enemies.filter((enemy) => !enemy.isDead)
-  if (living.length === 0) return null
+  const searching = contacts.length === 0
+  if (searching && !search) return null
   // A bit each in a 32-bit mask; a squad is four.
-  const watchers = living.filter((enemy) => enemy.watching && enemy.weapon.currentClip > 0)
-  const watcherEyes = watchers.map((watcher) => eyesOf(grid, watcher))
+  const watchers = contacts.filter((contact) => contact.watching && contact.unit.weapon.currentClip > 0)
+  const watcherEyes = watchers.map((watcher) => eyesOf(grid, { tile: watcher.tile, peek: watcher.unit.peek }))
 
-  const reach = reachable(grid, unit.tile, occupied, moveBudget(unit))
+  // Searching, a unit keeps a shot's points in hand. Whoever walks into the
+  // other's view has usually spent the turn walking, and the side it found
+  // answers with everything — so without a reserve, finding the enemy first
+  // was how a side lost, and the side that happened to find first was
+  // decided by turn order.
+  const keep = searching ? shotApCost(unit, ShotMode.Snap) : 0
+  const reach = reachable(grid, unit.tile, occupied, Math.max(0, unit.ap - keep) / unit.moveCostMul)
+  const toSearch = searching ? search : null
   const size = grid.size
   const startIdx = grid.index(unit.tile.x, unit.tile.y)
   const mask = new Uint32Array(size * size)
@@ -174,22 +210,22 @@ export function chooseDestination(
   const judge = (at: Tile, ap: number, routeDanger: number) => {
     let offense = 0
     let exposure = 0
-    let nearest = Infinity
-    for (const enemy of living) {
-      const distance = grid.distance(at, enemy.tile)
+    let nearest = toSearch ? toSearch[grid.index(at.x, at.y)]! : Infinity
+    for (const { unit: enemy, tile } of contacts) {
+      const distance = grid.distance(at, tile)
       if (distance < nearest) nearest = distance
-      if (distance > RULES.sightRange || !hasLineOfSight(grid, at, enemy.tile)) {
+      if (distance > RULES.sightRange || !hasLineOfSight(grid, at, tile)) {
         // Out of its sight now is not out of its reach next turn: a tile it
         // can walk into range of and shoot is a tile to end a turn on warily.
-        exposure += NEXT_TURN * nextTurnThreat(grid, enemy, unit, at)
+        exposure += NEXT_TURN * nextTurnThreat(grid, enemy, tile, unit, at)
         continue
       }
-      offense = Math.max(offense, offenseFrom(grid, unit, at, enemy, distance, ap))
+      offense = Math.max(offense, offenseFrom(grid, unit, at, enemy, tile, distance, ap))
       // What they would do to it on their turn: shoot it, or, standing next to
       // it, hit it — whichever is worse for the unit.
       exposure += Math.max(
-        threat(grid, enemy, unit, at, ShotMode.Snap),
-        inReach(grid, enemy.tile, at) ? blow(enemy, unit) : 0,
+        threat(grid, enemy, tile, unit, at, ShotMode.Snap),
+        inReach(grid, tile, at) ? blow(enemy, unit) : 0,
       )
     }
     return { offense, exposure, nearest, danger: routeDanger }
@@ -218,7 +254,7 @@ export function chooseDestination(
       const watcher = watchers[w]!
       if (!sees(grid, watcher.tile, watcherEyes[w]!, at)) continue
       seen |= bit
-      routeDanger += threat(grid, watcher, unit, at, ShotMode.Reaction)
+      routeDanger += threat(grid, watcher.unit, watcher.tile, unit, at, ShotMode.Reaction)
     }
     mask[index] = seen
     danger[index] = routeDanger

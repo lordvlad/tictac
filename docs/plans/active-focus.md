@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M4 Competitive & Meta Roster"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-18"
+lastReviewed: "2026-09-24"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -25,9 +25,15 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- Nothing in flight. The open combat question ITEM-032 left: the shotgun now has a real band
-  (inside ~4 m), but the AI and the map rarely produce a fight inside it — indoor fights go
-  through doorways where tall cover hides the target from every gun.
+- **`[ITEM-019]`**: Noise, awareness and the quiet kill — built in slices, mechanics first:
+  1. ✅ The sweep's policy knows only what its side has seen (`src/sim/Intel.ts`): contacts
+     where an enemy was last seen, and a search when there are none.
+  2. Crouched movement: a crouched unit stays crouched when it moves, at a step premium.
+  3. Attacks from behind: an integer heading, blows and shots from behind ignore defence and
+     parry (cover still counts), and a knife from behind hits far harder.
+  4. Noise: loudness per source (per weapon, muffled by a suppressor) falling off with
+     distance against each listener's own threshold; a frag is heard map-wide, smoke and
+     flash much less. Then awareness, glass and the stone.
 
 ### 📋 Ready (Pull Queue)
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for
@@ -75,11 +81,6 @@ reaction fire and a roster that survives a match.
   already replicated entities whose `kind` every consumer reads, so a door costs no new wire
   message. Fire is deliberately *not* in it — a burning tile is a per-tile effect with a
   clock, and every effect today is a status on a unit.
-- **`[ITEM-019]`**: Noise, awareness and the quiet kill. Sound as the second information
-  channel, with awareness sitting beside `seen` and `known` exactly as intel fog does. The
-  real cost is an AI that can be *fooled* — a thrown stone is worth nothing against a policy
-  that ignores information — plus enemy patrol behaviour, without which sneaking is walking
-  around statues.
 
 ### ✅ Completed
 - **`[ITEM-001]`**: Narrow ports (`Combatant`, `CombatFx`, focus port for `TurnManager`).

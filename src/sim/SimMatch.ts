@@ -14,6 +14,7 @@ import { canMelee, canShoot, shotApCost, shotBreakdown } from '../game/Combat'
 import type { SquadLoadout } from '../game/Loadout'
 import { stepCostFor } from '../game/Movement'
 import { chooseDestination } from './Tactics'
+import { Intel } from './Intel'
 import type { NetworkMessage } from '../game/NetworkManager'
 import { canWatch } from '../game/Overwatch'
 import {
@@ -177,6 +178,8 @@ export class SimMatch {
   private readonly ground: GroundTracker
   /** Handovers since anybody lost a hit point; see `chooseDestination`. */
   private quiet = 0
+  /** What each side knows about the other; see {@link Intel}. */
+  private readonly intel: Record<Faction, Intel>
 
   constructor(private readonly setup: MatchSetup) {
     this.turnCap = setup.turnCap ?? DEFAULT_TURN_CAP
@@ -213,6 +216,15 @@ export class SimMatch {
     this.recorder = setup.record
       ? new Recorder(header, () => ({ turn: this.host.turnNumber, faction: this.host.activeFaction }))
       : null
+    const { byFaction } = this.host.squads
+    this.intel = {
+      [Faction.Blue]: new Intel(this.host.grid, byFaction[Faction.Blue], byFaction[Faction.Red]),
+      [Faction.Red]: new Intel(this.host.grid, byFaction[Faction.Red], byFaction[Faction.Blue]),
+    }
+    for (const faction of [Faction.Blue, Faction.Red]) {
+      this.intel[faction].observe()
+      for (const unit of byFaction[faction]) this.intel[faction].survey(unit, this.host.turnNumber)
+    }
   }
 
   get grid(): Grid {
@@ -275,6 +287,10 @@ export class SimMatch {
     if (!applied.applied) {
       throw new Error(`sim issued an intent the rules refused (${applied.reason}): ${JSON.stringify(command)}`)
     }
+    // Both sides look after every intent: the one acting sees what it walked
+    // into, and the other sees whatever just walked past it.
+    this.intel[Faction.Blue].observe()
+    this.intel[Faction.Red].observe()
     return applied
   }
 
@@ -327,9 +343,15 @@ export class SimMatch {
       // other way round — shoot anything at 50%, move only if nothing was —
       // a shotgun fired from eight metres, because a shell nearly always lands
       // *something*, and never closed to where it is the best gun there is.
-      if (!moved && this.tryReposition(unit)) {
-        moved = true
-        continue
+      // …unless the walk was cut short by spotting somebody. The route was
+      // chosen not knowing they were there, so the unit gets to choose again
+      // knowing it — which is what a player does on seeing an enemy mid-move.
+      if (!moved) {
+        const walked = this.tryReposition(unit)
+        if (walked) {
+          moved = walked === 'arrived'
+          continue
+        }
       }
 
       const worthTaking = this.bestShot(unit)
@@ -358,6 +380,7 @@ export class SimMatch {
     // and the host refuses the intent for one that is not alive.
     if (unit.isDead) return
     this.ground.turnEnded(unit.faction, unit.tile)
+    this.intel[unit.faction].survey(unit, this.host.turnNumber)
     this.act({ type: 'endUnitTurn', faction: unit.faction, squadIndex: unit.squadIndex })
   }
 
@@ -468,11 +491,11 @@ export class SimMatch {
 
     for (const centre of enemies) {
       if (this.grid.distance(unit.tile, centre.tile) > spec.throwRange) continue
-      const caught = this.host.squads.soldiers.filter(
-        (other) => !other.isDead && this.grid.distance(centre.tile, other.tile) <= spec.areaRadius,
-      )
-      if (caught.filter((other) => other.faction !== unit.faction).length < 2) continue
-      if (caught.some((other) => other.faction === unit.faction)) continue
+      // Only what it can see counts toward the pair: an enemy crouched round
+      // the corner is not a reason to throw, however near it happens to be.
+      const caught = (other: Soldier) => !other.isDead && this.grid.distance(centre.tile, other.tile) <= spec.areaRadius
+      if (enemies.filter(caught).length < 2) continue
+      if (this.host.squads.byFaction[unit.faction].some(caught)) continue
 
       this.act({
         type: 'throwGrenade',
@@ -493,15 +516,23 @@ export class SimMatch {
    * One tile at a time because a walk can be interrupted: a watcher may shoot
    * the unit on any arrival, and a wound mid-route changes what the next step
    * costs. A player can issue the same one-tile moves.
+   *
+   * @returns `spotted` when the walk stopped because the side saw an enemy it
+   *   had not known about; `arrived` when it went where it meant to, or as far
+   *   as its points allowed; null when it stayed put.
    */
-  private tryReposition(unit: Soldier): boolean {
+  private tryReposition(unit: Soldier): 'arrived' | 'spotted' | null {
     const occupied = new Set<number>()
     for (const other of this.host.squads.soldiers) {
       if (other === unit || other.isDead) continue
       occupied.add(this.grid.index(other.tile.x, other.tile.y))
     }
-    const destination = chooseDestination(this.grid, unit, this.enemiesOf(unit), occupied, this.quiet)
-    if (!destination) return false
+    const intel = this.intel[unit.faction]
+    const contacts = intel.contacts
+    const search = contacts.length === 0 ? intel.searchFrom(unit, this.host.turnNumber) : null
+    const destination = chooseDestination(this.grid, unit, contacts, occupied, this.quiet, search)
+    if (!destination) return null
+    const known = new Set(contacts.map((contact) => contact.unit))
 
     const { route } = destination
     for (let i = 1; i < route.length; i++) {
@@ -519,8 +550,9 @@ export class SimMatch {
       })
       this.ground.step(unit.faction, unit.squadIndex, unit.tile)
       if (unit.isDead) break
+      if (intel.contacts.some((contact) => !known.has(contact.unit))) return 'spotted'
     }
-    return true
+    return 'arrived'
   }
 
   /**
