@@ -83,9 +83,16 @@ describe('Running a recorded match with nobody watching', () => {
   test('a reaction nobody sent is reproduced from the intents alone', () => {
     // The claim that lets overwatch cost no wire at all: a reaction is a
     // consequence of a movement intent, so replaying the intents produces the
-    // same reactions — at the same points, from the same dice. Seed 7 is a
-    // match in which the AI both set watches and had somebody walk into one.
-    const { outcome, recording } = recorded(7)
+    // same reactions — at the same points, from the same dice. The first seed
+    // in which the AI both set a watch and had somebody walk into one, found
+    // rather than named: which match that is moves whenever the policy does.
+    let found: ReturnType<typeof recorded> | undefined
+    for (let seed = 1; seed <= 60 && !found; seed++) {
+      const candidate = recorded(seed)
+      if (candidate.outcome.reactions > 0) found = candidate
+    }
+    expect(found).toBeDefined()
+    const { outcome, recording } = found!
     expect(outcome.watches).toBeGreaterThan(0)
     expect(outcome.reactions).toBeGreaterThan(0)
     expect(recording.events.some((event) => event.command.type === 'overwatch')).toBe(true)

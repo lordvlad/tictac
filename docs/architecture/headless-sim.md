@@ -44,10 +44,30 @@ graph TD
 
 ## 3. Scripted AI Decision Loop
 
-The simulated AI executes deterministic decision steps each turn:
-1. **Target Selection**: Evaluates all visible enemies; ranks targets by kill probability, current HP, and hit percentage.
-2. **Engagement Position**: Moves to optimal firing range band while favoring cover tiles.
-3. **Action Execution**: Fires primary weapon or reloads when empty; ends turn when AP is exhausted.
+Each unit, in squad order, spends its points in this order until nothing applies:
+
+1. **Reload** if nothing its weapon can fire is loaded.
+2. **Grenade** a cluster of two or more enemies that catches no friend.
+3. **Shoot** if a shot of at least 50% is on offer (best expected damage per AP).
+4. **Reposition**, once per turn, to where `src/sim/Tactics.ts` says. Every tile
+   reachable this turn is scored in expected hit points: what the unit could do
+   from there with the points left, minus the reactions the route provokes
+   (once per watcher, at the first tile that watcher sees), minus what the
+   enemies who can see the tile would do to it on their turn. While nothing is
+   shootable from anywhere reachable, closing the distance counts instead, and
+   counts for more with every handover in which nobody was hurt — two squads
+   that each price the other's watch above a few metres of ground otherwise
+   wait each other out to the turn cap. The walk is issued one tile per intent,
+   so a reaction can interrupt it.
+5. **Shoot** the best poor shot, if any.
+6. **Reload** at half a magazine, **get low** when hurt, and **go on watch**
+   with whatever is left.
+
+Watching is last on purpose. An earlier version held a watch in place of a poor
+shot, and a side that was forbidden to watch (`--blueWatch=off`) then won
+*more* often — the policy was spending points on watches that rarely paid.
+Watched only with points that would otherwise be wasted, the ability is worth
+a few points of win rate to the side that has it.
 
 ---
 

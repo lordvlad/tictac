@@ -7,6 +7,7 @@
  *   bun run balance -- --matches=200 --seed=1 --turnCap=60
  *   bun run balance -- --blue=shotgun --red=sniper
  *   bun run balance -- --redAmmo=ap --blueItems=plate:1 --blueMods=scope,bipod
+ *   bun run balance -- --blueWatch=off
  *   bun run balance -- --record=recordings
  *   bun run balance -- --json
  *
@@ -64,8 +65,18 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   const ammo = arg(`${side}Ammo`)
   const items = arg(`${side}Items`)
   const mods = arg(`${side}Mods`)
-  if (weapons === undefined && ammo === undefined && items === undefined && mods === undefined) {
+  const watch = arg(`${side}Watch`)
+  if (
+    weapons === undefined &&
+    ammo === undefined &&
+    items === undefined &&
+    mods === undefined &&
+    watch === undefined
+  ) {
     return undefined
+  }
+  if (watch !== undefined && watch !== 'on' && watch !== 'off') {
+    throw new Error(`--${side}Watch: "${watch}" is not one of on, off`)
   }
 
   return {
@@ -79,6 +90,8 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
       mods === undefined
         ? undefined
         : mods.split(',').map((entry) => pick(AttachmentId, `${side}Mods`, entry.trim())),
+    // Policy rather than kit: prices the ability by taking it away.
+    watch: watch !== 'off',
   }
 }
 

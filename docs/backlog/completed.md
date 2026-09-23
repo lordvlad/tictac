@@ -723,3 +723,49 @@ variance. Reactions 0.21–0.25 per match.
 - [x] Sweep throughput within the old budget.
 - [x] Every recorded sweep match replays with no skipped intent and the same survivors
       (`tests/replay.test.ts`, ten seeds).
+
+---
+
+### [ITEM-029] AI That Crosses Covered Ground
+**Completed Date:** 2026-09-19  
+**Type:** Tooling / AI  
+**Milestone:** M3 — Reconnaissance & Morale  
+
+#### Why
+The sweep's policy advanced along the shortest route until it had a shot and stopped, so it never
+weighed a watched lane at all: overwatch fired about 0.2 times per match, and melee would have
+measured as worthless for the same reason.
+
+#### Key Changes
+- `src/sim/Tactics.ts`: `chooseDestination` scores every tile reachable this turn in expected hit
+  points — offence from there with the points left, minus reactions the route provokes (once per
+  watcher, propagated down the search tree as a bitmask), minus exposure to enemies who can see
+  it. While nothing is shootable from anywhere reachable, closing counts instead, weighted up by
+  every quiet handover.
+- `core/Pathfinding`: `reachable` (Dijkstra within a budget) and `routeTo`, sharing one stepping
+  rule (`canStep`) with the A* search.
+- The policy reloads — it never did, which only surfaced once fights ran long: draws became
+  squads a metre apart with empty magazines.
+- `SquadPlan.watch` and `--blueWatch=off` / `--redWatch=off` price the ability by removal.
+
+#### Measured
+Disjoint blocks 1000 / 5000 / 9000, 400 matches each:
+
+| | blue | red | draws | reactions / match |
+|---|---|---|---|---|
+| mirror | 151 / 153 / 142 | 237 / 235 / 250 | 12 / 12 / 8 | 0.76 / 0.70 / 0.75 |
+| blue may not watch | 133 / 138 / 145 | | | |
+| red may not watch | | 217 / 225 / 240 | | |
+
+A watch is worth about 3% of matches to the side holding it (positive in five of six runs). The
+side moving **second** now wins about 60% of mirror matches, reversing the old first-mover edge:
+the first squad to close has to end a turn where the other can see it. That is a statement about
+this AI as much as the game, and is recorded rather than tuned away. Sweep speed 7 s → 12 s per
+400 matches.
+
+#### Acceptance Criteria
+- [~] **Reactions an order of magnitude above 0.2: not met, and it was the wrong target.** A
+      policy that holds a watch instead of a poor shot reached 4.9 reactions per match — and lost
+      to a side forbidden to watch at all. A mover that prices danger *avoids* watched ground,
+      which is the watch working. Settled at 0.7–0.76 (≈3.6×).
+- [x] A watch's value is measurable: removing it costs a side ~3% of matches.

@@ -53,9 +53,6 @@ reaction fire and a roster that survives a match.
 - **`[ITEM-014]`**: Morale, stress and predispositions. The unbuilt half of M3. Wants its own
   replicated component and its own stress hooks; the three predispositions are trait-shaped
   but have nothing to modify until the loop exists.
-- **`[ITEM-029]`**: A sweep policy that crosses covered ground. Overwatch shipped and fires
-  about 0.2 times per match, because the AI stops advancing the moment it has a shot; melee
-  (`ITEM-018`) would measure as worthless for the same reason. Wanted before melee is balanced.
 - **`[ITEM-024]`** is **deferred**: a port with one implementation is an abstraction waiting
   for its second caller, and that caller is the referee. The transports come with it.
 - **`[ITEM-023]`**: Intent-only wire. **The agreed destination**
@@ -88,7 +85,8 @@ reaction fire and a roster that survives a match.
 - **`[ITEM-018]`**: Melee. First combat consumer of Strength and the answer to a unit that
   is unshootable in cover and trivially reachable. Blocked less by the swing than by the
   game around it: the sweep's policy never closes, so it would measure as worthless the way
-  the shotgun once did (`[ITEM-029]`). Overwatch, its counter, is in.
+  the shotgun once did. Overwatch, its counter, is in, and the sweep's policy now weighs
+  crossing ground (`ITEM-029`), so melee can be measured rather than guessed.
 - **`[ITEM-019]`**: Noise, awareness and the quiet kill. Sound as the second information
   channel, with awareness sitting beside `seen` and `known` exactly as intel fog does. The
   real cost is an AI that can be *fooled* — a thrown stone is worth nothing against a policy

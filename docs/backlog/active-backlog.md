@@ -81,35 +81,6 @@ Medic, Scout, and Marksman roles gate which crate rows a unit may draw equipment
 
 ---
 
-### [ITEM-029] AI That Crosses Covered Ground
-**Type:** Tooling / AI  
-**Priority:** P2  
-**Status:** Backlog  
-**Milestone:** M3 — Reconnaissance & Morale  
-
-#### Why
-The sweep's policy advances until it has a shot and then stops, so it almost never walks
-*through* a watched lane. Overwatch ([ITEM-011](completed.md)) fires about 0.2 times per match in
-the sweep, and melee ([ITEM-018](#item-018-melee-fists-blades-and-bludgeons)) will measure as
-worthless for the same reason: any mechanic whose value is about crossing ground reads as noise
-to a policy that never crosses it.
-
-#### Change
-Give the headless policy a notion of danger along a path: prefer routes out of enemy watch
-cones, and sometimes accept one — a flanking move, a rush to melee. Not a smarter game AI;
-a policy that exercises the rules the game already has. Built once, on the one engine
-(`ITEM-030` retired the sweep's private copy of the rules).
-
-#### Acceptance Criteria
-- [ ] `bun run balance` reports reactions per match an order of magnitude above today's ~0.2.
-- [ ] A watch's value is measurable: a squad that may not watch loses a measurable share of
-      matches against one that may.
-
-#### Affected Files
-- `src/sim/SimMatch.ts`
-
----
-
 ### [ITEM-012] Permadeath, Lasting Wounds & Campaign Roster Persistence
 **Type:** Feature  
 **Priority:** P2  

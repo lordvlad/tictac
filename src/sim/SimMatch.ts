@@ -2,9 +2,8 @@ import { Faction, RULES, SQUAD_SIZE } from '../config'
 import { AmmoId, type GrenadeId, GRENADES, type ShotMode, type WeaponId } from '../core/Arsenal'
 import type { AttachmentId } from '../core/Attachments'
 import { type CharacterSheet, rollSquadSheets } from '../core/Characters'
-import { type Grid, tileEquals } from '../core/Grid'
+import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
-import { findPathSegment } from '../core/Pathfinding'
 import { Rng } from '../core/rng'
 import { hasLineOfSight } from '../core/Visibility'
 import { effectiveWeapon, resolveDamage } from '../core/Ballistics'
@@ -12,6 +11,7 @@ import type { Soldier } from '../entities/Soldier'
 import { calculateHitChance, canShoot, shotApCost } from '../game/Combat'
 import type { SquadLoadout } from '../game/Loadout'
 import { stepCostFor } from '../game/Movement'
+import { chooseDestination } from './Tactics'
 import type { NetworkMessage } from '../game/NetworkManager'
 import { canWatch } from '../game/Overwatch'
 import {
@@ -30,6 +30,11 @@ export interface SquadPlan {
   items?: Partial<Record<ItemId, number>>
   /** Fitted to every unit's weapon, as far as its class has room. */
   attachments?: readonly AttachmentId[]
+  /**
+   * Whether this side's policy may go on watch. Policy, not kit — here so a
+   * sweep can price the ability by taking it away from one side.
+   */
+  watch?: boolean
 }
 
 /**
@@ -152,6 +157,8 @@ export class SimMatch {
   private readonly turnCap: number
   private grenadesThrown = 0
   private watches = 0
+  /** Handovers since anybody lost a hit point; see `chooseDestination`. */
+  private quiet = 0
 
   constructor(private readonly setup: MatchSetup) {
     this.turnCap = setup.turnCap ?? DEFAULT_TURN_CAP
@@ -196,10 +203,13 @@ export class SimMatch {
   run(): MatchOutcome {
     const { byFaction } = this.host.squads
     while (this.host.turnNumber <= this.turnCap && this.living(Faction.Blue) && this.living(Faction.Red)) {
+      const before = this.totalHp()
       for (const unit of byFaction[this.host.activeFaction]) {
         if (unit.isDead) continue
         this.takeUnitTurn(unit)
       }
+      // Measured across the whole side's turn, reactions on its movers included.
+      this.quiet = this.totalHp() < before ? 0 : this.quiet + 1
       this.act({ type: 'endTurn', faction: this.host.activeFaction })
     }
 
@@ -239,6 +249,12 @@ export class SimMatch {
     return applied
   }
 
+  private totalHp(): number {
+    let total = 0
+    for (const unit of this.host.squads.soldiers) total += Math.max(0, unit.hp)
+    return total
+  }
+
   private living(faction: Faction): boolean {
     return this.host.squads.byFaction[faction].some((unit) => !unit.isDead)
   }
@@ -269,7 +285,11 @@ export class SimMatch {
    * something or breaks, so a unit that can do nothing useful cannot spin.
    */
   private takeUnitTurn(unit: Soldier): void {
+    // One deliberate move per turn: a unit that re-chose its spot after every
+    // step would spend its points dithering between two nearly equal tiles.
+    let moved = false
     for (let guard = 0; guard < 64 && unit.ap > 0 && !unit.isDead; guard++) {
+      if (this.tryReload(unit, 'empty')) continue
       if (this.tryGrenade(unit)) continue
 
       const worthTaking = this.bestShot(unit)
@@ -278,18 +298,22 @@ export class SimMatch {
         continue
       }
 
-      if (this.tryAdvance(unit)) continue
+      if (!moved && this.tryReposition(unit)) {
+        moved = true
+        continue
+      }
 
       // Nowhere better to be. A poor shot now is worth less than the same
-      // shot taken at somebody walking into the open, so hold it if there are
-      // points to hold it with.
+      // shot taken at somebody walking into the open, so hold it — unless
+      // nobody has walked into anything for a while, in which case the other
+      // side is holding too and the poor shot is the only one on offer.
       const lastResort = this.bestShot(unit)
-      if (lastResort && lastResort.chance < PREFERRED_CHANCE && this.tryWatch(unit)) continue
       if (lastResort) {
         this.fireAt(unit, lastResort)
         continue
       }
 
+      if (this.tryReload(unit, 'low')) continue
       if (this.tryCover(unit)) continue
       if (this.tryWatch(unit)) continue
       break
@@ -395,39 +419,25 @@ export class SimMatch {
   }
 
   /**
-   * Close on the nearest enemy, one tile per intent.
+   * Go where {@link chooseDestination} says, one tile per intent.
    *
-   * A walk is a sequence of decisions: a watcher may shoot the unit on any
-   * arrival, and the unit stops the moment there is a shot worth taking rather
-   * than the moment something comes into view — a shotgun reaches 12 m and
-   * sees 14, so breaking on sight left it frozen just outside its own range. A
-   * player can issue the same one-tile moves.
+   * One tile at a time because a walk can be interrupted: a watcher may shoot
+   * the unit on any arrival, and a wound mid-route changes what the next step
+   * costs. A player can issue the same one-tile moves.
    */
-  private tryAdvance(unit: Soldier): boolean {
-    const enemies = this.enemiesOf(unit).filter((enemy) => !enemy.isDead)
-    if (enemies.length === 0) return false
-
-    const goal = enemies.reduce((nearest, enemy) =>
-      this.grid.distance(unit.tile, enemy.tile) < this.grid.distance(unit.tile, nearest.tile)
-        ? enemy
-        : nearest,
-    )
-
+  private tryReposition(unit: Soldier): boolean {
     const occupied = new Set<number>()
     for (const other of this.host.squads.soldiers) {
       if (other === unit || other.isDead) continue
       occupied.add(this.grid.index(other.tile.x, other.tile.y))
     }
+    const destination = chooseDestination(this.grid, unit, this.enemiesOf(unit), occupied, this.quiet)
+    if (!destination) return false
 
-    const { path } = findPathSegment(this.grid, unit.tile, goal.tile, occupied)
-    if (path.length < 2) return false
-
-    let moved = false
-    for (let i = 1; i < path.length; i++) {
-      const from = path[i - 1]!
-      const step = path[i]!
-      // Stop short of walking onto the target: the last tile is where it stands.
-      if (tileEquals(step, goal.tile)) break
+    const { route } = destination
+    for (let i = 1; i < route.length; i++) {
+      const from = route[i - 1]!
+      const step = route[i]!
       if (unit.ap < stepCostFor(this.grid, unit, from, step)) break
       this.act({
         type: 'moveUnit',
@@ -438,12 +448,28 @@ export class SimMatch {
           { x: step.x, y: step.y },
         ],
       })
-      moved = true
       if (unit.isDead) break
-      const shot = this.bestShot(unit)
-      if (shot && shot.chance >= PREFERRED_CHANCE) break
     }
-    return moved
+    return true
+  }
+
+  /**
+   * Put a fresh magazine in.
+   *
+   * `empty` is the forced case — nothing the weapon can fire is loaded — and
+   * comes before everything else. `low` is housekeeping with spare points, at
+   * half a magazine, and comes after anything useful. The old policy did
+   * neither, which went unnoticed while fights were short: once watches spent
+   * rounds and fights ran long, matches ended as draws between squads standing
+   * a metre apart with nothing in their guns.
+   */
+  private tryReload(unit: Soldier, when: 'empty' | 'low'): boolean {
+    const { weapon } = unit
+    if (unit.ap < RULES.reloadApCost || weapon.currentClip >= weapon.maxClip) return false
+    const canFire = weapon.availableModes.some((mode) => weapon.currentClip >= weapon.bulletConsumption(mode))
+    if (when === 'empty' ? canFire : weapon.currentClip * 2 > weapon.maxClip) return false
+    this.act({ type: 'reload', faction: unit.faction, squadIndex: unit.squadIndex })
+    return true
   }
 
   /** Hurt, with nothing to shoot: get low. */
@@ -464,7 +490,8 @@ export class SimMatch {
    * by never closing to its own range band.
    */
   private tryWatch(unit: Soldier): boolean {
-    if (!canWatch(unit)) return false
+    const plan = unit.faction === Faction.Blue ? this.setup.blue : this.setup.red
+    if (plan.watch === false || !canWatch(unit)) return false
     this.act({ type: 'overwatch', faction: unit.faction, squadIndex: unit.squadIndex })
     this.watches += 1
     return true
