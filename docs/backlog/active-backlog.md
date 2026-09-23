@@ -81,39 +81,6 @@ Medic, Scout, and Marksman roles gate which crate rows a unit may draw equipment
 
 ---
 
-### [ITEM-031] One Intent Applier for the Played Game
-**Type:** Architecture / Refactor  
-**Priority:** P1  
-**Status:** Backlog  
-**Milestone:** M1 — Headless Foundation  
-
-#### Why
-The same disease as the sweep's `SimUnit` (ITEM-030), one layer up. `MatchHost.apply` and
-`InteractionController.handleRemoteNetworkMessage` are two switches over the same intents, and
-only the first is exercised headlessly. ITEM-011 shipped a duplicate `case 'overwatch'` in the
-controller whose first copy was the *local* handler: an incoming watch put this side's
-selected soldier (nobody, on the opponent's turn) on watch instead of the peer's unit, so
-every reaction in a live match would have desynchronised — while every replay, referee and
-sweep test passed, because they go through `MatchHost`. Found by ITEM-018's work; a linter
-rule (`bun run lint:code`, `noDuplicateCase`) now catches that exact shape, not the class.
-
-#### Change
-The controller resolves a peer's intent through the same applier the host uses, and keeps only
-what is presentation: HUD refresh, fog, the camera, the planners. Either `MatchHost` is split
-into a world-agnostic applier both call, or the controller owns a host. A refused intent in a
-live match becomes a finding, as it already is in a replay.
-
-#### Acceptance Criteria
-- [ ] One switch over intents that change the world; the controller's is gone.
-- [ ] A test drives a live-shaped controller path headlessly with a recorded match.
-- [ ] `bun run lint:code` no longer needed as a guard for this bug class.
-
-#### Affected Files
-- `src/game/InteractionController.ts`
-- `src/sim/MatchHost.ts`
-
----
-
 ### [ITEM-012] Permadeath, Lasting Wounds & Campaign Roster Persistence
 **Type:** Feature  
 **Priority:** P2  

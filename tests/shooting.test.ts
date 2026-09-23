@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Scene, Vector3 } from 'three'
 import { Grid } from '../src/core/Grid'
-import { matchDice } from '../src/core/rng'
 import { AMMO, AmmoId, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { meleeChance } from '../src/core/Ballistics'
 import { MeleeId } from '../src/core/Melee'
@@ -9,7 +8,6 @@ import { Faction } from '../src/config'
 import { shotApCost, type ShotResult } from '../src/game/Combat'
 import { ShootPlanner } from '../src/game/ShootPlanner'
 import type { Squads } from '../src/game/Squads'
-import type { CombatSystem } from '../src/ecs/systems/CombatSystem'
 import type { EngineContext } from '../src/engine'
 import type { Soldier } from '../src/entities/Soldier'
 import type { Tile } from '../src/core/Grid'
@@ -55,11 +53,7 @@ function harness(soldiers: Soldier[]): ShootPlanner {
   return new ShootPlanner(
     new Grid(12),
     { soldiers } as unknown as Squads,
-    {} as unknown as CombatSystem,
     { scene: new Scene() } as unknown as EngineContext,
-    // Seeded: a planner that rolls its own hit dice must roll the same ones
-    // every run, or a preview test measures the weather.
-    matchDice(1),
   )
 }
 

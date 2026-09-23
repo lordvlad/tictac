@@ -21,7 +21,8 @@ import {
   Recorder,
   type RecordingHeader,
 } from '../game/Recording'
-import { type Carried, MatchHost } from './MatchHost'
+import type { Carried } from '../ecs/systems/CommandSystem'
+import { MatchHost } from './MatchHost'
 
 /** What one squad brought, so a sweep can vary it. */
 export interface SquadPlan {

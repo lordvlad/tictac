@@ -25,11 +25,7 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- **`[ITEM-031]`: one intent applier for the played game.** `InteractionController` keeps its
-  own switch over intents beside `MatchHost.apply`, and only the host's is tested headlessly —
-  which is how a duplicate `case 'overwatch'` shipped that would have desynchronised every
-  reaction in a live match while every replay passed. The same disease ITEM-030 cured in the
-  sweep, one layer up; P1 because it is the path real players take.
+- Nothing in flight. Next pull: **`[ITEM-012]`** persistence, with **`[ITEM-028]`** beside it.
 
 ### 📋 Ready (Pull Queue)
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for
@@ -117,6 +113,7 @@ reaction fire and a roster that survives a match.
 - **`[ITEM-030]`**: One engine — the sweep drives `MatchHost`; `SimUnit` is gone.
 - **`[ITEM-029]`**: The sweep's policy weighs the ground it crosses, and reloads.
 - **`[ITEM-018]`**: Melee — a sidearm slot, fists, knife and club.
+- **`[ITEM-031]`**: One command applier for every caller, live play included.
 
 ### 🚫 Struck
 - **`[ITEM-003.4]`** — "Remove `installCanvasStub` from `movement`, `camera`, `pathmarker`,

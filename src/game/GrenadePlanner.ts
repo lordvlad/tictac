@@ -1,12 +1,11 @@
 import { type GrenadeId, STATUSES } from '../core/Arsenal'
 import { blastFalloff, grenadeDamageAt } from '../core/Ballistics'
-import type { GrenadeResult, ResolvedHit } from './Combat'
+import type { ResolvedHit } from './Combat'
 import { type Grid, type Tile, tileEquals } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import { DamageIndicators } from '../render/DamageIndicators'
 import type { Ground } from '../render/Ground'
 import type { Effects } from '../render/Effects'
-import type { CombatSystem } from '../ecs/systems/CombatSystem'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
 import { FX } from '../config'
@@ -54,7 +53,6 @@ export class GrenadePlanner {
   constructor(
     private readonly grid: Grid,
     private readonly squads: Squads,
-    private readonly combat: CombatSystem,
     private readonly effects: Effects,
     private readonly rig: { shake(intensity: number, duration: number): void },
     engine: EngineContext,
@@ -137,14 +135,6 @@ export class GrenadePlanner {
    * The FX half is {@link replayThrow}, which a peer's throw goes through
    * directly with the numbers that peer already resolved.
    */
-  executeThrowAt(thrower: Soldier, kind: GrenadeId, targetTile: Tile): GrenadeResult | null {
-    const spec = thrower.grenadeSpecs[kind]
-    const result = this.combat.throwGrenade(thrower, targetTile, kind)
-    if (!result.thrown) return null
-    this.replayThrow(kind, targetTile, spec.areaRadius, result.hits)
-    return result
-  }
-
   /**
    * Blast FX, indicators and the post-throw refresh. No rules, no damage.
    *
@@ -182,15 +172,14 @@ export class GrenadePlanner {
     this.onThrowResolved?.()
   }
 
-  /** Throw the armed grenade at the aimed tile. Returns thrown data for P2P sync. */
-  confirm(thrower: Soldier): { kind: GrenadeId; targetTile: Tile; result: GrenadeResult } | null {
+  /**
+   * What the armed grenade is aimed at, if the throw is one the panel offers.
+   * Choosing only: the throw is a command, resolved by `CommandSystem`.
+   */
+  aimed(thrower: Soldier): { kind: GrenadeId; targetTile: Tile } | null {
     const pending = this.pending(thrower)
     if (!pending || !pending.affordable || !pending.inRange) return null
-
-    const kind = pending.kind
-    const targetTile = pending.at
-    const result = this.executeThrowAt(thrower, kind, targetTile)
-    return result ? { kind, targetTile, result } : null
+    return { kind: pending.kind, targetTile: pending.at }
   }
 
   /** Paint the blast footprint, brightest at the centre. */

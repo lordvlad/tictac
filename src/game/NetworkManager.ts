@@ -1,6 +1,6 @@
 import { Faction, SQUAD_SIZE } from '../config'
 import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
-import type { GrenadeId, ShotMode, StatusKind } from '../core/Arsenal'
+import type { GrenadeId, ShotMode } from '../core/Arsenal'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
 import { squadLoadoutFrom, type RecordedEvent, type RecordingHeader } from './Recording'
@@ -15,7 +15,6 @@ import {
   parseComponentUpdateMethod,
   RpcMethods,
 } from './JsonRpc'
-import type { Recorder } from './Recording'
 import {
   hostDataChannel,
   joinDataChannel,
@@ -145,14 +144,6 @@ export class NetworkManager {
   onDisconnected: ((reason?: string) => void) | null = null
   /** Fired after peer state has been written into the world. */
   onComponentUpdate: (() => void) | null = null
-  /**
-   * Attached to write every command this side issues to a file.
-   *
-   * Tapped here rather than at each call site because this is the one door a
-   * command goes out of, and a recording with a hole in it is worse than none.
-   * Null unless the debug panel armed it.
-   */
-  recorder: Recorder | null = null
 
   /** Set once a peer has been turned away; nothing it sends is read again. */
   private refused = false
@@ -359,8 +350,8 @@ export class NetworkManager {
     this.mode = 'join'
     this.myFaction = Faction.Red
     this.opening = Promise.withResolvers()
-    // Sent past the recorder rather than through `send`: a version is a fact
-    // about this bundle, not an intent the match can replay.
+    // Straight to the transport rather than through `send`: a version is a
+    // fact about this bundle, not an intent the match can replay.
     this.sendRpc(this.messageToRpc({ type: 'hello', ...MY_VERSION }))
     return this.opening.promise
   }
@@ -413,9 +404,9 @@ export class NetworkManager {
   }
 
   send(msg: NetworkMessage): void {
-    // Before the local-mode return: a recording is made of what this side did,
-    // and in local play nothing is transmitted but everything still happened.
-    this.recorder?.record(msg)
+    // Not recorded here: a recording is of every command the world applied,
+    // from either side, and only the applier sees both. When this recorded,
+    // a match's file held this side's moves and none of the opponent's.
     if (this.mode === 'local') return
     console.info(`%c[NET 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
     this.sendRpc(this.messageToRpc(msg))

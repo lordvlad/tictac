@@ -1,5 +1,4 @@
 import type { Grid } from '../core/Grid'
-import type { Roll } from '../core/rng'
 import type { Soldier } from '../entities/Soldier'
 import { DamageIndicators } from '../render/DamageIndicators'
 import type { Ground } from '../render/Ground'
@@ -16,8 +15,7 @@ import {
   resolveDamage,
 } from '../core/Ballistics'
 import { MELEE, type MeleeId } from '../core/Melee'
-import { calculateHitChance, canMelee, canShoot, shotApCost, shotBreakdown, type ShotResult } from './Combat'
-import type { CombatSystem } from '../ecs/systems/CombatSystem'
+import { canMelee, canShoot, shotApCost, shotBreakdown, type ShotResult } from './Combat'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
 
@@ -104,10 +102,7 @@ export class ShootPlanner {
   constructor(
     private readonly grid: Grid,
     private readonly squads: Squads,
-    private readonly combat: CombatSystem,
     engine: EngineContext,
-    /** The match's dice — the same stream the resolver rolls crits from. */
-    private readonly roll: Roll,
   ) {
     this.damageIndicators = new DamageIndicators(engine)
   }
@@ -220,28 +215,20 @@ export class ShootPlanner {
     }
   }
   /**
-   * Take the shot in `mode`.
+   * The target of a shot in `mode`, if the panel offers one.
    *
-   * The dice are rolled here and handed to the resolver, so the outcome the
-   * panel promised is the outcome that lands. They come back out on
-   * {@link ShotResult.rolls}, which is what a peer or a replay reads.
+   * Choosing only: the shot itself is a command, resolved by `CommandSystem`
+   * from the match's dice exactly as the peer resolves it. This used to roll
+   * every round's hit here and hand them in, then let the resolver draw the
+   * crits — so a burst drew hit, hit, hit, crit on this side and hit, crit,
+   * hit, crit on the peer's, and two peers desynchronised on any burst that
+   * landed twice.
    */
-  fire(shooter: Soldier, mode: ShotMode): { target: Soldier; result: ShotResult } | null {
+  choose(shooter: Soldier, mode: ShotMode): Soldier | null {
     const pending = this.pending(shooter)
     if (!pending) return null
     const option = pending.options.find((o) => o.mode === mode)
-    if (!option || !option.available) return null
-
-    const target = pending.target
-    const chance = calculateHitChance(this.grid, shooter, target, mode)
-    const bullets = shooter.weapon.bulletConsumption(mode)
-    const rolls: boolean[] = []
-    for (let i = 0; i < bullets; i++) {
-      rolls.push(this.roll() * 100 <= chance)
-    }
-
-    const result = this.combat.fireShot(shooter, target, mode, rolls)
-    return result ? { target, result } : null
+    return option?.available ? pending.target : null
   }
 
   /** Damage numbers and target bookkeeping, once combat has resolved a shot. */

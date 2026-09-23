@@ -31,7 +31,8 @@ import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
-import { MovementSystem, CombatSystem, ItemSystem, RenderSystem, WallSystem } from '../ecs/systems'
+import { MovementSystem, CombatSystem, CommandSystem, ItemSystem, RenderSystem, WallSystem } from '../ecs/systems'
+import { type Carried, type Command, type CommandOrigin, isCommand } from '../ecs/systems/CommandSystem'
 import { ITEMS, type ItemId, itemTargetsAlly } from '../core/Items'
 import { distance, facingYaw } from '../core/math'
 
@@ -80,6 +81,12 @@ export class InteractionController {
   private readonly effects: Effects
   readonly movementSystem: MovementSystem
   readonly combatSystem: CombatSystem
+  /**
+   * The one door for anything that changes the world — this player's clicks,
+   * the other player's messages and a replay's file alike. See
+   * {@link CommandSystem} for why there is only one.
+   */
+  readonly commands: CommandSystem
   readonly itemSystem: ItemSystem
   readonly renderSystem: RenderSystem
   readonly wallSystem: WallSystem
@@ -122,6 +129,12 @@ export class InteractionController {
   spectating = false
   /** A recording was armed once this match, so it cannot be armed again. */
   private recordingStarted = false
+  /**
+   * Every command the world applied while armed, from either side. Fed by the
+   * applier rather than by the network's send, which only ever saw this side.
+   * Null unless the debug panel armed it.
+   */
+  private recorder: Recorder | null = null
 
   constructor(
     readonly world: World,
@@ -163,7 +176,17 @@ export class InteractionController {
       dice,
     )
     this.wallSystem = new WallSystem(battlefield.grid)
+    this.commands = new CommandSystem(
+      world,
+      squads,
+      turnManager,
+      this.movementSystem,
+      this.combatSystem,
+      this.itemSystem,
+    )
 
+    // First, so a queued command is applied before the tick that walks it.
+    this.world.addSystem(this.commands)
     this.world.addSystem(this.movementSystem)
     this.world.addSystem(this.combatSystem)
     this.world.addSystem(this.itemSystem)
@@ -189,14 +212,32 @@ export class InteractionController {
     }
 
 
-    this.movementSystem.onStep = (entityId) => {
-      // Reactions first: a watcher shoots at the tile the mover just entered,
-      // and the fog and the HUD should show the result of that rather than the
-      // moment before it.
-      const mover = this.squads.byEntityId(entityId)
-      if (mover) this.combatSystem.reactTo(mover)
+    // Reactions are the applier's, resolved before this is called: the fog
+    // and the HUD show the result of a watcher's shot, not the moment before.
+    this.commands.onStep = () => {
       this.recomputeVisibility()
       this.refreshHud()
+    }
+    this.commands.onBeforeApply = (command, origin) => {
+      // The fingerprint is of the world as this side hands it over, so it is
+      // taken at the last moment the handover has not happened yet.
+      if (command.type === 'endTurn' && origin === 'local') this.sendStateDigest()
+    }
+    this.commands.onApplied = (command, result, origin) => {
+      // Everything that happened, from either side, is what a recording is
+      // of; a replay's own commands are already on file.
+      if (origin !== 'record') this.recorder?.record(command)
+      // Only this side's own decisions travel, and only once the rules took
+      // them: a refusal spent nothing here and would be refused there too.
+      if (origin === 'local') this.network?.send(command)
+      this.present(command, result, origin)
+    }
+    this.commands.onRefused = (command, refusal, origin) => {
+      // From the player, a refusal is a click the rules turned down. From a
+      // peer or a file it means two sides disagree about what was possible.
+      if (origin !== 'local') {
+        console.error(`[commands] ${origin} ${command.type} refused: ${refusal.reason}`, command)
+      }
     }
     this.movementSystem.onArrived = () => {
       this.recomputeVisibility()
@@ -225,22 +266,22 @@ export class InteractionController {
     }
 
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
-    this.shoot = new ShootPlanner(battlefield.grid, squads, this.combatSystem, engine, dice)
+    this.shoot = new ShootPlanner(battlefield.grid, squads, engine)
     this.combatSystem.onShotResolved = (shooter, target, result) => {
       this.shoot.reportShot(shooter, target, result)
     }
     this.planner.onMovementStarted = (soldier, path) => {
-      this.movementSystem.startMovement(this.world, soldier.entityId, path)
-      if (this.network && this.network.isMyTurn(soldier.faction)) {
-        this.network.send({
+      this.commands.apply(
+        {
           type: 'moveUnit',
           faction: soldier.faction,
           squadIndex: soldier.squadIndex,
           path: path.map((t) => ({ x: t.x, y: t.y })),
-        })
-      }
+        },
+        'local',
+      )
     }
-    this.grenade = new GrenadePlanner(battlefield.grid, squads, this.combatSystem, this.effects, rig, engine)
+    this.grenade = new GrenadePlanner(battlefield.grid, squads, this.effects, rig, engine)
     this.debug = new DebugPanel(
       () => {
         // Live edits can change reach, cost and visibility, so everything the
@@ -343,26 +384,25 @@ export class InteractionController {
   private recordingControls(): RecordingControls | null {
     if (!this.recordingHeader) return null
     return {
-      isRecording: () => this.network?.recorder != null,
+      isRecording: () => this.recorder !== null,
       canArm: () => !this.recordingStarted && this.turnManager.turnNumber === 1,
-      eventCount: () => this.network?.recorder?.eventCount ?? 0,
+      eventCount: () => this.recorder?.eventCount ?? 0,
       setRecording: (on) => {
-        const network = this.network
         const header = this.recordingHeader
-        if (!network || !header) return
+        if (!header) return
         if (!on) {
-          network.recorder = null
+          this.recorder = null
           return
         }
         if (this.recordingStarted) return
-        network.recorder = new Recorder(header, () => ({
+        this.recorder = new Recorder(header, () => ({
           turn: this.turnManager.turnNumber,
           faction: this.turnManager.activeFaction,
         }))
         this.recordingStarted = true
       },
       export: () => {
-        const recorder = this.network?.recorder
+        const recorder = this.recorder
         if (!recorder || recorder.eventCount === 0) return
         downloadJson(recorder.filename(), recorder.toJSON())
       },
@@ -372,43 +412,17 @@ export class InteractionController {
   /**
    * Apply a recorded command as a spectator.
    *
-   * Mostly the peer's own door, because a peer's command *is* a recorded one.
-   * Two of them are no-ops over the wire and cannot be here: a peer learns a
-   * reload's clip and an item's effect from replicated components, and a replay
-   * has no peer to replicate from — so the same rules are run locally instead.
+   * Through the same door as the player's own clicks and the peer's messages.
+   * Playback paces itself on {@link anyUnitMoving}, so the command is applied
+   * at once rather than queued.
    */
   applyRecordedCommand(command: NetworkMessage): void {
-    switch (command.type) {
-      case 'reload': {
-        const soldier = this.squads.byFaction[command.faction][command.squadIndex]
-        if (soldier) this.combatSystem.reload(soldier)
-        this.refreshHud()
-        return
-      }
-      case 'useItem': {
-        const soldier = this.squads.byFaction[command.faction][command.squadIndex]
-        // A recording re-runs the use, so it is the one path that has to know
-        // who it was used on. A frame from before targeted use, or one naming
-        // a unit this build cannot find, replays as a use on the carrier.
-        const target =
-          command.targetFaction !== undefined && command.targetIndex !== undefined
-            ? this.squads.byFaction[command.targetFaction][command.targetIndex]
-            : undefined
-        if (soldier) this.itemSystem.use(soldier, command.itemId, target ?? soldier)
-        this.afterCombat()
-        return
-      }
-      default:
-        this.handleRemoteNetworkMessage(command)
-        // The played game picks the incoming side's first unit for the player;
-        // a replay does it so the camera follows whoever acts next.
-        if (command.type === 'endTurn') this.turnManager.autoSelectFirst()
-    }
+    if (isCommand(command)) this.commands.apply(command, 'record')
   }
 
   /** True while a unit is still walking, which is what paces a replay. */
   get anyUnitMoving(): boolean {
-    return this.squads.soldiers.some((soldier) => soldier.isMoving)
+    return this.commands.busy
   }
 
   /** Single place where a HUD press becomes a change to the game. */
@@ -445,55 +459,40 @@ export class InteractionController {
       }
       case 'fireShot': {
         const shooter = this.turnManager.selectedSoldier
-        if (shooter) {
-          const shotData = this.shoot.fire(shooter, intent.mode)
-          // `send` is a no-op in local play on its own; gating again here would
-          // leave a local recording missing every shot fired in it.
-          if (shotData && this.network) {
-            this.network.send({
-              type: 'fireShot',
-              shooterFaction: shooter.faction,
-              shooterIndex: shooter.squadIndex,
-              targetFaction: shotData.target.faction,
-              targetIndex: shotData.target.squadIndex,
-              mode: intent.mode,
-              // Intent only: the peer resolves the same shot from the same
-              // seeded stream against state it already holds, so nothing about
-              // the outcome travels — and nothing about it can arrive wrong.
-            })
-          }
-        }
+        const target = shooter ? this.shoot.choose(shooter, intent.mode) : null
+        if (!shooter || !target) break
+        this.commands.apply(
+          {
+            type: 'fireShot',
+            shooterFaction: shooter.faction,
+            shooterIndex: shooter.squadIndex,
+            targetFaction: target.faction,
+            targetIndex: target.squadIndex,
+            mode: intent.mode,
+          },
+          'local',
+        )
         break
       }
       case 'meleeAttack': {
         const attacker = this.turnManager.selectedSoldier
         const target = this.shoot.selectedTarget
         if (!attacker || !target) break
-        // The blow reports through `onShotResolved` like a round, so the damage
-        // number, the shoot-mode bookkeeping and the fog refresh all follow on
-        // their own. Only a blow the rules allowed goes on the wire: a refusal
-        // spent nothing here and would be refused again there.
-        if (!this.combatSystem.melee(attacker, target)) break
-        this.network?.send({
-          type: 'meleeAttack',
-          attackerFaction: attacker.faction,
-          attackerIndex: attacker.squadIndex,
-          targetFaction: target.faction,
-          targetIndex: target.squadIndex,
-          // Intent only, exactly like a shot: the peer rolls the same dice.
-        })
+        this.commands.apply(
+          {
+            type: 'meleeAttack',
+            attackerFaction: attacker.faction,
+            attackerIndex: attacker.squadIndex,
+            targetFaction: target.faction,
+            targetIndex: target.squadIndex,
+          },
+          'local',
+        )
         break
       }
       case 'reload': {
         const selected = this.turnManager.selectedSoldier
-        if (selected && this.combatSystem.reload(selected)) {
-          this.refreshHud()
-          this.network?.send({
-            type: 'reload',
-            faction: selected.faction,
-            squadIndex: selected.squadIndex,
-          })
-        }
+        if (selected) this.commands.apply({ type: 'reload', faction: selected.faction, squadIndex: selected.squadIndex }, 'local')
         break
       }
       case 'armGrenade': {
@@ -533,13 +532,7 @@ export class InteractionController {
         break
       case 'overwatch': {
         const soldier = this.turnManager.selectedSoldier
-        if (!soldier || !this.combatSystem.overwatch(soldier)) break
-        this.network?.send({
-          type: 'overwatch',
-          faction: soldier.faction,
-          squadIndex: soldier.squadIndex,
-        })
-        this.refreshHud()
+        if (soldier) this.commands.apply({ type: 'overwatch', faction: soldier.faction, squadIndex: soldier.squadIndex }, 'local')
         break
       }
       case 'toggleCover':
@@ -550,35 +543,23 @@ export class InteractionController {
         break
       case 'endUnitTurn': {
         const selected = this.turnManager.selectedSoldier
-        if (selected && !selected.isDead) {
-          this.turnManager.finishSoldierTurn(selected)
-          this.refreshHud()
-          this.network?.send({
-            type: 'endUnitTurn',
-            faction: selected.faction,
-            squadIndex: selected.squadIndex,
-          })
+        if (selected) {
+          this.commands.apply({ type: 'endUnitTurn', faction: selected.faction, squadIndex: selected.squadIndex }, 'local')
         }
         break
       }
       case 'requestTurnSwitch':
+        // Hot seat asks the next player to take the chair first; a networked
+        // match has nobody to hand the screen to.
         if (this.network && this.network.mode !== 'local') {
-          this.sendStateDigest()
-          this.network.send({ type: 'endTurn', faction: this.turnManager.activeFaction })
-          this.turnManager.startNextTurn()
-          this.onTurnSwitched()
-          this.refreshHud()
+          this.commands.apply({ type: 'endTurn', faction: this.turnManager.activeFaction }, 'local')
         } else {
           this.hud.showTurnOverlay()
         }
         break
       case 'confirmTurnSwitch':
         this.hud.hideTurnOverlay()
-        this.sendStateDigest()
-        this.network?.send({ type: 'endTurn', faction: this.turnManager.activeFaction })
-        this.turnManager.startNextTurn()
-        this.onTurnSwitched()
-        this.refreshHud()
+        this.commands.apply({ type: 'endTurn', faction: this.turnManager.activeFaction }, 'local')
         break
       case 'selectLevel':
         this.selectedLevelFilter = intent.level
@@ -601,110 +582,80 @@ export class InteractionController {
         break
     }
   }
+  /**
+   * A frame from the other player.
+   *
+   * Commands wait their turn in the applier's queue rather than being applied
+   * on arrival: the network delivers faster than this side animates, and a
+   * shot resolved while its shooter's move is still being walked here would be
+   * resolved from somewhere the peer never stood.
+   */
   handleRemoteNetworkMessage(msg: NetworkMessage): void {
-    switch (msg.type) {
-      case 'moveUnit': {
-        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (!soldier || soldier.isDead) break
-        this.planner.clear()
-        this.movementSystem.startMovement(this.world, soldier.entityId, msg.path)
-        this.refreshHud()
-        break
-      }
-      case 'fireShot': {
-        const shooter = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
-        const target = this.squads.byFaction[msg.targetFaction][msg.targetIndex]
-        if (!shooter || !target) break
-        // Resolved, not applied. The same rules, the same seeded stream, the
-        // same state — so a peer's shot is a peer's *intention* to shoot and
-        // this side works out what it did. A disagreement is no longer a wrong
-        // number quietly applied; it is a desynchronisation the digest reports
-        // at the handover.
-        this.combatSystem.fireShot(shooter, target, msg.mode)
-        this.afterCombat()
-        break
-      }
-      case 'throwGrenade': {
-        const thrower = this.squads.byFaction[msg.shooterFaction][msg.shooterIndex]
-        if (!thrower) break
-        this.grenade.executeThrowAt(thrower, msg.kind, msg.targetTile)
-        this.afterCombat()
-        break
-      }
-      case 'reload': {
-        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (!soldier) break
-        // Re-run rather than awaited by replication: the peer's clip is a
-        // number this side can work out, and under intent-only it does.
-        this.combatSystem.reload(soldier)
-        this.refreshHud()
-        break
-      }
-      case 'meleeAttack': {
-        const attacker = this.squads.byFaction[msg.attackerFaction][msg.attackerIndex]
-        const target = this.squads.byFaction[msg.targetFaction][msg.targetIndex]
-        if (!attacker || !target) break
-        // Resolved, not applied, for the reason a shot is: same rules, same
-        // stream, same state — so a peer's blow is its intention to strike.
-        this.combatSystem.melee(attacker, target)
-        this.afterCombat()
-        break
-      }
-      case 'toggleCover': {
-        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (!soldier) break
-        this.combatSystem.toggleCover(this.world, soldier.entityId)
-        this.refreshHud()
-        break
-      }
-      case 'overwatch': {
-        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (!soldier) break
-        // Resolved, not applied: the peer spent its own points and this side
-        // works out the same thing from the same state.
-        this.combatSystem.overwatch(soldier)
-        this.refreshHud()
-        break
-      }
-      case 'endUnitTurn': {
-        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (!soldier || soldier.isDead) break
-        this.turnManager.finishSoldierTurn(soldier)
-        this.refreshHud()
-        break
-      }
-      case 'endTurn': {
-        this.turnManager.startNextTurn()
-        this.onTurnSwitched()
-        this.refreshHud()
-        break
-      }
-      case 'rightClickFacing': {
-        const soldier = this.squads.byFaction[msg.faction][msg.squadIndex]
-        if (!soldier || soldier.isDead) break
-        const dx = msg.x - soldier.position.x
-        const dz = msg.z - soldier.position.z
-        if (distance(dx, dz) > 0.01) soldier.targetYaw = facingYaw(dx, dz)
-        break
-      }
-      case 'digest': {
-        // Compared before `endTurn` is applied, because that is the state the
-        // sender fingerprinted: it took its digest immediately before handing
-        // over, and this side has not advanced past that point yet.
+    if (isCommand(msg)) {
+      this.commands.enqueue(msg, 'peer')
+      return
+    }
+    if (msg.type === 'digest') {
+      // Compared once everything the peer sent before it has been applied and
+      // has stopped moving, because that is the state the sender
+      // fingerprinted: immediately before it handed over.
+      const digest = msg.digest
+      this.commands.whenSettled(() =>
         reportDivergence(
-          `state at the end of turn ${msg.digest.turn}`,
-          compareDigests(this.localDigest(), msg.digest, (entityId) => this.unitName(entityId)),
-        )
-        break
-      }
-      case 'useItem': {
-        // The peer already spent the item and applied its effect; HP, AP,
-        // armour, statuses and the item counts all replicate from its side.
+          `state at the end of turn ${digest.turn}`,
+          compareDigests(this.localDigest(), digest, (entityId) => this.unitName(entityId)),
+        ),
+      )
+    }
+  }
+
+  /**
+   * What the player sees change once a command has been carried out.
+   *
+   * Presentation only — every rule has already run. The shot and blow cases
+   * have next to nothing to do because `CombatSystem.onShotResolved` already
+   * drew the damage and settled shoot mode; a throw has to be drawn here
+   * because the blast is the result's, not the planner's.
+   */
+  private present(command: Command, result: Carried, origin: CommandOrigin): void {
+    switch (command.type) {
+      case 'moveUnit':
+        // A peer's route replaces whatever this side was previewing.
+        if (origin !== 'local') this.planner.clear()
         this.refreshHud()
-        break
+        return
+      case 'throwGrenade': {
+        const thrower = this.squads.byFaction[command.shooterFaction][command.shooterIndex]
+        if (thrower && result.grenade) {
+          this.grenade.replayThrow(
+            command.kind,
+            command.targetTile,
+            thrower.grenadeSpecs[command.kind].areaRadius,
+            result.grenade.hits,
+          )
+        }
+        this.afterCombat()
+        return
       }
-      case 'init':
-        break
+      case 'fireShot':
+      case 'meleeAttack':
+      case 'useItem':
+        this.afterCombat()
+        return
+      case 'endTurn':
+        this.onTurnSwitched()
+        // The played game picks the incoming side's first unit for the player;
+        // a replay does it so the camera follows whoever acts next.
+        if (origin === 'record') this.turnManager.autoSelectFirst()
+        this.refreshHud()
+        return
+      case 'reload':
+      case 'toggleCover':
+      case 'overwatch':
+      case 'endUnitTurn':
+      case 'rightClickFacing':
+        this.refreshHud()
+        return
     }
   }
 
@@ -782,19 +733,21 @@ export class InteractionController {
     this.refreshHud()
   }
 
-  /** Throw the armed grenade at the aimed tile, and tell the peer. */
+  /** Throw the armed grenade at the aimed tile. */
   confirmThrow(): void {
     const thrower = this.turnManager.selectedSoldier
-    if (!thrower) return
-    const thrown = this.grenade.confirm(thrower)
-    if (!thrown) return
-    this.network?.send({
-      type: 'throwGrenade',
-      shooterFaction: thrower.faction,
-      shooterIndex: thrower.squadIndex,
-      kind: thrown.kind,
-      targetTile: thrown.targetTile,
-    })
+    const aimed = thrower ? this.grenade.aimed(thrower) : null
+    if (!thrower || !aimed) return
+    this.commands.apply(
+      {
+        type: 'throwGrenade',
+        shooterFaction: thrower.faction,
+        shooterIndex: thrower.squadIndex,
+        kind: aimed.kind,
+        targetTile: aimed.targetTile,
+      },
+      'local',
+    )
   }
 
   /**
@@ -890,36 +843,31 @@ export class InteractionController {
   }
 
   /**
-   * Spend the item and tell the peer.
+   * Spend the item.
    *
    * Only the target travels: both sides hold both squads' real sheets, so how
    * much a trained medic heals is derived identically on each.
    */
   private applyItem(user: Soldier, itemId: ItemId, target: Soldier): void {
-    if (!this.itemSystem.use(user, itemId, target)) return
     // Self-use names nobody, exactly as it did before there was anyone to name.
     const aimed = target === user ? null : target
-    this.network?.send({
-      type: 'useItem',
-      faction: user.faction,
-      squadIndex: user.squadIndex,
-      itemId,
-      targetFaction: aimed?.faction,
-      targetIndex: aimed?.squadIndex,
-    })
+    this.commands.apply(
+      {
+        type: 'useItem',
+        faction: user.faction,
+        squadIndex: user.squadIndex,
+        itemId,
+        targetFaction: aimed?.faction,
+        targetIndex: aimed?.squadIndex,
+      },
+      'local',
+    )
   }
 
   /** Hunker into / out of a crouch cover stance. Entering costs AP; standing is free. */
   toggleCover(): void {
     const soldier = this.turnManager.selectedSoldier
-    if (!soldier) return
-    if (!this.combatSystem.toggleCover(this.world, soldier.entityId)) return
-    this.refreshHud()
-    this.network?.send({
-      type: 'toggleCover',
-      faction: soldier.faction,
-      squadIndex: soldier.squadIndex,
-    })
+    if (soldier) this.commands.apply({ type: 'toggleCover', faction: soldier.faction, squadIndex: soldier.squadIndex }, 'local')
   }
 
   toggleWaypointMode(): void {
@@ -991,24 +939,11 @@ export class InteractionController {
     const pt = this.picker.fromNdc(this.ndc)
     if (!pt) return
 
-    this.executeRightClickFacing(selected.squadIndex, selected.faction, pt.x, pt.z)
-    this.network?.send({
-      type: 'rightClickFacing',
-      faction: selected.faction,
-      squadIndex: selected.squadIndex,
-      x: pt.x,
-      z: pt.z,
-    })
+    this.commands.apply(
+      { type: 'rightClickFacing', faction: selected.faction, squadIndex: selected.squadIndex, x: pt.x, z: pt.z },
+      'local',
+    )
   }
-
-  executeRightClickFacing(squadIndex: number, faction: Faction, x: number, z: number): void {
-    const soldier = this.squads.byFaction[faction][squadIndex]
-    if (!soldier || soldier.isMoving || soldier.isDead) return
-    const dx = x - soldier.position.x
-    const dz = z - soldier.position.z
-    if (distance(dx, dz) > 0.01) soldier.targetYaw = facingYaw(dx, dz)
-  }
-
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'Escape') this.exitShootMode()

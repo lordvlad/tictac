@@ -86,6 +86,17 @@ Current values for every status and trait are in the generated
 
 Systems execute business logic across entities on each tick or action:
 
+- **`CommandSystem`**: The one door through which anything changes the world. Every command —
+  the player's clicks, the other player's messages, a replay, the referee, the sweep's policy —
+  is a `Command` (the world-changing subset of `NetworkMessage`) applied by `apply(command,
+  origin)`, which looks the units up, calls the system that owns the rule, and reports
+  `onApplied` / `onRefused`. It also owns the reaction trigger: `MovementSystem.onStep` →
+  `CombatSystem.reactTo`. Peer commands go through `enqueue`, and the queue drains only while
+  nothing is walking, so a command is never resolved against a unit still between tiles on this
+  screen; `whenSettled` queues a check (the peer's digest) behind them. Registered first, so a
+  queued command is applied before the tick that walks it. Origin decides three things only:
+  `local` is the one origin sent to the peer, item use is re-checked for legality only when
+  `local`, and a refusal is a finding from anywhere but `local`.
 - **`MovementSystem`**: Steps entities along A* waypoints, deducts AP per tile, updates stance animations.
 - **`CombatSystem`**: One door for every attack, whoever intended it. It evaluates cover and LOS, rolls from the match stream, resolves damage, shreds armour and kills. A peer's shot arrives as an *intent* and goes through the same call the acting side makes — there is no second path that applies numbers somebody else resolved.
 - **`ItemSystem`**: Command-driven, not ticked. Applies an item's ordered effect list to a target that defaults to the user; charges the turn's price and the pouch to the *user* whoever is being worked on. The only place that knows what an effect does.
@@ -120,15 +131,12 @@ is worth being precise about, because the same message is read two different way
 
 - **The command carries a target.** `useItem` gained optional `targetFaction` / `targetIndex`;
   a self-use names nobody, exactly as it did before there was anyone to name.
-- **The live remote handler applies nothing.** Every consequence of a use — hit points, armour,
-  action points, statuses, item counts — is component state that already replicates from the
-  side that resolved it, so the receiving peer refreshes its HUD and does no arithmetic. This
-  is the same reasoning as suppression and death: state a peer can already see is never also
-  announced.
-- **The target is load-bearing for recording and playback.** `applyRecordedCommand` *re-runs*
-  the use rather than restoring state around it, so it is the one path that has to know who the
-  kit was used on. A frame from before targeted use, or one naming a unit this side cannot
-  resolve, replays as a self-use rather than being dropped.
+- **Every side resolves it.** A peer's `useItem` goes through `CommandSystem` like any other
+  command and is resolved here, from the same sheets — until ITEM-031 the live receiver applied
+  nothing and waited for the user's component updates, while a replay re-ran the use: two
+  readings of one message. The component updates still arrive and agree.
+- **The target is load-bearing.** A frame from before targeted use, or one naming a unit this
+  side cannot resolve, resolves as a self-use rather than being dropped.
 - **No number travels.** Both peers hold both squads' real sheets from the `ready` handshake,
   so a trained medic's amount is derived identically on each side. The wire says *who*, not
   *how much* — and the Intelligence gate is re-checked locally regardless, because how clever a

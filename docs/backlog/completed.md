@@ -818,3 +818,46 @@ per point than a knife against plate, the one fight it exists for; it is 4.
 - [ ] Not verified in a browser, the loadout picker and the Strike row included — same tooling
       block as every item since ITEM-020.
 - Deferred: attacks from behind and the silent kill (ITEM-019), non-lethal takedowns (ITEM-012).
+
+---
+
+### [ITEM-031] One Intent Applier for the Played Game
+**Completed Date:** 2026-09-19  
+**Type:** Architecture / Refactor  
+**Milestone:** M1 — Headless Foundation  
+
+#### Why
+`MatchHost.apply` and the controller's two switches (local input, peer messages) were three
+readers of the same commands, and only the host's was tested. ITEM-011 shipped a duplicated
+`case 'overwatch'` in the controller that meant a peer's watch was never applied in a live match
+while every replay passed.
+
+#### Key Changes
+- `src/ecs/systems/CommandSystem.ts`: `apply(command, origin)` is the only switch over
+  world-changing commands. The controller, replays, the referee, the sweep and the host all call
+  it; the reaction trigger moved into it. `onApplied` / `onRefused` / `onBeforeApply` hooks
+  carry presentation, recording, sending and the digest.
+- Peer commands queue (`enqueue`) and drain only while nothing is walking; `whenSettled` orders
+  the peer's digest behind them.
+- The controller keeps one *presentation* switch (`present`) and no rule calls.
+- `MatchHost` is the world plus a fixed-step clock over `CommandSystem`.
+
+#### Found on the way — all live-only, all invisible to every headless test
+- **Burst fire desynchronised peers.** `ShootPlanner.fire` pre-rolled every round's hit from the
+  match stream and let the resolver draw crits after; the receiver drew hit, crit, hit, crit.
+  Any burst landing two rounds put the peers on different dice. The planner now only chooses.
+- **A peer's shot was resolved mid-walk.** Commands were applied on arrival, while the peer's
+  previous move was still animating here. Proven by `tests/commands.test.ts`: remove the queue's
+  movement gate and the peer's shots are refused.
+- **Recordings of online matches held one side.** The recorder was tapped in
+  `NetworkManager.send`; it now records every applied command from either side.
+- **A peer's item use was never resolved** on the receiving side (component updates were relied
+  on instead), unlike in a replay.
+
+#### Acceptance Criteria
+- [x] One switch over commands that change the world; the controller's are gone.
+- [x] A test drives the live peer path headlessly with recorded matches at uneven frame rates,
+      and is proven red without the queue's gate.
+- [~] `bun run lint:code` kept rather than dropped: the controller still switches over HUD
+      intents and presentation, and a duplicated case there is a bug too. It costs 0.1 s.
+- [ ] Not verified in two live browsers — same tooling block as since ITEM-020.

@@ -1,10 +1,8 @@
 import { Faction, SIM } from '../config'
 import { NO_FOCUS, NO_FX } from '../core/Combatant'
 import { generateMap } from '../core/MapGenerator'
-import { distance, facingYaw } from '../core/math'
 import { matchDice } from '../core/rng'
 import type { Grid } from '../core/Grid'
-import { type ShotResult, throwGrenade } from '../game/Combat'
 import type { NetworkMessage } from '../game/NetworkManager'
 import type { RecordingHeader } from '../game/Recording'
 import { Squads } from '../game/Squads'
@@ -12,49 +10,25 @@ import { digestWorld, type StateDigest } from '../game/StateDigest'
 import { TurnManager } from '../game/TurnManager'
 import { createGlobalRules } from '../ecs/globals'
 import { CombatSystem, ItemSystem, MovementSystem, TurnSystem } from '../ecs/systems'
+import { type Applied, CommandSystem, isCommand } from '../ecs/systems/CommandSystem'
 import { World } from '../ecs/World'
 
 /**
  * A whole match, with nobody watching, driven by intents.
  *
- * One applier, three users: the replay runner (`Replay.ts`), the referee
- * (`src/server/Referee.ts`) and any test that wants to play a match without an
- * engine. Under [ADR-0004](../../docs/design/adr/0004-full-knowledge-lockstep.md)
- * a command carries what a player decided and both sides *resolve* it, so
- * "apply this intent to a world" is the same operation wherever it happens —
- * and having three copies of it would be three chances to resolve a match
- * differently from the peers playing it.
+ * The world a played match builds, minus the scene: the same systems, the same
+ * {@link CommandSystem} applying the same commands. Its users are the replay
+ * runner (`Replay.ts`), the referee (`src/server/Referee.ts`), the sweep
+ * (`SimMatch`) and any test that wants a match without an engine. Because the
+ * applier is shared with the played game, everything they exercise is the
+ * path real players take — which was not true while the controller kept
+ * switches of its own.
  *
- * It is not a second implementation of the rules: every branch below calls the
- * same door a live match calls — `CombatSystem.fireShot`, `throwGrenade`,
- * `MovementSystem.startMovement`, `TurnManager`.
- *
- * What it deliberately does *not* do is decide anything. There is no policy
- * here and no input: a host is told what happened and works out what that
- * means. Deciding is the AI's job in `SimMatch`, and a player's in the
- * controller.
+ * What it adds is time: movement is animated, so a host steps the world at a
+ * fixed rate until every walker has arrived. What it deliberately does *not*
+ * do is decide anything. Deciding is the AI's job in `SimMatch`, and a
+ * player's in the controller.
  */
-
-/** Why an intent could not be carried out. */
-export interface Refusal {
-  applied: false
-  reason: string
-}
-
-/**
- * An intent carried out. A shot says what it did, because whoever sent it may
- * want to know — a policy deciding its next move, a sweep keeping score — and
- * the rules are the only place that knows.
- */
-export interface Carried {
-  applied: true
-  shot?: ShotResult
-}
-
-export type Applied = Carried | Refusal
-
-const carried: Applied = { applied: true }
-const refuse = (reason: string): Refusal => ({ applied: false, reason })
 
 /** Where a unit ended up, for a report that has no scene to look at. */
 export interface UnitState {
@@ -86,14 +60,9 @@ export class MatchHost {
   readonly squads: Squads
   readonly turnManager: TurnManager
 
-  private readonly movement: MovementSystem
-  private readonly combat: CombatSystem
-  private readonly items: ItemSystem
+  readonly commands: CommandSystem
   private readonly step: number
   private readonly maxSteps: number
-
-  /** Reactions fired so far: a fact about the match, not about any one intent. */
-  reactions = 0
 
   /**
    * Build the opening position from a match's header.
@@ -122,140 +91,53 @@ export class MatchHost {
     this.squads.equipFaction(Faction.Blue, header.loadouts[Faction.Blue])
     this.squads.equipFaction(Faction.Red, header.loadouts[Faction.Red])
 
-    this.movement = new MovementSystem(map.grid)
-    // The reaction trigger, wired identically to a live match's: a unit that
-    // walked into somebody's watch is shot at by the rules rather than by a
-    // message. Both peers, a replay and a referee therefore provoke the same
-    // reactions from the same intent.
-    this.movement.onStep = (entityId) => {
-      const mover = this.squads.byEntityId(entityId)
-      if (mover) this.reactions += this.combat.reactTo(mover)
-    }
-    this.combat = new CombatSystem(map.grid, this.squads, NO_FX, matchDice(header.seed))
-    this.items = new ItemSystem()
+    const movement = new MovementSystem(map.grid)
+    const combat = new CombatSystem(map.grid, this.squads, NO_FX, matchDice(header.seed))
+    const items = new ItemSystem()
     const turns = new TurnSystem()
     this.turnManager = new TurnManager(this.world, turns, this.squads, NO_FOCUS)
-    this.world.addSystem(this.movement)
-    this.world.addSystem(this.combat)
-    this.world.addSystem(this.items)
+    this.commands = new CommandSystem(this.world, this.squads, this.turnManager, movement, combat, items)
+    this.world.addSystem(this.commands)
+    this.world.addSystem(movement)
+    this.world.addSystem(combat)
+    this.world.addSystem(items)
     this.world.addSystem(turns)
     this.turnManager.autoSelectFirst()
-  }
-
-  private unitAt(faction: Faction, index: number) {
-    return this.squads.byFaction[faction][index]
   }
 
   /** Advance time until nothing is walking, so the next intent sees the arrival. */
   private settleMovement(): void {
     for (let i = 0; i < this.maxSteps; i++) {
-      if (!this.squads.soldiers.some((unit) => unit.isMoving)) return
+      if (!this.commands.busy) return
       this.world.update(this.step)
     }
   }
 
   /**
-   * Carry out one intent.
+   * Carry out one intent, and wait for it to finish.
+   *
+   * The same applier the played game uses, so this is not a second reading of
+   * the rules: the only thing a host adds is time. A move is advanced at a
+   * fixed step until the walker arrives, so the next intent sees the arrival —
+   * exactly what the played game's queue waits for.
    *
    * A refusal is a *finding*, never a silent no-op: it means this build and
    * whoever sent the intent disagree about what was possible, which is a
    * bigger disagreement than any number.
    */
   apply(command: NetworkMessage): Applied {
-    switch (command.type) {
-      case 'moveUnit': {
-        const soldier = this.unitAt(command.faction, command.squadIndex)
-        if (!soldier || soldier.isDead) return refuse('no such live unit')
-        this.movement.startMovement(this.world, soldier.entityId, command.path)
-        this.settleMovement()
-        return carried
-      }
-      case 'fireShot': {
-        const shooter = this.unitAt(command.shooterFaction, command.shooterIndex)
-        const target = this.unitAt(command.targetFaction, command.targetIndex)
-        if (!shooter || !target) return refuse('shooter or target missing')
-        // Resolved from the match's dice, exactly as the peer that sent the
-        // intent did and exactly as the peer receiving it does.
-        const shot = this.combat.fireShot(shooter, target, command.mode)
-        if (!shot) return refuse('shot refused by the rules')
-        return { applied: true, shot }
-      }
-      case 'meleeAttack': {
-        const attacker = this.unitAt(command.attackerFaction, command.attackerIndex)
-        const target = this.unitAt(command.targetFaction, command.targetIndex)
-        if (!attacker || !target) return refuse('attacker or target missing')
-        const shot = this.combat.melee(attacker, target)
-        if (!shot) return refuse('blow refused by the rules')
-        return { applied: true, shot }
-      }
-      case 'throwGrenade': {
-        const thrower = this.unitAt(command.shooterFaction, command.shooterIndex)
-        if (!thrower) return refuse('no such thrower')
-        const result = throwGrenade(
-          this.grid,
-          thrower,
-          command.targetTile,
-          command.kind,
-          this.squads.soldiers,
-        )
-        if (!result.thrown) return refuse('throw refused by the rules')
-        return carried
-      }
-      case 'reload': {
-        const soldier = this.unitAt(command.faction, command.squadIndex)
-        if (!soldier) return refuse('no such unit')
-        this.combat.reload(soldier)
-        return carried
-      }
-      case 'toggleCover': {
-        const soldier = this.unitAt(command.faction, command.squadIndex)
-        if (!soldier) return refuse('no such unit')
-        this.combat.toggleCover(this.world, soldier.entityId)
-        return carried
-      }
-      case 'overwatch': {
-        const soldier = this.unitAt(command.faction, command.squadIndex)
-        if (!soldier) return refuse('no such unit')
-        if (!this.combat.overwatch(soldier)) return refuse('cannot afford a watch')
-        return carried
-      }
-      case 'useItem': {
-        const user = this.unitAt(command.faction, command.squadIndex)
-        if (!user) return refuse('no such unit')
-        const target =
-          command.targetFaction !== undefined && command.targetIndex !== undefined
-            ? this.unitAt(command.targetFaction, command.targetIndex)
-            : undefined
-        // Forced: the acting side established that it was legal, and a host
-        // that second-guessed it would report a disagreement about legality as
-        // a failure to apply.
-        this.items.use(user, command.itemId, target ?? user, true)
-        return carried
-      }
-      case 'endUnitTurn': {
-        const soldier = this.unitAt(command.faction, command.squadIndex)
-        if (!soldier || soldier.isDead) return refuse('no such live unit')
-        this.turnManager.finishSoldierTurn(soldier)
-        return carried
-      }
-      case 'endTurn': {
-        this.turnManager.startNextTurn()
-        return carried
-      }
-      case 'rightClickFacing': {
-        const soldier = this.unitAt(command.faction, command.squadIndex)
-        if (!soldier || soldier.isDead) return refuse('no such live unit')
-        const dx = command.x - soldier.position.x
-        const dz = command.z - soldier.position.z
-        if (distance(dx, dz) > 0.01) soldier.targetYaw = facingYaw(dx, dz)
-        return carried
-      }
-      default:
-        // Handshake and diagnostic frames are not intents and are never
-        // recorded; anything else here is a command this build does not know,
-        // which is a finding about the sender's version.
-        return refuse('unknown command')
-    }
+    // Handshake and diagnostic frames are not intents and are never recorded;
+    // anything else here is a command this build does not know, which is a
+    // finding about the sender's version.
+    if (!isCommand(command)) return { applied: false, reason: 'unknown command' }
+    const result = this.commands.apply(command, 'record')
+    this.settleMovement()
+    return result
+  }
+
+  /** Reactions fired so far. */
+  get reactions(): number {
+    return this.commands.reactions
   }
 
   /** The fingerprint two sides compare to find out whether they agree. */
