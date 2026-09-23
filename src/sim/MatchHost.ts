@@ -180,6 +180,14 @@ export class MatchHost {
         if (!shot) return refuse('shot refused by the rules')
         return { applied: true, shot }
       }
+      case 'meleeAttack': {
+        const attacker = this.unitAt(command.attackerFaction, command.attackerIndex)
+        const target = this.unitAt(command.targetFaction, command.targetIndex)
+        if (!attacker || !target) return refuse('attacker or target missing')
+        const shot = this.combat.melee(attacker, target)
+        if (!shot) return refuse('blow refused by the rules')
+        return { applied: true, shot }
+      }
       case 'throwGrenade': {
         const thrower = this.unitAt(command.shooterFaction, command.shooterIndex)
         if (!thrower) return refuse('no such thrower')

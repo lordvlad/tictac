@@ -2,6 +2,7 @@ import { AMMO, AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Ar
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { derive, rollSquadSheets, type CharacterSheet } from '../core/Characters'
 import { ITEMS, ItemId } from '../core/Items'
+import { MELEE, MeleeId } from '../core/Melee'
 import { resolveTraits, TRAITS, type TraitId } from '../core/Traits'
 import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
 import type { EngineContext } from '../engine'
@@ -9,12 +10,14 @@ import {
   canAddGrenade,
   canAddItem,
   canEquipAmmo,
+  canEquipSidearm,
   canEquipWeapon,
   canFitAttachment,
   defaultLoadout,
   addGrenade,
   addItem,
   equipAmmo,
+  equipSidearm,
   equipWeapon,
   fitAttachment,
   itemsCarried,
@@ -35,6 +38,7 @@ type LoadoutAction =
   | { kind: 'select'; index: number }
   | { kind: 'weapon'; id: WeaponId }
   | { kind: 'ammo'; id: AmmoId }
+  | { kind: 'sidearm'; id: MeleeId }
   | { kind: 'grenade'; id: GrenadeId; delta: number }
   | { kind: 'item'; id: ItemId; delta: number }
   | { kind: 'attachment'; id: AttachmentId; delta: number }
@@ -126,6 +130,9 @@ export class LoadoutScreen {
         break
       case 'ammo':
         equipAmmo(this.loadout, this.selected, action.id)
+        break
+      case 'sidearm':
+        equipSidearm(this.loadout, this.selected, action.id)
         break
       case 'grenade':
         if (action.delta > 0) addGrenade(this.loadout, this.selected, action.id)
@@ -222,6 +229,12 @@ export class LoadoutScreen {
         ${Object.values(AttachmentId)
           .map((id) => row(`attachment-${id}`, ATTACHMENTS[id].name, left.attachments[id]))
           .join('')}
+        ${Object.values(MeleeId)
+          // Fists are not in the crate: a row for them would read as a stock
+          // that could run out.
+          .filter((id) => id !== MeleeId.Fists)
+          .map((id) => row(`melee-${id}`, MELEE[id].name, left.sidearms[id]))
+          .join('')}
       </div>`
   }
 
@@ -243,6 +256,30 @@ export class LoadoutScreen {
         <span class="loadout-count">${count}</span>
         <button class="loadout-step interactive" ${canAdd ? '' : 'disabled'} ${LoadoutScreen.actionAttr(plus)}>+</button>
       </div>`
+
+    // The sidearm is the one pick whose options are not simply better or
+    // worse than each other, so the button has to carry enough of the table
+    // to choose on: what a blow costs and does, and the one-line character
+    // from `sidearmCharacter`. The count sits on the button rather than only
+    // in the crate because a greyed-out knife needs its reason beside it, the
+    // same argument the pouch pips make. Fists are never short, so they show
+    // no number at all rather than a zero or an infinity to puzzle over.
+    const left = remaining(this.loadout)
+    const sidearm = (id: MeleeId): string => {
+      const spec = MELEE[id]
+      const stock = id === MeleeId.Fists ? '' : `<span class="loadout-pool-count">×${left.sidearms[id]}</span>`
+      return `
+      <button class="action-btn interactive loadout-sidearm ${unit.sidearm === id ? 'active' : ''}"
+              ${canEquipSidearm(this.loadout, this.selected, id) ? '' : 'disabled'}
+              title="Accuracy ${spec.accuracy}% · parry ${spec.parry} · crit ${spec.critChance}% ×${spec.critMultiplier}"
+              ${LoadoutScreen.actionAttr({ kind: 'sidearm', id })}>
+        ${icon(`melee-${id}`)}<span class="loadout-pick-name">${spec.name}</span>${stock}
+        <span class="loadout-sidearm-spec">
+          ${spec.apCost} AP · ${spec.damage} dmg · ${Math.round(spec.armorPen * 100)}% pen<br />
+          ${LoadoutScreen.sidearmCharacter(id)}
+        </span>
+      </button>`
+    }
 
     // Shown here as well as on the card because this is where the + goes
     // dead: a stepper that stops responding needs its reason in the same
@@ -306,6 +343,9 @@ export class LoadoutScreen {
           )
           .join('')}
 
+        <div class="loadout-section">Sidearm</div>
+        ${Object.values(MeleeId).map(sidearm).join('')}
+
         <div class="loadout-section">Grenades</div>
         ${Object.values(GrenadeId)
           .map((id) =>
@@ -357,6 +397,30 @@ export class LoadoutScreen {
   }
 
   /**
+   * What a sidearm is *for*, in a few words, worked out from the table rather
+   * than written beside it: the debug panel edits `MELEE` live, and a caption
+   * saying "best at crits" over a blade that no longer is would be worse than
+   * no caption.
+   *
+   * Only the differences are named. Every sidearm has some crit chance and
+   * some armour penetration, so listing both on each would make three lines
+   * that look alike; the crit note goes to whichever crits best, the armour
+   * note to whatever strips plate or, at the other end, to whatever plate
+   * stops entirely. Noise is always named, because it is a yes/no a player
+   * plans around.
+   */
+  private static sidearmCharacter(id: MeleeId): string {
+    const spec = MELEE[id]
+    const notes: string[] = []
+    const bestCrit = Object.values(MELEE).every((other) => spec.critChance >= other.critChance)
+    if (bestCrit && spec.critChance > 0) notes.push(`crits ${spec.critChance}% ×${spec.critMultiplier}`)
+    if (spec.armorShred > 0) notes.push(`shreds ${spec.armorShred} armour`)
+    else if (spec.armorPen === 0) notes.push('armour stops it')
+    notes.push(spec.loud ? 'loud' : 'quiet')
+    return notes.join(' · ')
+  }
+
+  /**
    * The combat squad card, reused: same chrome and selection treatment, with
    * the HP/AP/AR bars — meaningless before a shot is fired — replaced by what
    * the member is carrying and who they are.
@@ -387,6 +451,14 @@ export class LoadoutScreen {
           <div class="loadout-card-kit">
             ${icon(`weapon-${unit.weaponId}`, 'big')}
             ${icon(`ammo-${unit.ammoId}`, 'big')}
+            ${
+              // Only a carried blade or club earns a glyph: every card would
+              // otherwise show the same fist, and the row is for telling the
+              // four apart.
+              unit.sidearm === MeleeId.Fists
+                ? ''
+                : `<span class="loadout-carried" title="${MELEE[unit.sidearm].name}">${icon(`melee-${unit.sidearm}`, 'big')}</span>`
+            }
             ${carried
               .map(
                 (entry) =>

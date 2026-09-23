@@ -4,6 +4,7 @@ import type { AttachmentId } from '../../src/core/Attachments'
 import { type CharacterSheet, characterSheet } from '../../src/core/Characters'
 import { Grid, type Tile } from '../../src/core/Grid'
 import { ItemId } from '../../src/core/Items'
+import { MeleeId } from '../../src/core/Melee'
 import { Rng } from '../../src/core/rng'
 import { World } from '../../src/ecs/World'
 import { Soldier } from '../../src/entities/Soldier'
@@ -19,6 +20,7 @@ export interface SoldierSpec {
   grenades?: Partial<Record<GrenadeId, number>>
   items?: Partial<Record<ItemId, number>>
   attachments?: AttachmentId[]
+  sidearm?: MeleeId
 }
 
 /**
@@ -50,6 +52,7 @@ export function headlessSoldier(spec: SoldierSpec = {}): Soldier {
       Object.values(ItemId).map((id) => [id, spec.items?.[id] ?? 0]),
     ) as Record<ItemId, number>,
     attachments: [...(spec.attachments ?? [])],
+    sidearm: spec.sidearm ?? MeleeId.Fists,
   })
   return soldier
 }

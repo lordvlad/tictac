@@ -9,6 +9,7 @@ appliesTo:
   - "src/core/Traits.ts"
   - "src/core/Attachments.ts"
   - "src/core/Items.ts"
+  - "src/core/Melee.ts"
   - "src/config.ts"
 relatedDocs:
   - "docs/architecture/combat-and-rules.md"
@@ -127,7 +128,28 @@ Training rather than physique, rolled per character and scaling exactly one thin
 
 ---
 
-## 5. Where the numbers come from
+## 5. Sidearms
+
+Carried in their own slot beside the primary weapon; an empty slot is fists. A blow reaches a
+neighbouring tile on the same level, and its chance has no range and no cover term. The
+defender's parry is their sidearm's plus their primary weapon's handling.
+
+| Sidearm | AP | Chance | Parry | Damage | Armour pen | Shred | Crit | Crit × | Loud |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Fists | 3 | 75% | 0 | 14 | 0% | 0 | 5% | 1.5 | no |
+| Knife | 3 | 80% | +10 | 32 | 50% | 0 | 25% | 2 | no |
+| Club | 4 | 70% | +5 | 36 | 90% | 12 | 0% | 1 | yes |
+
+| Primary weapon | Parry when held |
+| --- | --- |
+| Rifle | 0 |
+| Shotgun | 0 |
+| Sniper Rifle | -10 |
+| Gatling | -5 |
+
+---
+
+## 6. Where the numbers come from
 
 | Rule | Value | Source |
 | --- | --- | --- |
@@ -141,5 +163,7 @@ Training rather than physique, rolled per character and scaling exactly one thin
 | Chance of an innate trait | 55% | `CHARACTER.traitChance` |
 | Utility proficiency rolled | -20 to +35% | `CHARACTER.utility` |
 | Gear penalty Strength cancels | 0 to 100% | `CHARACTER.gearRelief` |
+| Blow chance Strength adds | -10 to +10 points | `CHARACTER.meleeSkill` |
+| Blow damage Strength adds | -25 to +50% | `CHARACTER.meleePower` |
 | Crit chance clamp | 0 to 75% | `CRIT` |
 | Crit range swing | +12 at either end of a weapon's reach | `CRIT.rangeSwing` |

@@ -1,4 +1,5 @@
 import type { Vector3 } from 'three'
+import type { MeleeId } from '../core/Melee'
 import { Faction, RULES } from '../config'
 import {
   type AmmoSpec,
@@ -504,6 +505,19 @@ export class Soldier {
   }
   get grenadeSpecs(): Record<GrenadeId, GrenadeSpec> {
     return this.grenadeSpecsComponent.specs
+  }
+  /** What is in the sidearm slot; fists when it is empty. */
+  get sidearm(): MeleeId {
+    return this.inventory.sidearm
+  }
+  set sidearm(value: MeleeId) {
+    this.inventory.sidearm = value
+  }
+  get meleeSkill(): number {
+    return this.derived.meleeSkill
+  }
+  get meleePower(): number {
+    return this.derived.meleePower
   }
   /** Consumables still in the pouch, by item. */
   get items(): Record<ItemId, number> {

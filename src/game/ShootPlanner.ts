@@ -10,9 +10,13 @@ import {
   type CritBreakdown,
   effectiveWeapon,
   type HitChanceBreakdown,
+  type MeleeBreakdown,
+  meleeChance,
+  meleeWeapon,
   resolveDamage,
 } from '../core/Ballistics'
-import { calculateHitChance, canShoot, shotApCost, shotBreakdown, type ShotResult } from './Combat'
+import { MELEE, type MeleeId } from '../core/Melee'
+import { calculateHitChance, canMelee, canShoot, shotApCost, shotBreakdown, type ShotResult } from './Combat'
 import type { CombatSystem } from '../ecs/systems/CombatSystem'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
@@ -32,6 +36,21 @@ export interface ShotOption {
   armorShred: number
   /** Affordable and in range — i.e. this shot can actually be taken. */
   available: boolean
+}
+
+/**
+ * A blow with the sidearm, offered beside the shots rather than as a mode of
+ * its own: the player is already standing over a target they picked, and the
+ * question "shoot it or hit it?" is one decision with its answers side by side.
+ */
+export interface StrikeOption {
+  sidearm: MeleeId
+  name: string
+  apCost: number
+  breakdown: MeleeBreakdown
+  /** Damage a blow does, after the target's armour. */
+  damage: number
+  armorShred: number
 }
 
 /** The target being aimed at, and every shot that could be taken at it. */
@@ -54,6 +73,14 @@ export interface PendingShot {
   crit: CritBreakdown
   /** Damage a critical hit does, after the target's armour. */
   critDamage: number
+  /**
+   * The blow on offer, or null when {@link canMelee} refuses it — out of reach,
+   * another storey, a wall on the shared edge, or not the points for it.
+   * Absent rather than greyed, unlike a shot: a shot out of range is still a
+   * shot the weapon *has*, while a blow across the room is not an option at
+   * all, and a dead row on every target would teach the player to skip it.
+   */
+  strike: StrikeOption | null
 }
 
 /**
@@ -94,11 +121,13 @@ export class ShootPlanner {
   }
 
   /**
-   * Enemies this shooter may fire at: alive, actually rendered (fog of war must
-   * not leak positions through the target list) and inside the weapon's range.
+   * Enemies this shooter may fire at or strike: alive, actually rendered (fog
+   * of war must not leak positions through the target list) and either inside
+   * the weapon's range or inside arm's reach.
    *
    * Range is judged by the cheapest shot: if any mode can reach, the target is
-   * worth offering.
+   * worth offering. Reach is judged by the sidearm, so a unit that cannot
+   * afford a round any more still lists the enemy it is standing next to.
    */
   availableTargets(shooter: Soldier): Soldier[] {
     if (shooter.isDead) return []
@@ -107,14 +136,25 @@ export class ShootPlanner {
         s.faction !== shooter.faction &&
         !s.isDead &&
         s.seen &&
-        canShoot(this.grid, shooter, s, ShotMode.Snap),
+        (canShoot(this.grid, shooter, s, ShotMode.Snap) || canMelee(this.grid, shooter, s)),
     )
+  }
+
+  /**
+   * Whether aiming is worth starting: the points for a shot, or somebody in
+   * reach of the sidearm. The second half is why the HUD asks here rather than
+   * comparing AP to the snap price itself — fists cost less than any round, and
+   * a unit with three points left beside an enemy has exactly one thing to do.
+   */
+  canEnter(shooter: Soldier | null): boolean {
+    if (!shooter || shooter.isDead) return false
+    if (shooter.ap >= shotApCost(shooter, ShotMode.Snap)) return true
+    return this.availableTargets(shooter).length > 0
   }
 
   /** @returns true when shoot mode was entered (the unit can still afford it). */
   enter(shooter: Soldier | null): boolean {
-    if (!shooter || shooter.isDead) return false
-    if (shooter.ap < shotApCost(shooter, ShotMode.Snap)) return false
+    if (!shooter || !this.canEnter(shooter)) return false
     this.activeOn = true
     // Pre-select the best odds so the player usually only has to pick a card.
     const targets = this.availableTargets(shooter)
@@ -176,6 +216,7 @@ export class ShootPlanner {
       options,
       crit,
       critDamage: resolveDamage(eff, target, 1, true).damage,
+      strike: canMelee(this.grid, shooter, target) ? strikeOption(shooter, target) : null,
     }
   }
   /**
@@ -217,12 +258,15 @@ export class ShootPlanner {
    * dropped out, but the panel stayed on shoot until the player cancelled it
    * by hand. Re-entering re-picks the best remaining target exactly the way
    * the first entry did, and refuses when the shooter can no longer afford a
-   * shot — which, with nothing left to shoot at, is when the mode is over.
+   * shot — which, with nothing left to shoot at, is when the mode is over. A
+   * blow resolves through the same report, and a target still in reach keeps
+   * the mode open even when no round is affordable any more.
    */
   private settle(shooter: Soldier, target: Soldier): void {
     // Someone else's shot says nothing about the shot being lined up here.
     if (!this.activeOn || this.target !== target) return
-    if (!target.isDead && shooter.ap >= shotApCost(shooter)) return
+    // A second blow is as good a reason to stay aimed as a second round.
+    if (!target.isDead && (shooter.ap >= shotApCost(shooter) || canMelee(this.grid, shooter, target))) return
     if (!this.enter(shooter) || this.target === null) this.exit()
   }
 
@@ -256,4 +300,22 @@ function previewDamage(
 ): { damage: number; armorShred: number } {
   const result = resolveDamage(effectiveWeapon(shooter, mode), target)
   return { damage: result.damage, armorShred: result.armorShred }
+}
+
+/**
+ * The blow on offer, priced and rated through the same terms the resolver
+ * uses — {@link meleeChance} for the odds and {@link meleeWeapon} for what
+ * lands — so the row on the panel is the blow that is struck.
+ */
+function strikeOption(attacker: Soldier, target: Soldier): StrikeOption {
+  const spec = MELEE[attacker.sidearm]
+  const damage = resolveDamage(meleeWeapon(attacker), target)
+  return {
+    sidearm: spec.id,
+    name: spec.name,
+    apCost: spec.apCost,
+    breakdown: meleeChance(attacker, target),
+    damage: damage.damage,
+    armorShred: damage.armorShred,
+  }
 }

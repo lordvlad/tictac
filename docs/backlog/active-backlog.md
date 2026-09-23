@@ -81,6 +81,39 @@ Medic, Scout, and Marksman roles gate which crate rows a unit may draw equipment
 
 ---
 
+### [ITEM-031] One Intent Applier for the Played Game
+**Type:** Architecture / Refactor  
+**Priority:** P1  
+**Status:** Backlog  
+**Milestone:** M1 — Headless Foundation  
+
+#### Why
+The same disease as the sweep's `SimUnit` (ITEM-030), one layer up. `MatchHost.apply` and
+`InteractionController.handleRemoteNetworkMessage` are two switches over the same intents, and
+only the first is exercised headlessly. ITEM-011 shipped a duplicate `case 'overwatch'` in the
+controller whose first copy was the *local* handler: an incoming watch put this side's
+selected soldier (nobody, on the opponent's turn) on watch instead of the peer's unit, so
+every reaction in a live match would have desynchronised — while every replay, referee and
+sweep test passed, because they go through `MatchHost`. Found by ITEM-018's work; a linter
+rule (`bun run lint:code`, `noDuplicateCase`) now catches that exact shape, not the class.
+
+#### Change
+The controller resolves a peer's intent through the same applier the host uses, and keeps only
+what is presentation: HUD refresh, fog, the camera, the planners. Either `MatchHost` is split
+into a world-agnostic applier both call, or the controller owns a host. A refused intent in a
+live match becomes a finding, as it already is in a replay.
+
+#### Acceptance Criteria
+- [ ] One switch over intents that change the world; the controller's is gone.
+- [ ] A test drives a live-shaped controller path headlessly with a recorded match.
+- [ ] `bun run lint:code` no longer needed as a guard for this bug class.
+
+#### Affected Files
+- `src/game/InteractionController.ts`
+- `src/sim/MatchHost.ts`
+
+---
+
 ### [ITEM-012] Permadeath, Lasting Wounds & Campaign Roster Persistence
 **Type:** Feature  
 **Priority:** P2  
@@ -214,50 +247,6 @@ should be its own item, so locks can ship without waiting for it.
 
 ---
 
-### [ITEM-018] Melee: Fists, Blades and Bludgeons
-**Type:** Feature  
-**Priority:** P2  
-**Status:** Backlog  
-**Milestone:** M2 — Tactical Depth  
-
-#### Why
-[GDD: Melee Combat](../design/gdd/melee-combat.md). Distance is the only axis the game has,
-so a soldier in good cover is close to unkillable while being trivially reachable. Melee is
-the answer to that stalemate, the first combat consumer of Strength, and the only way to end
-a sentry quietly.
-
-#### Change
-1. A melee resolution path beside `executeShot`: a contest between the attacker's strength
-   and training and the defender's agility, with no range or cover terms and no ammunition.
-   Sender-resolved, numbers on the wire like every other attack.
-2. Three families that answer different questions — bare hands (non-lethal, worst against
-   armour), blades (crits, quiet, find gaps) and bludgeons (shred armour, loud).
-3. Attacks from outside a target's view resolved differently from attacks to the face; facing
-   and per-side visibility are both already replicated.
-
-#### Blocker
-Two, and both are about the game around it rather than the swing itself. The headless policy
-picks the best available *shot* and never closes, so a melee that ships before the AI can use
-it will measure as worthless — exactly how the shotgun once measured, by never entering its
-own range band. And melee without [ITEM-011](#item-011-overwatch--reaction-fire) has no
-counter: crossing open ground has to be punishable or closing becomes strictly correct.
-
-#### Affected Files
-- `src/core/Arsenal.ts`
-- `src/game/Combat.ts`
-- `src/ecs/systems/CombatSystem.ts`
-- `src/sim/SimMatch.ts`
-- `src/game/Loadout.ts`
-
-#### Acceptance Criteria
-- [ ] A melee exchange resolves with no cover or range term, and a peer replays the sender's
-      numbers verbatim.
-- [ ] Bare hands, a blade and a bludgeon differ measurably against an armoured target.
-- [ ] The sweep's AI closes when closing is the better option, and `bun run balance` reports
-      what each family actually did.
-
----
-
 ### [ITEM-019] Noise, Awareness and the Quiet Kill
 **Type:** Feature  
 **Priority:** P2  
@@ -279,7 +268,10 @@ from *read* — awareness is a third state of the same kind.
 3. Breakable glazing — `WallKind.Glass` already stops nothing and is already a replicated
    entity — and a thrown stone that makes its noise where it *lands*, which is the first
    mechanic in the game that manipulates enemy information rather than enemy hit points.
-4. A silent kill: an unaware target, from behind, with a quiet weapon, unobserved.
+4. A silent kill: an unaware target, from behind, with a quiet weapon, unobserved. The blow
+   itself exists (ITEM-018: `executeMelee`, and a knife is already quiet); what is missing is
+   *from behind*, which needs an integer heading — `targetYaw` is a float from `atan2`, banned
+   from rules code — and *unaware*, which is this item's awareness state.
 
 #### Blocker
 Enemies cannot currently be unaware, so there is nothing to sneak past and nothing to

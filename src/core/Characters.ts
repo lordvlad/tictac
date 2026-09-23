@@ -88,6 +88,10 @@ export interface DerivedStats {
   healBonus: number
   /** Percent of gear's own movement and AP penalty this character shrugs off. */
   gearRelief: number
+  /** Percentage points on landing a blow. */
+  meleeSkill: number
+  /** Percent on the damage a blow does. */
+  meleePower: number
 }
 
 /** Traits a character can be born with. `Nullweave` is a garment, not a person. */
@@ -127,6 +131,8 @@ export function derive(sheet: CharacterSheet): DerivedStats {
     carrySlots: band(strength, CHARACTER.carrySlots),
     itemApDelta: band(intelligence, CHARACTER.itemApDelta),
     gearRelief: band(strength, CHARACTER.gearRelief),
+    meleeSkill: band(strength, CHARACTER.meleeSkill),
+    meleePower: band(strength, CHARACTER.meleePower),
   }
 }
 

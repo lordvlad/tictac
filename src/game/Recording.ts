@@ -1,3 +1,4 @@
+import { MELEE, MeleeId } from '../core/Melee'
 import { Faction, SQUAD_SIZE } from '../config'
 import { AMMO, type AmmoId, GRENADES, type GrenadeId, WEAPONS, type WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
@@ -191,6 +192,12 @@ export function squadLoadoutFrom(raw: unknown, what: string): SquadLoadout {
       throw new Error(`${what}[${i}]: unknown ammo "${String(unit.ammoId)}"`)
     }
 
+    // Absent in files written before the slot existed, and those units fought
+    // bare-handed; a name this build does not know is refused like a weapon.
+    const sidearm = unit.sidearm ?? MeleeId.Fists
+    if (typeof sidearm !== 'string' || !Object.hasOwn(MELEE, sidearm)) {
+      throw new Error(`${what}[${i}]: unknown sidearm "${String(sidearm)}"`)
+    }
     const attachments = Array.isArray(unit.attachments) ? unit.attachments : []
     return {
       weaponId: unit.weaponId as WeaponId,
@@ -200,6 +207,7 @@ export function squadLoadoutFrom(raw: unknown, what: string): SquadLoadout {
       attachments: attachments.filter(
         (id): id is AttachmentId => typeof id === 'string' && Object.hasOwn(ATTACHMENTS, id),
       ),
+      sidearm: sidearm as MeleeId,
     }
   })
 }

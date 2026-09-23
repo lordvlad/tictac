@@ -10,7 +10,7 @@ import type { Squads } from '../../game/Squads'
 import { canWatch, reactToArrival, watchCost } from '../../game/Overwatch'
 import { NO_FX, type CombatFx } from '../../core/Combatant'
 import type { Roll } from '../../core/rng'
-import {
+import { executeMelee,
   applyHitEffects,
   canShoot,
   fireWeapon,
@@ -79,6 +79,17 @@ export class CombatSystem extends System {
     )
     if (!result) return null
     this.onShotResolved?.(shooter, target, result)
+    return result
+  }
+
+  /**
+   * Strike an adjacent enemy with the sidearm. Resolved from the match's dice,
+   * like a shot, and reported through the same `onShotResolved`.
+   */
+  melee(attacker: Soldier, target: Soldier): ShotResult | null {
+    const result = executeMelee(this.grid, attacker, target, this.fx, this.roll)
+    if (!result) return null
+    this.onShotResolved?.(attacker, target, result)
     return result
   }
 

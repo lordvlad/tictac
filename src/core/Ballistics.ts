@@ -9,6 +9,7 @@ import {
   Weapon,
 } from './Arsenal'
 import { CoverLevel } from './Walls'
+import { LONG_GUN_PARRY, MELEE, type MeleeId } from './Melee'
 import { clamp } from './math'
 
 /** A live status on a unit. */
@@ -62,6 +63,12 @@ export interface CombatantStats {
   critChanceBonus: number
   /** What this unit's traits add to the multiplier its crits apply. */
   critMultiplierBonus: number
+  /** What is in the sidearm slot; {@link MeleeId.Fists} when it is empty. */
+  sidearm: MeleeId
+  /** Percentage points Strength adds to landing a blow. */
+  meleeSkill: number
+  /** Percent Strength adds to the damage a blow does. */
+  meleePower: number
 }
 
 /** A weapon with its loaded ammo folded in. */
@@ -369,5 +376,85 @@ export function grenadeDamageAt(spec: GrenadeSpec, distance: number, target: Com
     armorShred: Math.round(spec.armorShred * falloff),
     absorbed: Math.round(Math.min(armorInPlay, raw)),
     crit: false,
+  }
+}
+
+/** Every term behind a melee chance, so the HUD can explain the number. */
+export interface MeleeBreakdown {
+  /** Final clamped percentage. */
+  chance: number
+  /** The sidearm's own chance. */
+  base: number
+  /** What the attacker's Strength added. */
+  skill: number
+  /** What the defender's hands took off: sidearm parry plus primary weapon handling. */
+  parry: number
+  /** The defender's own evasion. */
+  evasion: number
+  attackerPenalty: number
+  defenderBonus: number
+}
+
+/**
+ * Chance a blow lands.
+ *
+ * A contest folded into one roll: the attacker's weapon and Strength against
+ * the defender's Agility and what they are holding. Deliberately missing are
+ * the terms a shot is mostly made of — no range, no cover, no ammunition —
+ * because there is no space between the two people for any of them to act on.
+ * That absence is what melee is *for*: a soldier in good cover is close to
+ * unshootable and completely reachable.
+ *
+ * One number drawn from the match stream rather than two opposed rolls: the
+ * same shape of answer for half the dice.
+ */
+export function meleeChance(attacker: CombatantStats, defender: CombatantStats): MeleeBreakdown {
+  const spec = MELEE[attacker.sidearm]
+  const attackerStatus = statusTotals(attacker.statuses)
+  const defenderStatus = statusTotals(defender.statuses)
+  const parry = MELEE[defender.sidearm].parry + LONG_GUN_PARRY[defender.weapon.id]
+  const evasion = Math.max(0, defender.evasion)
+  const raw =
+    spec.accuracy +
+    attacker.meleeSkill -
+    parry -
+    evasion -
+    attackerStatus.accuracyPenalty -
+    defenderStatus.defenceBonus
+  return {
+    chance: clamp(Math.round(raw), AIM.min, AIM.max),
+    base: spec.accuracy,
+    skill: attacker.meleeSkill,
+    parry,
+    evasion,
+    attackerPenalty: attackerStatus.accuracyPenalty,
+    defenderBonus: defenderStatus.defenceBonus,
+  }
+}
+
+/**
+ * A sidearm in the shape damage and crits are resolved in.
+ *
+ * Melee changes the terms feeding the damage arithmetic, not the arithmetic:
+ * armour subtracts and penetration decides how much of it counts, a crit
+ * multiplies before armour, exactly as for a round. Reach and range bias are
+ * zero, so the crit chance has no distance term; the unit's own crit traits
+ * apply, because they are about where the unit puts its blows.
+ */
+export function meleeWeapon(attacker: CombatantStats): EffectiveWeapon {
+  const spec = MELEE[attacker.sidearm]
+  return {
+    weapon: attacker.weapon,
+    apCost: spec.apCost,
+    baseAccuracy: spec.accuracy,
+    accuracyPerMetre: 0,
+    damage: spec.damage * (1 + attacker.meleePower / 100),
+    armorPen: spec.armorPen,
+    armorShred: spec.armorShred,
+    areaRadius: 0,
+    maxRange: 0,
+    critChance: spec.critChance > 0 ? spec.critChance + attacker.critChanceBonus : 0,
+    critMultiplier: Math.max(1, spec.critMultiplier + (spec.critChance > 0 ? attacker.critMultiplierBonus : 0)),
+    critRangeBias: 0,
   }
 }

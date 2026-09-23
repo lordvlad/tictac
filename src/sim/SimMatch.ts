@@ -1,14 +1,15 @@
 import { Faction, RULES, SQUAD_SIZE } from '../config'
 import { AmmoId, type GrenadeId, GRENADES, type ShotMode, type WeaponId } from '../core/Arsenal'
 import type { AttachmentId } from '../core/Attachments'
+import { MELEE, MeleeId } from '../core/Melee'
 import { type CharacterSheet, rollSquadSheets } from '../core/Characters'
 import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
 import { hasLineOfSight } from '../core/Visibility'
-import { effectiveWeapon, resolveDamage } from '../core/Ballistics'
+import { effectiveWeapon, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
 import type { Soldier } from '../entities/Soldier'
-import { calculateHitChance, canShoot, shotApCost } from '../game/Combat'
+import { calculateHitChance, canMelee, canShoot, shotApCost } from '../game/Combat'
 import type { SquadLoadout } from '../game/Loadout'
 import { stepCostFor } from '../game/Movement'
 import { chooseDestination } from './Tactics'
@@ -30,6 +31,8 @@ export interface SquadPlan {
   items?: Partial<Record<ItemId, number>>
   /** Fitted to every unit's weapon, as far as its class has room. */
   attachments?: readonly AttachmentId[]
+  /** Every unit's sidearm; fists when absent. */
+  sidearm?: MeleeId
   /**
    * Whether this side's policy may go on watch. Policy, not kit — here so a
    * sweep can price the ability by taking it away from one side.
@@ -61,6 +64,7 @@ export function planToLoadout(plan: SquadPlan): SquadLoadout {
       Object.values(ItemId).map((id) => [id, plan.items?.[id] ?? 0]),
     ) as Record<ItemId, number>,
     attachments: [...(plan.attachments ?? [])],
+    sidearm: plan.sidearm ?? MeleeId.Fists,
   }))
 }
 
@@ -109,10 +113,11 @@ const DEFAULT_TURN_CAP = 40
  */
 const PREFERRED_CHANCE = 0.5
 
-/** A shot the policy has chosen but not yet taken. */
+/** An attack the policy has chosen but not yet made: a shot, or a blow. */
 interface PlannedShot {
   target: Soldier
-  mode: ShotMode
+  /** `melee` for a blow with the sidearm; otherwise the shot mode. */
+  mode: ShotMode | 'melee'
   /** Probability, not percent — it is arithmetic here, not display. */
   chance: number
   /** Expected damage per action point, which is how it was chosen. */
@@ -336,16 +341,24 @@ export class SimMatch {
   }
 
   /**
-   * The best shot available, by damage per action point.
+   * The best attack available, by damage per action point.
    *
    * Expected rather than maximum: a burst that lands one round in three is
    * worse than a snap shot that lands, and the whole point of measuring is to
-   * find out which weapons that is true for.
+   * find out which weapons that is true for. A blow with the sidearm is one
+   * more option on the same scale, so the policy strikes exactly when striking
+   * is worth more than shooting — never because it was told to.
    */
   private bestShot(unit: Soldier): PlannedShot | null {
     let best: PlannedShot | null = null
 
     for (const target of this.visibleEnemies(unit)) {
+      if (canMelee(this.grid, unit, target)) {
+        const chance = meleeChance(unit, target).chance / 100
+        const damage = resolveDamage(meleeWeapon(unit), target).damage
+        const value = (chance * damage) / MELEE[unit.sidearm].apCost
+        if (!best || value > best.value) best = { target, mode: 'melee', chance, value }
+      }
       for (const mode of unit.weapon.availableModes) {
         if (!canShoot(this.grid, unit, target, mode)) continue
         const bullets = unit.weapon.bulletConsumption(mode)
@@ -360,22 +373,37 @@ export class SimMatch {
     return best
   }
 
-  /** Pull the trigger on an already-chosen shot, and write down what it did. */
+  /**
+   * Make an already-chosen attack, and write down what it did.
+   *
+   * Blows are tallied under the sidearm's name beside the guns, so the report
+   * says what each family actually did rather than folding a knife into the
+   * rifle its carrier happened to hold.
+   */
   private fireAt(unit: Soldier, shot: PlannedShot): void {
-    const weapon = unit.weapon.id
+    const weapon = shot.mode === 'melee' ? unit.sidearm : unit.weapon.id
     const tally = this.tally.get(weapon) ?? emptyTally()
     const before = shot.target.hp
-    const { shot: result } = this.act({
-      type: 'fireShot',
-      shooterFaction: unit.faction,
-      shooterIndex: unit.squadIndex,
-      targetFaction: shot.target.faction,
-      targetIndex: shot.target.squadIndex,
-      mode: shot.mode,
-    })
+    const { shot: result } =
+      shot.mode === 'melee'
+        ? this.act({
+            type: 'meleeAttack',
+            attackerFaction: unit.faction,
+            attackerIndex: unit.squadIndex,
+            targetFaction: shot.target.faction,
+            targetIndex: shot.target.squadIndex,
+          })
+        : this.act({
+            type: 'fireShot',
+            shooterFaction: unit.faction,
+            shooterIndex: unit.squadIndex,
+            targetFaction: shot.target.faction,
+            targetIndex: shot.target.squadIndex,
+            mode: shot.mode,
+          })
 
     tally.shots += 1
-    tally.rounds += unit.weapon.bulletConsumption(shot.mode)
+    if (shot.mode !== 'melee') tally.rounds += unit.weapon.bulletConsumption(shot.mode)
     if (result?.hit) tally.hits += 1
     tally.damage += before - shot.target.hp
     tally.crits += result?.crits ?? 0

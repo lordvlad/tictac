@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { MeleeId } from '../src/core/Melee'
 import { AMMO, AmmoId, Gatling, Rifle, Shotgun, Sniper, ShotMode } from '../src/core/Arsenal'
 import {
   type CombatantStats,
@@ -21,6 +22,9 @@ const NOBODY = {
     damageTaken: 0,
     critChanceBonus: 0,
   critMultiplierBonus: 0,
+  sidearm: MeleeId.Fists,
+  meleeSkill: 0,
+  meleePower: 0,
 } as const
 
 /** A shooter carrying `weapon`, loaded with `ammo`. */

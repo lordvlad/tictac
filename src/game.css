@@ -1941,6 +1941,23 @@ canvas {
   font-variant-numeric: tabular-nums;
 }
 
+/* A sidearm pick is the weapon pick with its spec underneath: the options
+   trade off rather than rank, so the numbers have to be on the button. The
+   spec wraps onto its own line and is indented past the icon so the name
+   column stays aligned with the picks above. */
+.loadout-panel .loadout-sidearm {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.loadout-sidearm-spec {
+  flex-basis: 100%;
+  padding-left: 24px;
+  font-size: 9px;
+  line-height: 1.35;
+  color: var(--hud-dim);
+}
+
 .loadout-cards {
   position: absolute;
   bottom: 16px;

@@ -25,16 +25,11 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- **`[ITEM-025]`: the referee.** In flight. A `Bun.serve` process that recomputes the same
-  intent stream as a **witness rather than an authority** — not in the data path, no latency,
-  and a match plays on unwatched without it. What it buys is persistence, rejoin after a lost
-  client, and *attribution*: two peers can detect a disagreement, neither can prove whose fault
-  it is until a third recomputation makes it two against one. A foul aborts the match.
-- Half of it already exists: `src/sim/Replay.ts` rebuilds a whole match from an intent stream
-  headlessly and proves it reproducible, which is exactly what rejoin needs. What remains is a
-  channel, a store and the verdict.
-- `[ITEM-024]` (transport port) comes with it rather than before it — the referee is the second
-  caller that justifies the abstraction, which is why it was deferred until now.
+- **`[ITEM-031]`: one intent applier for the played game.** `InteractionController` keeps its
+  own switch over intents beside `MatchHost.apply`, and only the host's is tested headlessly —
+  which is how a duplicate `case 'overwatch'` shipped that would have desynchronised every
+  reaction in a live match while every replay passed. The same disease ITEM-030 cured in the
+  sweep, one layer up; P1 because it is the path real players take.
 
 ### 📋 Ready (Pull Queue)
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for
@@ -82,11 +77,6 @@ reaction fire and a roster that survives a match.
   already replicated entities whose `kind` every consumer reads, so a door costs no new wire
   message. Fire is deliberately *not* in it — a burning tile is a per-tile effect with a
   clock, and every effect today is a status on a unit.
-- **`[ITEM-018]`**: Melee. First combat consumer of Strength and the answer to a unit that
-  is unshootable in cover and trivially reachable. Blocked less by the swing than by the
-  game around it: the sweep's policy never closes, so it would measure as worthless the way
-  the shotgun once did. Overwatch, its counter, is in, and the sweep's policy now weighs
-  crossing ground (`ITEM-029`), so melee can be measured rather than guessed.
 - **`[ITEM-019]`**: Noise, awareness and the quiet kill. Sound as the second information
   channel, with awareness sitting beside `seen` and `known` exactly as intel fog does. The
   real cost is an AI that can be *fooled* — a thrown stone is worth nothing against a policy
@@ -121,6 +111,12 @@ reaction fire and a roster that survives a match.
   anyway — so one item unblocked both halves.
 - Of the four items filed out of the attribute pass, only **`[ITEM-014]`** (morale) is still
   open, and it is in the cold backlog for its own reason rather than for a missing prerequisite.
+- **`[ITEM-020]`–`[ITEM-025]`**: full-knowledge lockstep — version gate, state digest, intent-only
+  wire, the referee and the transport port.
+- **`[ITEM-011]`**: Overwatch and reaction fire, with no message of its own.
+- **`[ITEM-030]`**: One engine — the sweep drives `MatchHost`; `SimUnit` is gone.
+- **`[ITEM-029]`**: The sweep's policy weighs the ground it crosses, and reloads.
+- **`[ITEM-018]`**: Melee — a sidearm slot, fists, knife and club.
 
 ### 🚫 Struck
 - **`[ITEM-003.4]`** — "Remove `installCanvasStub` from `movement`, `camera`, `pathmarker`,

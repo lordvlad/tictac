@@ -8,6 +8,7 @@
  *   bun run balance -- --blue=shotgun --red=sniper
  *   bun run balance -- --redAmmo=ap --blueItems=plate:1 --blueMods=scope,bipod
  *   bun run balance -- --blueWatch=off
+ *   bun run balance -- --blueSidearm=knife --redSidearm=club
  *   bun run balance -- --record=recordings
  *   bun run balance -- --json
  *
@@ -23,6 +24,7 @@ import { mkdir } from 'node:fs/promises'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
 import { AttachmentId } from '../src/core/Attachments'
 import { ItemId } from '../src/core/Items'
+import { MeleeId } from '../src/core/Melee'
 import { formatReport, sweep } from '../src/sim/Balance'
 import type { CombatRecording } from '../src/game/Recording'
 import type { SquadPlan } from '../src/sim/SimMatch'
@@ -66,7 +68,9 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   const items = arg(`${side}Items`)
   const mods = arg(`${side}Mods`)
   const watch = arg(`${side}Watch`)
+  const sidearm = arg(`${side}Sidearm`)
   if (
+    sidearm === undefined &&
     weapons === undefined &&
     ammo === undefined &&
     items === undefined &&
@@ -92,6 +96,7 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
         : mods.split(',').map((entry) => pick(AttachmentId, `${side}Mods`, entry.trim())),
     // Policy rather than kit: prices the ability by taking it away.
     watch: watch !== 'off',
+    sidearm: sidearm === undefined ? undefined : pick(MeleeId, `${side}Sidearm`, sidearm),
   }
 }
 

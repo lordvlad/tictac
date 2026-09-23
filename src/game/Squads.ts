@@ -103,6 +103,7 @@ export class Squads {
       // so this array is already exactly what is fitted to this gun. Copied,
       // never handed out: the rail is live state.
       attachments: [...soldier.weapon.attachments],
+      sidearm: soldier.sidearm,
     }))
   }
 

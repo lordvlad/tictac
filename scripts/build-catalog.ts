@@ -14,6 +14,7 @@
  * the game to be wrong.
  */
 import { STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src/core/Arsenal'
+import { LONG_GUN_PARRY, MELEE, MeleeId } from '../src/core/Melee'
 import { CHARACTER, CRIT, RULES, WOUNDS } from '../src/config'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
@@ -144,6 +145,7 @@ function build(): string {
   lines.push('  - "src/core/Traits.ts"')
   lines.push('  - "src/core/Attachments.ts"')
   lines.push('  - "src/core/Items.ts"')
+  lines.push('  - "src/core/Melee.ts"')
   lines.push('  - "src/config.ts"')
   lines.push('relatedDocs:')
   lines.push('  - "docs/architecture/combat-and-rules.md"')
@@ -292,7 +294,32 @@ function build(): string {
   lines.push('')
   lines.push('---')
   lines.push('')
-  lines.push('## 5. Where the numbers come from')
+  lines.push('## 5. Sidearms')
+  lines.push('')
+  lines.push(
+    'Carried in their own slot beside the primary weapon; an empty slot is fists. A blow reaches a',
+  )
+  lines.push(
+    'neighbouring tile on the same level, and its chance has no range and no cover term. The',
+  )
+  lines.push("defender's parry is their sidearm's plus their primary weapon's handling.")
+  lines.push('')
+  lines.push('| Sidearm | AP | Chance | Parry | Damage | Armour pen | Shred | Crit | Crit × | Loud |')
+  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+  for (const id of Object.values(MeleeId)) {
+    const m = MELEE[id]
+    lines.push(
+      `| ${m.name} | ${m.apCost} | ${m.accuracy}% | ${points(m.parry)} | ${m.damage} | ${share(m.armorPen)} | ${m.armorShred} | ${m.critChance}% | ${m.critMultiplier} | ${m.loud ? 'yes' : 'no'} |`,
+    )
+  }
+  lines.push('')
+  lines.push('| Primary weapon | Parry when held |')
+  lines.push('| --- | --- |')
+  for (const id of Object.values(WeaponId)) lines.push(`| ${WEAPONS[id].name} | ${points(LONG_GUN_PARRY[id])} |`)
+  lines.push('')
+  lines.push('---')
+  lines.push('')
+  lines.push('## 6. Where the numbers come from')
   lines.push('')
   lines.push('| Rule | Value | Source |')
   lines.push('| --- | --- | --- |')
@@ -319,6 +346,12 @@ function build(): string {
   )
   lines.push(
     `| Gear penalty Strength cancels | ${range(CHARACTER.gearRelief.min, CHARACTER.gearRelief.max)}% | \`CHARACTER.gearRelief\` |`,
+  )
+  lines.push(
+    `| Blow chance Strength adds | ${range(CHARACTER.meleeSkill.min, CHARACTER.meleeSkill.max, true)} points | \`CHARACTER.meleeSkill\` |`,
+  )
+  lines.push(
+    `| Blow damage Strength adds | ${range(CHARACTER.meleePower.min, CHARACTER.meleePower.max, true)}% | \`CHARACTER.meleePower\` |`,
   )
   lines.push(`| Crit chance clamp | ${range(CRIT.min, CRIT.max)}% | \`CRIT\` |`)
   lines.push(

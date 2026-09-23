@@ -5,6 +5,7 @@ import type {
   HudModel,
   HudShotOption,
   HudShotPanel,
+  HudStrikeOption,
   HudThrowPanel,
 } from './HudModel'
 import { bottomLeftRow } from './CornerStack'
@@ -501,6 +502,7 @@ export class Hud {
         </div>
       </div>
       ${shot.options.map((option) => this.shotOptionRow(option)).join('')}
+      ${shot.strike ? this.strikeRow(shot.strike) : ''}
       <button class="action-btn interactive" ${Hud.intentAttr({ type: 'cancelShoot' })}>
         <span class="action-label">${icon('ui-cancel')} Cancel</span>
         <span class="action-tag">Esc</span>
@@ -532,6 +534,26 @@ export class Hud {
             }
           </span>
           <span class="shot-option-ap">${option.apCost} AP · ${option.bullets}x · ${option.damageAtBest} dmg</span>
+        </span>
+      </button>
+    `
+  }
+
+  /**
+   * The sidearm blow, laid out as one more shot mode so the choice between
+   * shooting and striking reads as one list. It says what it is fought with
+   * because the card above it describes the gun; and it has no delta, because
+   * the base it would be measured from is a rifle's.
+   */
+  private strikeRow(strike: HudStrikeOption): string {
+    return `
+      <button class="shot-option interactive" ${Hud.intentAttr({ type: 'meleeAttack' })}>
+        <span class="shot-option-name">${icon(`melee-${strike.sidearm}`)} Strike · ${strike.name}</span>
+        <span class="shot-option-diff">
+          <span class="shot-option-odds">
+            <span class="shot-option-hit ${strike.hitChance >= 50 ? 'good' : 'poor'}">${strike.hitChance}%</span>
+          </span>
+          <span class="shot-option-ap">${strike.apCost} AP · ${strike.damage} dmg</span>
         </span>
       </button>
     `

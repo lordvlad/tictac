@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { MeleeId } from '../src/core/Melee'
 import { AmmoId, GrenadeId, WEAPONS, type Weapon, WeaponId } from '../src/core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
@@ -10,13 +11,16 @@ import {
   canAddItem,
   itemsCarried,
   applyUnitLoadout,
+  canEquipSidearm,
   canEquipWeapon,
   canFitAttachment,
   defaultLoadout,
+  equipSidearm,
   equipWeapon,
   fitAttachment,
   remaining,
 } from '../src/game/Loadout'
+import { squadLoadoutFrom } from '../src/game/Recording'
 import type { Soldier } from '../src/entities/Soldier'
 
 /**
@@ -102,6 +106,12 @@ describe('Shared crate', () => {
       [AttachmentId.Scope]: 2,
       [AttachmentId.Bipod]: 2,
       [AttachmentId.Suppressor]: 2,
+    })
+    // Everyone starts bare-handed, so the whole rack is still on offer.
+    expect(left.sidearms).toEqual({
+      [MeleeId.Fists]: 0,
+      [MeleeId.Knife]: 2,
+      [MeleeId.Club]: 2,
     })
   })
 
@@ -215,6 +225,91 @@ describe('Shared crate', () => {
 })
 
 /**
+ * The sidearm slot shares the crate on the same terms as the primary, with
+ * one difference that every rule below has to respect: fists are the empty
+ * slot. They are not stock, so choosing them can never be refused and never
+ * leaves the crate any poorer.
+ */
+describe('Sidearms', () => {
+  test('equipping a knife takes one from the crate', () => {
+    const loadout = defaultLoadout()
+    const before = remaining(loadout).sidearms[MeleeId.Knife]
+
+    equipSidearm(loadout, 0, MeleeId.Knife)
+    expect(loadout[0]!.sidearm).toBe(MeleeId.Knife)
+    expect(remaining(loadout).sidearms[MeleeId.Knife]).toBe(before - 1)
+  })
+
+  test('the last knife cannot be taken twice', () => {
+    const loadout = defaultLoadout()
+    // Hand the crate out until exactly one blade is left in it.
+    let at = 0
+    while (remaining(loadout).sidearms[MeleeId.Knife] > 1) equipSidearm(loadout, at++, MeleeId.Knife)
+
+    equipSidearm(loadout, at, MeleeId.Knife)
+    expect(loadout[at]!.sidearm).toBe(MeleeId.Knife)
+    expect(remaining(loadout).sidearms[MeleeId.Knife]).toBe(0)
+
+    // The next member finds an empty sheath and is left as they were...
+    expect(canEquipSidearm(loadout, at + 1, MeleeId.Knife)).toBe(false)
+    equipSidearm(loadout, at + 1, MeleeId.Knife)
+    expect(loadout[at + 1]!.sidearm).toBe(MeleeId.Fists)
+
+    // ...while the one holding it may keep it, spare or not.
+    expect(canEquipSidearm(loadout, at, MeleeId.Knife)).toBe(true)
+  })
+
+  test('fists never deplete anything', () => {
+    const loadout = defaultLoadout()
+    const before = remaining(loadout)
+
+    // A crate with no fists in it at all still arms everyone with them, and
+    // arming everyone with them leaves every count where it was.
+    for (let at = 0; at < loadout.length; at++) {
+      expect(canEquipSidearm(loadout, at, MeleeId.Fists)).toBe(true)
+      equipSidearm(loadout, at, MeleeId.Fists)
+    }
+    expect(remaining(loadout)).toEqual(before)
+
+    // And the empty slot is on offer to someone holding a blade, even with
+    // the crate's fists entry zeroed: putting a knife back is not a withdrawal.
+    equipSidearm(loadout, 0, MeleeId.Knife)
+    expect(canEquipSidearm(loadout, 0, MeleeId.Fists)).toBe(true)
+    equipSidearm(loadout, 0, MeleeId.Fists)
+    expect(remaining(loadout)).toEqual(before)
+  })
+
+  test('swapping a knife for a club puts the knife back', () => {
+    const loadout = defaultLoadout()
+    const before = remaining(loadout).sidearms
+    equipSidearm(loadout, 0, MeleeId.Knife)
+
+    equipSidearm(loadout, 0, MeleeId.Club)
+    expect(loadout[0]!.sidearm).toBe(MeleeId.Club)
+    const after = remaining(loadout).sidearms
+    expect(after[MeleeId.Knife]).toBe(before[MeleeId.Knife])
+    expect(after[MeleeId.Club]).toBe(before[MeleeId.Club] - 1)
+  })
+
+  test('a squad’s sidearms survive the wire check', () => {
+    // The same validation a peer's `ready` and a replay header go through:
+    // a knife that came back as fists would change who can open a throat.
+    const loadout = defaultLoadout()
+    equipSidearm(loadout, 0, MeleeId.Knife)
+    equipSidearm(loadout, 2, MeleeId.Club)
+
+    const parsed = squadLoadoutFrom(JSON.parse(JSON.stringify(loadout)), 'test')
+    expect(parsed.map((unit) => unit.sidearm)).toEqual(loadout.map((unit) => unit.sidearm))
+  })
+
+  test('an unknown sidearm is refused, not disarmed', () => {
+    const tampered = JSON.parse(JSON.stringify(defaultLoadout()))
+    tampered[1].sidearm = 'chainsaw'
+    expect(() => squadLoadoutFrom(tampered, 'test')).toThrow(/chainsaw/)
+  })
+})
+
+/**
  * The default spread is Rifle (3 slots), Gatling (2), Sniper (3), Shotgun (1),
  * which is what makes the rail rules visible: the same mod is a free choice on
  * one member and impossible on another.
@@ -303,6 +398,7 @@ describe('Stamping a loadout onto a soldier', () => {
         [ItemId.RepairKit]: 0,
       },
       attachments: [],
+      sidearm: MeleeId.Fists,
     })
 
     expect(soldier.weaponId).toBe(WeaponId.Sniper)
@@ -337,6 +433,7 @@ describe('Stamping a loadout onto a soldier', () => {
         [ItemId.RepairKit]: 0,
       },
       attachments: [AttachmentId.Scope, AttachmentId.Suppressor],
+      sidearm: MeleeId.Fists,
     })
 
     expect(soldier.weapon.attachments).toEqual([AttachmentId.Scope, AttachmentId.Suppressor])

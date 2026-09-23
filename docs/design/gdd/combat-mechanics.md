@@ -134,8 +134,10 @@ Three design drafts extend the pillars above. None of them is implemented; each 
 already exists in the code and what it would still need, so a reader can tell a plan from a
 rule.
 
-- [Melee Combat](melee-combat.md) — contact fighting as a *contest* rather than a hit roll,
-  where cover stops mattering and a blade can kill quietly.
+- [Melee Combat](melee-combat.md) — contact with a sidearm is **built** (fists, knife, club;
+  see [Combat & Rules](../../architecture/combat-and-rules.md#melee-a-blow-with-the-sidearm)).
+  What remains a proposal is the half that needs awareness: attacks from behind and the
+  silent kill.
 - [Noise & Stealth](noise-and-stealth.md) — crouching as sneaking, a loudness per action,
   enemy awareness as a third state beside seen and read, and breaking glass as both a cost
   and a tool.

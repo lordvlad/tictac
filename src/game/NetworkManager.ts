@@ -97,6 +97,14 @@ export type NetworkMessage =
     }
   | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number } }
   | { type: 'reload'; faction: Faction; squadIndex: number }
+  /** Strike an adjacent enemy with the sidearm. Intent only, like a shot. */
+  | {
+      type: 'meleeAttack'
+      attackerFaction: Faction
+      attackerIndex: number
+      targetFaction: Faction
+      targetIndex: number
+    }
   | { type: 'toggleCover'; faction: Faction; squadIndex: number }
   /**
    * Hold fire for the other side's turn.

@@ -3,6 +3,7 @@ import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
 import { ITEMS, type ItemEffect, ItemId, itemApCost, itemTargetsAlly } from '../core/Items'
 import { UtilityId } from '../core/Characters'
 import { effectiveWeapon, type HitChanceBreakdown, statusStacks } from '../core/Ballistics'
+import type { MeleeId } from '../core/Melee'
 import { clamp } from '../core/math'
 import { canWatch, watchCost } from '../game/Overwatch'
 import { TRAITS, woundTraits } from '../core/Traits'
@@ -23,6 +24,8 @@ export type HudIntent =
   | { type: 'cancelShoot' }
   | { type: 'selectTarget'; index: number }
   | { type: 'fireShot'; mode: ShotMode }
+  /** The sidearm blow at the target being aimed at; offered only in reach. */
+  | { type: 'meleeAttack' }
   | { type: 'reload' }
   | { type: 'armGrenade'; kind: GrenadeId }
   | { type: 'useItem'; itemId: ItemId }
@@ -156,6 +159,17 @@ export interface HudShotOption {
   outOfRange: boolean
 }
 
+/** The sidearm blow, as the row beside the shot modes shows it. */
+export interface HudStrikeOption {
+  /** Which sidearm, so the row can show its icon. */
+  sidearm: MeleeId
+  name: string
+  hitChance: number
+  apCost: number
+  /** Damage a landed blow does, after the target's armour. */
+  damage: number
+}
+
 /** The target being aimed at: the shared picture, then a row per way to shoot. */
 export interface HudShotPanel {
   targetName: string
@@ -176,6 +190,13 @@ export interface HudShotPanel {
   maxClip: number
   base: HudShotBase
   options: HudShotOption[]
+  /**
+   * The blow, when the target is in reach. Its own row rather than another
+   * {@link HudShotOption}: none of the shared picture above it — range, cover,
+   * the rifle's crit — has anything to do with a knife, so it carries its
+   * whole answer on the row.
+   */
+  strike: HudStrikeOption | null
 }
 
 /** The throw lined up and awaiting confirmation. */
@@ -248,6 +269,12 @@ export interface HudModelSources {
   portraits: OffscreenPortraits
   seedLabel: string
   shootActive: boolean
+  /**
+   * Whether pressing Shoot would do anything: a round affordable, or an enemy
+   * in reach of the sidearm. The planner's answer, because the second half
+   * needs the map.
+   */
+  shootReady: boolean
   waypointActive: boolean
   /** Shoot-mode state, when shoot mode is on. */
   shoot: ShootSnapshot | null
@@ -322,7 +349,8 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       icon: shootActive ? 'ui-cancel' : 'ui-shoot',
       tag: `${shootApCost} AP`,
       active: shootActive,
-      disabled: selected.ap < shootApCost,
+      // Cancelling is never refused; only starting to aim can be pointless.
+      disabled: !shootActive && !sources.shootReady,
       intent: shootActive ? { type: 'cancelShoot' } : { type: 'shoot' },
     })
     actions.push({
@@ -670,6 +698,15 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
       available: option.available,
       outOfRange: option.breakdown.outOfRange,
     })),
+    strike: pending.strike
+      ? {
+          sidearm: pending.strike.sidearm,
+          name: pending.strike.name,
+          hitChance: pending.strike.breakdown.chance,
+          apCost: pending.strike.apCost,
+          damage: pending.strike.damage,
+        }
+      : null,
   }
 }
 

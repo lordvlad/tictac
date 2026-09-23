@@ -1,10 +1,11 @@
 import { RULES } from '../config'
 import { ShotMode } from '../core/Arsenal'
-import { effectiveWeapon, hitChance, resolveDamage } from '../core/Ballistics'
+import { effectiveWeapon, hitChance, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
 import type { Combatant } from '../core/Combatant'
 import { shotCoverLevel } from '../core/Cover'
 import type { Grid, Tile } from '../core/Grid'
 import { reachable, routeTo } from '../core/Pathfinding'
+import { MELEE } from '../core/Melee'
 import { eyesOf, hasLineOfSight, sees } from '../core/Visibility'
 import { shotApCost } from '../game/Combat'
 import { moveBudget } from '../game/Movement'
@@ -50,7 +51,23 @@ export interface Destination {
   exposure: number
 }
 
-/** Expected damage from spending `ap` on `target`, firing from `from`. */
+/**
+ * Whether a unit standing on `a` could strike one standing on `b`: the
+ * adjacency and level half of `canMelee`, for tiles nobody is standing on yet.
+ * Sight between them is the caller's check, which it has already made.
+ */
+function inReach(grid: Grid, a: Tile, b: Tile): boolean {
+  const dx = Math.abs(a.x - b.x)
+  const dy = Math.abs(a.y - b.y)
+  return dx <= 1 && dy <= 1 && dx + dy > 0 && grid.levelAt(a.x, a.y) === grid.levelAt(b.x, b.y)
+}
+
+/** Expected damage from a blow by `attacker` on `defender`. */
+function blow(attacker: Combatant, defender: Combatant): number {
+  return (meleeChance(attacker, defender).chance / 100) * resolveDamage(meleeWeapon(attacker), defender).damage
+}
+
+/** Expected damage from spending `ap` on `target`, from `from`: by gun, or by hand when in reach. */
 function offenseFrom(
   grid: Grid,
   shooter: Combatant,
@@ -61,6 +78,9 @@ function offenseFrom(
 ): number {
   const cover = shotCoverLevel(grid, from, target.tile)
   let best = 0
+  if (inReach(grid, from, target.tile)) {
+    best = blow(shooter, target) * Math.floor(ap / MELEE[shooter.sidearm].apCost)
+  }
   for (const mode of shooter.weapon.availableModes) {
     const cost = shotApCost(shooter, mode)
     const bullets = shooter.weapon.bulletConsumption(mode)
@@ -127,7 +147,12 @@ export function chooseDestination(
       if (distance < nearest) nearest = distance
       if (distance > RULES.sightRange || !hasLineOfSight(grid, at, enemy.tile)) continue
       offense = Math.max(offense, offenseFrom(grid, unit, at, enemy, distance, ap))
-      exposure += threat(grid, enemy, unit, at, ShotMode.Snap)
+      // What they would do to it on their turn: shoot it, or, standing next to
+      // it, hit it — whichever is worse for the unit.
+      exposure += Math.max(
+        threat(grid, enemy, unit, at, ShotMode.Snap),
+        inReach(grid, enemy.tile, at) ? blow(enemy, unit) : 0,
+      )
     }
     return { offense, exposure, nearest, danger: routeDanger }
   }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { MeleeId } from '../src/core/Melee'
 import { AMMO, AmmoId, Rifle, Shotgun, ShotMode, Sniper, WeaponId } from '../src/core/Arsenal'
 import {
   type CombatantStats,
@@ -43,6 +44,9 @@ function combatant(overrides: Partial<CombatantStats> = {}): CombatantStats {
     proficiency: 0,
     evasion: 0,
     critImmune: false,
+    sidearm: MeleeId.Fists,
+    meleeSkill: 0,
+    meleePower: 0,
     rangeFalloff: 0,
     damageTaken: 0,
     critChanceBonus: 0,

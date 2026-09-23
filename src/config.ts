@@ -236,6 +236,10 @@ export const CHARACTER = {
    * GDD makes about gating heavy armour on Strength rather than forbidding it.
    */
   gearRelief: { min: 0, max: 100 },
+  /** Percentage points on landing a blow. From Strength. */
+  meleeSkill: { min: -10, max: 10 },
+  /** Percent on the damage a blow does. From Strength: melee is where Strength first fights. */
+  meleePower: { min: -25, max: 50 },
   /**
    * Percent a utility discipline adds to what it governs, per discipline.
    *

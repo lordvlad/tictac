@@ -3,8 +3,10 @@ import { Scene, Vector3 } from 'three'
 import { Grid } from '../src/core/Grid'
 import { matchDice } from '../src/core/rng'
 import { AMMO, AmmoId, WEAPONS, WeaponId } from '../src/core/Arsenal'
+import { meleeChance } from '../src/core/Ballistics'
+import { MeleeId } from '../src/core/Melee'
 import { Faction } from '../src/config'
-import type { ShotResult } from '../src/game/Combat'
+import { shotApCost, type ShotResult } from '../src/game/Combat'
 import { ShootPlanner } from '../src/game/ShootPlanner'
 import type { Squads } from '../src/game/Squads'
 import type { CombatSystem } from '../src/ecs/systems/CombatSystem'
@@ -12,6 +14,7 @@ import type { EngineContext } from '../src/engine'
 import type { Soldier } from '../src/entities/Soldier'
 import type { Tile } from '../src/core/Grid'
 import { installCanvasStub } from './support/dom'
+import { headlessSoldier } from './support/soldier'
 
 // Render code is under test here (canvas-backed textures), so the stub is
 // this suite's own business - it must not rely on another file installing it.
@@ -40,6 +43,9 @@ function unit(faction: Faction, tile: Tile, ap = 12) {
     weapon: WEAPONS[WeaponId.Rifle],
     ammo: AMMO[AmmoId.Standard],
     position: new Vector3(tile.x, 0, tile.y),
+    // Shoot mode asks whether a blow is in reach before it lets go of a
+    // target, so the slot has to be there even on a unit that never swings.
+    sidearm: MeleeId.Fists,
   }
   // Structurally the surface shoot mode uses; the rest of Soldier is graphics.
   return soldier as unknown as Soldier & typeof soldier
@@ -164,6 +170,56 @@ describe('Shoot mode ends when the shot does', () => {
 
     expect(shoot.active).toBe(true)
     expect(shoot.selectedTarget).toBe(enemy)
+
+    shoot.dispose()
+  })
+})
+
+describe('A blow is offered beside the shots, in reach only', () => {
+  /** A real soldier on the planner's floor, visible to the other side. */
+  function fighter(faction: Faction, tile: Tile, sidearm: MeleeId = MeleeId.Fists): Soldier {
+    const soldier = headlessSoldier({ faction, tile, sidearm })
+    soldier.seen = true
+    return soldier
+  }
+
+  test('an adjacent enemy can be struck; one two tiles away cannot', () => {
+    const attacker = fighter(Faction.Blue, { x: 4, y: 4 }, MeleeId.Knife)
+    const beside = fighter(Faction.Red, { x: 5, y: 5 })
+    const across = fighter(Faction.Red, { x: 6, y: 4 })
+    const shoot = harness([attacker, beside, across])
+    shoot.enter(attacker)
+
+    shoot.selectTarget(beside)
+    const strike = shoot.pending(attacker)?.strike
+    expect(strike?.sidearm).toBe(MeleeId.Knife)
+    expect(strike?.name).toBe('Knife')
+    // The number on the row is the number the resolver rolls against.
+    expect(strike?.breakdown.chance).toBe(meleeChance(attacker, beside).chance)
+
+    shoot.selectTarget(across)
+    const pending = shoot.pending(attacker)
+    // Still a target for the rifle, so the panel is up — with no blow on it.
+    expect(pending?.options.length).toBeGreaterThan(0)
+    expect(pending?.strike).toBeNull()
+
+    shoot.dispose()
+  })
+
+  test('points for a blow but not a round still open the aim, only with someone in reach', () => {
+    const attacker = fighter(Faction.Blue, { x: 4, y: 4 })
+    const enemy = fighter(Faction.Red, { x: 7, y: 4 })
+    const shoot = harness([attacker, enemy])
+    attacker.ap = 3
+    expect(shotApCost(attacker)).toBeGreaterThan(attacker.ap)
+
+    expect(shoot.canEnter(attacker)).toBe(false)
+    expect(shoot.enter(attacker)).toBe(false)
+
+    enemy.tile = { x: 5, y: 4 }
+    expect(shoot.enter(attacker)).toBe(true)
+    expect(shoot.selectedTarget).toBe(enemy)
+    expect(shoot.pending(attacker)?.strike?.sidearm).toBe(MeleeId.Fists)
 
     shoot.dispose()
   })

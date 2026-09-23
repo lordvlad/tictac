@@ -769,3 +769,52 @@ this AI as much as the game, and is recorded rather than tuned away. Sweep speed
       to a side forbidden to watch at all. A mover that prices danger *avoids* watched ground,
       which is the watch working. Settled at 0.7–0.76 (≈3.6×).
 - [x] A watch's value is measurable: removing it costs a side ~3% of matches.
+
+---
+
+### [ITEM-018] Melee: Fists, Blades and Bludgeons
+**Completed Date:** 2026-09-19  
+**Type:** Feature  
+**Milestone:** M2 — Tactical Depth  
+
+#### Key Changes
+- **A sidearm slot** beside the primary weapon: `UnitLoadout.sidearm`, stored on
+  `InventoryComponent` (replicated, in the digest), stamped by `applyUnitLoadout`, validated in
+  recordings (absent = fists, unknown = refused). The crate supplies knives and clubs; an empty
+  slot is fists. Loadout screen picker with remaining counts; three new icons.
+- **The rule** (`src/core/Melee.ts`, `meleeChance`/`meleeWeapon` in Ballistics,
+  `canMelee`/`executeMelee` in Combat): adjacent incl. diagonal, same level, sight between. One
+  roll — the attacker's sidearm and Strength against the defender's evasion and parry (their
+  sidearm plus `LONG_GUN_PARRY` for what is in their other hand). No range, cover or ammunition
+  term. Damage through the shared armour arithmetic; Strength scales it (`meleeSkill`,
+  `meleePower`, its first combat use). A loud sidearm lights the attacker up like a shot.
+- **On the wire**: `meleeAttack` names attacker and target; both peers resolve it.
+- **In the game**: a *Strike* row beside the shot modes when the target is in reach, with its
+  chance; a unit with too few points for any gun can still enter shoot mode to strike.
+- **In the sweep**: a blow is one more option on the policy's damage-per-AP scale, and in the
+  movement scorer's offence and exposure terms. `--blueSidearm=knife|club`; blows are tallied
+  under the sidearm's name.
+
+#### Found on the way
+A duplicate `case 'overwatch'` in `InteractionController.handleRemoteNetworkMessage` (from
+ITEM-011) meant a peer's watch was never applied in a live match. Fixed; `bun run lint:code`
+(Biome `noDuplicateCase`) added and proven red on the shipped file; the underlying duplication
+filed as ITEM-031.
+
+#### Measured
+Disjoint blocks 1000 / 5000 / 9000, 400 matches each. Melee is rare — 15 to 80 blows per 400
+matches — because the policy strikes only when it is worth more than a shot, and win rates did
+not move with any sidearm (blue 150 / 152 / 143 fists, 151 / 151 / 145 knife, 151 / 153 / 142
+club). Per blow against a plated squad: fists 3–8 damage, knife 16–21 at 3 AP, club 21–23 at 4 AP
+plus 12 armour stripped per landed blow. The club was first costed at 5 AP and measured *worse*
+per point than a knife against plate, the one fight it exists for; it is 4.
+
+#### Acceptance Criteria
+- [x] A blow resolves with no cover or range term, from intent only, on both peers
+      (`tests/melee.test.ts`, `tests/network.test.ts`).
+- [x] Fists, knife and club differ measurably against an armoured target (above).
+- [x] The sweep's AI strikes when a blow is worth more than a shot, and `bun run balance`
+      reports what each family did.
+- [ ] Not verified in a browser, the loadout picker and the Strike row included — same tooling
+      block as every item since ITEM-020.
+- Deferred: attacks from behind and the silent kill (ITEM-019), non-lethal takedowns (ITEM-012).

@@ -19,6 +19,9 @@ item-repair: auto-repair by lorc
 attachment-scope: magnifying-glass by lorc
 attachment-bipod: gun-stock by delapouite
 attachment-suppressor: silenced by delapouite
+melee-fists: fist by lorc
+melee-knife: trench-knife by skoll
+melee-club: wood-club by delapouite
 ui-pool: cargo-crate by delapouite
 ui-deploy: check-mark by delapouite
 ui-shoot: targeting by lorc

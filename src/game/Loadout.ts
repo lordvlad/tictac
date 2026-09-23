@@ -1,3 +1,4 @@
+import { MeleeId } from '../core/Melee'
 import { AmmoId, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { ItemId } from '../core/Items'
@@ -26,6 +27,11 @@ export interface UnitLoadout {
   grenades: Record<GrenadeId, number>
   items: Record<ItemId, number>
   attachments: AttachmentId[]
+  /**
+   * The sidearm slot, beside the primary weapon rather than instead of it.
+   * {@link MeleeId.Fists} is the empty slot: nothing to carry, always there.
+   */
+  sidearm: MeleeId
 }
 
 /** What the whole squad has to share out, by id. */
@@ -35,6 +41,13 @@ export interface Inventory {
   grenades: Record<GrenadeId, number>
   items: Record<ItemId, number>
   attachments: Record<AttachmentId, number>
+  /**
+   * Keyed by every {@link MeleeId} so the crate reads like the other tables,
+   * but the {@link MeleeId.Fists} entry means nothing: fists are the empty
+   * slot, never come out of the crate and never run out, and every piece of
+   * accounting below skips them rather than trusting whatever number is here.
+   */
+  sidearms: Record<MeleeId, number>
 }
 
 /** The squad's kit, one entry per `squadIndex`. */
@@ -85,6 +98,14 @@ export const DEMO_INVENTORY: Inventory = {
     [AttachmentId.Bipod]: 2,
     [AttachmentId.Suppressor]: 2,
   },
+  // Half as many blades as soldiers, and as many clubs: arming one member for
+  // contact is cheap, arming everyone is not on offer, so a sidearm goes to
+  // whoever is going to end up next to someone.
+  sidearms: {
+    [MeleeId.Fists]: 0,
+    [MeleeId.Knife]: 2,
+    [MeleeId.Club]: 2,
+  },
 }
 
 /** Grenade cap, so one soldier cannot hoover up the whole pouch. */
@@ -105,6 +126,7 @@ export function defaultLoadout(): SquadLoadout {
       [ItemId.RepairKit]: 0,
     },
     attachments: [],
+    sidearm: MeleeId.Fists,
   }))
 }
 
@@ -116,6 +138,7 @@ export function remaining(loadout: SquadLoadout, pool: Inventory = DEMO_INVENTOR
     grenades: { ...pool.grenades },
     items: { ...pool.items },
     attachments: { ...pool.attachments },
+    sidearms: { ...pool.sidearms },
   }
 
   for (const unit of loadout) {
@@ -124,6 +147,8 @@ export function remaining(loadout: SquadLoadout, pool: Inventory = DEMO_INVENTOR
     for (const kind of Object.values(GrenadeId)) left.grenades[kind] -= unit.grenades[kind] ?? 0
     for (const id of Object.values(ItemId)) left.items[id] -= unit.items[id] ?? 0
     for (const id of unit.attachments) left.attachments[id] -= 1
+    // Fists are carried by everyone and owed to nobody.
+    if (unit.sidearm !== MeleeId.Fists) left.sidearms[unit.sidearm] -= 1
   }
 
   for (const id of Object.values(WeaponId)) left.weapons[id] = Math.max(0, left.weapons[id])
@@ -133,6 +158,7 @@ export function remaining(loadout: SquadLoadout, pool: Inventory = DEMO_INVENTOR
   for (const id of Object.values(AttachmentId)) {
     left.attachments[id] = Math.max(0, left.attachments[id])
   }
+  for (const id of Object.values(MeleeId)) left.sidearms[id] = Math.max(0, left.sidearms[id])
 
   return left
 }
@@ -217,6 +243,33 @@ export function equipAmmo(
 ): void {
   if (!canEquipAmmo(loadout, index, ammoId, pool)) return
   loadout[index]!.ammoId = ammoId
+}
+
+/**
+ * Same shape as {@link canEquipWeapon}: keeping what you hold is always
+ * allowed. Fists are always allowed as well — putting a knife back is
+ * emptying the slot, and an empty slot is never short of stock.
+ */
+export function canEquipSidearm(
+  loadout: SquadLoadout,
+  index: number,
+  id: MeleeId,
+  pool?: Inventory,
+): boolean {
+  const unit = loadout[index]
+  if (!unit) return false
+  if (id === MeleeId.Fists || unit.sidearm === id) return true
+  return remaining(loadout, pool).sidearms[id] > 0
+}
+
+export function equipSidearm(
+  loadout: SquadLoadout,
+  index: number,
+  id: MeleeId,
+  pool?: Inventory,
+): void {
+  if (!canEquipSidearm(loadout, index, id, pool)) return
+  loadout[index]!.sidearm = id
 }
 
 export function canAddGrenade(
@@ -346,4 +399,5 @@ export function applyUnitLoadout(soldier: Soldier, unit: UnitLoadout): void {
   // refold has to see the finished kit.
   soldier.refreshTraits()
   for (const id of unit.attachments) soldier.fitAttachment(id)
+  soldier.sidearm = unit.sidearm
 }

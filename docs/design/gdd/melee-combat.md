@@ -2,8 +2,8 @@
 title: "GDD: Melee — Fists, Blades and Blunt Instruments"
 id: "GDD-MELEE"
 type: "gdd"
-status: "draft"
-lastReviewed: "2026-09-17"
+status: "active"
+lastReviewed: "2026-09-19"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Ballistics.ts"
@@ -17,8 +17,10 @@ tags: ["melee", "combat", "design"]
 
 # GDD: Melee — Fists, Blades and Blunt Instruments
 
-**Status: draft.** A design proposal. Every number here is a proposal; shipped numbers live in
-the code and surface in the [generated catalogue](status-and-trait-catalog.md).
+**Status: partly built (ITEM-018).** Sidearms, the contest and the three families shipped;
+attacks from behind, the silent kill and non-lethal takedowns did not — see §9. Shipped numbers
+live in the code and surface in the [generated catalogue](status-and-trait-catalog.md#5-sidearms);
+the rules are in [Combat & Rules](../../architecture/combat-and-rules.md#melee-a-blow-with-the-sidearm).
 
 ## 1. Why melee earns its place
 
@@ -148,3 +150,27 @@ damage ladder.
   melee feels like a duel or like a very short-ranged gun.
 - **Facing needs to be trustworthy.** It is replicated, but it is currently cosmetic in most
   situations; making it decide damage makes it worth desynchronising.
+
+## 9. What shipped, and what did not
+
+Decisions taken when it was built:
+
+- **A sidearm slot**, not a pouch item: a soldier carries a rifle *and* a knife. The slot is on
+  `UnitLoadout`, the crate supplies knives and clubs, and an empty slot is fists.
+- **Contest or chance** — both, in one roll: the attacker's sidearm and Strength against the
+  defender's Agility and parry, where parry counts what they are holding in *both* hands. One
+  number drawn from the match stream instead of two opposed rolls.
+- **The rifle butt** is not a separate weapon: fists are the free option, and the primary
+  weapon's handling shows up in the *defender's* parry instead.
+- **Intent on the wire**, like every attack since ADR-0004: `meleeAttack` names attacker and
+  target, both peers resolve it.
+
+Not built, and where it went:
+
+- **From behind, and the silent kill** — to ITEM-019. Facing is a float computed with `atan2`,
+  which the determinism rule bans from rules code; making it decide damage needs an integer
+  heading first, and "nobody noticed" needs the awareness model that item introduces.
+- **Non-lethal takedowns and prisoners** — to ITEM-012, the campaign roster, which is the only
+  thing a prisoner is for.
+- **Suppression in contact** — a unit in melee is simply not suppressed by the blow; fire
+  landing *around* a brawl still suppresses as usual.

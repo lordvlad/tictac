@@ -301,6 +301,7 @@ export class InteractionController {
         portraits: this.portraits,
         seedLabel: this.seedLabel,
         shootActive: this.shoot.active,
+        shootReady: this.shoot.canEnter(shooter),
         waypointActive: this.planner.waypointMode,
         selectedLevelFilter: this.selectedLevelFilter,
         topLevel: this.topLevel,
@@ -464,6 +465,25 @@ export class InteractionController {
         }
         break
       }
+      case 'meleeAttack': {
+        const attacker = this.turnManager.selectedSoldier
+        const target = this.shoot.selectedTarget
+        if (!attacker || !target) break
+        // The blow reports through `onShotResolved` like a round, so the damage
+        // number, the shoot-mode bookkeeping and the fog refresh all follow on
+        // their own. Only a blow the rules allowed goes on the wire: a refusal
+        // spent nothing here and would be refused again there.
+        if (!this.combatSystem.melee(attacker, target)) break
+        this.network?.send({
+          type: 'meleeAttack',
+          attackerFaction: attacker.faction,
+          attackerIndex: attacker.squadIndex,
+          targetFaction: target.faction,
+          targetIndex: target.squadIndex,
+          // Intent only, exactly like a shot: the peer rolls the same dice.
+        })
+        break
+      }
       case 'reload': {
         const selected = this.turnManager.selectedSoldier
         if (selected && this.combatSystem.reload(selected)) {
@@ -620,15 +640,14 @@ export class InteractionController {
         this.refreshHud()
         break
       }
-      case 'overwatch': {
-        const soldier = this.turnManager.selectedSoldier
-        if (!soldier || !this.combatSystem.overwatch(soldier)) break
-        this.network?.send({
-          type: 'overwatch',
-          faction: soldier.faction,
-          squadIndex: soldier.squadIndex,
-        })
-        this.refreshHud()
+      case 'meleeAttack': {
+        const attacker = this.squads.byFaction[msg.attackerFaction][msg.attackerIndex]
+        const target = this.squads.byFaction[msg.targetFaction][msg.targetIndex]
+        if (!attacker || !target) break
+        // Resolved, not applied, for the reason a shot is: same rules, same
+        // stream, same state — so a peer's blow is its intention to strike.
+        this.combatSystem.melee(attacker, target)
+        this.afterCombat()
         break
       }
       case 'toggleCover': {

@@ -87,7 +87,7 @@ and a band may run backwards — `itemApDelta` does, which is how an attribute m
 | --- | --- | --- |
 | Health | `maxHp`, `healBonus` | `hp`, `healBonus` |
 | Agility | `maxAp`, `evasion` | `ap`, `evasion` |
-| Strength | `throwRange`, `carrySlots`, `gearRelief` | `throwRange`, `carrySlots`, `gearRelief` |
+| Strength | `throwRange`, `carrySlots`, `gearRelief`, `meleeSkill`, `meleePower` | `throwRange`, `carrySlots`, `gearRelief`, `meleeSkill`, `meleePower` |
 | Intelligence | `itemApDelta` | `itemApDelta` (runs backwards, floored at 1 AP by `itemApCost`) |
 
 AP and evasion sharing Agility is a deliberate coupling, not a shortage of attributes: a
@@ -158,6 +158,32 @@ Current values for every trait, status, attachment and piece of kit named here l
 generated [status and trait catalogue](../design/gdd/status-and-trait-catalog.md).
 
 ---
+
+### Melee: a blow with the sidearm
+Every soldier carries a **sidearm** in its own loadout slot, beside the primary weapon
+(`UnitLoadout.sidearm`, stored on `InventoryComponent` and replicated). An empty slot is
+`MeleeId.Fists`. The table is `MELEE` in `src/core/Melee.ts`; numbers in the
+[catalogue](../design/gdd/status-and-trait-catalog.md#5-sidearms).
+
+- **Reach** (`canMelee`): a neighbouring tile, diagonals included, on the same level, with line
+  of sight between — a solid wall on the shared edge stops a blow, a parapet does not. Points
+  enough for the sidearm; no range band and no ammunition.
+- **Chance** (`meleeChance`): the sidearm's own accuracy plus the attacker's Strength
+  (`meleeSkill`), minus the defender's evasion and **parry** — their sidearm's plus what their
+  primary weapon is worth held across them (`LONG_GUN_PARRY`: a scoped rifle is a liability).
+  Status penalties apply as for a shot. No range term and **no cover term**: that absence is
+  what melee is for. One draw, a contest folded into one roll.
+- **Damage** (`meleeWeapon` → `resolveDamage`): the same armour arithmetic as a round. Strength
+  scales the blow (`meleePower`); armour penetration and shred are what separate the families —
+  fists barely dent plate, a club keeps its damage through it and strips it. Crits use
+  `critBreakdown` with no distance term; a club has no crit chance at all.
+- **Consequences** (`executeMelee`): contact makes both units `known`; a loud sidearm sets
+  `firedThisTurn` like a shot. No suppression. At most two draws from the match stream in a fixed
+  order — the blow, then the crit if it landed and the weapon can crit.
+
+Deferred on purpose: attacks from behind and silent kills need a deterministic facing (today's
+`targetYaw` is a float from `atan2`, banned from rules code) and an awareness model — both belong
+to ITEM-019. A non-lethal knockout belongs with the campaign roster (ITEM-012).
 
 ## 3. Damage Resolution & Armor
 

@@ -6,6 +6,10 @@ import { CHARACTER, Faction, RULES, SQUAD_SIZE } from '../src/config'
 import { GrenadeId, ShotMode, StatusKind, WeaponId } from '../src/core/Arsenal'
 import { derive, rollSquadSheets } from '../src/core/Characters'
 import { defaultLoadout } from '../src/game/Loadout'
+import { MeleeId } from '../src/core/Melee'
+import { canMelee, type ShotResult } from '../src/game/Combat'
+import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
+import { MatchHost } from '../src/sim/MatchHost'
 import { TraitId } from '../src/core/Traits'
 import { Rng } from '../src/core/rng'
 import { HealthComponent, MatchRulesComponent } from '../src/ecs/components'
@@ -74,6 +78,7 @@ describe('JSON-RPC framing', () => {
       'reload',
       'toggleCover',
       'overwatch',
+      'meleeAttack',
       'endUnitTurn',
       'endTurn',
       'rightClickFacing',
@@ -467,6 +472,78 @@ describe('A match over a linked pair, with no broker', () => {
 
     expect(reasons).toHaveLength(1)
     expect(sent).toEqual([])
+  })
+
+  test('a blow sent as an intent lands the same on both sides', () => {
+    // Two peers holding the same match, each resolving on its own world: the
+    // wire carries who struck whom and nothing about how it went.
+    const loadout = defaultLoadout()
+    loadout[0]!.sidearm = MeleeId.Knife
+    const header: RecordingHeader = {
+      version: RECORDING_VERSION,
+      seed: 7,
+      seedLabel: 'seven',
+      source: 'live',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      turnCap: null,
+      sheets: { [Faction.Blue]: rollSquadSheets(new Rng(1)), [Faction.Red]: rollSquadSheets(new Rng(2)) },
+      loadouts: { [Faction.Blue]: loadout, [Faction.Red]: defaultLoadout() },
+    }
+    const ours = new MatchHost(header)
+    const theirs = new MatchHost(header)
+
+    // Walk-free setup, identical on both: put the knife beside an enemy. The
+    // same seed makes the same map, so the tile found on one side is legal on
+    // the other.
+    const target = ours.squads.byFaction[Faction.Red][0]!
+    const attacker = ours.squads.byFaction[Faction.Blue][0]!
+    const beside = [-1, 0, 1]
+      .flatMap((dx) => [-1, 0, 1].map((dy) => ({ x: target.tile.x + dx, y: target.tile.y + dy })))
+      .find((tile) => {
+        if (!ours.grid.isWalkable(tile.x, tile.y)) return false
+        attacker.tile = tile
+        return canMelee(ours.grid, attacker, target)
+      })
+    expect(beside).toBeDefined()
+    theirs.squads.byFaction[Faction.Blue][0]!.tile = beside!
+
+    const [a, b] = loopback()
+    const sender = new NetworkManager()
+    const receiver = new NetworkManager()
+    sender.mode = 'host'
+    receiver.mode = 'join'
+    sender.attach(a)
+    receiver.attach(b)
+    const theirResults: (ShotResult | undefined)[] = []
+    receiver.onMessage = (msg) => {
+      const applied = theirs.apply(msg)
+      theirResults.push(applied.applied ? applied.shot : undefined)
+    }
+
+    // Every blow the knife can afford, so the dice are exercised beyond one.
+    const ourResults: (ShotResult | undefined)[] = []
+    const intent: NetworkMessage = {
+      type: 'meleeAttack',
+      attackerFaction: Faction.Blue,
+      attackerIndex: 0,
+      targetFaction: Faction.Red,
+      targetIndex: 0,
+    }
+    while (canMelee(ours.grid, attacker, target)) {
+      const applied = ours.apply(intent)
+      expect(applied.applied).toBe(true)
+      ourResults.push(applied.applied ? applied.shot : undefined)
+      sender.send(intent)
+    }
+
+    const theirTarget = theirs.squads.byFaction[Faction.Red][0]!
+    // Otherwise "the same HP" could be two untouched units agreeing.
+    expect(ourResults.some((shot) => shot?.hit)).toBe(true)
+    expect(target.hp).toBeLessThan(target.maxHp)
+    expect(theirResults).toEqual(ourResults)
+    expect(theirTarget.hp).toBe(target.hp)
+    expect(theirTarget.armor).toBe(target.armor)
+    expect(theirs.squads.byFaction[Faction.Blue][0]!.ap).toBe(attacker.ap)
   })
 })
 

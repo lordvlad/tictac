@@ -8,9 +8,13 @@ import {
   grenadeDamageAt,
   type HitChanceBreakdown,
   hitChance,
+  meleeChance,
+  meleeWeapon,
   resolveDamage,
   statusStacks,
 } from '../core/Ballistics'
+import { MELEE } from '../core/Melee'
+import { hasLineOfSight } from '../core/Visibility'
 import { type GrenadeId, ShotMode, STATUSES, StatusKind } from '../core/Arsenal'
 import { type Casualty, type Combatant, type CombatFx, NO_FX } from '../core/Combatant'
 import type { Roll } from '../core/rng'
@@ -229,6 +233,80 @@ export function executeShot(
     crits,
     hits,
     rolls,
+  }
+}
+
+/**
+ * Can `attacker` strike `target` with what is in its sidearm slot, right now?
+ *
+ * Contact means a neighbouring tile, diagonals included, on the same level,
+ * with nothing between that stops sight — a wall on the shared edge is a wall,
+ * but a sandbag at knee height is not in the way of a blow. Points enough for
+ * the sidearm, and nothing else: no range band and no ammunition.
+ */
+export function canMelee(grid: Grid, attacker: Combatant, target: Combatant): boolean {
+  if (attacker.isDead || target.isDead || attacker.faction === target.faction) return false
+  if (attacker.ap < MELEE[attacker.sidearm].apCost) return false
+  const dx = Math.abs(attacker.tile.x - target.tile.x)
+  const dy = Math.abs(attacker.tile.y - target.tile.y)
+  if (dx > 1 || dy > 1 || (dx === 0 && dy === 0)) return false
+  if (grid.levelAt(attacker.tile.x, attacker.tile.y) !== grid.levelAt(target.tile.x, target.tile.y)) return false
+  return hasLineOfSight(grid, attacker.tile, target.tile)
+}
+
+/**
+ * Strike an adjacent enemy with the sidearm.
+ *
+ * The same result shape as a shot, so every consumer of "an attack happened" —
+ * the combat log, the sweep's tally, a replay — reads it without a second
+ * path. Two draws at most from the match stream, in a fixed order: the blow,
+ * then, if it landed and the weapon can crit, the crit. No suppression: a unit
+ * cannot be pinned by something it is standing inside.
+ *
+ * @returns null when the blow was not legal, having spent nothing.
+ */
+export function executeMelee(
+  grid: Grid,
+  attacker: Combatant,
+  target: Combatant,
+  fx: CombatFx,
+  roll: Roll,
+): ShotResult | null {
+  if (!canMelee(grid, attacker, target)) return null
+  const spec = MELEE[attacker.sidearm]
+  const eff = meleeWeapon(attacker)
+
+  attacker.ap = Math.max(0, attacker.ap - spec.apCost)
+  // Contact tells both sides what they are dealing with. A quiet blow gives
+  // nobody else anything; a loud one lights the attacker up like a shot.
+  attacker.known = true
+  if (!target.unreadable) target.known = true
+  if (spec.loud) attacker.firedThisTurn = true
+
+  const dx = target.tile.x - attacker.tile.x
+  const dz = target.tile.y - attacker.tile.y
+  if (distance(dx, dz) > 0) attacker.targetYaw = facingYaw(dx, dz)
+
+  const chance = meleeChance(attacker, target).chance
+  const hit = roll() * 100 <= chance
+  const hits: ResolvedHit[] = []
+  let crits = 0
+  if (hit) {
+    const critical = eff.critChance > 0 && roll() * 100 <= critBreakdown(eff, target, 0).chance
+    if (critical) crits++
+    hits.push(applyWeaponDamage(eff, target, fx, 1, critical))
+  }
+
+  return {
+    hit,
+    damage: hits[0]?.damage ?? 0,
+    armorShred: hits[0]?.armorShred ?? 0,
+    killed: target.isDead,
+    hitChance: chance,
+    apSpent: spec.apCost,
+    crits,
+    hits,
+    rolls: [hit],
   }
 }
 

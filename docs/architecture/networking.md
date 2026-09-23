@@ -95,6 +95,9 @@ against state they both hold. See
 - `moveUnit`: faction, squad index, and waypoint array `{x, y}[]`.
 - `fireShot`: shooter, target, and shot mode. Nothing else.
 - `throwGrenade`: thrower, grenade kind, and the aimed tile.
+- `meleeAttack`: attacker and target. The sidearm is known to both sides from the loadout.
+- `overwatch`: the unit going on watch. Reactions it provokes are never sent; both peers
+  resolve them from the mover's `moveUnit`.
 - `reload` / `toggleCover` / `useItem`: the intent to use an ability, with
   `useItem` naming a target when the kit is being used on somebody else.
 
