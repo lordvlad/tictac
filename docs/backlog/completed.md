@@ -688,3 +688,38 @@ rather than claimed as exercised.
 - [x] Both peers agree on every reaction with no message: 10 recorded matches replay with no
       skipped intent and the same survivors (`tests/replay.test.ts`).
 - [ ] Not verified live in two browsers — same tooling block as ITEM-020..023.
+
+---
+
+### [ITEM-030] One Engine: The Sweep Drives MatchHost
+**Completed Date:** 2026-09-19  
+**Type:** Architecture / Refactor  
+**Milestone:** M1 — Headless Foundation  
+
+#### Why
+The balance sweep was a second implementation of the game. `SimUnit` mirrored `Soldier` because,
+when it was written, a soldier needed a scene; ITEM-001 removed that need the next day and the copy
+stayed. ITEM-011's replay cross-check found it had drifted in ways no test caught — wounds that
+cost it no action points, a turn handover settled in the opposite order — each moving every
+balance number a little. The ECS unified the game's *state*; the rules still had two carriers.
+
+#### Key Changes
+- `SimMatch` is a policy over a `MatchHost`: it reads ECS soldiers, decides, and applies intents
+  (`moveUnit` one tile at a time, so a watcher can interrupt and the unit can re-decide), recording
+  each. A refused intent throws — the policy asks the rules first, so a refusal is a bug.
+- `MatchHost.apply` reports what a shot did (`Carried.shot`) and the host counts reactions.
+- `src/sim/SimUnit.ts` deleted. Rule tests (wounds, exhaustion, suppression, utility) run on a real
+  headless `Soldier` via `tests/support/soldier.ts`; the one parity test between the two carriers
+  was deleted as tautological.
+- Grenade policy reads the thrower's own Strength-adjusted reach instead of the base spec.
+
+#### Measured
+Speed unchanged: ~7 s per 400 matches. Disjoint blocks 1000 / 5000 / 9000: blue 237 / 244 / 243,
+red 140 / 135 / 129 (previously 229 / 248 / 239 and 141 / 129 / 132) — within block-to-block
+variance. Reactions 0.21–0.25 per match.
+
+#### Acceptance Criteria
+- [x] No second soldier: `SimUnit` gone, every headless match is ECS.
+- [x] Sweep throughput within the old budget.
+- [x] Every recorded sweep match replays with no skipped intent and the same survivors
+      (`tests/replay.test.ts`, ten seeds).

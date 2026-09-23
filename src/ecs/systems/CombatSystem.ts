@@ -117,10 +117,13 @@ export class CombatSystem extends System {
    * controller in a live game, `MatchHost` in a replay or a referee — so a
    * reaction is a consequence of the movement intent rather than something a
    * client announces.
+   *
+   * @returns how many reactions the arrival drew.
    */
-  reactTo(mover: Soldier): void {
+  reactTo(mover: Soldier): number {
     const fired = reactToArrival(this.grid, mover, this.squads.soldiers, this.roll, this.fx)
     for (const { watcher, result } of fired) this.onShotResolved?.(watcher, mover, result)
+    return fired.length
   }
 
   /**

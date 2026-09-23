@@ -1,40 +1,29 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction, RULES, SQUAD_SIZE } from '../src/config'
-import { AmmoId, GRENADES, type GrenadeId, StatusKind, WeaponId } from '../src/core/Arsenal'
+import { StatusKind } from '../src/core/Arsenal'
 import { effectiveMaxAp } from '../src/core/Ballistics'
 import { characterSheet } from '../src/core/Characters'
 import { Grid } from '../src/core/Grid'
-import { ItemId } from '../src/core/Items'
 import { Rng } from '../src/core/rng'
 import { World } from '../src/ecs/World'
 import { ActionPointsComponent } from '../src/ecs/components'
 import { TurnSystem } from '../src/ecs/systems'
 import { Squads } from '../src/game/Squads'
 import { settleTurn } from '../src/game/Turn'
-import { SimUnit } from '../src/sim/SimUnit'
+import type { Soldier } from '../src/entities/Soldier'
+import { headlessSoldier } from './support/soldier'
 
-/** A unit with no scene and no world: the rule only needs a combatant. */
-function unit(faction: Faction = Faction.Blue): SimUnit {
-  return new SimUnit(
-    faction,
-    0,
-    'Test',
-    characterSheet(new Rng(4)),
-    WeaponId.Rifle,
-    AmmoId.Standard,
-    { x: 1, y: 1 },
-    Object.fromEntries(Object.keys(GRENADES).map((k) => [k, 0])) as Record<GrenadeId, number>,
-    { stim: 0, firstAid: 0, nullweave: 0 } as Record<ItemId, number>,
-  )
+function unit(faction: Faction = Faction.Blue): Soldier {
+  return headlessSoldier({ faction, sheet: characterSheet(new Rng(4)) })
 }
 
 /** Hand over, refill the side coming in, settle — the order a match uses. */
-function handOver(units: SimUnit[], incoming: Faction): void {
+function handOver(units: Soldier[], incoming: Faction): void {
   for (const u of units) if (u.faction === incoming && !u.isDead) u.ap = u.effectiveMaxAp
   settleTurn(units, incoming)
 }
 
-const winded = (u: SimUnit): boolean =>
+const winded = (u: Soldier): boolean =>
   u.statuses.some((s) => s.kind === StatusKind.Winded && s.turnsLeft > 0)
 
 describe('Running a unit into the ground', () => {
@@ -160,20 +149,5 @@ describe('What counts as effort', () => {
 
     settleTurn(squads.soldiers, Faction.Red)
     expect(soldier.exhaustedTurns).toBe(0)
-  })
-
-  test('a soldier counts its own spending through the same setter', () => {
-    const world = new World()
-    const grid = new Grid(16)
-    const spawns = {
-      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: 2 + i, y: 2 })),
-      [Faction.Red]: Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: 2 + i, y: 6 })),
-    }
-    const soldier = new Squads(world, grid, spawns).byFaction[Faction.Blue][0]!
-
-    soldier.ap -= 5
-    expect(soldier.spentThisTurn).toBe(5)
-    // Replicated, because a peer has to agree about who is winded.
-    expect(world.getComponent(soldier.entityId, ActionPointsComponent)?.spentThisTurn).toBe(5)
   })
 })

@@ -3,7 +3,7 @@ title: "ADR-0002: Deterministic Headless Balance Harness"
 id: "ADR-0002"
 type: "adr"
 status: "implemented"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-09-19"
 appliesTo:
   - "src/sim/**"
   - "scripts/balance.ts"
@@ -28,7 +28,7 @@ Tactical game balancing (e.g. assessing whether snipers outclass shotguns, evalu
 ---
 
 ## Decision Outcome
-**Chosen Architecture:** Built a high-speed, deterministic headless simulation package (`src/sim/SimUnit.ts`, `src/sim/SimMatch.ts`, `src/sim/Balance.ts`) executed via CLI (`scripts/balance.ts`).
+**Chosen Architecture:** Built a high-speed, deterministic headless simulation package (`src/sim/SimMatch.ts`, `src/sim/Balance.ts`) executed via CLI (`scripts/balance.ts`).
 
 ### Key Capabilities
 1. **Headless Execution**: Runs entirely against the pure rule layer (`MapGenerator`, `Grid`, `Pathfinding`, `Visibility`, `Ballistics`, `Combat`) using a no-op `CombatFx` port.
@@ -42,3 +42,8 @@ Tactical game balancing (e.g. assessing whether snipers outclass shotguns, evalu
   - Regression test `tests/balance.test.ts` pins baseline simulation outputs to catch unintentional rule drifts.
 - **Negative / Costs:**
   - AI policy in `SimMatch` must be maintained as new tactical actions (overwatch, item usage) are introduced.
+
+---
+
+## Amendment (2026-09-19): one engine
+The original harness carried its own soldier (`SimUnit`) because a `Soldier` needed a scene. ITEM-001 removed that need a day later, but the copy stayed and drifted from the game in four measured ways (see [Headless Simulation](../../architecture/headless-sim.md#one-engine-not-two)). ITEM-030 retired it: `SimMatch` is now a policy that drives `MatchHost` — the ECS match the replay runner and referee already use — through intents. Throughput is unchanged. The negative consequence above still holds, and is now the *only* thing to maintain: a new action needs a policy branch, never a second implementation of its rule.

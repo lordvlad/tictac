@@ -66,7 +66,7 @@ describe('A simulated match obeys the rules it is measuring', () => {
   test('nobody ends up below zero, or above their own ceiling', () => {
     const match = new SimMatch({ seed: 41, blue: STOCK, red: STOCK })
     match.run()
-    for (const unit of match.units) {
+    for (const unit of match.host.squads.soldiers) {
       expect(unit.hp).toBeGreaterThanOrEqual(0)
       expect(unit.hp).toBeLessThanOrEqual(unit.maxHp)
       expect(unit.ap).toBeGreaterThanOrEqual(0)
@@ -76,12 +76,12 @@ describe('A simulated match obeys the rules it is measuring', () => {
 
   test('both squads deploy, at their own spawns', () => {
     const match = new SimMatch({ seed: 42, blue: STOCK, red: STOCK })
-    expect(match.byFaction[Faction.Blue]).toHaveLength(SQUAD_SIZE)
-    expect(match.byFaction[Faction.Red]).toHaveLength(SQUAD_SIZE)
+    expect(match.host.squads.byFaction[Faction.Blue]).toHaveLength(SQUAD_SIZE)
+    expect(match.host.squads.byFaction[Faction.Red]).toHaveLength(SQUAD_SIZE)
     // Blue deploys along the low-Y edge and Red along the high-Y edge, so the
     // two squads must not start on top of each other.
-    const blueY = match.byFaction[Faction.Blue].map((unit) => unit.tile.y)
-    const redY = match.byFaction[Faction.Red].map((unit) => unit.tile.y)
+    const blueY = match.host.squads.byFaction[Faction.Blue].map((unit) => unit.tile.y)
+    const redY = match.host.squads.byFaction[Faction.Red].map((unit) => unit.tile.y)
     expect(Math.max(...blueY)).toBeLessThan(Math.min(...redY))
   })
 
@@ -101,14 +101,14 @@ describe('A simulated match obeys the rules it is measuring', () => {
       red: { weapons: [WeaponId.Rifle] },
     })
 
-    for (const unit of match.byFaction[Faction.Blue]) {
+    for (const unit of match.host.squads.byFaction[Faction.Blue]) {
       expect(unit.items.nullweave).toBe(1)
       expect(unit.ammo.id).toBe(AmmoId.ArmorPiercing)
       // The vest grants its trait out here exactly as it does in a match: no
       // hit on these four can be critical.
       expect(unit.critImmune).toBe(true)
     }
-    for (const unit of match.byFaction[Faction.Red]) {
+    for (const unit of match.host.squads.byFaction[Faction.Red]) {
       expect(unit.items.nullweave).toBe(0)
       // Without the vest the only way to be immune is to have been born it,
       // which is the point: the two sources are interchangeable and this is

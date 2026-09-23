@@ -3,7 +3,7 @@ title: "Headless Simulation Engine & Balance Automation"
 id: "ARCH-HEADLESS-SIM"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-18"
+lastReviewed: "2026-09-19"
 appliesTo:
   - "src/sim/**"
   - "scripts/balance.ts"
@@ -22,11 +22,11 @@ The simulation engine (`src/sim/`) runs completely headless in pure TypeScript/J
 ```mermaid
 graph TD
     A[scripts/balance.ts CLI] --> B[SimMatch Runner]
-    B --> C[Seeded MapGenerator]
-    B --> D[SimUnit Squad Construction]
     B --> E[Scripted Tactical AI Policy]
-    E --> F[Pure Rules: Visibility & Pathfinding]
-    E --> G[Combat Resolvers via No-op CombatFx]
+    E -->|reads| D[ECS Soldiers]
+    E -->|intents| M[MatchHost]
+    M --> D
+    M --> G[CombatSystem · MovementSystem · TurnManager]
     B --> H[Balance Stats Collector]
     H --> I[CLI Aggregated Report Table]
 ```
@@ -35,8 +35,8 @@ graph TD
 
 ## 2. Core Modules
 
-- **`SimUnit` (`src/sim/SimUnit.ts`)**: Lightweight data model representing combatants with health, armor, weapon specs, ammo, AP, and position coordinates.
-- **`SimMatch` (`src/sim/SimMatch.ts`)**: Manages the match lifecycle, turn order, scripted AI decision loops (movement selection, firing priority, cover usage), and win/loss resolution.
+- **`MatchHost` (`src/sim/MatchHost.ts`)**: The match. Real ECS soldiers and systems with no scene, advanced by intents — the same applier the replay runner and the referee use.
+- **`SimMatch` (`src/sim/SimMatch.ts`)**: A policy and nothing else. It reads the board, decides, and hands the host an intent (`moveUnit` one tile at a time, `fireShot`, `throwGrenade`, `toggleCover`, `overwatch`, `endUnitTurn`, `endTurn`), recording each. A refused intent throws: the policy asks the rules before it acts, so a refusal is a bug.
 - **`Balance` (`src/sim/Balance.ts`)**: Statistical aggregator tracking win rates by faction/seed, mean turns to victory, weapon shot accuracy, damage distribution, and trait differential win rates.
 - **`scripts/balance.ts`**: Command-line entry point parsing sweep parameters and formatting tabular terminal outputs.
 
@@ -72,8 +72,9 @@ tested without two browsers, a signalling broker and a second pair of hands.
 What it proves is narrower and stronger than a comparison: that the same intents
 over the same seed produce the same world, every time. A recorded match replays
 with every intent applied, twice to the same digest, and reaches the same
-survivors as the match that produced it — two carriers of the same rules
-(`SimUnit`s in the sweep, ECS soldiers and components in the replay), one answer.
+survivors as the match that produced it. The sweep and the replay run the same
+engine, so that agreement is the file checking itself: everything the policy did
+is in the recording, in order.
 
 It is not a second implementation of the rules: commands go through
 `CombatSystem.fireShot`, `throwGrenade`, `MovementSystem` and `TurnManager`, the
@@ -90,3 +91,16 @@ after it: adding one attribute per character once shifted every die in a
 had finished dealing and resolved a different match.
 
 A match is still one number. Its dice are a function of that number alone.
+
+## One engine, not two
+
+Until ITEM-030 the sweep ran on its own copy of the soldier (`SimUnit`) and its
+own turn loop, written when a soldier could not exist without a scene. That
+stopped being true a day later (ITEM-001) and the copy stayed. Replaying sweep
+matches through `MatchHost` and comparing state intent by intent found it had
+drifted in four places — wounds cost it no action points, it settled a handover
+in the opposite order, walking never counted toward exhaustion on the ECS side,
+and the host never settled a turn at all. None broke a test; each moved every
+balance number a little. The sweep now drives `MatchHost`, so a balance number
+is a measurement of the game by construction, at the same speed (~7 s per 400
+matches).

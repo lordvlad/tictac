@@ -62,7 +62,7 @@ graph TD
 | --- | --- | --- | --- |
 | `src/core/` | Core Rules | Pure math, Grid DDA, Line of Sight, Pathfinding, Ballistics, Combat formulas, RNG. | **Yes** (100% pure) |
 | `src/ecs/` | State & Systems | ECS `World`, component classes, system update loops, dirty-diff state sync. | **Yes** (Pure data) |
-| `src/sim/` | Simulation | Fast headless match runner (`SimUnit`, `SimMatch`, `Balance`) for automated testing. | **Yes** |
+| `src/sim/` | Simulation | Headless matches: `MatchHost` (the ECS match, driven by intents), `SimMatch` (the sweep's policy), `Replay`, `Balance`. | **Yes** |
 | `src/game/` | Game Logic | `TurnManager`, `NetworkManager`, `Battlefield`, `Squads`, movement/shooting planners. | Mostly (decoupling in progress) |
 | `src/render/`| Presentation | Three.js meshes, animations, tracers, particles, material cloning, ground tiles. | **No** (Requires WebGL) |
 | `src/hud/` | Presentation | HTML/CSS HUD overlays, loadout screen, portraits, debug panels. | **No** (Requires DOM) |

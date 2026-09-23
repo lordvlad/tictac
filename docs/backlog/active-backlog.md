@@ -97,7 +97,8 @@ to a policy that never crosses it.
 #### Change
 Give the headless policy a notion of danger along a path: prefer routes out of enemy watch
 cones, and sometimes accept one — a flanking move, a rush to melee. Not a smarter game AI;
-a policy that exercises the rules the game already has.
+a policy that exercises the rules the game already has. Built once, on the one engine
+(`ITEM-030` retired the sweep's private copy of the rules).
 
 #### Acceptance Criteria
 - [ ] `bun run balance` reports reactions per match an order of magnitude above today's ~0.2.

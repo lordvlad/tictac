@@ -1,31 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction, SQUAD_SIZE, WOUNDS } from '../src/config'
-import { AmmoId, GRENADES, type GrenadeId, ShotMode, WeaponId } from '../src/core/Arsenal'
-import { characterSheet } from '../src/core/Characters'
+import { AmmoId, ShotMode, WeaponId } from '../src/core/Arsenal'
 import { Grid } from '../src/core/Grid'
-import { ItemId } from '../src/core/Items'
-import { Rng } from '../src/core/rng'
 import { TraitId, resolveTraits, woundTraits } from '../src/core/Traits'
 import { World } from '../src/ecs/World'
 import { TraitsComponent } from '../src/ecs/components'
 import { calculateHitChance } from '../src/game/Combat'
 import { Squads } from '../src/game/Squads'
 import { stepCostFor, moveBudget } from '../src/game/Movement'
-import { SimUnit } from '../src/sim/SimUnit'
-
-function unit(): SimUnit {
-  return new SimUnit(
-    Faction.Blue,
-    0,
-    'Test',
-    characterSheet(new Rng(21)),
-    WeaponId.Rifle,
-    AmmoId.Standard,
-    { x: 1, y: 1 },
-    Object.fromEntries(Object.keys(GRENADES).map((k) => [k, 0])) as Record<GrenadeId, number>,
-    { stim: 0, firstAid: 0, nullweave: 0 } as Record<ItemId, number>,
-  )
-}
+import { headlessSoldier } from './support/soldier'
 
 function headlessSquads(): { world: World; grid: Grid; squads: Squads } {
   const world = new World()
@@ -64,7 +47,7 @@ describe('What a wound is', () => {
 
 describe('What a wound costs', () => {
   test('taking damage across a threshold starts costing, and healing stops it', () => {
-    const u = unit()
+    const u = headlessSoldier()
     const wholeStep = u.moveCostMul
 
     u.hp = Math.floor(u.maxHp * WOUNDS.limping)
@@ -77,7 +60,7 @@ describe('What a wound costs', () => {
   })
 
   test('being badly hurt costs accuracy and evasion too', () => {
-    const u = unit()
+    const u = headlessSoldier()
     const wholeAim = u.proficiency
     const wholeEvasion = u.evasion
 
@@ -96,8 +79,8 @@ describe('What a wound costs', () => {
 
   test('a limp is charged on the ground it walks', () => {
     const { grid } = headlessSquads()
-    const whole = unit()
-    const hurt = unit()
+    const whole = headlessSoldier()
+    const hurt = headlessSoldier()
     hurt.hp = Math.floor(hurt.maxHp * WOUNDS.limping)
 
     const from = { x: 1, y: 1 }
@@ -109,8 +92,8 @@ describe('What a wound costs', () => {
     // Routes are costed in terrain prices, so a unit paying more per step
     // affords fewer of them. Budget and charge have to agree or a confirmed
     // route strands the unit halfway.
-    const whole = unit()
-    const hurt = unit()
+    const whole = headlessSoldier()
+    const hurt = headlessSoldier()
     hurt.hp = Math.floor(hurt.maxHp * WOUNDS.limping)
     hurt.ap = whole.ap
 

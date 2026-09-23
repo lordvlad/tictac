@@ -4,7 +4,7 @@ import { generateMap } from '../core/MapGenerator'
 import { distance, facingYaw } from '../core/math'
 import { matchDice } from '../core/rng'
 import type { Grid } from '../core/Grid'
-import { throwGrenade } from '../game/Combat'
+import { type ShotResult, throwGrenade } from '../game/Combat'
 import type { NetworkMessage } from '../game/NetworkManager'
 import type { RecordingHeader } from '../game/Recording'
 import { Squads } from '../game/Squads'
@@ -41,7 +41,17 @@ export interface Refusal {
   reason: string
 }
 
-export type Applied = { applied: true } | Refusal
+/**
+ * An intent carried out. A shot says what it did, because whoever sent it may
+ * want to know — a policy deciding its next move, a sweep keeping score — and
+ * the rules are the only place that knows.
+ */
+export interface Carried {
+  applied: true
+  shot?: ShotResult
+}
+
+export type Applied = Carried | Refusal
 
 const carried: Applied = { applied: true }
 const refuse = (reason: string): Refusal => ({ applied: false, reason })
@@ -82,6 +92,9 @@ export class MatchHost {
   private readonly step: number
   private readonly maxSteps: number
 
+  /** Reactions fired so far: a fact about the match, not about any one intent. */
+  reactions = 0
+
   /**
    * Build the opening position from a match's header.
    *
@@ -116,7 +129,7 @@ export class MatchHost {
     // reactions from the same intent.
     this.movement.onStep = (entityId) => {
       const mover = this.squads.byEntityId(entityId)
-      if (mover) this.combat.reactTo(mover)
+      if (mover) this.reactions += this.combat.reactTo(mover)
     }
     this.combat = new CombatSystem(map.grid, this.squads, NO_FX, matchDice(header.seed))
     this.items = new ItemSystem()
@@ -163,10 +176,9 @@ export class MatchHost {
         if (!shooter || !target) return refuse('shooter or target missing')
         // Resolved from the match's dice, exactly as the peer that sent the
         // intent did and exactly as the peer receiving it does.
-        if (!this.combat.fireShot(shooter, target, command.mode)) {
-          return refuse('shot refused by the rules')
-        }
-        return carried
+        const shot = this.combat.fireShot(shooter, target, command.mode)
+        if (!shot) return refuse('shot refused by the rules')
+        return { applied: true, shot }
       }
       case 'throwGrenade': {
         const thrower = this.unitAt(command.shooterFaction, command.shooterIndex)
@@ -249,6 +261,10 @@ export class MatchHost {
 
   get turnNumber(): number {
     return this.turnManager.turnNumber
+  }
+
+  get activeFaction(): Faction {
+    return this.turnManager.activeFaction
   }
 
   /** Whether the match is over, and who is left standing. */

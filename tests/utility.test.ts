@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { CHARACTER, Faction } from '../src/config'
-import { AmmoId, GRENADES, GrenadeId, WeaponId } from '../src/core/Arsenal'
+import { CHARACTER } from '../src/config'
+import { GRENADES, GrenadeId } from '../src/core/Arsenal'
 import {
   type CharacterSheet,
   characterSheet,
@@ -17,15 +17,8 @@ import {
   TraitId,
   TraitSource,
 } from '../src/core/Traits'
-import { SimUnit } from '../src/sim/SimUnit'
-
-const NO_GRENADES = Object.fromEntries(
-  Object.values(GrenadeId).map((k) => [k, 0]),
-) as Record<GrenadeId, number>
-const NO_ITEMS = Object.fromEntries(Object.values(ItemId).map((k) => [k, 0])) as Record<
-  ItemId,
-  number
->
+import type { Soldier } from '../src/entities/Soldier'
+import { headlessSoldier } from './support/soldier'
 
 /** A sheet with the attributes and training a test is about, nothing else. */
 function sheetWith(over: {
@@ -42,18 +35,8 @@ function sheetWith(over: {
   }
 }
 
-function unit(sheet: CharacterSheet, items: Partial<Record<ItemId, number>> = {}): SimUnit {
-  return new SimUnit(
-    Faction.Blue,
-    0,
-    'Test',
-    sheet,
-    WeaponId.Rifle,
-    AmmoId.Standard,
-    { x: 1, y: 1 },
-    { ...NO_GRENADES },
-    { ...NO_ITEMS, ...items },
-  )
+function unit(sheet: CharacterSheet, items: Partial<Record<ItemId, number>> = {}): Soldier {
+  return headlessSoldier({ sheet, items })
 }
 
 describe('Telling gear apart from everything else', () => {

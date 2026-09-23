@@ -1,33 +1,26 @@
 import { Faction, RULES, SQUAD_SIZE } from '../config'
-import { AmmoId, type GrenadeId, GRENADES, ShotMode, type WeaponId } from '../core/Arsenal'
+import { AmmoId, type GrenadeId, GRENADES, type ShotMode, type WeaponId } from '../core/Arsenal'
 import type { AttachmentId } from '../core/Attachments'
-import { NO_FX } from '../core/Combatant'
 import { type CharacterSheet, rollSquadSheets } from '../core/Characters'
-import { type Grid, type Tile, tileEquals } from '../core/Grid'
+import { type Grid, tileEquals } from '../core/Grid'
 import { ItemId } from '../core/Items'
-import { generateMap } from '../core/MapGenerator'
 import { findPathSegment } from '../core/Pathfinding'
-import { matchDice, Rng, type Roll } from '../core/rng'
+import { Rng } from '../core/rng'
 import { hasLineOfSight } from '../core/Visibility'
-import {
-  calculateHitChance,
-  canShoot,
-  fireWeapon,
-  shotApCost,
-  throwGrenade,
-} from '../game/Combat'
-import { stepCostFor } from '../game/Movement'
-import { canWatch, reactToArrival, watchCost } from '../game/Overwatch'
-import { forfeitTurn, settleTurn } from '../game/Turn'
 import { effectiveWeapon, resolveDamage } from '../core/Ballistics'
+import type { Soldier } from '../entities/Soldier'
+import { calculateHitChance, canShoot, shotApCost } from '../game/Combat'
 import type { SquadLoadout } from '../game/Loadout'
+import { stepCostFor } from '../game/Movement'
+import type { NetworkMessage } from '../game/NetworkManager'
+import { canWatch } from '../game/Overwatch'
 import {
   type CombatRecording,
   RECORDING_VERSION,
   Recorder,
   type RecordingHeader,
 } from '../game/Recording'
-import { SimUnit } from './SimUnit'
+import { type Carried, MatchHost } from './MatchHost'
 
 /** What one squad brought, so a sweep can vary it. */
 export interface SquadPlan {
@@ -113,7 +106,7 @@ const PREFERRED_CHANCE = 0.5
 
 /** A shot the policy has chosen but not yet taken. */
 interface PlannedShot {
-  target: SimUnit
+  target: Soldier
   mode: ShotMode
   /** Probability, not percent — it is arithmetic here, not display. */
   chance: number
@@ -128,11 +121,18 @@ function emptyTally(): WeaponTally {
 /**
  * One match, played out with nobody watching.
  *
- * The rules are the game's own — `generateMap`, `findPathSegment`,
- * `hasLineOfSight`, `canShoot`, `fireWeapon`, `throwGrenade`, `tickStatuses` —
- * and the only things supplied here are the things a player would otherwise
- * supply: a decision per unit, and dice. Both are seeded, so a match is a pure
- * function of its {@link MatchSetup}.
+ * A *policy*, and nothing else. The match itself is a {@link MatchHost}: the
+ * same ECS soldiers, systems and turn handover a played game runs, driven by
+ * the same intents a player's clicks produce. This class reads the board,
+ * decides, and hands the host an intent — exactly the position a player is in.
+ *
+ * It used to be a second engine: a scene-free copy of the soldier (`SimUnit`)
+ * and its own turn loop, written when a soldier could not exist without a
+ * scene. That stopped being true a day later and the copy stayed, drifting
+ * quietly — wounds that cost the sweep no action points, a handover settled in
+ * the opposite order, walking that never counted toward exhaustion. Each moved
+ * every balance number a little and broke none of them. With one engine, a
+ * number measured here is a number about the game by construction.
  *
  * The AI is deliberately dull. It is a measuring instrument, not an opponent:
  * it takes the best shot it can see, closes the distance when it cannot see
@@ -140,103 +140,51 @@ function emptyTally(): WeaponTally {
  * would make the numbers a statement about the AI instead of about the guns.
  */
 export class SimMatch {
-  readonly grid: Grid
-  readonly units: SimUnit[] = []
-  readonly byFaction: Record<Faction, SimUnit[]> = {
-    [Faction.Blue]: [],
-    [Faction.Red]: [],
-  }
-
+  readonly host: MatchHost
   /** The people this match rolled, so a recording can redeploy them. */
-  readonly sheets: Record<Faction, CharacterSheet[]> = {
-    [Faction.Blue]: [],
-    [Faction.Red]: [],
-  }
+  readonly sheets: Record<Faction, CharacterSheet[]>
   /** The kit each side fought with, in the form the rendered game equips from. */
-  readonly loadouts: Record<Faction, SquadLoadout> = {
-    [Faction.Blue]: [],
-    [Faction.Red]: [],
-  }
+  readonly loadouts: Record<Faction, SquadLoadout>
   /** Null unless the setup asked to record. */
   readonly recorder: Recorder | null
 
-  private readonly rng: Rng
-  /**
-   * The match's dice, and nothing else.
-   *
-   * Separate from the stream that deals the people on purpose. When setup and
-   * dice shared one stream, *how many numbers a sheet consumed* decided every
-   * roll that followed — which is why adding one attribute per character once
-   * shifted every die in a 400-match sweep, and why a replay could not
-   * reproduce a recorded match at all: it deals nobody, so it starts the dice
-   * where the sim had already finished dealing.
-   *
-   * Under ADR-0004 the dice are a function of the seed alone.
-   */
-  private readonly roll: Roll
   private readonly tally = new Map<string, WeaponTally>()
   private readonly turnCap: number
   private grenadesThrown = 0
   private watches = 0
-  private reactions = 0
-  private activeFaction: Faction = Faction.Blue
-  private turnNumber = 1
 
   constructor(private readonly setup: MatchSetup) {
     this.turnCap = setup.turnCap ?? DEFAULT_TURN_CAP
-    // One stream for the whole match: the map, the sheets and every die.
-    this.rng = new Rng(setup.seed >>> 0)
-    // Derived from the same seed, so a match is still one number — but its own
-    // stream, so the dice do not depend on what setup drew before them.
-    this.roll = matchDice(setup.seed >>> 0)
-
-    const map = generateMap(setup.seed)
-    this.grid = map.grid
-
-    for (const faction of [Faction.Blue, Faction.Red] as const) {
-      const plan = faction === Faction.Blue ? setup.blue : setup.red
-      const loadout = planToLoadout(plan)
-      const sheets = rollSquadSheets(this.rng)
-      this.sheets[faction] = sheets
-      this.loadouts[faction] = loadout
-      for (let i = 0; i < SQUAD_SIZE; i++) {
-        const spawn = map.spawns[faction][i] ?? { x: 2 + i * 2, y: faction === Faction.Blue ? 2 : this.grid.size - 3 }
-        const kit = loadout[i]!
-        const unit = new SimUnit(
-          faction,
-          i,
-          `${faction === Faction.Blue ? 'B' : 'R'}${i}`,
-          sheets[i]!,
-          kit.weaponId,
-          kit.ammoId,
-          spawn,
-          kit.grenades,
-          kit.items,
-          kit.attachments,
-        )
-        this.units.push(unit)
-        this.byFaction[faction].push(unit)
-      }
+    // Setup's own stream: who turns up is dealt from the seed, and the match's
+    // dice are the host's (`matchDice`), so how many numbers a sheet consumed
+    // can never move a roll.
+    const deal = new Rng(setup.seed >>> 0)
+    const blue = rollSquadSheets(deal)
+    const red = rollSquadSheets(deal)
+    this.sheets = { [Faction.Blue]: blue, [Faction.Red]: red }
+    this.loadouts = {
+      [Faction.Blue]: planToLoadout(setup.blue),
+      [Faction.Red]: planToLoadout(setup.red),
     }
 
-    // After the squads, so the header carries the people and the kit rather
-    // than two empty arrays.
-    this.recorder = setup.record
-      ? new Recorder(this.header(), () => ({ turn: this.turnNumber, faction: this.activeFaction }))
-      : null
-  }
-
-  private header(): RecordingHeader {
-    return {
+    const header: RecordingHeader = {
       version: RECORDING_VERSION,
-      seed: this.setup.seed >>> 0,
-      seedLabel: String(this.setup.seed >>> 0),
+      seed: setup.seed >>> 0,
+      seedLabel: String(setup.seed >>> 0),
       source: 'sim',
       createdAt: new Date().toISOString(),
       turnCap: this.turnCap,
       sheets: this.sheets,
       loadouts: this.loadouts,
     }
+    this.host = new MatchHost(header)
+    this.recorder = setup.record
+      ? new Recorder(header, () => ({ turn: this.host.turnNumber, faction: this.host.activeFaction }))
+      : null
+  }
+
+  get grid(): Grid {
+    return this.host.grid
   }
 
   /** The commands this match issued, or null when it was not recording. */
@@ -246,12 +194,13 @@ export class SimMatch {
 
   /** Play until one side is gone or the cap is hit. */
   run(): MatchOutcome {
-    while (this.turnNumber <= this.turnCap && this.living(Faction.Blue) && this.living(Faction.Red)) {
-      for (const unit of this.byFaction[this.activeFaction]) {
+    const { byFaction } = this.host.squads
+    while (this.host.turnNumber <= this.turnCap && this.living(Faction.Blue) && this.living(Faction.Red)) {
+      for (const unit of byFaction[this.host.activeFaction]) {
         if (unit.isDead) continue
         this.takeUnitTurn(unit)
       }
-      this.endTurn()
+      this.act({ type: 'endTurn', faction: this.host.activeFaction })
     }
 
     const blueAlive = this.living(Faction.Blue)
@@ -260,11 +209,8 @@ export class SimMatch {
     return {
       seed: this.setup.seed,
       winner: blueAlive === redAlive ? null : blueAlive ? Faction.Blue : Faction.Red,
-      turns: this.turnNumber,
-      survivors: {
-        [Faction.Blue]: this.byFaction[Faction.Blue].filter((u) => !u.isDead).length,
-        [Faction.Red]: this.byFaction[Faction.Red].filter((u) => !u.isDead).length,
-      },
+      turns: this.host.turnNumber,
+      survivors: this.host.living,
       traits: {
         [Faction.Blue]: this.traitsOf(Faction.Blue),
         [Faction.Red]: this.traitsOf(Faction.Red),
@@ -272,17 +218,38 @@ export class SimMatch {
       byWeapon: Object.fromEntries(this.tally),
       grenadesThrown: this.grenadesThrown,
       watches: this.watches,
-      reactions: this.reactions,
+      reactions: this.host.reactions,
     }
   }
 
+  /**
+   * Hand the host one intent, and write it down.
+   *
+   * Recorded before it is applied so the stamp names the side that issued it —
+   * an `endTurn` stamped afterwards would carry the side coming in. A refusal
+   * throws: the policy asks the same rules the host enforces before it acts, so
+   * a refused intent is a bug in one of them, never a move to shrug off.
+   */
+  private act(command: NetworkMessage): Carried {
+    this.recorder?.record(command)
+    const applied = this.host.apply(command)
+    if (!applied.applied) {
+      throw new Error(`sim issued an intent the rules refused (${applied.reason}): ${JSON.stringify(command)}`)
+    }
+    return applied
+  }
+
   private living(faction: Faction): boolean {
-    return this.byFaction[faction].some((unit) => !unit.isDead)
+    return this.host.squads.byFaction[faction].some((unit) => !unit.isDead)
+  }
+
+  private enemiesOf(unit: Soldier): readonly Soldier[] {
+    return this.host.squads.byFaction[unit.faction === Faction.Blue ? Faction.Red : Faction.Blue]
   }
 
   private traitsOf(faction: Faction): string[] {
     const seen = new Set<string>()
-    for (const unit of this.byFaction[faction]) {
+    for (const unit of this.host.squads.byFaction[faction]) {
       for (const id of unit.sheet.traits) seen.add(id)
       if (unit.items.nullweave > 0) seen.add('nullweave')
     }
@@ -301,7 +268,7 @@ export class SimMatch {
    * Bounded by AP rather than by a step count, and every branch either spends
    * something or breaks, so a unit that can do nothing useful cannot spin.
    */
-  private takeUnitTurn(unit: SimUnit): void {
+  private takeUnitTurn(unit: Soldier): void {
     for (let guard = 0; guard < 64 && unit.ap > 0 && !unit.isDead; guard++) {
       if (this.tryGrenade(unit)) continue
 
@@ -328,27 +295,15 @@ export class SimMatch {
       break
     }
 
-    // The same boundary the played game has: whatever is left is forfeited, and
-    // a replay uses it to hand selection on to the next unit. Forfeited here as
-    // well as recorded — a runner that records an intent it does not apply to
-    // itself writes a file that plays out as a different match.
-    //
     // A unit shot dead partway through its own move has no turn left to end,
-    // and a match refuses the intent for one that is not alive. Recording it
-    // anyway would put a frame in the file that every replay skips.
+    // and the host refuses the intent for one that is not alive.
     if (unit.isDead) return
-    forfeitTurn(unit)
-    this.recorder?.record({
-      type: 'endUnitTurn',
-      faction: unit.faction,
-      squadIndex: unit.squadIndex,
-    })
+    this.act({ type: 'endUnitTurn', faction: unit.faction, squadIndex: unit.squadIndex })
   }
 
   /** Enemies this unit can actually see. */
-  private visibleEnemies(unit: SimUnit): SimUnit[] {
-    const enemies = this.byFaction[unit.faction === Faction.Blue ? Faction.Red : Faction.Blue]
-    return enemies.filter(
+  private visibleEnemies(unit: Soldier): Soldier[] {
+    return this.enemiesOf(unit).filter(
       (enemy) =>
         !enemy.isDead &&
         this.grid.distance(unit.tile, enemy.tile) <= RULES.sightRange &&
@@ -363,7 +318,7 @@ export class SimMatch {
    * worse than a snap shot that lands, and the whole point of measuring is to
    * find out which weapons that is true for.
    */
-  private bestShot(unit: SimUnit): PlannedShot | null {
+  private bestShot(unit: Soldier): PlannedShot | null {
     let best: PlannedShot | null = null
 
     for (const target of this.visibleEnemies(unit)) {
@@ -382,25 +337,11 @@ export class SimMatch {
   }
 
   /** Pull the trigger on an already-chosen shot, and write down what it did. */
-  private fireAt(unit: SimUnit, shot: PlannedShot): boolean {
+  private fireAt(unit: Soldier, shot: PlannedShot): void {
     const weapon = unit.weapon.id
     const tally = this.tally.get(weapon) ?? emptyTally()
     const before = shot.target.hp
-    const result = fireWeapon(
-      this.grid,
-      unit,
-      shot.target,
-      NO_FX,
-      this.units,
-      shot.mode,
-      this.roll,
-    )
-    if (!result) return false
-
-    // The dice come back off the result rather than being rolled here: hit and
-    // crit rolls interleave per round, so pre-rolling would move the stream and
-    // every balance number with it.
-    this.recorder?.record({
+    const { shot: result } = this.act({
       type: 'fireShot',
       shooterFaction: unit.faction,
       shooterIndex: unit.squadIndex,
@@ -411,12 +352,11 @@ export class SimMatch {
 
     tally.shots += 1
     tally.rounds += unit.weapon.bulletConsumption(shot.mode)
-    if (result.hit) tally.hits += 1
+    if (result?.hit) tally.hits += 1
     tally.damage += before - shot.target.hp
-    tally.crits += result.crits
+    tally.crits += result?.crits ?? 0
     if (shot.target.isDead) tally.kills += 1
     this.tally.set(weapon, tally)
-    return true
   }
 
   /**
@@ -426,41 +366,45 @@ export class SimMatch {
    * also refuses to catch its own side, which is the rule a player is applying
    * when they decide not to throw.
    */
-  private tryGrenade(unit: SimUnit): boolean {
-    const spec = GRENADES.frag
-    if ((unit.grenades.frag ?? 0) <= 0 || unit.ap < spec.apCost) return false
+  private tryGrenade(unit: Soldier): boolean {
+    const spec = unit.grenadeSpecs.frag
+    if ((unit.grenades.frag ?? 0) <= 0 || unit.ap < GRENADES.frag.apCost) return false
 
     const enemies = this.visibleEnemies(unit)
     if (enemies.length < 2) return false
 
     for (const centre of enemies) {
       if (this.grid.distance(unit.tile, centre.tile) > spec.throwRange) continue
-      const caught = this.units.filter(
+      const caught = this.host.squads.soldiers.filter(
         (other) => !other.isDead && this.grid.distance(centre.tile, other.tile) <= spec.areaRadius,
       )
       if (caught.filter((other) => other.faction !== unit.faction).length < 2) continue
       if (caught.some((other) => other.faction === unit.faction)) continue
 
-      const result = throwGrenade(this.grid, unit, centre.tile, 'frag' as GrenadeId, this.units)
-      if (!result.thrown) continue
-      this.grenadesThrown += 1
-      this.recorder?.record({
+      this.act({
         type: 'throwGrenade',
         shooterFaction: unit.faction,
         shooterIndex: unit.squadIndex,
         kind: 'frag' as GrenadeId,
         targetTile: { x: centre.tile.x, y: centre.tile.y },
       })
+      this.grenadesThrown += 1
       return true
     }
     return false
   }
 
-  /** Close on the nearest enemy, spending what the steps actually cost. */
-  private tryAdvance(unit: SimUnit): boolean {
-    const enemies = this.byFaction[unit.faction === Faction.Blue ? Faction.Red : Faction.Blue].filter(
-      (enemy) => !enemy.isDead,
-    )
+  /**
+   * Close on the nearest enemy, one tile per intent.
+   *
+   * A walk is a sequence of decisions: a watcher may shoot the unit on any
+   * arrival, and the unit stops the moment there is a shot worth taking rather
+   * than the moment something comes into view — a shotgun reaches 12 m and
+   * sees 14, so breaking on sight left it frozen just outside its own range. A
+   * player can issue the same one-tile moves.
+   */
+  private tryAdvance(unit: Soldier): boolean {
+    const enemies = this.enemiesOf(unit).filter((enemy) => !enemy.isDead)
     if (enemies.length === 0) return false
 
     const goal = enemies.reduce((nearest, enemy) =>
@@ -470,7 +414,7 @@ export class SimMatch {
     )
 
     const occupied = new Set<number>()
-    for (const other of this.units) {
+    for (const other of this.host.squads.soldiers) {
       if (other === unit || other.isDead) continue
       occupied.add(this.grid.index(other.tile.x, other.tile.y))
     }
@@ -478,59 +422,35 @@ export class SimMatch {
     const { path } = findPathSegment(this.grid, unit.tile, goal.tile, occupied)
     if (path.length < 2) return false
 
-    // The tiles actually walked, starting from where the unit stood: that is
-    // the shape `MovementSystem` replays a route from, which treats the first
-    // entry as the origin.
-    const walked: Tile[] = [{ ...unit.tile }]
     let moved = false
     for (let i = 1; i < path.length; i++) {
+      const from = path[i - 1]!
       const step = path[i]!
       // Stop short of walking onto the target: the last tile is where it stands.
       if (tileEquals(step, goal.tile)) break
-      const cost = stepCostFor(this.grid, unit, path[i - 1]!, step)
-      if (unit.ap < cost) break
-      unit.ap -= cost
-      unit.tile = { ...step }
-      unit.exitCover()
-      walked.push({ ...step })
-      moved = true
-
-      // The same trigger a match wires to `MovementSystem.onStep`: arriving on
-      // a tile is what a watcher was waiting for. Per tile rather than per
-      // route, because that is the point both peers compute identically — and
-      // because walking the whole way past a rifle should cost more than
-      // stepping once into its lane.
-      this.reactions += reactToArrival(this.grid, unit, this.units, this.roll).length
-      if (unit.isDead) break
-      // One tile at a time, then re-decide, and stop the moment there is a
-      // shot to take rather than the moment something comes into view: a
-      // shotgun reaches 12 m and sees 14, so breaking on sight left it frozen
-      // just outside its own range, never firing a round all match.
-      const shot = this.bestShot(unit)
-      if (shot && shot.chance >= PREFERRED_CHANCE) break
-    }
-    if (moved) {
-      this.recorder?.record({
+      if (unit.ap < stepCostFor(this.grid, unit, from, step)) break
+      this.act({
         type: 'moveUnit',
         faction: unit.faction,
         squadIndex: unit.squadIndex,
-        path: walked.map((tile) => ({ x: tile.x, y: tile.y })),
+        path: [
+          { x: from.x, y: from.y },
+          { x: step.x, y: step.y },
+        ],
       })
+      moved = true
+      if (unit.isDead) break
+      const shot = this.bestShot(unit)
+      if (shot && shot.chance >= PREFERRED_CHANCE) break
     }
     return moved
   }
 
   /** Hurt, with nothing to shoot: get low. */
-  private tryCover(unit: SimUnit): boolean {
+  private tryCover(unit: Soldier): boolean {
     if (unit.isCrouching || unit.ap < RULES.coverApCost) return false
     if (unit.hp > unit.maxHp / 2) return false
-    unit.ap -= RULES.coverApCost
-    unit.enterCover()
-    this.recorder?.record({
-      type: 'toggleCover',
-      faction: unit.faction,
-      squadIndex: unit.squadIndex,
-    })
+    this.act({ type: 'toggleCover', faction: unit.faction, squadIndex: unit.squadIndex })
     return true
   }
 
@@ -543,35 +463,11 @@ export class SimMatch {
    * worthless in every report, which is exactly how the shotgun once measured
    * by never closing to its own range band.
    */
-  private tryWatch(unit: SimUnit): boolean {
+  private tryWatch(unit: Soldier): boolean {
     if (!canWatch(unit)) return false
-    unit.ap = Math.max(0, unit.ap - watchCost(unit))
-    unit.watching = true
+    this.act({ type: 'overwatch', faction: unit.faction, squadIndex: unit.squadIndex })
     this.watches += 1
-    this.recorder?.record({
-      type: 'overwatch',
-      faction: unit.faction,
-      squadIndex: unit.squadIndex,
-    })
     return true
-  }
-
-  /**
-   * The game's own turn boundary, in the game's own order: hand over, settle,
-   * then refill the incoming side — which is what `TurnManager.startNextTurn`
-   * does via `TurnSystem` and `settleTurn`.
-   */
-  private endTurn(): void {
-    // Recorded before the hand-over, so the event is stamped with the side that
-    // just finished rather than the one coming up.
-    this.recorder?.record({ type: 'endTurn', faction: this.activeFaction })
-    this.activeFaction = this.activeFaction === Faction.Blue ? Faction.Red : Faction.Blue
-    if (this.activeFaction === Faction.Blue) this.turnNumber++
-    settleTurn(this.units, this.activeFaction)
-    for (const unit of this.byFaction[this.activeFaction]) {
-      if (unit.isDead) continue
-      unit.ap = unit.effectiveMaxAp
-    }
   }
 }
 

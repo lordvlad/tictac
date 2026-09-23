@@ -1,28 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
-import { AmmoId, GRENADES, type GrenadeId, STATUSES, StatusKind, WeaponId } from '../src/core/Arsenal'
+import { STATUSES, StatusKind } from '../src/core/Arsenal'
 import { statusStacks } from '../src/core/Ballistics'
 import { characterSheet } from '../src/core/Characters'
-import { ItemId } from '../src/core/Items'
 import { Rng } from '../src/core/rng'
+import type { Soldier } from '../src/entities/Soldier'
 import { applyStatus, suppress, tickStatuses } from '../src/game/Combat'
-import { SimUnit } from '../src/sim/SimUnit'
+import { headlessSoldier } from './support/soldier'
 
-function unit(faction: Faction = Faction.Blue): SimUnit {
-  return new SimUnit(
-    faction,
-    0,
-    'Test',
-    characterSheet(new Rng(9)),
-    WeaponId.Rifle,
-    AmmoId.Standard,
-    { x: 1, y: 1 },
-    Object.fromEntries(Object.keys(GRENADES).map((k) => [k, 0])) as Record<GrenadeId, number>,
-    { stim: 0, firstAid: 0, nullweave: 0 } as Record<ItemId, number>,
-  )
+function unit(faction: Faction = Faction.Blue): Soldier {
+  return headlessSoldier({ faction, sheet: characterSheet(new Rng(9)) })
 }
 
-const stacksOn = (u: SimUnit, kind: StatusKind): number => {
+const stacksOn = (u: Soldier, kind: StatusKind): number => {
   const state = u.statuses.find((s) => s.kind === kind && s.turnsLeft > 0)
   return state ? statusStacks(state) : 0
 }

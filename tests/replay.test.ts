@@ -58,14 +58,12 @@ describe('Running a recorded match with nobody watching', () => {
   })
 
   test('the replay agrees with the match it is replaying about who lived', () => {
-    // Two different carriers of the same rules: the sweep fought these matches
-    // with `SimUnit`s, the replay refights them with ECS soldiers and
-    // components. Agreement on the survivors is the cross-check neither side
-    // can fake, and a block of seeds rather than one because the disagreements
-    // this has actually caught — a handover that settled in the wrong order, a
-    // runner that never charged wounds their action points, movement that
-    // counted toward exhaustion on one side only — each showed up in a handful
-    // of matches and in none of the others.
+    // The sweep and a replay now run the same engine, so this is no longer two
+    // implementations checking each other — it is the file checking itself.
+    // Everything the policy did has to be in the recording, in order, or a
+    // fresh host fed the file reaches a different end. A block of seeds rather
+    // than one because the disagreements this has caught each showed up in a
+    // handful of matches and in none of the others.
     for (const seed of [4242, 1, 2, 3, 4, 5, 6, 7, 8, 9]) {
       const { outcome, recording } = recorded(seed)
       const result = replay(recording)
