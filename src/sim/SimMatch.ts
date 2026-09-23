@@ -8,9 +8,9 @@ import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
 import { hasLineOfSight } from '../core/Visibility'
-import { effectiveWeapon, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
+import { effectiveWeapon, expectedRoundDamage, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
 import type { Soldier } from '../entities/Soldier'
-import { calculateHitChance, canMelee, canShoot, shotApCost } from '../game/Combat'
+import { canMelee, canShoot, shotApCost, shotBreakdown } from '../game/Combat'
 import type { SquadLoadout } from '../game/Loadout'
 import { stepCostFor } from '../game/Movement'
 import { chooseDestination } from './Tactics'
@@ -321,14 +321,20 @@ export class SimMatch {
       if (this.tryReload(unit, 'empty')) continue
       if (this.tryGrenade(unit)) continue
 
-      const worthTaking = this.bestShot(unit)
-      if (worthTaking && worthTaking.chance >= PREFERRED_CHANCE) {
-        this.fireAt(unit, worthTaking)
+      // Where to stand first, then whether to shoot. The scorer counts staying
+      // put and firing from here as one of its candidates, so a unit only moves
+      // when a reachable tile is worth more by its own estimate. Asked the
+      // other way round — shoot anything at 50%, move only if nothing was —
+      // a shotgun fired from eight metres, because a shell nearly always lands
+      // *something*, and never closed to where it is the best gun there is.
+      if (!moved && this.tryReposition(unit)) {
+        moved = true
         continue
       }
 
-      if (!moved && this.tryReposition(unit)) {
-        moved = true
+      const worthTaking = this.bestShot(unit)
+      if (worthTaking && worthTaking.chance >= PREFERRED_CHANCE) {
+        this.fireAt(unit, worthTaking)
         continue
       }
 
@@ -388,9 +394,10 @@ export class SimMatch {
         if (!canShoot(this.grid, unit, target, mode)) continue
         const bullets = unit.weapon.bulletConsumption(mode)
         if (unit.weapon.currentClip < bullets) continue
-        const chance = calculateHitChance(this.grid, unit, target, mode) / 100
-        const damage = resolveDamage(effectiveWeapon(unit, mode), target).damage
-        const value = (chance * damage * bullets) / Math.max(1, shotApCost(unit, mode))
+        const odds = shotBreakdown(this.grid, unit, target, mode)
+        const chance = odds.chance / 100
+        const expected = expectedRoundDamage(effectiveWeapon(unit, mode), target, odds)
+        const value = (expected * bullets) / Math.max(1, shotApCost(unit, mode))
         if (!best || value > best.value) best = { target, mode, chance, value }
       }
     }

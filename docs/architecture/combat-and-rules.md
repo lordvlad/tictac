@@ -32,23 +32,44 @@ Grid visibility is computed purely in 2D/3D integer coordinates using high-speed
 
 ## 2. Ballistic Equations & Hit Probability
 
-### Hit Calculation
-`hitChance` (`src/core/Ballistics.ts`) sums every term inside one bracket and then scales
-the lot by the shot mode, so a mode multiplies the situation rather than being added to it:
+### Hit Calculation: projectiles are straight lines
+Every round fires one or more **projectiles**, and each is a straight line that misses by some
+error `e`. It lands on a target of presented half-width `w` with probability
 
-$$\text{chance} = \text{clamp}\Big(\big(\text{weapon base} + \text{global} + \text{proficiency} - \text{range} - \text{cover} - \text{shooter statuses} - \text{target statuses} - \text{evasion}\big) \times \text{mode}\Big)$$
+$$P = \frac{w^2}{w^2 + e^2}, \qquad e = (\text{sway} + \text{spread} \times d) \times \text{mode} \times \text{training}, \qquad w = \text{size} \times \text{visible} \times (1 - \text{evasion})$$
 
-- **Range**: `distance × accuracyPerMetre`, where the per-metre figure is the weapon's own,
-  scaled by the loaded round and by carried glass (`rangeFalloff`, floored at zero — gear may
-  cancel falloff, never invert it). Beyond `maxRange` the chance is 0 outright.
-- **Cover** (`COVER`, applied by `coverPenalty`): standing behind a crate 20, crouching in the
-  open 25, crouching behind a crate 40, standing behind a wall 45, crouching behind a wall 60.
-- **Proficiency**: the shooter's training with *that weapon class*, plus trait accuracy, plus
-  bipod-style bonuses that apply only while crouched.
-- **Evasion**: the target's, never below zero. Subtracted before the mode multiplier, so a
-  hard target is hard to snap at and hard to line up on alike.
-- Clamped to `AIM.min`–`AIM.max`, which is why the headline percentage is recomputed from the
-  terms rather than divided back out of a mode's result.
+`hitChance` (`src/core/Ballistics.ts`) returns `ShotOdds`: the chance the **round** lands (any
+of its projectiles), the chance one projectile does, and how many are expected to land given
+the round does. Multiplication and division only, so both peers compute the same number.
+
+- **Weapon** (`Arsenal`): `sway` (metres of error at no distance — how steady it is in the
+  hands), `spread` (metres per metre — how the error grows), `pellets` (lines per round: 1 for a
+  bullet, 9 for a shell), and `damage` / `armorPen` per projectile. Out of `maxRange` the chance
+  is 0 outright.
+- **Mode** (`SHOT_MODES[mode].spreadMul`): aimed ×0.5, snap ×1, burst ×1.1, reaction ×1.4.
+- **Training**: proficiency tightens the error by `AIM.trainingTighten` per point, a status
+  penalty (flashed, suppressed) widens it by the same; clamped between 0.2× and 3×. Carried
+  glass and the loaded round scale `spread` only (`rangeFalloff`, `rangePenaltyMul`), floored at
+  zero.
+- **Target**: `AIM.targetSize` (0.3 m) × the **visible share** for its stance and the cover the
+  line crosses (`COVER`: open crouched 0.55, low cover 0.6 standing / 0.33 crouched, tall cover
+  0.27 / 0.14) × `1 − AIM.evasionShrink × (evasion + status defence)`. Evasion below zero is
+  treated as zero.
+- **Clamps**: one projectile never exceeds `AIM.max`; the *round* never falls below `AIM.min`.
+  A floor per pellet would make a shell at the far end of its range land a third of the time.
+- **A round** lands if any projectile does. Each projectile is its own roll from the match
+  stream, in order, then one crit roll if anything landed. **Armour is taken off the round once**
+  — `resolveDamage(…, landed)` sums the landed projectiles first — and the minimum damage is per
+  round, so buckshot is impact rather than penetration and base armour blunts it without
+  zeroing it.
+- **Consequence, not rule**: a shotgun's damage falls with distance because fewer pellets
+  land. Calibrated so it out-damages a rifle about twofold inside a room and draws level at
+  about 6 m. The rifle, gatling and sniper were fitted to the additive model this replaced,
+  within a few points at 4–20 m.
+- **What a player sees** is the round's chance and its damage when it lands (for a shell, with
+  the pellets expected at that distance), plus AP and rounds. `expectedRoundDamage` is the same
+  estimate for the AI. Spread, pellets and crit are on the loadout screen and in the
+  [catalogue](../design/gdd/status-and-trait-catalog.md).
 
 ### Critical Hit Calculation
 `critBreakdown` takes the weapon's own chance — with the holder's trait bonuses already folded

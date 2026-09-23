@@ -78,27 +78,34 @@ graph TD
   [catalogue](status-and-trait-catalog.md).
 - A rail refuses a duplicate as well as an overflow, and swapping to a weapon with fewer
   slots trims what no longer fits back into the crate.
+- **A weapon fires straight lines.** A rifle round is one line; a shotgun shell is nine, each
+  wide. What separates the classes is how steady a line is in the hands, how fast its error
+  grows with distance, and how many lines a round is — so a shotgun is the hardest-hitting
+  thing in a room and nearly useless across a street, with no rule saying so. The player sees
+  a chance and a damage figure; the weapon's character is on the loadout screen.
 
 ### 2.4 Cover & Stances
-- Cover is an accuracy penalty on the shot rather than an evasion bonus on the target, and it
-  depends on stance as well as on what is being hidden behind: crouching in the open is worth
-  something, crouching behind a wall a great deal. Values in `COVER`
-  (`docs/architecture/combat-and-rules.md`).
+- Cover hides body rather than subtracting points: it depends on stance as well as on what is
+  being hidden behind — crouching in the open shows half a soldier, crouching behind a wall
+  barely any. Values in `COVER` (`docs/architecture/combat-and-rules.md`).
 - **Stances**: standing (ordinary mobility) versus crouched (cover is worth more, and some kit
   — the bipod — pays only while down).
 - **Overwatch.** A unit may go on watch for a snap shot's price, paid at once. The first time an
   enemy *arrives* on a tile it can shoot at during the other side's turn, it fires a reaction
-  shot (0.7× the chance) and stops watching. The shot itself costs nothing more — it was bought
-  when the watch was set — and a watch that nobody walks into is simply spent, which is what
-  keeps it from being strictly better than ending a turn. A watch ends when its own side's turn
-  comes round. This is the counter to crossing open ground: walking the whole way past a rifle
-  costs more than stepping once into its lane, because the trigger is each tile, not the route.
+  shot (its aim 1.4× as wide as a snap shot's) and stops watching. The shot itself costs
+  nothing more — it was bought when the watch was set — and a watch that nobody walks into is
+  simply spent, which is what keeps it from being strictly better than ending a turn. A watch
+  ends when its own side's turn comes round. This is the counter to crossing open ground:
+  walking the whole way past a rifle costs more than stepping once into its lane, because the
+  trigger is each tile, not the route.
 
 ### 2.5 Ballistics, Armor, and Wounds
-- **Hit roll**: the shooter's training with the weapon in hand against the target's evasion,
-  less range, cover and statuses, all scaled by the shot mode.
-- **Armor & shred**: armour subtracts flat from each round, but only the share the round fails
-  to penetrate, and every hit does at least a minimum. AP rounds and explosives shred it
+- **Hit roll**: each projectile lands with a probability set by its error at that distance
+  against how much of the target is showing — training and aimed fire tighten the error;
+  snap, reaction, suppression and being flashed widen it; cover, crouching and evasion hide body.
+- **Armor & shred**: armour subtracts flat from each round — once, from whatever of it landed,
+  so buckshot is impact rather than penetration — and only the share the round fails to
+  penetrate. Every round that lands does at least a minimum. AP rounds and explosives shred it
   permanently.
 - **Wounds**: `Limping` below half health, `Concussed` below a quarter — derived from current
   health, so patching a soldier up lifts them. `Winded` is exhaustion, not a wound.

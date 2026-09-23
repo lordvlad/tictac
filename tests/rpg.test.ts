@@ -372,14 +372,14 @@ describe('Who is holding the weapon', () => {
   test('training with the class in hand moves the shot either way', () => {
     const plain = chanceOf(combatant(), combatant())
 
-    expect(chanceOf(combatant({ proficiency: 10 }), combatant())).toBe(plain + 10)
-    expect(chanceOf(combatant({ proficiency: -10 }), combatant())).toBe(plain - 10)
+    expect(chanceOf(combatant({ proficiency: 10 }), combatant())).toBeGreaterThan(plain)
+    expect(chanceOf(combatant({ proficiency: -10 }), combatant())).toBeLessThan(plain)
   })
 
   test('a hard target is a harder shot', () => {
     const plain = chanceOf(combatant(), combatant())
 
-    expect(chanceOf(combatant(), combatant({ evasion: 10 }))).toBe(plain - 10)
+    expect(chanceOf(combatant(), combatant({ evasion: 10 }))).toBeLessThan(plain)
   })
 
   test('evasion below zero is no gift to the attacker', () => {
@@ -390,31 +390,13 @@ describe('Who is holding the weapon', () => {
     expect(chanceOf(combatant(), combatant({ evasion: -5 }))).toBe(plain)
   })
 
-  test('training and evasion of the same size cancel', () => {
-    const plain = chanceOf(combatant(), combatant())
-
-    expect(chanceOf(combatant({ proficiency: 12 }), combatant({ evasion: 12 }))).toBe(plain)
-  })
-
-  test('the breakdown reports both terms so the HUD can explain them', () => {
-    const shown = hitChance(
-      combatant({ proficiency: -7 }),
-      combatant({ evasion: 9 }),
-      OPEN_RANGE,
-      CoverLevel.None,
-      ShotMode.Snap,
-    )
-
-    expect(shown.proficiency).toBe(-7)
-    expect(shown.evasion).toBe(9)
-    // The base is the weapon's, untouched by either: the HUD draws them as
-    // separate rows and must not double-count.
-    expect(shown.base).toBe(new Rifle().baseAccuracy + AIM.globalBonus)
-  })
-
   test('the clamps hold however lopsided the people are', () => {
     expect(chanceOf(combatant({ proficiency: 500 }), combatant())).toBe(AIM.max)
-    expect(chanceOf(combatant({ proficiency: -500 }), combatant())).toBe(AIM.min)
+    // Training scales a shooter's error, capped at three times as wide: however
+    // untrained, a rifle at ten metres is not a coin that never lands.
+    const untrained = chanceOf(combatant({ proficiency: -500 }), combatant())
+    expect(untrained).toBeGreaterThanOrEqual(AIM.min)
+    expect(untrained).toBeLessThan(chanceOf(combatant(), combatant()))
     expect(chanceOf(combatant(), combatant({ evasion: 500 }))).toBe(AIM.min)
   })
 })

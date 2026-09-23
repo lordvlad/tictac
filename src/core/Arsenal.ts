@@ -59,8 +59,19 @@ export abstract class Weapon {
   readonly serial: number = nextSerial++
 
   apCost = 4
-  baseAccuracy = 85
-  accuracyPerMetre = 3
+  /**
+   * Metres a line misses by at no distance at all: how steady the weapon is
+   * in the hands. A long scoped rifle is hard to snap onto somebody close.
+   */
+  sway = 0.075
+  /** Metres a line misses by per metre travelled: how the error grows with range. */
+  spread = 0.02
+  /**
+   * Lines per round. One for a bullet; a shell of buckshot is a fan of them,
+   * each its own roll, each a share of the round's damage.
+   */
+  pellets = 1
+  /** Per projectile. A round's damage is this times the projectiles that land. */
   damage = 55
   armorPen = 0.25
   armorShred = 0
@@ -158,7 +169,8 @@ export class Rifle extends Weapon {
   constructor() {
     super()
     this.apCost = 4
-    this.baseAccuracy = 85
+    this.sway = 0.075
+    this.spread = 0.02
     this.maxClip = 15
     this.currentClip = 15
     // Built as a platform: optic, grip, can.
@@ -181,9 +193,17 @@ export class Shotgun extends Weapon {
   constructor() {
     super()
     this.apCost = 4
-    this.baseAccuracy = 95
-    this.accuracyPerMetre = 6.0 // lowered: was 9
-    this.damage = 85
+    // Nine lines, each wide. Point blank most of them land and the shell is
+    // the hardest-hitting round in the game; across a room a few do; at the
+    // end of its range one might. Its damage falls with distance because its
+    // pellets do, not because of a rule saying so. Tuned to out-damage a rifle
+    // about twofold inside a room and to draw level with it at about 6 m.
+    this.sway = 0
+    this.spread = 0.05
+    this.pellets = 9
+    this.damage = 12
+    // Barely penetrates — but armour is taken off the *round*, not each
+    // pellet, so it is impact rather than punch-through.
     this.armorPen = 0.05
     this.armorShred = 0
     this.areaRadius = 0
@@ -209,8 +229,9 @@ export class Sniper extends Weapon {
   constructor() {
     super()
     this.apCost = 6
-    this.baseAccuracy = 80
-    this.accuracyPerMetre = 0.25 // lowered: was 0.4
+    // Unwieldy up close, nearly flat beyond.
+    this.sway = 0.11
+    this.spread = 0.0015
     this.damage = 70
     this.armorPen = 0.5
     this.armorShred = 0
@@ -237,8 +258,9 @@ export class Gatling extends Weapon {
   constructor() {
     super()
     this.apCost = 5
-    this.baseAccuracy = 80 // elevated: was 70
-    this.accuracyPerMetre = 2.5 // lowered: was 4
+    // Every round a rifle bullet that wanders more: volume, not placement.
+    this.sway = 0.11
+    this.spread = 0.014
     this.damage = 35
     this.maxClip = 30
     this.currentClip = 30
@@ -340,18 +362,18 @@ export interface ShotModeSpec {
   name: string
   /** Multiplies the weapon's AP cost. */
   apMul: number
-  /** Multiplies the final hit chance, before clamping. */
-  chanceMul: number
+  /** Multiplies a shot's error — sway and spread both. Below 1 is steadier. */
+  spreadMul: number
 }
 
 export const SHOT_MODES: Record<ShotMode, ShotModeSpec> = {
-  [ShotMode.Snap]: { id: ShotMode.Snap, name: 'Snap Shot', apMul: 1, chanceMul: 1 },
-  [ShotMode.Aimed]: { id: ShotMode.Aimed, name: 'Aimed Shot', apMul: 2, chanceMul: 2 },
-  [ShotMode.Burst]: { id: ShotMode.Burst, name: 'Burst Fire', apMul: 1.25, chanceMul: 0.9 },
+  [ShotMode.Snap]: { id: ShotMode.Snap, name: 'Snap Shot', apMul: 1, spreadMul: 1 },
+  [ShotMode.Aimed]: { id: ShotMode.Aimed, name: 'Aimed Shot', apMul: 2, spreadMul: 0.5 },
+  [ShotMode.Burst]: { id: ShotMode.Burst, name: 'Burst Fire', apMul: 1.25, spreadMul: 1.1 },
   // Cheaper in points than a snap shot and worse than one: the points were
   // already paid when the unit went on watch, and a round snapped off at
   // somebody crossing open ground is not an aimed one.
-  [ShotMode.Reaction]: { id: ShotMode.Reaction, name: 'Reaction Fire', apMul: 0, chanceMul: 0.7 },
+  [ShotMode.Reaction]: { id: ShotMode.Reaction, name: 'Reaction Fire', apMul: 0, spreadMul: 1.4 },
 }
 
 // ---------------------------------------------------------------------------

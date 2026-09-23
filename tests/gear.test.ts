@@ -126,7 +126,7 @@ describe('Worn kit', () => {
 })
 
 describe('A scope', () => {
-  test('takes a share off what distance costs', () => {
+  test('takes a share off how fast the error grows with distance', () => {
     const { squads } = squad()
     const bare = squads.byFaction[F.Blue][0]!
     const scoped = squads.byFaction[F.Blue][1]!
@@ -134,8 +134,8 @@ describe('A scope', () => {
     scoped.equip(WeaponId.Rifle, AmmoId.Standard)
     fit(scoped, AttachmentId.Scope)
 
-    const bareFalloff = effectiveWeapon(bare, ShotMode.Snap).accuracyPerMetre
-    const scopedFalloff = effectiveWeapon(scoped, ShotMode.Snap).accuracyPerMetre
+    const bareFalloff = effectiveWeapon(bare, ShotMode.Snap).spread
+    const scopedFalloff = effectiveWeapon(scoped, ShotMode.Snap).spread
 
     expect(scopedFalloff).toBeLessThan(bareFalloff)
     expect(scopedFalloff).toBeGreaterThan(0)
@@ -163,8 +163,8 @@ describe('A scope', () => {
     expect(gainAt(12)).toBeGreaterThan(gainAt(3))
   })
 
-  test('cannot turn falloff into a bonus for being far away', () => {
-    // Enough glass to cancel the penalty must floor at zero, not invert it.
+  test('cannot turn spread into a bonus for being far away', () => {
+    // Enough glass to cancel the spread must floor at zero, not invert it.
     const { squads } = squad()
     const soldier = squads.byFaction[F.Blue][0]!
     soldier.equip(WeaponId.Rifle, AmmoId.Standard)
@@ -172,7 +172,7 @@ describe('A scope', () => {
     soldier.sheet.traits.push(TraitId.Scoped, TraitId.Scoped, TraitId.Scoped)
     soldier.refreshTraits()
 
-    expect(effectiveWeapon(soldier, ShotMode.Snap).accuracyPerMetre).toBe(0)
+    expect(effectiveWeapon(soldier, ShotMode.Snap).spread).toBe(0)
   })
 })
 

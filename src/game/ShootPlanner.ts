@@ -5,10 +5,7 @@ import type { Ground } from '../render/Ground'
 import { hasLineOfSight } from '../core/Visibility'
 import { SHOT_MODES, ShotMode } from '../core/Arsenal'
 import {
-  critBreakdown,
-  type CritBreakdown,
   effectiveWeapon,
-  type HitChanceBreakdown,
   type MeleeBreakdown,
   meleeChance,
   meleeWeapon,
@@ -16,6 +13,7 @@ import {
 } from '../core/Ballistics'
 import { MELEE, type MeleeId } from '../core/Melee'
 import { canMelee, canShoot, shotApCost, shotBreakdown, type ShotResult } from './Combat'
+import type { ShotOdds } from '../core/Ballistics'
 import type { Squads } from './Squads'
 import type { EngineContext } from '../engine'
 
@@ -28,8 +26,12 @@ export interface ShotOption {
   name: string
   apCost: number
   bullets: number
-  breakdown: HitChanceBreakdown
-  /** Damage on a hit, after the target's armour. */
+  odds: ShotOdds
+  /**
+   * What a round does when it lands, after the target's armour. For buckshot,
+   * with the pellets expected to land at this distance — which is how a
+   * shotgun's damage falls across a room without the panel saying why.
+   */
   damage: number
   armorShred: number
   /** Affordable and in range — i.e. this shot can actually be taken. */
@@ -63,14 +65,6 @@ export interface PendingShot {
    * with its real numbers rather than making the player toggle to compare.
    */
   options: ShotOption[]
-  /**
-   * The crit terms for this shot. Outside {@link options} because nothing about
-   * a crit depends on the shot mode: the weapon, the distance and the target's
-   * armour decide it, and all three are the same whichever mode is picked.
-   */
-  crit: CritBreakdown
-  /** Damage a critical hit does, after the target's armour. */
-  critDamage: number
   /**
    * The blow on offer, or null when {@link canMelee} refuses it — out of reach,
    * another storey, a wall on the shared edge, or not the points for it.
@@ -193,25 +187,20 @@ export class ShootPlanner {
 
     const options: ShotOption[] = shooter.weapon.availableModes.map((mode) => {
       const apCost = shotApCost(shooter, mode)
-      const breakdown = shotBreakdown(this.grid, shooter, target, mode)
-      const preview = previewDamage(shooter, target, mode)
+      const odds = shotBreakdown(this.grid, shooter, target, mode)
+      const preview = resolveDamage(effectiveWeapon(shooter, mode), target, 1, false, Math.max(1, odds.landed))
       const bullets = shooter.weapon.bulletConsumption(mode)
       return {
         mode,
         name: SHOT_MODES[mode].name,
         apCost,
         bullets,
-        breakdown,
+        odds,
         damage: preview.damage,
         armorShred: preview.armorShred,
-        available: shooter.ap >= apCost && !breakdown.outOfRange && shooter.weapon.currentClip >= bullets,
+        available: shooter.ap >= apCost && !odds.outOfRange && shooter.weapon.currentClip >= bullets,
       }
     })
-
-    // Any mode will do for the crit terms: `effectiveWeapon` only varies its AP
-    // cost by mode, and a crit is priced off damage, range and armour.
-    const eff = effectiveWeapon(shooter, shooter.weapon.availableModes[0] ?? ShotMode.Snap)
-    const crit = critBreakdown(eff, target, this.grid.distance(shooter.tile, target.tile))
 
     return {
       target,
@@ -220,8 +209,6 @@ export class ShootPlanner {
       currentClip: shooter.weapon.currentClip,
       maxClip: shooter.weapon.maxClip,
       options,
-      crit,
-      critDamage: resolveDamage(eff, target, 1, true).damage,
       strike: canMelee(this.grid, shooter, target) ? strikeOption(shooter, target) : null,
     }
   }
@@ -291,15 +278,6 @@ export class ShootPlanner {
  * What a hit would do, without touching anything. Uses the same resolver the
  * shot itself uses, so the number on the panel is the number that lands.
  */
-function previewDamage(
-  shooter: Soldier,
-  target: Soldier,
-  mode: ShotMode,
-): { damage: number; armorShred: number } {
-  const result = resolveDamage(effectiveWeapon(shooter, mode), target)
-  return { damage: result.damage, armorShred: result.armorShred }
-}
-
 /**
  * The blow on offer, priced and rated through the same terms the resolver
  * uses — {@link meleeChance} for the odds and {@link meleeWeapon} for what

@@ -75,8 +75,12 @@ export interface CombatantStats {
 export interface EffectiveWeapon {
   weapon: Weapon
   apCost: number
-  baseAccuracy: number
-  accuracyPerMetre: number
+  /** Metres of error at no distance, the mode folded in. */
+  sway: number
+  /** Metres of error per metre, the mode, the round and the holder's glass folded in. */
+  spread: number
+  /** Projectiles per round. */
+  pellets: number
   damage: number
   /** 0..1 fraction of armour ignored. */
   armorPen: number
@@ -106,13 +110,14 @@ export function effectiveWeapon(stats: CombatantStats, mode: ShotMode): Effectiv
   return {
     weapon,
     apCost: Math.max(1, Math.round((weapon.apCost + ammo.apDelta) * modeSpec.apMul)),
-    baseAccuracy: weapon.baseAccuracy,
-    // Floored at nothing: gear may cancel falloff, never invert it into a
+    sway: weapon.sway * modeSpec.spreadMul,
+    // Floored at nothing: gear may cancel spread, never invert it into a
     // weapon that shoots better the further away the target is.
-    accuracyPerMetre: Math.max(
+    spread: Math.max(
       0,
-      weapon.accuracyPerMetre * ammo.rangePenaltyMul * (1 + stats.rangeFalloff),
+      weapon.spread * modeSpec.spreadMul * ammo.rangePenaltyMul * (1 + stats.rangeFalloff),
     ),
+    pellets: weapon.pellets,
     damage: weapon.damage * ammo.damageMul,
     armorPen: clamp(weapon.armorPen + ammo.armorPenBonus, 0, 1),
     armorShred: weapon.armorShred + ammo.armorShredBonus,
@@ -124,11 +129,11 @@ export function effectiveWeapon(stats: CombatantStats, mode: ShotMode): Effectiv
   }
 }
 
-/** Accuracy the shooter loses, given the cover crossed and the target's stance. */
-export function coverPenalty(level: CoverLevel, crouching: boolean): number {
+/** Share of the body still showing, given the cover crossed and the target's stance. */
+export function visibleShare(level: CoverLevel, crouching: boolean): number {
   if (level === CoverLevel.Tall) return crouching ? COVER.tallCrouch : COVER.tallStand
   if (level === CoverLevel.Low) return crouching ? COVER.lowCrouch : COVER.lowStand
-  return crouching ? COVER.openCrouch : 0
+  return crouching ? COVER.openCrouch : 1
 }
 
 /**
@@ -167,37 +172,30 @@ function statusTotals(statuses: StatusState[]): {
   return { accuracyPenalty, defenceBonus, damageTakenBonus }
 }
 
-/** Every term that produced a hit chance, so the HUD can explain the number. */
-export interface HitChanceBreakdown {
-  /** Final clamped percentage. 0 means the shot is impossible. */
+/** What a round is likely to do: the only numbers a player is shown. */
+export interface ShotOdds {
+  /** Percent chance the round lands at all — any of its projectiles. 0 when out of range. */
   chance: number
-  base: number
-  rangePenalty: number
-  coverPenalty: number
-  /** Lost to the shooter's own statuses (flashed). */
-  shooterPenalty: number
-  /** Lost to the target's statuses (smoke). */
-  targetDefence: number
-  /** What the shooter's training on this weapon class is worth. Signed. */
-  proficiency: number
-  /** Lost to the target being a hard thing to hit. */
-  evasion: number
-  modeMultiplier: number
+  /** Percent chance one projectile lands. The same as `chance` for a single bullet. */
+  projectile: number
+  /** Projectiles expected to land, given that the round does. */
+  landed: number
   distance: number
   outOfRange: boolean
 }
 
 /**
- * Chance for `shooter` to hit `target`.
+ * The odds of `shooter`'s round landing on `target`.
  *
- * Range is the term that distinguishes the weapons: it is the weapon's own
- * per-metre falloff scaled by the loaded round, not one global constant.
+ * One straight line per projectile, missing by `e = (sway + spread × d) ×
+ * tighten`, onto a body of half-width `w = targetSize × visible share ×
+ * (1 − evasion)`. A line lands with probability `w² / (w² + e²)`. Training
+ * tightens the error and a status penalty widens it; cover and stance hide
+ * body, and evasion or a status's defence hide a little more.
  *
- * Two of the terms are people rather than equipment. The shooter's proficiency
- * is what they are worth with the class of weapon in their hands, so the same
- * rifle is not the same rifle in every pair of hands. The target's evasion is
- * subtracted before the mode multiplier, so a hard target is hard to snap at
- * and hard to line up on alike.
+ * A round of several projectiles lands if any of them does, so a shotgun's
+ * chance to land *something* stays high across a room while what lands falls
+ * off — which is its damage falling with distance, with no rule of its own.
  */
 export function hitChance(
   shooter: CombatantStats,
@@ -205,41 +203,54 @@ export function hitChance(
   distance: number,
   cover: CoverLevel,
   mode: ShotMode,
-): HitChanceBreakdown {
+): ShotOdds {
   const eff = effectiveWeapon(shooter, mode)
+  if (distance > eff.maxRange) {
+    return { chance: 0, projectile: 0, landed: 0, distance, outOfRange: true }
+  }
   const shooterStatus = statusTotals(shooter.statuses)
   const targetStatus = statusTotals(target.statuses)
-  const modeMultiplier = SHOT_MODES[mode].chanceMul
 
-  const rangePenalty = distance * eff.accuracyPerMetre
-  const cov = coverPenalty(cover, target.isCrouching)
-  const outOfRange = distance > eff.maxRange
-  const evasion = Math.max(0, target.evasion)
+  const hidden = AIM.evasionShrink * (Math.max(0, target.evasion) + targetStatus.defenceBonus)
+  const w = AIM.targetSize * visibleShare(cover, target.isCrouching) * Math.max(0.05, 1 - hidden)
+  const tighten = clamp(
+    1 - AIM.trainingTighten * (shooter.proficiency - shooterStatus.accuracyPenalty),
+    0.2,
+    3,
+  )
+  const e = (eff.sway + eff.spread * distance) * tighten
+  // The ceiling holds for every line — nothing is certain — but the floor is
+  // the round's: nine pellets each forced up to five percent would make a
+  // shell across the map land a third of the time.
+  const one = Math.min((w * w) / (w * w + e * e), AIM.max / 100)
 
-  const raw =
-    (eff.baseAccuracy +
-      AIM.globalBonus +
-      shooter.proficiency -
-      rangePenalty -
-      cov -
-      shooterStatus.accuracyPenalty -
-      targetStatus.defenceBonus -
-      evasion) *
-    modeMultiplier
+  // Repeated multiplication rather than a power: it has to agree bit for bit
+  // on both peers, and there are at most a handful of pellets.
+  let allMiss = 1
+  for (let i = 0; i < eff.pellets; i++) allMiss *= 1 - one
+  const floor = AIM.min / 100
+  const any = Math.max(1 - allMiss, floor)
+  // A single line forced up to the floor has to roll against the floor too.
+  const line = eff.pellets === 1 ? any : one
 
   return {
-    chance: outOfRange ? 0 : clamp(Math.round(raw), AIM.min, AIM.max),
-    base: eff.baseAccuracy + AIM.globalBonus,
-    rangePenalty: Math.round(rangePenalty),
-    coverPenalty: cov,
-    shooterPenalty: shooterStatus.accuracyPenalty,
-    targetDefence: targetStatus.defenceBonus,
-    proficiency: shooter.proficiency,
-    evasion,
-    modeMultiplier,
+    chance: Math.round(any * 100),
+    projectile: Math.round(line * 100),
+    landed: Math.max(1, (eff.pellets * line) / any),
     distance,
-    outOfRange,
+    outOfRange: false,
   }
+}
+
+/**
+ * Damage one round can be expected to do: the chance it lands, times what it
+ * does when it does — for buckshot, with the pellets expected to land at that
+ * distance. The one estimate the planner's panel and every AI weighs a round
+ * by, so a shotgun is never priced as if all nine pellets landed every time.
+ */
+export function expectedRoundDamage(eff: EffectiveWeapon, target: CombatantStats, odds: ShotOdds): number {
+  if (odds.outOfRange || odds.chance === 0) return 0
+  return (odds.chance / 100) * resolveDamage(eff, target, 1, false, Math.max(1, odds.landed)).damage
 }
 
 /** Every term behind a crit chance, so the HUD can explain the number. */
@@ -329,13 +340,24 @@ export function resolveDamage(
   target: CombatantStats,
   falloff = 1,
   crit = false,
+  /**
+   * Projectiles of the round that landed. Armour is taken off the round's
+   * total once, not off each projectile, and the floor is per round: buckshot
+   * is impact, so plate that would stop any one pellet blunts a full shell and
+   * does not zero it.
+   */
+  landed = 1,
 ): DamageResult {
   const status = statusTotals(target.statuses)
   const multiplier = crit ? eff.critMultiplier : 1
   // Gear and statuses pull on the same number, so they add rather than
   // compounding: a plated unit under a shred takes both.
   const raw =
-    eff.damage * falloff * multiplier * Math.max(0, 1 + status.damageTakenBonus + target.damageTaken)
+    eff.damage *
+    landed *
+    falloff *
+    multiplier *
+    Math.max(0, 1 + status.damageTakenBonus + target.damageTaken)
   const armorInPlay = Math.max(0, target.armor) * (1 - eff.armorPen)
   const damage = Math.max(AIM.minDamage, raw - armorInPlay)
 
@@ -446,8 +468,9 @@ export function meleeWeapon(attacker: CombatantStats): EffectiveWeapon {
   return {
     weapon: attacker.weapon,
     apCost: spec.apCost,
-    baseAccuracy: spec.accuracy,
-    accuracyPerMetre: 0,
+    sway: 0,
+    spread: 0,
+    pellets: 1,
     damage: spec.damage * (1 + attacker.meleePower / 100),
     armorPen: spec.armorPen,
     armorShred: spec.armorShred,

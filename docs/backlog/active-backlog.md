@@ -81,52 +81,6 @@ Medic, Scout, and Marksman roles gate which crate rows a unit may draw equipment
 
 ---
 
-### [ITEM-032] Projectile Hit Model
-**Type:** Feature / Rules  
-**Priority:** P1  
-**Status:** In Progress  
-**Milestone:** M2 — Tactical Depth  
-
-#### Why
-Hit chance is additive points: a weapon's base accuracy minus a per-metre penalty, cover and
-evasion. That cannot express what separates a rifle from a shotgun: one straight line versus a
-fan of them. Measured: the shotgun fires closest of any weapon (6 m mean) and still hits a third
-of the time for ~20 damage, and nothing about getting closer is worth more to it than accuracy
-because its damage does not depend on distance.
-
-#### Change
-Every trigger pull fires projectiles; each is one straight line with error.
-1. **Weapon**: `pellets` per round (1 for bullets, ~9 for buckshot), `spread` (metres of error
-   per metre travelled), `damage` and `armorPen` per projectile. `baseAccuracy` and
-   `accuracyPerMetre` go.
-2. **Target**: a presented size — cover hides a share of it (a visible fraction per stance and
-   cover level replaces the subtractive `COVER` table), and Agility (evasion) shrinks it.
-3. **Chance a line lands**: `P = w² / (w² + e²)`, `e = sway + spread × distance`. Multiplication and
-   division only, so peers compute it identically. Training, aimed fire and glass tighten the
-   spread; snap, reaction, suppression and wounds widen it. Clamped 5–95% per projectile.
-4. **A round** lands if any of its projectiles does. **Armour subtracts once per round**, from
-   the landed projectiles' sum, and the minimum damage is per round — so buckshot is impact, not
-   penetration, and light armour does not zero it. **Crit** is rolled once per round that lands.
-   Each pellet is its own roll from the match stream.
-5. **HUD**: the shot panel shows hit chance, damage, AP and rounds — nothing else. For a shotgun
-   the chance is that the round lands at all and the damage is what it does when it does. The
-   term breakdown and the crit row leave the shot panel; spread, pellets and crit are shown on
-   the loadout screen.
-
-#### Acceptance Criteria
-- [ ] The rifle's curve stays close to today's at 4–12 m (calibrated, not re-balanced).
-- [ ] A shotgun's damage falls with distance with no damage-falloff rule, and it does more per
-      shot indoors than out.
-- [ ] Four shotguns against the stock squad win clearly more than today's 17%; mirror stays even.
-- [ ] The shot panel shows only chance, damage, AP and rounds; verified in the browser.
-
-#### Affected Files
-- `src/core/Arsenal.ts`, `src/core/Ballistics.ts`, `src/config.ts`, `src/game/Combat.ts`
-- `src/game/ShootPlanner.ts`, `src/hud/HudModel.ts`, `src/hud/Hud.ts`, `src/hud/LoadoutScreen.ts`
-- `src/sim/SimMatch.ts`, `src/sim/Tactics.ts`, `scripts/build-catalog.ts`
-
----
-
 ### [ITEM-012] Permadeath, Lasting Wounds & Campaign Roster Persistence
 **Type:** Feature  
 **Priority:** P2  

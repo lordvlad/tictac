@@ -1,4 +1,4 @@
-import { AMMO, AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
+import { AMMO, AmmoId, GRENADES, GrenadeId, SHOT_MODES, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { derive, rollSquadSheets, type CharacterSheet } from '../core/Characters'
 import { ITEMS, ItemId } from '../core/Items'
@@ -257,26 +257,53 @@ export class LoadoutScreen {
         <button class="loadout-step interactive" ${canAdd ? '' : 'disabled'} ${LoadoutScreen.actionAttr(plus)}>+</button>
       </div>`
 
-    // The sidearm is the one pick whose options are not simply better or
-    // worse than each other, so the button has to carry enough of the table
-    // to choose on: what a blow costs and does, and the one-line character
-    // from `sidearmCharacter`. The count sits on the button rather than only
-    // in the crate because a greyed-out knife needs its reason beside it, the
-    // same argument the pouch pips make. Fists are never short, so they show
-    // no number at all rather than a zero or an infinity to puzzle over.
+    // The sidearm and the weapon are the picks whose options are not simply
+    // better or worse than each other, so their buttons have to carry enough
+    // of the table to choose on: what a blow or a round costs and does, and a
+    // one-line character from `sidearmCharacter` or `weaponCharacter`. The
+    // count sits on the sidearm button rather than only in the crate because a
+    // greyed-out knife needs its reason beside it, the same argument the pouch
+    // pips make. Fists are never short, so they show no number at all rather
+    // than a zero or an infinity to puzzle over.
     const left = remaining(this.loadout)
     const sidearm = (id: MeleeId): string => {
       const spec = MELEE[id]
       const stock = id === MeleeId.Fists ? '' : `<span class="loadout-pool-count">×${left.sidearms[id]}</span>`
       return `
-      <button class="action-btn interactive loadout-sidearm ${unit.sidearm === id ? 'active' : ''}"
+      <button class="action-btn interactive loadout-specced ${unit.sidearm === id ? 'active' : ''}"
               ${canEquipSidearm(this.loadout, this.selected, id) ? '' : 'disabled'}
               title="Accuracy ${spec.accuracy}% · parry ${spec.parry} · crit ${spec.critChance}% ×${spec.critMultiplier}"
               ${LoadoutScreen.actionAttr({ kind: 'sidearm', id })}>
         ${icon(`melee-${id}`)}<span class="loadout-pick-name">${spec.name}</span>${stock}
-        <span class="loadout-sidearm-spec">
+        <span class="loadout-pick-spec">
           ${spec.apCost} AP · ${spec.damage} dmg · ${Math.round(spec.armorPen * 100)}% pen<br />
           ${LoadoutScreen.sidearmCharacter(id)}
+        </span>
+      </button>`
+    }
+
+    // The in-match shot panel says only whether a round lands and what it
+    // does, so this is where a weapon's character is read. Spread is shown as
+    // centimetres of miss at ten metres because metres-per-metre is a number
+    // nobody can picture; the tooltip keeps the raw table for whoever wants it.
+    // The character word rides on the name row, where a sidearm shows its
+    // stock: the spec lines are already as long as the panel is wide.
+    const weapon = (id: WeaponId): string => {
+      const spec = WEAPONS[id]
+      const damage = spec.pellets > 1 ? `${spec.pellets}×${spec.damage}` : `${spec.damage}`
+      const spread = Math.round(LoadoutScreen.errorAt10(id) * 100)
+      const modes = spec.availableModes.map((mode) => SHOT_MODES[mode].name).join(', ')
+      const bias = spec.critRangeBias > 0 ? 'far' : spec.critRangeBias < 0 ? 'close' : 'anywhere'
+      return `
+      <button class="action-btn interactive loadout-specced ${unit.weaponId === id ? 'active' : ''}"
+              ${canEquipWeapon(this.loadout, this.selected, id) ? '' : 'disabled'}
+              title="Sway ${spec.sway} m · spread ${spec.spread} m per m · ${Math.round(spec.armorPen * 100)}% pen · ${modes} · crits best ${bias}"
+              ${LoadoutScreen.actionAttr({ kind: 'weapon', id })}>
+        ${icon(`weapon-${id}`)}<span class="loadout-pick-name">${spec.name}</span>
+        <span class="loadout-pick-tag">${LoadoutScreen.weaponCharacter(id)}</span>
+        <span class="loadout-pick-spec">
+          ${spec.apCost} AP · ${damage} dmg · ${spec.maxRange} m · clip ${spec.maxClip}<br />
+          spread ${spread} cm @10m · crit ${spec.critChance}% ×${spec.critMultiplier}
         </span>
       </button>`
     }
@@ -318,17 +345,7 @@ export class LoadoutScreen {
         <div class="loadout-panel-head">${name}</div>
 
         <div class="loadout-section">Weapon</div>
-        ${Object.values(WeaponId)
-          .map((id) =>
-            pick(
-              `weapon-${id}`,
-              WEAPONS[id].name,
-              unit.weaponId === id,
-              canEquipWeapon(this.loadout, this.selected, id),
-              { kind: 'weapon', id },
-            ),
-          )
-          .join('')}
+        ${Object.values(WeaponId).map(weapon).join('')}
 
         <div class="loadout-section">Ammo</div>
         ${Object.values(AmmoId)
@@ -417,6 +434,35 @@ export class LoadoutScreen {
     if (spec.armorShred > 0) notes.push(`shreds ${spec.armorShred} armour`)
     else if (spec.armorPen === 0) notes.push('armour stops it')
     notes.push(spec.loud ? 'loud' : 'quiet')
+    return notes.join(' · ')
+  }
+
+  /** Metres a snap shot misses by at ten metres: the one distance every weapon reaches. */
+  private static errorAt10(id: WeaponId): number {
+    const spec = WEAPONS[id]
+    return spec.sway + spec.spread * 10
+  }
+
+  /**
+   * What a weapon is *for*, in a word or two, worked out from `WEAPONS` for
+   * the same reason `sidearmCharacter` is: the table is edited live and a
+   * caption has to follow it.
+   *
+   * Only a weapon that stands out is named, so one in the middle of the table
+   * carries no word at all. A shell is `buckshot` rather than `wide`: it is
+   * wide, but a fan of pellets that each roll is the thing to know about it.
+   */
+  private static weaponCharacter(id: WeaponId): string {
+    const spec = WEAPONS[id]
+    const error = LoadoutScreen.errorAt10(id)
+    const others = Object.values(WeaponId).map((other) => LoadoutScreen.errorAt10(other))
+    const notes: string[] = []
+    if (spec.pellets > 1) notes.push('buckshot')
+    else if (others.every((other) => error <= other)) notes.push('pinpoint')
+    else if (others.every((other) => error >= other)) notes.push('wide')
+    // A weapon with one way to fire is defined by it: nobody aims a Gatling.
+    const [only] = spec.availableModes
+    if (spec.availableModes.length === 1 && only) notes.push(`${only} only`)
     return notes.join(' · ')
   }
 

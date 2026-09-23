@@ -861,3 +861,54 @@ while every replay passed.
 - [~] `bun run lint:code` kept rather than dropped: the controller still switches over HUD
       intents and presentation, and a duplicated case there is a bug too. It costs 0.1 s.
 - [ ] Not verified in two live browsers — same tooling block as since ITEM-020.
+
+---
+
+### [ITEM-032] Projectile Hit Model
+**Completed Date:** 2026-09-19  
+**Type:** Feature / Rules  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+Hit chance was additive points, which cannot express what separates a rifle from a shotgun:
+one straight line against a fan of them.
+
+#### Key Changes
+- Every projectile is a straight line that misses by `e = (sway + spread × d) × mode × training`
+  and lands on a body of half-width `w` (visible share of cover and stance, less evasion) with
+  probability `w² / (w² + e²)`. Weapons have `sway`, `spread`, `pellets`, and `damage` /
+  `armorPen` per projectile; `baseAccuracy`, `accuracyPerMetre` and the subtractive cover table
+  are gone. Rifle, gatling and sniper were fitted to the old curves (RMSE 6.6 points).
+- A round lands if any projectile does; armour is taken off the round once and the minimum is
+  per round; crit once per landed round; one roll per pellet from the match stream. The round's
+  chance is floored, a pellet's is not.
+- Shotgun: 9 pellets × 12, spread 0.05 — about twice a rifle's expected damage inside a room,
+  level at ~6 m, worse beyond.
+- Shot panel: chance, damage, AP and rounds only. Loadout weapon buttons show damage (9×12 for
+  buckshot), range, clip, spread at 10 m and crit; the catalogue has a Weapons section.
+- `expectedRoundDamage` is the one estimate the panel and every AI use.
+- Sweep policy: the destination scorer runs *before* the take-it-now shot, since it counts
+  staying and firing as a candidate. Without that a shotgun fired from 8 m, because a shell
+  nearly always lands something.
+
+#### Measured
+Blocks 1000/5000/9000, wins summed:
+
+| | 4× shotgun vs stock | shotgun distance | dmg/shot in / out | mirror blue / red |
+| --- | --- | --- | --- | --- |
+| before | 192 | 6.8 m | 16 / 21 | 568 / 579 |
+| new model | 125 | 7.5 m | 22 / 27 | 549 / 591 |
+| + reposition first | 155 | 6.6 m | 26 / 36 | 576 / 569 |
+
+#### Acceptance Criteria
+- [x] The rifle's curve stays close to the old one at 4–20 m.
+- [x] A shotgun's damage falls with distance with no damage-falloff rule.
+- [ ] **Not met: it does more per shot indoors than out.** It does less (26 vs 36): indoor
+      fights go through doorways and partitions, where tall cover hides most of the target from
+      any weapon.
+- [ ] **Not met: four shotguns win clearly more than 17%.** 13%. They close to 6.6 m — where the
+      new shotgun is by design level with a rifle — because getting inside 4 m means crossing
+      rifle fire, which the scorer prices as expensive. The rule gives the shotgun its band; the
+      AI and the map rarely produce a fight inside it.
+- [x] Mirror stays even (576 / 569).
+- [x] The shot panel shows only chance, damage, AP and rounds; verified in the browser.

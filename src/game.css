@@ -1941,20 +1941,29 @@ canvas {
   font-variant-numeric: tabular-nums;
 }
 
-/* A sidearm pick is the weapon pick with its spec underneath: the options
-   trade off rather than rank, so the numbers have to be on the button. The
-   spec wraps onto its own line and is indented past the icon so the name
-   column stays aligned with the picks above. */
-.loadout-panel .loadout-sidearm {
+/* A sidearm or weapon pick is the plain pick with its spec underneath: the
+   options trade off rather than rank, so the numbers have to be on the
+   button. The spec wraps onto its own line and is indented past the icon so
+   the name column stays aligned with the picks above. */
+.loadout-panel .loadout-specced {
   flex-wrap: wrap;
   row-gap: 2px;
 }
 
-.loadout-sidearm-spec {
+.loadout-pick-spec {
   flex-basis: 100%;
   padding-left: 24px;
   font-size: 9px;
   line-height: 1.35;
+  color: var(--hud-dim);
+  /* A weapon's spread-and-crit line is as long as the panel is wide; the
+     button's heading tracking would push it onto a third line. */
+  letter-spacing: 0.2px;
+}
+
+/* A weapon's character word, where a sidearm shows its stock. */
+.loadout-pick-tag {
+  font-size: 9px;
   color: var(--hud-dim);
 }
 

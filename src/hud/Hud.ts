@@ -478,27 +478,8 @@ export class Hud {
         <div class="shot-option-chance ${shot.base.chance >= 50 ? 'good' : 'poor'}">
           ${shot.base.chance}<span>%</span>
         </div>
-        <div class="shot-rows">
-          ${shot.base.terms
-            .map(
-              (t) => `
-            <div class="shot-row ${t.penalty ? 'penalty' : ''}">
-              <span>${t.icon ? icon(t.icon, 'tiny') : ''}${t.label}</span><span>${t.value}</span>
-            </div>`,
-            )
-            .join('')}
-        </div>
         <div class="shot-rows shot-outcome">
           <div class="shot-row"><span>${icon('shot-damage', 'tiny')}Damage a hit</span><span>${shot.base.damage}</span></div>
-          <div class="shot-row shot-crit ${shot.base.critImmune ? 'shot-immune' : ''}">
-            ${
-              shot.base.critImmune
-                ? `<span>${icon('shot-shred', 'tiny')}Crit</span><span>IMMUNE</span>`
-                : `<span>${icon('shot-shred', 'tiny')}Crit ${shot.base.critChance}% &times;${shot.base.critMultiplier}</span>
-            <span>${shot.base.critDamage}</span>`
-            }
-          </div>
-          ${shot.base.armorShred > 0 ? `<div class="shot-row"><span>${icon('shot-shred', 'tiny')}Armor shred</span><span>-${shot.base.armorShred}</span></div>` : ''}
         </div>
       </div>
       ${shot.options.map((option) => this.shotOptionRow(option)).join('')}
@@ -510,16 +491,8 @@ export class Hud {
     `
   }
 
-  /**
-   * One mode: its own odds, its cost, and the damage its bullet count buys.
-   *
-   * The odds and the delta share a line so every row is the same two lines
-   * tall: as separate lines a mode with no delta stood shorter than its
-   * neighbours.
-   */
+  /** One mode: its odds, its cost, its rounds and what they do. */
   private shotOptionRow(option: HudShotOption): string {
-    const delta =
-      option.chanceDelta === 0 ? '' : `${option.chanceDelta > 0 ? '+' : ''}${option.chanceDelta}`
     return `
       <button class="shot-option interactive ${option.available ? '' : 'unavailable'}"
               ${option.available ? '' : 'disabled'} ${Hud.intentAttr({ type: 'fireShot', mode: option.mode })}>
@@ -529,8 +502,7 @@ export class Hud {
             ${
               option.outOfRange
                 ? '<span class="shot-option-hit poor">OUT OF RANGE</span>'
-                : `<span class="shot-option-hit ${option.hitChance >= 50 ? 'good' : 'poor'}">${option.hitChance}%</span>
-                   ${delta === '' ? '' : `<span class="shot-option-delta">${delta}</span>`}`
+                : `<span class="shot-option-hit ${option.hitChance >= 50 ? 'good' : 'poor'}">${option.hitChance}%</span>`
             }
           </span>
           <span class="shot-option-ap">${option.apCost} AP · ${option.bullets}x · ${option.damageAtBest} dmg</span>

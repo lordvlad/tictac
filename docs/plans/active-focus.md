@@ -25,8 +25,9 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- **`[ITEM-032]`: projectile hit model.** One straight line per projectile with error; a
-  shotgun is a fan of them. The shot panel shows chance, damage, AP and rounds only.
+- Nothing in flight. The open combat question ITEM-032 left: the shotgun now has a real band
+  (inside ~4 m), but the AI and the map rarely produce a fight inside it — indoor fights go
+  through doorways where tall cover hides the target from every gun.
 
 ### 📋 Ready (Pull Queue)
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for

@@ -1,6 +1,13 @@
 import { RULES } from '../config'
 import { ShotMode } from '../core/Arsenal'
-import { effectiveWeapon, hitChance, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
+import {
+  effectiveWeapon,
+  expectedRoundDamage,
+  hitChance,
+  meleeChance,
+  meleeWeapon,
+  resolveDamage,
+} from '../core/Ballistics'
 import type { Combatant } from '../core/Combatant'
 import { shotCoverLevel } from '../core/Cover'
 import type { Grid, Tile } from '../core/Grid'
@@ -95,8 +102,7 @@ function offenseFrom(
     const eff = effectiveWeapon(shooter, mode)
     if (distance > eff.maxRange) continue
     const shots = Math.min(Math.floor(ap / cost), Math.floor(shooter.weapon.currentClip / bullets))
-    const chance = hitChance(shooter, target, distance, cover, mode).chance / 100
-    const value = chance * resolveDamage(eff, target).damage * bullets * shots
+    const value = expectedRoundDamage(eff, target, hitChance(shooter, target, distance, cover, mode)) * bullets * shots
     if (value > best) best = value
   }
   return best
@@ -107,8 +113,8 @@ function threat(grid: Grid, shooter: Combatant, target: Combatant, at: Tile, mod
   const eff = effectiveWeapon(shooter, mode)
   const distance = grid.distance(shooter.tile, at)
   if (distance > eff.maxRange || shooter.weapon.currentClip <= 0) return 0
-  const chance = hitChance(shooter, target, distance, shotCoverLevel(grid, shooter.tile, at), mode).chance / 100
-  return chance * resolveDamage(eff, target).damage * shooter.weapon.bulletConsumption(mode)
+  const odds = hitChance(shooter, target, distance, shotCoverLevel(grid, shooter.tile, at), mode)
+  return expectedRoundDamage(eff, target, odds) * shooter.weapon.bulletConsumption(mode)
 }
 
 /**
@@ -127,9 +133,8 @@ function nextTurnThreat(grid: Grid, shooter: Combatant, target: Combatant, at: T
   const walk = Math.max(0, shooter.effectiveMaxAp - shotApCost(shooter, ShotMode.Snap)) / shooter.moveCostMul
   const distance = Math.max(1, grid.distance(shooter.tile, at) - walk)
   if (distance > eff.maxRange) return 0
-  const cover = shotCoverLevel(grid, shooter.tile, at)
-  const chance = hitChance(shooter, target, distance, cover, ShotMode.Snap).chance / 100
-  return chance * resolveDamage(eff, target).damage * shooter.weapon.bulletConsumption(ShotMode.Snap)
+  const odds = hitChance(shooter, target, distance, shotCoverLevel(grid, shooter.tile, at), ShotMode.Snap)
+  return expectedRoundDamage(eff, target, odds) * shooter.weapon.bulletConsumption(ShotMode.Snap)
 }
 
 /**

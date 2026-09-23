@@ -267,16 +267,27 @@ export const CHARACTER = {
 }
 
 /**
- * Global aim clamps and tuning offsets. Per-weapon accuracy and range falloff
- * live in {@link Arsenal}: what separates a shotgun from a sniper rifle is the
- * weapon, not a single global constant.
+ * How a projectile is aimed and what it has to land on.
+ *
+ * Every shot is one or more straight lines with error ({@link Arsenal} gives a
+ * weapon its `sway`, `spread` and `pellets`). A line lands on a target of
+ * presented half-width `w` with probability `w² / (w² + e²)`, where `e` is the
+ * line's error at that distance — so it lands half the time when its error is
+ * as wide as the target, and more often closer in. Multiplication and division
+ * only: both peers must compute the same number, and transcendental functions
+ * are not guaranteed to agree across browsers.
  */
 export const AIM = {
-  /** Flat hit-chance offset applied to every shot. A tuning/debug knob. */
-  globalBonus: 0,
+  /** Half-width of a standing body facing the shooter, in metres. */
+  targetSize: 0.3,
+  /** Share of the presented size one point of evasion (or of a status's defence) hides. */
+  evasionShrink: 0.025,
+  /** Share of a shooter's error one point of training (or of a status penalty) removes (adds). */
+  trainingTighten: 0.02,
+  /** Clamp on one projectile's chance, in percent. */
   min: 5,
   max: 95,
-  /** A hit always does at least this much, however good the armour. */
+  /** A round that lands always does at least this much, however good the armour. */
   minDamage: 5,
 }
 
@@ -303,21 +314,23 @@ export const CRIT = {
 }
 
 /**
- * Accuracy the shooter loses against a target, by the cover the bullet crosses
- * and the target's stance. Crouching ("taking cover") always beats standing,
- * and hunkering behind real cover beats crouching in the open.
+ * Share of the body still showing to a shooter, by the cover the line crosses
+ * and the target's stance. Crouching always shows less than standing, and
+ * hunkering behind real cover shows less than crouching in the open. Fitted to
+ * the point penalties this replaced, so a rifleman's odds against cover stayed
+ * where the game had them.
  */
 export const COVER = {
-  /** Crouching with no cover on the shot's side. */
-  openCrouch: 25,
+  /** Crouching with nothing on the shot's side. */
+  openCrouch: 0.55,
   /** Standing behind a low crate. */
-  lowStand: 20,
-  /** Crouching behind a low crate (> openCrouch and > lowStand). */
-  lowCrouch: 40,
-  /** Standing behind a wall/edge — strong, but a peek can still be hit. */
-  tallStand: 45,
-  /** Crouching behind a wall/edge. */
-  tallCrouch: 60,
+  lowStand: 0.6,
+  /** Crouching behind a low crate. */
+  lowCrouch: 0.33,
+  /** Standing behind a wall or an edge, leaning out to see. */
+  tallStand: 0.27,
+  /** Crouching behind a wall or an edge. */
+  tallCrouch: 0.14,
 }
 
 // ---------------------------------------------------------------------------

@@ -1,10 +1,9 @@
-import { AIM, FACTION_INFO, Faction, RULES } from '../config'
+import { FACTION_INFO, Faction, RULES } from '../config'
 import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
 import { ITEMS, type ItemEffect, ItemId, itemApCost, itemTargetsAlly } from '../core/Items'
 import { UtilityId } from '../core/Characters'
-import { effectiveWeapon, type HitChanceBreakdown, statusStacks } from '../core/Ballistics'
+import { effectiveWeapon, statusStacks } from '../core/Ballistics'
 import type { MeleeId } from '../core/Melee'
-import { clamp } from '../core/math'
 import { canWatch, watchCost } from '../game/Overwatch'
 import { TRAITS, woundTraits } from '../core/Traits'
 import type { OrbitRig } from '../camera/OrbitRig'
@@ -109,51 +108,25 @@ export interface HudTargetIcon {
 }
 
 /** One line of the "why is my chance this bad" breakdown. */
-export interface HudShotTerm {
-  label: string
-  value: string
-  /** Icon name under public/icons, when the term has one of its own. */
-  icon?: string
-  /** Negative terms are drawn in the danger colour. */
-  penalty: boolean
-}
-
 /**
- * What every way of shooting this target shares.
- *
- * Split out because it used to be repeated on every option card: the same
- * weapon, the same range, the same cover, five times over, with one line
- * between them that actually differed.
+ * What every way of shooting this target shares: the odds and the damage of
+ * the plainest shot. That is the whole of it on purpose — range, cover, spread,
+ * training and crit are all *in* these two numbers, and laying them out as
+ * terms turned every shot into arithmetic the player had to audit. What a
+ * weapon is like — its spread, its pellets, its crit — is on the loadout.
  */
 export interface HudShotBase {
-  /** Chance with no shot mode applied. */
   chance: number
-  /** Damage a single hit does, which no mode changes. */
+  /** What a round does when it lands, after the target's armour. */
   damage: number
-  armorShred: number
-  /** Chance a hit lands as a critical, after range and the target's armour. */
-  critChance: number
-  /** What a critical multiplies the round by. */
-  critMultiplier: number
-  /**
-   * The target cannot be crit at all. Stated rather than folded into a zero
-   * chance, because a 0% with a multiplier beside it reads as bad luck when it
-   * is actually a rule.
-   */
-  critImmune: boolean
-  /** Damage a critical does, after the target's armour. */
-  critDamage: number
-  terms: HudShotTerm[]
 }
 
-/** One way of shooting, and only what choosing it changes. */
+/** One way of shooting: its odds, its cost, its rounds and what they do. */
 export interface HudShotOption {
   mode: ShotMode
   name: string
   hitChance: number
-  /** Percentage points this mode puts on, or takes off, the base chance. */
-  chanceDelta: number
-  /** Damage with every bullet landing — what the bullet count buys. */
+  /** Damage with every round landing — what the round count buys. */
   damageAtBest: number
   apCost: number
   bullets: number
@@ -581,115 +554,9 @@ function statusChips(soldier: Soldier): HudStatusChip[] {
   return chips
 }
 
-/**
- * The chance with no shot mode applied.
- *
- * Recomputed from the terms rather than divided out of an option's chance: the
- * final figure is clamped, so dividing by the multiplier would misreport any
- * shot that hit the ceiling or the floor.
- *
- * Every term `hitChance` uses has to appear here, or the big number on the card
- * contradicts the rows printed under it: proficiency and evasion were missing
- * and a target with 22 evasion still read 64%.
- */
-function neutralChance(b: HitChanceBreakdown): number {
-  if (b.outOfRange) return 0
-  const raw =
-    b.base +
-    b.proficiency -
-    b.rangePenalty -
-    b.coverPenalty -
-    b.shooterPenalty -
-    b.targetDefence -
-    b.evasion
-  return clamp(Math.round(raw), AIM.min, AIM.max)
-}
-
-/** Turn a pending shot into the shared picture plus what each mode changes. */
+/** Turn a pending shot into the panel: the plainest shot's numbers, then one row per mode. */
 function shotPanelOf(pending: PendingShot): HudShotPanel {
-  // Every option carries the same mode-independent terms, so the first one
-  // speaks for all of them.
-  const first = pending.options[0]?.breakdown
-  const terms: HudShotTerm[] = []
-  if (first) {
-    terms.push({
-      label: 'Weapon base',
-      value: `${Math.round(first.base)}%`,
-      icon: 'ui-shoot',
-      penalty: false,
-    })
-    // The two terms that are people rather than kit. Worth their own rows: a
-    // player comparing two shooters on the same target has no other way to see
-    // that the rifle is not the same rifle in both pairs of hands.
-    const proficiency = Math.round(first.proficiency)
-    if (proficiency !== 0) {
-      terms.push({
-        label: `${pending.weaponName} skill`,
-        value: `${proficiency > 0 ? '+' : ''}${proficiency}%`,
-        icon: 'mode-aimed',
-        penalty: proficiency < 0,
-      })
-    }
-    terms.push({
-      label: `Range ${first.distance.toFixed(1)} m`,
-      value: `-${first.rangePenalty}%`,
-      icon: 'shot-range',
-      penalty: first.rangePenalty > 0,
-    })
-    terms.push({
-      label: 'Cover',
-      value: `-${first.coverPenalty}%`,
-      icon: 'ui-cover',
-      penalty: first.coverPenalty > 0,
-    })
-    if (first.shooterPenalty > 0) {
-      terms.push({
-        label: 'Blinded',
-        value: `-${first.shooterPenalty}%`,
-        icon: 'shot-blinded',
-        penalty: true,
-      })
-    }
-    if (first.targetDefence > 0) {
-      terms.push({
-        label: 'Concealment',
-        value: `-${first.targetDefence}%`,
-        icon: 'shot-conceal',
-        penalty: true,
-      })
-    }
-    if (first.evasion > 0) {
-      terms.push({
-        label: 'Target evasion',
-        // The chance above already has it in; what is withheld is the reason.
-        value: pending.target.known ? `-${Math.round(first.evasion)}%` : '-?%',
-        icon: 'shot-conceal',
-        penalty: true,
-      })
-    }
-  }
-
-  // What moved the crit chance off the weapon's own number, so a player can see
-  // why closing in or backing off would change it.
-  if (pending.crit.rangeTerm !== 0) {
-    terms.push({
-      label: pending.crit.rangeTerm > 0 ? 'Crit at this range' : 'Crit out of its range',
-      value: `${pending.crit.rangeTerm > 0 ? '+' : ''}${pending.crit.rangeTerm}%`,
-      icon: 'shot-range',
-      penalty: pending.crit.rangeTerm < 0,
-    })
-  }
-  if (pending.crit.armorTerm !== 0) {
-    terms.push({
-      label: 'Crit vs armour',
-      value: `${pending.crit.armorTerm}%`,
-      icon: 'shot-shred',
-      penalty: true,
-    })
-  }
-
-  const base = first ? neutralChance(first) : 0
-
+  const first = pending.options[0]
   return {
     targetName: pending.target.name,
     targetHp: pending.target.hp,
@@ -699,26 +566,16 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
     ammoName: pending.ammoName,
     currentClip: pending.currentClip,
     maxClip: pending.maxClip,
-    base: {
-      chance: base,
-      damage: pending.options[0]?.damage ?? 0,
-      armorShred: pending.options[0]?.armorShred ?? 0,
-      critChance: pending.crit.chance,
-      critMultiplier: pending.crit.multiplier,
-      critImmune: pending.crit.immune,
-      critDamage: pending.critDamage,
-      terms,
-    },
+    base: { chance: first?.odds.chance ?? 0, damage: first?.damage ?? 0 },
     options: pending.options.map((option) => ({
       mode: option.mode,
       name: option.name,
-      hitChance: option.breakdown.chance,
-      chanceDelta: option.breakdown.chance - base,
+      hitChance: option.odds.chance,
       damageAtBest: option.damage * option.bullets,
       apCost: option.apCost,
       bullets: option.bullets,
       available: option.available,
-      outOfRange: option.breakdown.outOfRange,
+      outOfRange: option.odds.outOfRange,
     })),
     strike: pending.strike
       ? {

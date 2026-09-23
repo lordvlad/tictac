@@ -1,12 +1,11 @@
 import type { Grid, Tile } from '../core/Grid'
 import { shotCoverLevel } from '../core/Cover'
 import {
-  type CombatantStats,
   critBreakdown,
   type EffectiveWeapon,
   effectiveWeapon,
   grenadeDamageAt,
-  type HitChanceBreakdown,
+  type ShotOdds,
   hitChance,
   meleeChance,
   meleeWeapon,
@@ -60,13 +59,13 @@ export interface GrenadeResult {
   hits: ResolvedHit[]
 }
 
-/** Hit chance plus every term that produced it, for the HUD to explain. */
+/** The odds of a round from `shooter` landing on `target`, from where they stand. */
 export function shotBreakdown(
   grid: Grid,
   shooter: Combatant,
   target: Combatant,
   mode: ShotMode = ShotMode.Snap,
-): HitChanceBreakdown {
+): ShotOdds {
   return hitChance(
     shooter,
     target,
@@ -167,7 +166,7 @@ export function executeShot(
   // does not stop the target being *seen*, only read.
   if (!target.unreadable) target.known = true
 
-  const chance = calculateHitChance(grid, shooter, target, mode)
+  const odds = shotBreakdown(grid, shooter, target, mode)
   const crit = critBreakdown(eff, target, grid.distance(shooter.tile, target.tile))
   const shooterWorld = grid.tileToWorld(shooter.tile)
   const targetWorld = grid.tileToWorld(target.tile)
@@ -188,7 +187,13 @@ export function executeShot(
   let misses = 0
 
   for (let i = 0; i < bullets; i++) {
-    const hit = overrideRolls ? (overrideRolls[i] ?? false) : roll() * 100 <= chance
+    // One roll per projectile, in order, then one for the crit if anything
+    // landed: the count and order of draws is what keeps two peers on the same
+    // stream. A forced roll (a test's) lands the whole round or none of it.
+    let landed = 0
+    if (overrideRolls) landed = overrideRolls[i] ? eff.pellets : 0
+    else for (let p = 0; p < eff.pellets; p++) if (roll() * 100 <= odds.projectile) landed++
+    const hit = landed > 0
     rolls.push(hit)
     if (hit) anyHit = true
     else misses++
@@ -198,9 +203,11 @@ export function executeShot(
     if (i === 0) fx.shoot(shooter)
 
     if (hit) {
+      // Once per round: a crit is where the round went, and nine pellets are
+      // not nine placements.
       const critical = roll() * 100 <= crit.chance
       if (critical) crits++
-      const primary = applyWeaponDamage(eff, target, fx, 1, critical)
+      const primary = applyWeaponDamage(eff, target, fx, 1, critical, landed)
       hits.push(primary)
       totalDamage += primary.damage
       totalArmorShred += primary.armorShred
@@ -228,7 +235,7 @@ export function executeShot(
     damage: totalDamage,
     armorShred: totalArmorShred,
     killed,
-    hitChance: chance,
+    hitChance: odds.chance,
     apSpent: apCost,
     crits,
     hits,
@@ -389,8 +396,9 @@ function applyWeaponDamage(
   fx: CombatFx,
   falloff = 1,
   crit = false,
+  landed = 1,
 ): ResolvedHit {
-  const result = resolveDamage(eff, target, falloff, crit)
+  const result = resolveDamage(eff, target, falloff, crit, landed)
   applyHitEffects(target, result.damage, result.armorShred, null, fx)
   return {
     soldier: target,
