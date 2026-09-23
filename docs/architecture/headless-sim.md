@@ -53,7 +53,8 @@ Each unit, in squad order, spends its points in this order until nothing applies
    reachable this turn is scored in expected hit points: what the unit could do
    from there with the points left, minus the reactions the route provokes
    (once per watcher, at the first tile that watcher sees), minus what the
-   enemies who can see the tile would do to it on their turn. While nothing is
+   enemies who can see the tile would do to it on their turn — and, at half weight, what an enemy
+   that *cannot* see it yet could do after walking its points less a snap shot straight at it. While nothing is
    shootable from anywhere reachable, closing the distance counts instead, and
    counts for more with every handover in which nobody was hurt — two squads
    that each price the other's watch above a few metres of ground otherwise
@@ -97,6 +98,14 @@ spawn centroids ~29 tiles apart, ~1270 walkable tiles):
   ends its turn where Red can see it. Red — standing, shooting first — wins about 60% of mirror
   matches. Winners and losers barely differ in ground, so it is not *how much* a side moves
   that loses, but being the side that walks into view.
+
+**After pricing next-turn reach** (same blocks, edge deployment, wins summed): blue 568, red
+579, draws 53 — even, where it was 550 / 611 before. Units reach ~7 tiles sideways (from ~4) and
+a squad uses ~6.3% of the map (from 4.4%) and walks ~120 tiles a match (from 69); matches run
+longer (median 7 turns, from 5). And ground now separates results: winners walk ~121 tiles to
+losers' ~102, where before the two were the same. A second term — scoring an approach by the
+cover the target would have against it — was measured alongside and dropped: alone it moved
+neither ground nor result, and together with this one it only skewed the split to Blue.
 
 ### Another battlefield
 

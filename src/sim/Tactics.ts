@@ -40,6 +40,13 @@ const ADVANCE_PER_METRE = 2
 /** A move has to beat standing still by this much, or it is not worth the points. */
 const MARGIN = 1
 
+/**
+ * How much of an enemy's *next-turn* threat to count against a tile it cannot
+ * see yet. Half, because it has to spend the turn walking to take the shot, and
+ * may spend it on somebody else.
+ */
+const NEXT_TURN = 0.5
+
 export interface Destination {
   /** Start first: the shape a `moveUnit` intent carries. */
   route: Tile[]
@@ -105,6 +112,27 @@ function threat(grid: Grid, shooter: Combatant, target: Combatant, at: Tile, mod
 }
 
 /**
+ * What `shooter` could do to `target` standing on `at` after spending its next
+ * turn closing: its points less a snap shot's, walked straight at the tile, then
+ * the shot — from the direction it stands in now, so cover facing it counts.
+ *
+ * Straight-line and wall-blind on purpose: this prices *where a unit ends its
+ * turn*, not a route, and it only has to be right about the thing that was
+ * losing matches — stopping in the open inside what an enemy can reach and
+ * shoot.
+ */
+function nextTurnThreat(grid: Grid, shooter: Combatant, target: Combatant, at: Tile): number {
+  if (shooter.weapon.currentClip <= 0) return 0
+  const eff = effectiveWeapon(shooter, ShotMode.Snap)
+  const walk = Math.max(0, shooter.effectiveMaxAp - shotApCost(shooter, ShotMode.Snap)) / shooter.moveCostMul
+  const distance = Math.max(1, grid.distance(shooter.tile, at) - walk)
+  if (distance > eff.maxRange) return 0
+  const cover = shotCoverLevel(grid, shooter.tile, at)
+  const chance = hitChance(shooter, target, distance, cover, ShotMode.Snap).chance / 100
+  return chance * resolveDamage(eff, target).damage * shooter.weapon.bulletConsumption(ShotMode.Snap)
+}
+
+/**
  * The best place for `unit` to be this turn, or `null` when that is where it
  * already stands.
  *
@@ -145,7 +173,12 @@ export function chooseDestination(
     for (const enemy of living) {
       const distance = grid.distance(at, enemy.tile)
       if (distance < nearest) nearest = distance
-      if (distance > RULES.sightRange || !hasLineOfSight(grid, at, enemy.tile)) continue
+      if (distance > RULES.sightRange || !hasLineOfSight(grid, at, enemy.tile)) {
+        // Out of its sight now is not out of its reach next turn: a tile it
+        // can walk into range of and shoot is a tile to end a turn on warily.
+        exposure += NEXT_TURN * nextTurnThreat(grid, enemy, unit, at)
+        continue
+      }
       offense = Math.max(offense, offenseFrom(grid, unit, at, enemy, distance, ap))
       // What they would do to it on their turn: shoot it, or, standing next to
       // it, hit it — whichever is worse for the unit.
