@@ -1,4 +1,5 @@
 import { Faction, RULES, SQUAD_SIZE } from '../config'
+import type { MapOptions } from '../core/MapGenerator'
 import { AmmoId, type GrenadeId, GRENADES, type ShotMode, type WeaponId } from '../core/Arsenal'
 import type { AttachmentId } from '../core/Attachments'
 import { MELEE, MeleeId } from '../core/Melee'
@@ -78,6 +79,8 @@ export interface MatchSetup {
   turnCap?: number
   /** Keep a replayable command stream. Off by default; a sweep opts in. */
   record?: boolean
+  /** A battlefield other than the game's; see {@link MapOptions}. */
+  map?: MapOptions
 }
 
 /** What one weapon class did over a match. */
@@ -193,6 +196,7 @@ export class SimMatch {
       turnCap: this.turnCap,
       sheets: this.sheets,
       loadouts: this.loadouts,
+      ...(setup.map ? { map: setup.map } : {}),
     }
     this.host = new MatchHost(header)
     // Where the squads actually stood at the start, which is what forward and

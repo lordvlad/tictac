@@ -1,4 +1,5 @@
 import { MELEE, MeleeId } from '../core/Melee'
+import type { MapOptions } from '../core/MapGenerator'
 import { Faction, SQUAD_SIZE } from '../config'
 import { AMMO, type AmmoId, GRENADES, type GrenadeId, WEAPONS, type WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
@@ -48,6 +49,12 @@ export interface RecordingHeader {
    * replay has no sender, so it needs the numbers both sides fought with.
    */
   loadouts: Record<Faction, SquadLoadout>
+  /**
+   * Layout beyond the seed. Absent for every map the game plays, which is
+   * the default layout; present when a sweep asked for another one, because
+   * the same seed under other options is another map.
+   */
+  map?: MapOptions
 }
 
 export interface RecordedEvent {
@@ -213,6 +220,30 @@ export function squadLoadoutFrom(raw: unknown, what: string): SquadLoadout {
 }
 
 /**
+ * A header's map options, refused rather than defaulted: the terrain is
+ * regenerated from them, so a value this build does not understand would
+ * replay the match on a different map.
+ */
+function mapOptionsFrom(raw: unknown): MapOptions {
+  if (!raw || typeof raw !== 'object') throw new Error('header: map must be an object')
+  const map = raw as Partial<MapOptions>
+  const options: MapOptions = {}
+  if (map.size !== undefined) {
+    if (typeof map.size !== 'number' || !Number.isInteger(map.size) || map.size < 16 || map.size > 256) {
+      throw new Error(`header: map size ${String(map.size)} is not a size this build can lay out`)
+    }
+    options.size = map.size
+  }
+  if (map.spawns !== undefined) {
+    if (map.spawns !== 'centre' && map.spawns !== 'edge') {
+      throw new Error(`header: unknown spawn layout "${String(map.spawns)}"`)
+    }
+    options.spawns = map.spawns
+  }
+  return options
+}
+
+/**
  * Validate untrusted JSON as a recording.
  *
  * Nothing here repairs a file. A recording is replayed by re-running the rules
@@ -270,6 +301,7 @@ export function parseRecording(raw: unknown): CombatRecording {
       [Faction.Blue]: squadLoadoutFrom(rawLoadouts[Faction.Blue], 'header.loadouts.blue'),
       [Faction.Red]: squadLoadoutFrom(rawLoadouts[Faction.Red], 'header.loadouts.red'),
     },
+    ...(head.map === undefined ? {} : { map: mapOptionsFrom(head.map) }),
   }
 
   if (!Array.isArray(file.events)) throw new Error('not a tictac recording: no events')

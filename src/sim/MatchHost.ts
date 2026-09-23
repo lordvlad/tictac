@@ -72,7 +72,7 @@ export class MatchHost {
    * be derived — and something that could then disagree with what the seed says.
    */
   constructor(header: RecordingHeader, options: MatchHostOptions = {}) {
-    const map = generateMap(header.seed)
+    const map = generateMap(header.seed, header.map)
     this.grid = map.grid
     this.step = options.step ?? SIM.step
     this.maxSteps = options.maxStepsPerMove ?? 2000

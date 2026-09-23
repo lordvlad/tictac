@@ -520,7 +520,7 @@ function startPlayback(recording: CombatRecording): void {
   const world = new World()
   createGlobalRules(world)
 
-  const battlefield = new Battlefield(generateMap(header.seed), engine)
+  const battlefield = new Battlefield(generateMap(header.seed, header.map), engine)
   const squads = new Squads(
     world,
     battlefield.grid,

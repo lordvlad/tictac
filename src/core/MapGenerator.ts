@@ -85,17 +85,47 @@ function rectArea(r: Rect): number {
  * No border pass: the map edge is solid by construction, so there is nothing
  * to draw and no ring of tiles lost to it.
  */
-export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMap {
+/**
+ * How a map is laid out, beyond its seed.
+ *
+ * Both default to the game as it is played; the options exist so the sweep can
+ * ask what a different battlefield does to the fight. They travel in a
+ * recording's header, because the terrain is regenerated from the seed and the
+ * same seed with different options is a different map.
+ */
+export interface MapOptions {
+  /** Tiles per side. The furniture — buildings, wall runs, crates — scales with the area. */
+  size?: number
+  /**
+   * Where the squads deploy along their own edge.
+   *
+   * - `centre`: facing each other across the middle, a few tiles of jitter apart.
+   * - `edge`: anywhere along the edge, each side drawn independently — so the
+   *   two squads can start well off each other's line and the fight has to be
+   *   found before it can be had.
+   */
+  spawns?: 'centre' | 'edge'
+}
+
+export function generateMap(seed: number, options: MapOptions = {}): GeneratedMap {
+  const size = options.size ?? GRID_SIZE
   const rng = new Rng(seed)
   const grid = new Grid(size)
+  // How much more map there is than the one the furniture counts were tuned
+  // on. Exactly 1 at the default size, so the default draws are unchanged.
+  const area = (size / GRID_SIZE) ** 2
+  const scaled = (count: number): number => Math.round(count * area)
 
   // --- Deployment zones -----------------------------------------------------
-  // Blue deploys along the low-Y edge, Red along the high-Y edge, both centred
-  // with a random lateral jitter so games do not always look identical.
+  // Blue deploys along the low-Y edge, Red along the high-Y edge. Centred with
+  // a random lateral jitter by default, so games do not always look identical;
+  // anywhere along the edge when asked to be.
   const zoneW = SQUAD_SIZE + 3
   const zoneH = 3
-  const blueX = Math.round(size / 2 - zoneW / 2 + rng.range(-4, 4))
-  const redX = Math.round(size / 2 - zoneW / 2 + rng.range(-4, 4))
+  const alongEdge = (): number => rng.int(2, size - 2 - zoneW)
+  const centred = (): number => Math.round(size / 2 - zoneW / 2 + rng.range(-4, 4))
+  const blueX = options.spawns === 'edge' ? alongEdge() : centred()
+  const redX = options.spawns === 'edge' ? alongEdge() : centred()
   const blueZone: Rect = { x: clamp(blueX, 2, size - 2 - zoneW), y: 2, w: zoneW, h: zoneH }
   const redZone: Rect = {
     x: clamp(redX, 2, size - 2 - zoneW),
@@ -107,8 +137,8 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
 
   // --- Building footprints --------------------------------------------------
   const buildings: Building[] = []
-  const target = rng.int(5, 8)
-  for (let attempt = 0; attempt < 500 && buildings.length < target; attempt++) {
+  const target = scaled(rng.int(5, 8))
+  for (let attempt = 0; attempt < scaled(500) && buildings.length < target; attempt++) {
     const w = rng.int(7, 13)
     const h = rng.int(7, 13)
     const footprint: Rect = {
@@ -173,7 +203,7 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   // A run lies along one lattice line: a horizontal run is a row of north-side
   // edges, a vertical run a column of west-side edges. It costs no floor, so
   // both sides of it stay playable.
-  const runCount = rng.int(5, 10)
+  const runCount = scaled(rng.int(5, 10))
   for (let i = 0; i < runCount; i++) {
     const horizontal = rng.chance(0.5)
     const length = rng.int(3, 9)
@@ -196,7 +226,7 @@ export function generateMap(seed: number, size: number = GRID_SIZE): GeneratedMa
   }
 
   // --- Crate clusters (half cover) -----------------------------------------
-  const clusterCount = rng.int(10, 18)
+  const clusterCount = scaled(rng.int(10, 18))
   for (let i = 0; i < clusterCount; i++) {
     const cx = rng.int(2, size - 3)
     const cy = rng.int(2, size - 3)

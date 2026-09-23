@@ -9,6 +9,7 @@
  *   bun run balance -- --redAmmo=ap --blueItems=plate:1 --blueMods=scope,bipod
  *   bun run balance -- --blueWatch=off
  *   bun run balance -- --blueSidearm=knife --redSidearm=club
+ *   bun run balance -- --mapSize=72 --spawns=edge
  *   bun run balance -- --record=recordings
  *   bun run balance -- --json
  *
@@ -27,6 +28,7 @@ import { ItemId } from '../src/core/Items'
 import { MeleeId } from '../src/core/Melee'
 import { formatReport, sweep } from '../src/sim/Balance'
 import type { CombatRecording } from '../src/game/Recording'
+import type { MapOptions } from '../src/core/MapGenerator'
 import type { SquadPlan } from '../src/sim/SimMatch'
 
 function arg(name: string): string | undefined {
@@ -100,6 +102,20 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   }
 }
 
+/** Another battlefield, for asking what the map does to the fight. */
+function mapOptions(): MapOptions | undefined {
+  const size = arg('mapSize')
+  const spawns = arg('spawns')
+  if (size === undefined && spawns === undefined) return undefined
+  if (spawns !== undefined && spawns !== 'centre' && spawns !== 'edge') {
+    throw new Error(`--spawns: "${spawns}" is not one of centre, edge`)
+  }
+  return {
+    ...(size === undefined ? {} : { size: numberArg('mapSize', 0) }),
+    ...(spawns === undefined ? {} : { spawns }),
+  }
+}
+
 const recordDir = arg('record')
 const recorded: { seed: number; recording: CombatRecording }[] = []
 
@@ -107,6 +123,7 @@ const report = sweep({
   seed: numberArg('seed', 1),
   matches: numberArg('matches', 100),
   turnCap: numberArg('turnCap', 40),
+  map: mapOptions(),
   blue: planFor('blue'),
   red: planFor('red'),
   record: recordDir !== undefined,

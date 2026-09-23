@@ -414,3 +414,39 @@ describe('Vertical access', () => {
     expect(ladderLayer!.fade.array[0]).toBe(0)
   })
 })
+
+describe('Another battlefield: size and deployment', () => {
+  test('a larger map is still one connected map', () => {
+    // The furniture scales with the area; a scaled pass that sealed a room
+    // would strand the ground behind it, which is the invariant that matters.
+    for (const seed of [3, 11, 29]) {
+      const { grid, spawns } = generateMap(seed, { size: 72, spawns: 'edge' })
+      expect(grid.size).toBe(72)
+      const mask = grid.reachableMask(spawns[Faction.Blue][0]!)
+      let stranded = 0
+      grid.forEach((x, y) => {
+        if (grid.isWalkable(x, y) && !mask[grid.index(x, y)]) stranded++
+      })
+      expect(stranded).toBe(0)
+    }
+  })
+
+  test('edge deployment reaches both ends of the edge; centred never leaves the middle', () => {
+    const size = 48
+    const lateral = (spawns: 'centre' | 'edge') => {
+      let left = false
+      let right = false
+      for (let seed = 1; seed <= 16; seed++) {
+        const map = generateMap(seed, { size, spawns })
+        for (const faction of [Faction.Blue, Faction.Red] as const) {
+          const x = map.spawns[faction].reduce((sum, t) => sum + t.x, 0) / map.spawns[faction].length
+          if (x < size / 4) left = true
+          if (x > (3 * size) / 4) right = true
+        }
+      }
+      return { left, right }
+    }
+    expect(lateral('edge')).toEqual({ left: true, right: true })
+    expect(lateral('centre')).toEqual({ left: false, right: false })
+  })
+})

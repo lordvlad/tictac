@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { MatchHost } from '../src/sim/MatchHost'
+import { parseRecording } from '../src/game/Recording'
 import { Faction } from '../src/config'
 import { ShotMode, WeaponId } from '../src/core/Arsenal'
 import { AmmoId } from '../src/core/Arsenal'
@@ -109,6 +111,38 @@ describe('Running a recorded match with nobody watching', () => {
       first.units.filter((unit) => unit.faction === faction && !unit.dead).length
     expect(living(Faction.Blue)).toBe(outcome.survivors[Faction.Blue])
     expect(living(Faction.Red)).toBe(outcome.survivors[Faction.Red])
+  })
+
+  test('a match on another battlefield replays on that battlefield', () => {
+    // The terrain is regenerated from the seed *and* the header's layout.
+    const match = new SimMatch({
+      seed: 21,
+      blue: STOCK,
+      red: STOCK,
+      record: true,
+      map: { size: 48, spawns: 'edge' },
+    })
+    const outcome = match.run()
+    const file = parseRecording(JSON.parse(JSON.stringify(match.recording)))
+    expect(file.header.map).toEqual({ size: 48, spawns: 'edge' })
+    // Asked of the rebuilt world directly: the sweep plays through the same
+    // host, so a host that ignored the layout would agree with itself.
+    expect(new MatchHost(file.header).grid.size).toBe(48)
+
+    const result = replay(file)
+    expect(result.skipped).toEqual([])
+    const living = (faction: Faction) =>
+      result.units.filter((unit) => unit.faction === faction && !unit.dead).length
+    expect(living(Faction.Blue)).toBe(outcome.survivors[Faction.Blue])
+    expect(living(Faction.Red)).toBe(outcome.survivors[Faction.Red])
+  })
+
+  test('a layout this build does not know is refused, not defaulted', () => {
+    const match = new SimMatch({ seed: 21, blue: STOCK, red: STOCK, record: true })
+    match.run()
+    const file = JSON.parse(JSON.stringify(match.recording))
+    file.header.map = { spawns: 'scattered' }
+    expect(() => parseRecording(file)).toThrow(/scattered/)
   })
 
   test('a file holds intents and nothing to disagree with', () => {

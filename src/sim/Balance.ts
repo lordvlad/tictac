@@ -1,4 +1,5 @@
 import { Faction } from '../config'
+import type { MapOptions } from '../core/MapGenerator'
 import type { GroundCovered } from './Ground'
 import { WeaponId } from '../core/Arsenal'
 import type { CombatRecording } from '../game/Recording'
@@ -26,6 +27,8 @@ export interface SweepOptions {
   red?: SquadPlan
   /** Keep a replayable command stream per match, for {@link SweepOptions.onMatch}. */
   record?: boolean
+  /** Fight on another battlefield; see {@link MapOptions}. */
+  map?: MapOptions
   /**
    * Called once per match, in seed order.
    *
@@ -133,6 +136,7 @@ export function sweep(options: SweepOptions): SweepReport {
       red: options.red ?? STOCK_PLAN,
       turnCap,
       record: options.record,
+      map: options.map,
     })
     const outcome = match.run()
     outcomes.push(outcome)
