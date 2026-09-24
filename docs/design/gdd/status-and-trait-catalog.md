@@ -3,7 +3,7 @@ title: "GDD: Status, Trait & Worn Kit Catalogue"
 id: "GDD-CATALOG"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-23"
+lastReviewed: "2026-09-24"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Traits.ts"
@@ -138,12 +138,12 @@ half-width: 0.3 m (`AIM.targetSize`) times the share cover and stance leave show
 27% / 14% behind tall. A round lands if any of its projectiles does, and armour is
 subtracted once per round, not per projectile.
 
-| Weapon | AP | Damage | Pellets | Armour pen | Sway (m) | Spread (m per m) | Max range | Clip | Crit | Crit × | Modes (error ×, AP ×) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Rifle | 4 | 55 | 1 | 25% | 0.075 | 0.02 | 22 m | 15 | 12% | 1.5 | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2), Burst Fire (×1.1, ×1.25) |
-| Shotgun | 4 | 14 | 9 | 5% | 0 | 0.05 | 12 m | 4 | 20% | 1.8 | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
-| Sniper Rifle | 6 | 70 | 1 | 50% | 0.11 | 0.0015 | 40 m | 5 | 25% | 2.2 | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
-| Gatling | 5 | 35 | 1 | 25% | 0.11 | 0.014 | 22 m | 30 | 5% | 1.3 | Burst Fire (×1.1, ×1.25) |
+| Weapon | AP | Damage | Pellets | Armour pen | Sway (m) | Spread (m per m) | Max range | Clip | Crit | Crit × | Heard at | Modes (error ×, AP ×) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Rifle | 4 | 55 | 1 | 25% | 0.075 | 0.02 | 22 m | 15 | 12% | 1.5 | 40 m (10 m suppressed) | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2), Burst Fire (×1.1, ×1.25) |
+| Shotgun | 4 | 14 | 9 | 5% | 0 | 0.05 | 12 m | 4 | 20% | 1.8 | 45 m (11.25 m suppressed) | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
+| Sniper Rifle | 6 | 70 | 1 | 50% | 0.11 | 0.0015 | 40 m | 5 | 25% | 2.2 | 55 m (13.75 m suppressed) | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
+| Gatling | 5 | 35 | 1 | 25% | 0.11 | 0.014 | 22 m | 30 | 5% | 1.3 | 50 m (12.5 m suppressed) | Burst Fire (×1.1, ×1.25) |
 
 Overwatch fires as Reaction Fire (×1.4 error, ×0 AP), which no weapon lists as a mode of its own.
 
@@ -157,11 +157,11 @@ defender's parry is their sidearm's plus their primary weapon's handling. From b
 the defender's parry, evasion and status defence do not count, and the damage is
 multiplied by the sidearm's own "From behind".
 
-| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Loud |
+| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Heard at |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Fists | 3 | 75% | 0 | 14 | ×1 | 0% | 0 | 5% | 1.5 | no |
-| Knife | 3 | 80% | +10 | 32 | ×5 | 50% | 0 | 25% | 2 | no |
-| Club | 4 | 70% | +5 | 36 | ×1 | 90% | 12 | 0% | 1 | yes |
+| Fists | 3 | 75% | 0 | 14 | ×1 | 0% | 0 | 5% | 1.5 | silent |
+| Knife | 3 | 80% | +10 | 32 | ×5 | 50% | 0 | 25% | 2 | silent |
+| Club | 4 | 70% | +5 | 36 | ×1 | 90% | 12 | 0% | 1 | 12 m |
 
 | Primary weapon | Parry when held |
 | --- | --- |

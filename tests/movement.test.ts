@@ -19,8 +19,8 @@ installCanvasStub()
  * and what a step costs it — routes are budgeted in terrain prices, so a unit
  * with no multiplier would plan against a budget of NaN.
  */
-function unit(tile: Tile, ap = 12): Soldier {
-  return { tile, ap, isDead: false, moveCostMul: 1 } as unknown as Soldier
+function unit(tile: Tile, ap = 12, moveCostMul = 1): Soldier {
+  return { tile, ap, isDead: false, moveCostMul, isCrouching: moveCostMul > 1 } as unknown as Soldier
 }
 interface ShowCall {
   goal: { x: number; y: number; z: number }
@@ -192,5 +192,17 @@ describe('Movement never shares a tile', () => {
     planner.handleClick(mover, { x: 6, y: 6 }, false)
     expect(planner.plan.path).toEqual([])
     expect(planner.plan.valid).toBe(false)
+  })
+})
+
+describe('What the move preview says a walk costs', () => {
+  test('the price is what the unit pays, not what the ground charges', () => {
+    // A crouched unit pays half as much again a step. Labelled at the
+    // terrain's price, a route the preview called affordable would strand it
+    // two thirds of the way along.
+    const crouched = unit({ x: 1, y: 1 }, 12, RULES.crouchStepCost)
+    const { planner, shown } = harness([crouched])
+    planner.handleClick(crouched, { x: 5, y: 1 }, false)
+    expect(shown[shown.length - 1]!.apCost).toBe(4 * RULES.stepOrthogonal * RULES.crouchStepCost)
   })
 })

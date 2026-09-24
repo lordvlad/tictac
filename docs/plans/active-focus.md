@@ -31,9 +31,11 @@ reaction fire and a roster that survives a match.
   2. ✅ Crouched movement: a crouched unit stays crouched when it moves, at 1.5× a step.
   3. ✅ Attacks from behind: an integer heading; blows and shots from behind ignore evasion,
      parry and defence (cover still counts), and a knife from behind does 5× its damage.
-  4. Noise: loudness per source (per weapon, muffled by a suppressor) falling off with
-     distance against each listener's own threshold; a frag is heard map-wide, smoke and
-     flash much less. Then awareness, glass and the stone.
+  4. ✅ Noise: loudness per source (per weapon, muffled by a suppressor) falling off with the
+     square of distance against each listener's own threshold; a frag is heard map-wide,
+     smoke and flash much less. Rings on the map, "heard at" on the move preview.
+  5. Next: awareness (unaware / alerted / engaged) as replicated state noise and sight drive,
+     then glass and the stone.
 
 ### 📋 Ready (Pull Queue)
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for

@@ -27,6 +27,8 @@ import { Effects } from '../render/Effects'
 import { SceneCombatFx } from '../render/SceneCombatFx'
 import { SquadViews } from '../render/SquadViews'
 import { WallXray } from './WallXray'
+import { NoiseMarks } from '../render/NoiseMarks'
+import { roughly } from '../core/Noise'
 import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
@@ -79,6 +81,7 @@ export class InteractionController {
   private readonly debugMap = new DebugMap()
   private readonly fog: FogOfWar
   private readonly xray: WallXray
+  private readonly noiseMarks: NoiseMarks
   private readonly effects: Effects
   readonly movementSystem: MovementSystem
   readonly combatSystem: CombatSystem
@@ -218,6 +221,10 @@ export class InteractionController {
     this.commands.onStep = () => {
       this.recomputeVisibility()
       this.refreshHud()
+    }
+    this.noiseMarks = new NoiseMarks(engine, battlefield.grid)
+    this.commands.onNoise = (noise, heard) => {
+      this.noiseMarks.add(roughly(noise.at), heard[0]!.faction, this.handovers)
     }
     this.commands.onBeforeApply = (command, origin) => {
       // The fingerprint is of the world as this side hands it over, so it is
@@ -721,6 +728,7 @@ export class InteractionController {
     window.removeEventListener('keydown', this.onKeyDown)
     this.planner.dispose()
     this.shoot.dispose()
+    this.noiseMarks.dispose()
     this.grenade.dispose()
     this.debug.dispose()
     this.debugMap.dispose()
@@ -910,6 +918,7 @@ export class InteractionController {
       this.battlefield.ground.revealAll()
       this.battlefield.blocks.revealAll()
       for (const soldier of this.squads.soldiers) soldier.seen = true
+      this.noiseMarks.show(null, this.handovers)
       return
     }
 
@@ -918,6 +927,12 @@ export class InteractionController {
         ? this.network.myFaction
         : this.turnManager.activeFaction
     this.fog.recompute(fogFaction, this.squads)
+    this.noiseMarks.show(fogFaction, this.handovers)
+  }
+
+  /** Handovers so far: the clock noise marks fade by. */
+  private get handovers(): number {
+    return this.turnManager.turnNumber * 2 + (this.turnManager.activeFaction === Faction.Blue ? 0 : 1)
   }
 
   // ---------------------------------------------------------------------------

@@ -48,7 +48,7 @@ export const ATTACHMENTS: Record<AttachmentId, AttachmentSpec> = {
   [AttachmentId.Suppressor]: {
     id: AttachmentId.Suppressor,
     name: 'Suppressor',
-    description: 'Firing never gives the position away, but crits bite less.',
+    description: 'Firing never gives the position away, and a shot carries a quarter as far; crits bite less.',
     traits: [Trait.Silenced],
     slots: 1,
   },

@@ -2,8 +2,8 @@
 title: "GDD: Noise & Stealth — Being Heard, and Not Being"
 id: "GDD-NOISE"
 type: "gdd"
-status: "draft"
-lastReviewed: "2026-09-17"
+status: "in-progress"
+lastReviewed: "2026-09-24"
 appliesTo:
   - "src/game/FogOfWar.ts"
   - "src/ecs/components/StanceComponent.ts"
@@ -18,8 +18,10 @@ tags: ["stealth", "noise", "awareness", "design"]
 
 # GDD: Noise & Stealth — Being Heard, and Not Being
 
-**Status: draft.** A design proposal. Numbers are proposals; shipped ones live in the code and
-appear in the [generated catalogue](status-and-trait-catalog.md).
+**Status: in progress (ITEM-019).** Built: crouched movement, attacks from behind, and
+noise (§3). Not yet built: awareness (§4), glass and the stone (§5), awareness on the HUD.
+Shipped numbers live in the code and appear in the [generated
+catalogue](status-and-trait-catalog.md).
 
 ## 1. The idea
 
@@ -51,25 +53,31 @@ the same kind.
 
 ## 3. Being heard
 
-A noise is an event at a tile with a radius. Anything inside it learns that something is
-there — not what, not exactly where.
+**Built** (`src/core/Noise.ts`). A noise has a source tile and a **loudness**, stated as the
+distance in metres at which an ordinary ear just hears it. It falls off with the square of
+distance — intensity `L²/d²` against the ear's threshold — so a noise four times as loud
+carries twice as far. Every listener has its own threshold: **hearing** multiplies the
+distance it hears anything at, from Intelligence (`CHARACTER.hearing`, −20% to +25%). Walls
+do not muffle: sound goes round corners and through doors, which is what makes it a
+different channel from sight rather than a worse copy of it. Nobody listens for their own side.
 
-| Noise | Proposed loudness | Notes |
+| Noise | Heard at (ordinary ear) | Notes |
 | --- | --- | --- |
-| Crouched move | silent | The reason to crouch |
-| Standing move | quiet | Carries a tile or two |
-| Sprint | loud | Plus `Winded` |
-| Door opened | quiet | Forcing one is loud |
-| Breaking glass | loud | And it leaves the window gone — see below |
-| Bare-hand or blade kill | silent | The point of a knife |
-| Bludgeon | loud | Hitting a plate with a hammer |
-| Suppressed shot | quiet | The suppressor's existing upside, extended |
-| Unsuppressed shot | very loud | Already reveals position; this generalises it |
-| Grenade | very loud | Nothing quiet about it |
+| Crouched step | 1 m | A sharp ear beside you hears it; an ordinary one does not |
+| Standing step | 4 m | |
+| Fists, knife | silent | |
+| Club | 12 m | And it gives the position away, like a shot |
+| Rifle / shotgun / gatling / sniper | 40 / 45 / 50 / 55 m | Per weapon (`Weapon.loudness`) |
+| Suppressed shot | a quarter of the weapon's | `NOISE.suppressed` |
+| Smoke / flashbang | 6 / 20 m | Where it lands |
+| Frag grenade | everywhere | Where it lands; every unit on any map hears it |
 
-The crucial rule is what hearing *gives* you. Being heard should never hand the listener a
-firing solution — only the knowledge that something is nearby, and roughly where. Otherwise
-sound becomes a way to shoot through walls, and the careful sight model stops mattering.
+Still proposals: sprinting as its own noise, plate as a noisy option, doors and glass.
+
+**What hearing gives** is deliberately little: that something is there, and **roughly where**
+— the middle of the 3×3 block it was made in (`roughly`). Never a firing solution; a shot
+still needs sight. `CommandSystem.onNoise(noise, heard)` reports every noise somebody heard,
+with who: worked out from state both peers hold, so both get the same list.
 
 ## 4. Alertness, and the unaware kill
 
@@ -119,14 +127,18 @@ awareness to be real: a distraction is meaningless if nobody can be distracted.
 
 - **A noise leaves a mark on the map** where it was heard from, on the side that heard it, and
   fades. Players need to see their own mistakes; a stealth system whose feedback is invisible
-  reads as randomness.
+  reads as randomness. *Built* (`src/render/NoiseMarks.ts`): an amber ring as wide as "roughly
+  where", shown only to the side that heard it, fading over its next two turns.
 - **Alertness is legible on the enemy.** Before committing to a knife, the player must be able
   to tell an unaware sentry from an alerted one. Intel fog already withholds an enemy's
   *sheet* until they have been read; awareness is the opposite — it should be shown, because
   it is the thing the player is acting on.
 - **Loudness is shown before the action, not after.** The move preview should say the route is
-  audible, the same way the shot panel says what a shot's odds are.
-- **Crouching should visibly say "quiet"**, since it now means two things.
+  audible, the same way the shot panel says what a shot's odds are. *Built*: the move label
+  reads "heard at 4 m" standing, "heard at 1 m" crouched, under the AP the walk actually
+  costs (it used to show the terrain's price, which understated a crouched or limping unit's).
+- **Crouching should visibly say "quiet"**, since it now means two things. The button reads
+  "Crouch"; the loadout names each sidearm's noise ("silent", "heard at 12 m").
 
 ## 7. What exists today, precisely
 

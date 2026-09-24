@@ -148,6 +148,15 @@ tile above a front one through the contact's last known heading — but the knif
 do not move (201 / 183 against 204 / 181 before), because a blow happens in fewer than half of
 matches at all.
 
+**Noise** (2026-09-24, same blocks): mirror 595 / 569 / 36, unchanged. The policy hears what
+its units hear (`Intel.hear`, roughly where) and, with no contacts, goes to look at the most
+recent noise from this turn or the last before it searches unseen ground. On block 1000 the two
+sides between them hear about 25 noises a match — 9.4 standing steps, 15 shots, one frag,
+almost never a crouched step — of which 1.9 arrive while the hearing side has no contact at
+all; that is the only time the policy acts on one, which is why nothing moved. Four
+suppressors against stock: 212 / 175, from 213 / 176 before noise. Noise has no rule
+consequence yet; awareness is what will give it one.
+
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles
 walked indoors and the share of unit-turns *ended* indoors; the weapon table reports each

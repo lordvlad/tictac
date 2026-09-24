@@ -48,10 +48,12 @@ export interface MeleeSpec {
   critChance: number
   critMultiplier: number
   /**
-   * Whether the blow gives the attacker's position away, the way a shot does.
-   * A knife in the dark does not; a hammer on a plate carrier does.
+   * Metres an ordinary ear hears a blow at (`core/Noise`); nought is silent.
+   * A knife in the dark makes no sound; a hammer on a plate carrier carries
+   * across a building — and, like a shot, anything audible gives the
+   * attacker's position away to the other side.
    */
-  loud: boolean
+  loudness: number
   /**
    * What the blow's damage is multiplied by when it lands from behind. Every
    * blow from behind already gets past parry and dodge; this is the weapon
@@ -73,7 +75,7 @@ export const MELEE: Record<MeleeId, MeleeSpec> = {
     armorShred: 0,
     critChance: 5,
     critMultiplier: 1.5,
-    loud: false,
+    loudness: 0,
     fromBehind: 1,
   },
   [MeleeId.Knife]: {
@@ -87,7 +89,7 @@ export const MELEE: Record<MeleeId, MeleeSpec> = {
     armorShred: 0,
     critChance: 25,
     critMultiplier: 2,
-    loud: false,
+    loudness: 0,
     fromBehind: 5,
   },
   [MeleeId.Club]: {
@@ -103,7 +105,7 @@ export const MELEE: Record<MeleeId, MeleeSpec> = {
     armorShred: 12,
     critChance: 0,
     critMultiplier: 1,
-    loud: true,
+    loudness: 12,
     fromBehind: 1,
   },
 }

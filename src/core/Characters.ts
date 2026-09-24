@@ -86,6 +86,8 @@ export interface DerivedStats {
   itemApDelta: number
   /** Percent on top of HP an item restores to them. */
   healBonus: number
+  /** Percent on the distance this character hears anything at. */
+  hearing: number
   /** Percent of gear's own movement and AP penalty this character shrugs off. */
   gearRelief: number
   /** Percentage points on landing a blow. */
@@ -130,6 +132,7 @@ export function derive(sheet: CharacterSheet): DerivedStats {
     throwRange: band(strength, CHARACTER.throwRange),
     carrySlots: band(strength, CHARACTER.carrySlots),
     itemApDelta: band(intelligence, CHARACTER.itemApDelta),
+    hearing: band(intelligence, CHARACTER.hearing),
     gearRelief: band(strength, CHARACTER.gearRelief),
     meleeSkill: band(strength, CHARACTER.meleeSkill),
     meleePower: band(strength, CHARACTER.meleePower),

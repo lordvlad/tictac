@@ -9,6 +9,8 @@ import type { Soldier } from '../../entities/Soldier'
 import type { Squads } from '../../game/Squads'
 import { canWatch, reactToArrival, watchCost } from '../../game/Overwatch'
 import { NO_FX, type CombatFx } from '../../core/Combatant'
+import { MELEE } from '../../core/Melee'
+import { type Noise, shotLoudness } from '../../core/Noise'
 import type { Roll } from '../../core/rng'
 import { executeMelee,
   applyHitEffects,
@@ -52,6 +54,11 @@ export class CombatSystem extends System {
 
   /** Fired after a shot resolves, for damage numbers and target bookkeeping. */
   onShotResolved?: (shooter: Soldier, target: Soldier, result: ShotResult) => void
+  /**
+   * Something an attack made audible: a shot, a loud blow, a grenade going
+   * off. Owned by `CommandSystem`, which works out who heard it.
+   */
+  onNoise?: (noise: Noise) => void
 
   /**
    * Fire at a target.
@@ -78,6 +85,7 @@ export class CombatSystem extends System {
       rolls,
     )
     if (!result) return null
+    this.onNoise?.({ at: { ...shooter.tile }, loudness: shotLoudness(shooter), faction: shooter.faction })
     this.onShotResolved?.(shooter, target, result)
     return result
   }
@@ -89,12 +97,17 @@ export class CombatSystem extends System {
   melee(attacker: Soldier, target: Soldier): ShotResult | null {
     const result = executeMelee(this.grid, attacker, target, this.fx, this.roll)
     if (!result) return null
+    const loudness = MELEE[attacker.sidearm].loudness
+    if (loudness > 0) this.onNoise?.({ at: { ...attacker.tile }, loudness, faction: attacker.faction })
     this.onShotResolved?.(attacker, target, result)
     return result
   }
 
   throwGrenade(thrower: Soldier, at: Tile, kind: GrenadeId): GrenadeResult {
-    return throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx)
+    const result = throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx)
+    // Heard where it goes off, not where it was thrown from.
+    if (result.thrown) this.onNoise?.({ at: { ...at }, loudness: thrower.grenadeSpecs[kind].loudness, faction: thrower.faction })
+    return result
   }
 
   reload(soldier: Soldier): boolean {
@@ -133,7 +146,10 @@ export class CombatSystem extends System {
    */
   reactTo(mover: Soldier): number {
     const fired = reactToArrival(this.grid, mover, this.squads.soldiers, this.roll, this.fx)
-    for (const { watcher, result } of fired) this.onShotResolved?.(watcher, mover, result)
+    for (const { watcher, result } of fired) {
+      this.onNoise?.({ at: { ...watcher.tile }, loudness: shotLoudness(watcher), faction: watcher.faction })
+      this.onShotResolved?.(watcher, mover, result)
+    }
     return fired.length
   }
 

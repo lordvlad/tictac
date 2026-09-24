@@ -53,6 +53,8 @@ export interface Combatant extends CombatantStats, Casualty {
    * order — and read by anything that asks whether an attack came from behind.
    */
   heading: number
+  /** Multiplier on the distance this unit hears anything at (`core/Noise`); 1 is ordinary. */
+  readonly hearing: number
   /** The AP ceiling with live statuses folded in. */
   readonly effectiveMaxAp: number
   /** What a step costs this unit, as a multiple of the terrain's own price. */

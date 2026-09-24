@@ -15,6 +15,7 @@
  */
 import { SHOT_MODES, STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { LONG_GUN_PARRY, MELEE, MeleeId } from '../src/core/Melee'
+import { NOISE } from '../src/core/Noise'
 import { AIM, CHARACTER, COVER, CRIT, RULES, WOUNDS } from '../src/config'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
@@ -319,16 +320,16 @@ function build(): string {
   lines.push('subtracted once per round, not per projectile.')
   lines.push('')
   lines.push(
-    '| Weapon | AP | Damage | Pellets | Armour pen | Sway (m) | Spread (m per m) | Max range | Clip | Crit | Crit × | Modes (error ×, AP ×) |',
+    '| Weapon | AP | Damage | Pellets | Armour pen | Sway (m) | Spread (m per m) | Max range | Clip | Crit | Crit × | Heard at | Modes (error ×, AP ×) |',
   )
-  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
   for (const id of Object.values(WeaponId)) {
     const w = WEAPONS[id]
     const modes = w.availableModes
       .map((mode) => `${SHOT_MODES[mode].name} (×${SHOT_MODES[mode].spreadMul}, ×${SHOT_MODES[mode].apMul})`)
       .join(', ')
     lines.push(
-      `| ${w.name} | ${w.apCost} | ${w.damage} | ${w.pellets} | ${share(w.armorPen)} | ${w.sway} | ${w.spread} | ${w.maxRange} m | ${w.maxClip} | ${w.critChance}% | ${w.critMultiplier} | ${modes} |`,
+      `| ${w.name} | ${w.apCost} | ${w.damage} | ${w.pellets} | ${share(w.armorPen)} | ${w.sway} | ${w.spread} | ${w.maxRange} m | ${w.maxClip} | ${w.critChance}% | ${w.critMultiplier} | ${w.loudness} m (${w.loudness * NOISE.suppressed} m suppressed) | ${modes} |`,
     )
   }
   lines.push('')
@@ -350,12 +351,12 @@ function build(): string {
   lines.push("the defender's parry, evasion and status defence do not count, and the damage is")
   lines.push('multiplied by the sidearm\'s own "From behind".')
   lines.push('')
-  lines.push('| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Loud |')
+  lines.push('| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Heard at |')
   lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
   for (const id of Object.values(MeleeId)) {
     const m = MELEE[id]
     lines.push(
-      `| ${m.name} | ${m.apCost} | ${m.accuracy}% | ${points(m.parry)} | ${m.damage} | ×${m.fromBehind} | ${share(m.armorPen)} | ${m.armorShred} | ${m.critChance}% | ${m.critMultiplier} | ${m.loud ? 'yes' : 'no'} |`,
+      `| ${m.name} | ${m.apCost} | ${m.accuracy}% | ${points(m.parry)} | ${m.damage} | ×${m.fromBehind} | ${share(m.armorPen)} | ${m.armorShred} | ${m.critChance}% | ${m.critMultiplier} | ${m.loudness > 0 ? `${m.loudness} m` : 'silent'} |`,
     )
   }
   lines.push('')

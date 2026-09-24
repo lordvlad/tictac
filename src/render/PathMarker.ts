@@ -49,7 +49,8 @@ export class PathMarker {
    * centres (y = 0); the hover height is applied here. `coverLevels`, aligned to
    * {@link COVER_DIRS}, adds a directional cover shield on each protected side
    * of the goal tile. `apCost`, when given, is shown above the goal pole so the
-   * price of the move is readable without counting tiles.
+   * price of the move is readable without counting tiles, with `note` — how
+   * far the walk is heard — beneath it.
    */
   show(
     path: Vector3[],
@@ -58,6 +59,7 @@ export class PathMarker {
     valid: boolean,
     coverLevels?: readonly CoverLevel[],
     apCost?: number,
+    note?: string,
   ): void {
     const beaconColor = valid ? PATH.colorValid : PATH.colorInvalid
 
@@ -73,7 +75,7 @@ export class PathMarker {
     this.beacon(goal, PATH.goalHeight, [PATH.goalInnerRadius, PATH.goalOuterRadius], beaconColor)
 
     if (apCost !== undefined && Number.isFinite(apCost)) {
-      this.label(goal, `${formatAp(apCost)} AP`, valid)
+      this.label(goal, `${formatAp(apCost)} AP`, valid, note)
     }
 
     if (coverLevels) {
@@ -162,8 +164,8 @@ export class PathMarker {
   }
 
   /** Camera-facing text plate floating just above the goal pole. */
-  private label(goal: Vector3, text: string, valid: boolean): void {
-    const texture = labelTexture(text, valid)
+  private label(goal: Vector3, text: string, valid: boolean, note?: string): void {
+    const texture = labelTexture(text, valid, note)
     this.textures.push(texture)
     const mat = new SpriteMaterial({
       map: texture,
@@ -174,8 +176,10 @@ export class PathMarker {
     })
     this.materials.push(mat)
     const sprite = new Sprite(mat)
-    sprite.position.set(goal.x, goal.y + PATH.goalHeight + PATH.labelRise, goal.z)
-    sprite.scale.set(PATH.labelScale * LABEL_ASPECT, PATH.labelScale, 1)
+    const aspect = note ? LABEL_ASPECT / 1.5 : LABEL_ASPECT
+    const scale = note ? PATH.labelScale * 1.5 : PATH.labelScale
+    sprite.position.set(goal.x, goal.y + PATH.goalHeight + PATH.labelRise + (scale - PATH.labelScale) / 2, goal.z)
+    sprite.scale.set(scale * aspect, scale, 1)
     sprite.renderOrder = 12
     this.group.add(sprite)
   }
@@ -257,24 +261,27 @@ function formatAp(cost: number): string {
 /**
  * Draw the AP cost onto a canvas texture: pill background so the digits stay
  * readable against bright floor and dark shadow alike, tinted by affordability.
+ * A `note` goes on a smaller second line.
  */
-function labelTexture(text: string, valid: boolean): CanvasTexture {
+function labelTexture(text: string, valid: boolean, note?: string): CanvasTexture {
   const width = 160
-  const height = 64
+  const height = note ? 96 : 64
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')!
   const ink = valid ? '#8effb4' : '#ff9a8e'
 
-  const radius = height / 2
+  const radius = 30
   ctx.beginPath()
   ctx.moveTo(radius, 4)
   ctx.lineTo(width - radius, 4)
   ctx.quadraticCurveTo(width - 4, 4, width - 4, radius)
+  ctx.lineTo(width - 4, height - radius)
   ctx.quadraticCurveTo(width - 4, height - 4, width - radius, height - 4)
   ctx.lineTo(radius, height - 4)
-  ctx.quadraticCurveTo(4, height - 4, 4, radius)
+  ctx.quadraticCurveTo(4, height - 4, 4, height - radius)
+  ctx.lineTo(4, radius)
   ctx.quadraticCurveTo(4, 4, radius, 4)
   ctx.closePath()
   ctx.fillStyle = 'rgba(8, 12, 18, 0.78)'
@@ -287,7 +294,10 @@ function labelTexture(text: string, valid: boolean): CanvasTexture {
   ctx.font = 'bold 34px "Segoe UI", Inter, system-ui, sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(text, width / 2, height / 2 + 2)
-
+  ctx.fillText(text, width / 2, note ? 36 : height / 2 + 2)
+  if (note) {
+    ctx.font = '600 22px "Segoe UI", Inter, system-ui, sans-serif'
+    ctx.fillText(note, width / 2, 70)
+  }
   return new CanvasTexture(canvas)
 }

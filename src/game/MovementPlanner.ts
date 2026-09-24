@@ -1,6 +1,7 @@
 import { directionalCover } from '../core/Cover'
 import { type Grid, type Tile, tileEquals } from '../core/Grid'
 import { findChainedPath } from '../core/Pathfinding'
+import { stepLoudness } from '../core/Noise'
 import { moveBudget } from './Movement'
 import type { Soldier } from '../entities/Soldier'
 import { PathMarker } from '../render/PathMarker'
@@ -195,8 +196,11 @@ export class MovementPlanner {
       affordable,
       provisional ? undefined : directionalCover(this.grid, endpoint),
       // Unreachable routes report Infinity; showing the walkable prefix's cost
-      // would be a lie, so the label is left off entirely.
-      Number.isFinite(result.totalCost) ? result.totalCost : undefined,
+      // would be a lie, so the label is left off entirely. Routes are costed
+      // in terrain prices; what the unit pays is that times its own rate — a
+      // crouch or a limp — so that is what the label says.
+      Number.isFinite(result.totalCost) ? result.totalCost * soldier.moveCostMul : undefined,
+      `heard at ${stepLoudness(soldier.isCrouching)} m`,
     )
   }
 

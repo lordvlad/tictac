@@ -88,6 +88,12 @@ export abstract class Weapon {
    * be close; a sniper rifle wants the distance.
    */
   critRangeBias = 0
+  /**
+   * Metres an ordinary ear hears a shot at (`core/Noise`). Far past what can
+   * be seen: a gunshot tells a whole quarter of the map that there is a fight.
+   * A suppressor keeps `NOISE.suppressed` of it.
+   */
+  loudness = 40
 
   /**
    * Rail space, in slots.
@@ -219,6 +225,7 @@ export class Shotgun extends Weapon {
     this.critChance = 20
     this.critMultiplier = 1.8
     this.critRangeBias = -1
+    this.loudness = 45
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Snap, ShotMode.Aimed]
@@ -248,6 +255,8 @@ export class Sniper extends Weapon {
     this.critChance = 25
     this.critMultiplier = 2.2
     this.critRangeBias = 1
+    // A full-power cartridge: the loudest thing on the map that is not a bomb.
+    this.loudness = 55
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Snap, ShotMode.Aimed]
@@ -274,6 +283,7 @@ export class Gatling extends Weapon {
     this.critChance = 5
     this.critMultiplier = 1.3
     this.critRangeBias = -0.5
+    this.loudness = 50
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Burst] // ONLY option for Gatling
@@ -512,6 +522,12 @@ export interface GrenadeSpec {
   applies: StatusKind | null
   /** True when the effect is meant for your own side (smoke). */
   friendly: boolean
+  /**
+   * Metres an ordinary ear hears it go off at, from where it lands. A frag is
+   * heard by everybody on the map; a flashbang's bang is short and sharp; a
+   * smoke canister hisses.
+   */
+  loudness: number
 }
 
 export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
@@ -526,6 +542,9 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     throwRange: 10,
     applies: StatusKind.Shredded,
     friendly: false,
+    // Everybody on any map hears it. Finite because grenade specs replicate as
+    // JSON, and JSON has no Infinity.
+    loudness: 1000,
   },
   [GrenadeId.Flash]: {
     id: GrenadeId.Flash,
@@ -537,6 +556,7 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     throwRange: 12,
     applies: StatusKind.Flashed,
     friendly: false,
+    loudness: 20,
   },
   [GrenadeId.Smoke]: {
     id: GrenadeId.Smoke,
@@ -548,5 +568,6 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     throwRange: 10,
     applies: StatusKind.Smoked,
     friendly: true,
+    loudness: 6,
   },
 }

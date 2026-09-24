@@ -238,10 +238,14 @@ Built in slices, mechanics before noise (agreed 2026-09-24):
    shot from behind ignores evasion, parry and status defence — cover still counts. A knife
    from behind does five times its damage: lethal through plate to the ordinary health band,
    survivable only by a very large, plated soldier against a weak knifer.
-3. **Noise.** Not a radius with equal ears: each source has a **loudness** that falls off with
-   distance, and each listener has its **own threshold**. Loudness per weapon, with the
-   suppressor muffling it. A frag grenade wakes the whole map; smoke and flash are far
-   quieter.
+3. ✅ **Noise** (`src/core/Noise.ts`). Each source has a **loudness** (metres an ordinary ear
+   hears it at) that falls off with the square of distance, and each listener its **own
+   threshold** (hearing, from Intelligence). Loudness per weapon (40–55 m), a suppressor
+   keeps a quarter; a frag grenade is heard map-wide, a flashbang at 20 m, smoke at 6 m;
+   standing steps 4 m, crouched 1 m, club 12 m, knife and fists silent. Hearing gives
+   roughly where, never a firing solution. Players see amber rings where their side heard
+   something and "heard at N m" on the move preview; the policy investigates what it heard
+   when it has no contacts. No rule consequence yet — that is awareness.
 4. Awareness per unit — unaware, alerted, engaged — as replicated, digested state resolved
    by the rules on both peers (the GDD's "the attacker's answer must be believed" predates
    ADR-0004 and no longer applies).

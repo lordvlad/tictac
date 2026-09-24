@@ -434,7 +434,7 @@ export class LoadoutScreen {
     if (spec.fromBehind > 1) notes.push(`×${spec.fromBehind} from behind`)
     if (spec.armorShred > 0) notes.push(`shreds ${spec.armorShred} armour`)
     else if (spec.armorPen === 0) notes.push('armour stops it')
-    notes.push(spec.loud ? 'loud' : 'quiet')
+    notes.push(spec.loudness > 0 ? `heard at ${spec.loudness} m` : 'silent')
     return notes.join(' · ')
   }
 

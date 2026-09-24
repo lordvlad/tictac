@@ -180,7 +180,7 @@ export const TRAITS: Record<TraitId, TraitSpec> = {
   [TraitId.Silenced]: {
     id: TraitId.Silenced,
     name: 'Silenced',
-    description: 'Quiet: firing never gives the position away, but crits bite less.',
+    description: 'Quiet: firing never gives the position away and is heard a quarter as far, but crits bite less.',
     effects: { silenced: true, critMultiplier: -0.3 },
   },
   [TraitId.Plated]: {

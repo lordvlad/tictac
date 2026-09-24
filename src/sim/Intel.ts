@@ -2,11 +2,14 @@ import { RULES } from '../config'
 import type { Combatant } from '../core/Combatant'
 import type { Grid, Tile } from '../core/Grid'
 import { reachable } from '../core/Pathfinding'
+import { type Noise, NOISE, roughly } from '../core/Noise'
 import { eyesOf, sees } from '../core/Visibility'
 import type { Contact } from './Tactics'
 
 /** How long, in turns, a searched tile stays searched. */
 const STALE_AFTER = 3
+/** How long, in turns, a noise is worth going to look at. */
+const HEARD_FOR = 2
 
 /**
  * What one side of a headless match knows about the other.
@@ -23,6 +26,10 @@ const STALE_AFTER = 3
  *   knows it is not *there*, and nothing about where it went.
  * - **Searched ground**: when each tile was last in view, so a side with no
  *   contacts goes and looks where it has not, instead of standing still.
+ * - **Noises heard**: roughly where (`core/Noise.roughly`), and when. With
+ *   nothing seen, a side goes to look at what it heard before it looks at
+ *   ground it has not seen. Hearing never makes a contact: it says that
+ *   something is there, not what or exactly where.
  *
  * A policy's memory, not game state: nothing here is replicated or rolled, and
  * the rules never read it.
@@ -42,6 +49,8 @@ export class Intel {
   private readonly walks = new Map<number, Float32Array>()
   /** Ground joined to where the squad stands, so a search never picks a goal it cannot walk to. */
   private connected: Uint8Array | null = null
+  /** Noises heard and not yet looked into: roughly where, and on which turn. */
+  private heard: { at: Tile; turn: number }[] = []
 
   constructor(
     private readonly grid: Grid,
@@ -92,6 +101,15 @@ export class Intel {
       const contact = this.last.get(enemy)
       if (contact && inView(contact.tile)) this.last.delete(enemy)
     }
+    // A noise whose block has been looked at has been looked into.
+    this.heard = this.heard.filter((noise) => !inView(noise.at))
+  }
+
+  /** One of this side's units heard `noise` on `turn`. */
+  hear(noise: Noise, turn: number): void {
+    const at = roughly(noise.at)
+    this.heard = this.heard.filter((old) => old.at.x !== at.x || old.at.y !== at.y)
+    this.heard.push({ at, turn })
   }
 
   /**
@@ -120,13 +138,16 @@ export class Intel {
   /**
    * Where `unit` should look next, as the walking cost from every tile to it.
    *
-   * The nearest ground nobody has seen, pulled toward the middle of the map,
-   * where an enemy that could be anywhere is most likely to be passing.
-   * Ground seen long enough ago counts as unseen again once everything has
-   * been looked at, because the enemy moves.
+   * What it heard most recently, if anything is worth going to look at: a
+   * noise from this turn or the last, taken to the walkable tile nearest where
+   * it seemed to come from. Otherwise the nearest ground nobody has seen,
+   * pulled toward the middle of the map, where an enemy that could be
+   * anywhere is most likely to be passing. Ground seen long enough ago counts
+   * as unseen again once everything has been looked at, because the enemy
+   * moves.
    *
-   * The goal is picked as the crow flies, over ground the unit can get to at
-   * all; only the way there is walked. Picking it on foot too meant a
+   * Goals are picked as the crow flies, over ground the unit can get to at
+   * all; only the way there is walked. Picking them on foot too meant a
    * whole-map search from wherever the unit stood, every time, which is a
    * source that never repeats — the goals do.
    */
@@ -135,6 +156,25 @@ export class Intel {
     const here = grid.index(unit.tile.x, unit.tile.y)
     if (!this.connected?.[here]) this.connected = grid.reachableMask(unit.tile)
     const connected = this.connected
+
+    this.heard = this.heard.filter((noise) => noise.turn >= turn - HEARD_FOR + 1)
+    for (let i = this.heard.length - 1; i >= 0; i--) {
+      const { at } = this.heard[i]!
+      let best: Tile | null = null
+      let bestKey = Infinity
+      for (let y = at.y - NOISE.blur; y <= at.y + NOISE.blur; y++) {
+        for (let x = at.x - NOISE.blur; x <= at.x + NOISE.blur; x++) {
+          if (!grid.inBounds(x, y) || !connected[grid.index(x, y)]) continue
+          const key = (x - at.x) ** 2 + (y - at.y) ** 2
+          if (key < bestKey) {
+            bestKey = key
+            best = { x, y }
+          }
+        }
+      }
+      if (best) return this.walkFrom(best)
+    }
+
     const centre = { x: (grid.size - 1) / 2, y: (grid.size - 1) / 2 }
     for (const staleBefore of [0, turn - STALE_AFTER + 1]) {
       let best: Tile | null = null

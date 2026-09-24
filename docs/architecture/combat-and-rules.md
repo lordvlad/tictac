@@ -205,8 +205,8 @@ Every soldier carries a **sidearm** in its own loadout slot, beside the primary 
   scales the blow (`meleePower`); armour penetration and shred are what separate the families —
   fists barely dent plate, a club keeps its damage through it and strips it. Crits use
   `critBreakdown` with no distance term; a club has no crit chance at all.
-- **Consequences** (`executeMelee`): contact makes both units `known`; a loud sidearm sets
-  `firedThisTurn` like a shot. No suppression. At most two draws from the match stream in a fixed
+- **Consequences** (`executeMelee`): contact makes both units `known`; an audible sidearm
+  (`loudness > 0`: the club) sets `firedThisTurn` like a shot. No suppression. At most two draws from the match stream in a fixed
   order — the blow, then the crit if it landed and the weapon can crit.
 
 **Facing is a rule quantity.** `PositionComponent.heading` is one of eight compass directions
@@ -215,6 +215,19 @@ facing order — each worked out from tile or world offsets by comparison alone,
 `targetYaw` is a float from `atan2` and banned from rules code. It replicates and is in the
 state digest. Awareness (and with it a *silent* kill) is still to come in ITEM-019; a non-lethal
 knockout belongs with the campaign roster (ITEM-012).
+
+### Noise
+Every step, shot, audible blow and grenade is a `Noise` (`src/core/Noise.ts`): a tile, the
+side that made it, and a **loudness** — metres an ordinary ear hears it at. A listener of the
+other side hears it when `dx² + dy² ≤ (loudness × hearing)²`: inverse-square falloff against
+the listener's own threshold, `hearing` being `1 + derive(sheet).hearing / 100` from
+Intelligence. Squares and products only, so both peers agree about who heard what; walls do
+not muffle. Sources: `NOISE.step` (4 m) / `NOISE.crouchStep` (1 m), `Weapon.loudness` (40–55 m,
+× `NOISE.suppressed` = 0.25 behind a suppressor), `MeleeSpec.loudness` (0 or 12 m),
+`GrenadeSpec.loudness` (frag 1000 m — every map; flash 20; smoke 6), a grenade's heard where it
+lands. `CommandSystem.onNoise(noise, heard)` reports each noise somebody heard. Hearing yields
+`roughly(at)` — the middle of the 3×3 block — and never a firing solution. Noise does not yet
+change any rule; awareness, which it will drive, is the next part of ITEM-019.
 
 ## 3. Damage Resolution & Armor
 

@@ -235,6 +235,12 @@ export const CHARACTER = {
   /** Percent added to HP an item restores to them. From Health. */
   healBonus: { min: -20, max: 30 },
   /**
+   * Percent on the distance a character hears anything at. From Intelligence:
+   * paying attention is a skill. At the sharp end a crouched step beside them
+   * is heard; at the dull end it is not (`core/Noise`).
+   */
+  hearing: { min: -20, max: 25 },
+  /**
    * Percent of what *gear* does to a soldier's movement and action points that
    * their own Strength cancels. From Strength.
    *

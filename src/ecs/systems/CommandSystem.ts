@@ -1,5 +1,6 @@
 import type { Faction } from '../../config'
 import { distance, facingYaw } from '../../core/math'
+import { hears, type Noise, stepLoudness } from '../../core/Noise'
 import { headingToward } from '../../core/Facing'
 import type { Soldier } from '../../entities/Soldier'
 import type { GrenadeResult, ShotResult } from '../../game/Combat'
@@ -122,6 +123,11 @@ export class CommandSystem extends System {
   onRefused?: (command: Command, refusal: Refusal, origin: CommandOrigin) => void
   /** A unit arrived on a tile — after any reactions it provoked have been resolved. */
   onStep?: (mover: Soldier) => void
+  /**
+   * Something was made audible, and these units of the other side heard it.
+   * Called only when somebody did: a noise nobody hears is not an event.
+   */
+  onNoise?: (noise: Noise, heard: Soldier[]) => void
 
   /** Reactions fired so far: a fact about the match, not about any one command. */
   reactions = 0
@@ -143,9 +149,22 @@ export class CommandSystem extends System {
     movement.onStep = (entityId) => {
       const mover = this.squads.byEntityId(entityId)
       if (!mover) return
+      // The step is made before anybody reacts to it: a watcher's shot is an
+      // answer to the arrival, and its report follows the footfall.
+      this.sound({ at: { ...mover.tile }, loudness: stepLoudness(mover.isCrouching), faction: mover.faction })
       this.reactions += this.combat.reactTo(mover)
       this.onStep?.(mover)
     }
+    combat.onNoise = (noise) => this.sound(noise)
+  }
+
+  /**
+   * Who heard `noise`, by the one rule (`hears`): the same list on both peers,
+   * in squad order, because it is worked out from state both hold.
+   */
+  private sound(noise: Noise): void {
+    const heard = this.squads.soldiers.filter((unit) => hears(unit, noise))
+    if (heard.length > 0) this.onNoise?.(noise, heard)
   }
 
   /** True while any unit is still walking a route. */

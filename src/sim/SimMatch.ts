@@ -226,6 +226,10 @@ export class SimMatch {
       this.intel[faction].observe()
       for (const unit of byFaction[faction]) this.intel[faction].survey(unit, this.host.turnNumber)
     }
+    // A side hears through its own units' ears; one of them is enough.
+    this.host.commands.onNoise = (noise, heard) => {
+      this.intel[heard[0]!.faction].hear(noise, this.host.turnNumber)
+    }
   }
 
   get grid(): Grid {

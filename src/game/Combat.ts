@@ -297,7 +297,7 @@ export function executeMelee(
   // nobody else anything; a loud one lights the attacker up like a shot.
   attacker.known = true
   if (!target.unreadable) target.known = true
-  if (spec.loud) attacker.firedThisTurn = true
+  if (spec.loudness > 0) attacker.firedThisTurn = true
 
   const dx = target.tile.x - attacker.tile.x
   const dz = target.tile.y - attacker.tile.y

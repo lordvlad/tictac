@@ -318,6 +318,14 @@ export class Soldier {
     return this.derived.healBonus
   }
 
+  /**
+   * Multiplier on the distance this soldier hears anything at; 1 is ordinary.
+   * From the sheet, which both sides hold, so both agree about who heard what.
+   */
+  get hearing(): number {
+    return 1 + this.derived.hearing / 100
+  }
+
   /** Every trait in force, from the sheet and from the pouch. */
   get traits(): ResolvedTraits {
     return this.resolvedTraits

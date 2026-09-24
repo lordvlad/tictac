@@ -91,7 +91,9 @@ Systems execute business logic across entities on each tick or action:
   is a `Command` (the world-changing subset of `NetworkMessage`) applied by `apply(command,
   origin)`, which looks the units up, calls the system that owns the rule, and reports
   `onApplied` / `onRefused`. It also owns the reaction trigger: `MovementSystem.onStep` →
-  `CombatSystem.reactTo`. Peer commands go through `enqueue`, and the queue drains only while
+  `CombatSystem.reactTo` — and the ears: every step, shot, loud blow and grenade is a `Noise`
+  (`src/core/Noise.ts`), and `onNoise(noise, heard)` reports each one somebody on the other side
+  heard, with who, worked out from state both peers hold. Peer commands go through `enqueue`, and the queue drains only while
   nothing is walking, so a command is never resolved against a unit still between tiles on this
   screen; `whenSettled` queues a check (the peer's digest) behind them. Registered first, so a
   queued command is applied before the tick that walks it. Origin decides three things only:
