@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction, FIRE, SQUAD_SIZE } from '../src/config'
-import { AmmoId, GrenadeId, WeaponId } from '../src/core/Arsenal'
+import { AmmoId, GRENADES, GrenadeId, WeaponId } from '../src/core/Arsenal'
 import { characterSheet } from '../src/core/Characters'
 import { NO_FOCUS, NO_FX } from '../src/core/Combatant'
-import { burn } from '../src/core/Fire'
+import { burn, kindle } from '../src/core/Fire'
 import { Block, Grid, Side } from '../src/core/Grid'
 import { Rng, type Roll } from '../src/core/rng'
 import { Surface } from '../src/core/Surfaces'
 import { WallKind } from '../src/core/Walls'
+import { hasLineOfSight } from '../src/core/Visibility'
 import { World } from '../src/ecs/World'
 import { GroundComponent } from '../src/ecs/components'
 import { createGlobalRules } from '../src/ecs/globals'
@@ -143,6 +144,54 @@ describe('Fire hurts whoever is in it', () => {
     expect(m.blue.hp).toBe(full - FIRE.damage)
     m.handOver() // Blue's again, still standing in it
     expect(m.blue.hp).toBe(full - 2 * FIRE.damage)
+  })
+})
+
+describe('Smoke', () => {
+  test('sight does not pass through it, into it or out of it — except from the next tile', () => {
+    const m = match(always(0.99))
+    const seen = (from: { x: number; y: number }, to: { x: number; y: number }) => hasLineOfSight(m.grid, from, to)
+    expect(seen({ x: 5, y: 10 }, { x: 15, y: 10 })).toBe(true)
+
+    m.ground.setSmoke(m.grid.index(10, 10), 2)
+    expect(seen({ x: 5, y: 10 }, { x: 15, y: 10 })).toBe(false) // through it
+    expect(seen({ x: 5, y: 10 }, { x: 10, y: 10 })).toBe(false) // into it
+    expect(seen({ x: 10, y: 10 }, { x: 5, y: 10 })).toBe(false) // out of it
+    expect(seen({ x: 9, y: 10 }, { x: 10, y: 10 })).toBe(true) // from beside it
+    expect(seen({ x: 5, y: 11 }, { x: 15, y: 11 })).toBe(true) // past it
+  })
+
+  test('a smoke grenade fills its blast but not past a wall, and the cloud thins away', () => {
+    const m = match(always(0.99), (grid) => grid.setWall(10, 12, Side.West, WallKind.Glass))
+    m.blue.tile = { x: 10, y: 5 }
+    m.blue.grenades[GrenadeId.Smoke] = 1
+    const turns = GRENADES[GrenadeId.Smoke].smokes
+
+    m.commands.apply(
+      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: GrenadeId.Smoke, targetTile: { x: 10, y: 12 } },
+      'local',
+    )
+
+    expect([m.grid.smokeAt(10, 12), m.grid.smokeAt(12, 12), m.grid.smokeAt(10, 14)]).toEqual([turns, turns, turns])
+    // Beyond the glass to the west: smoke keeps out of a room as sight does not.
+    expect(m.grid.smokeAt(9, 12)).toBe(0)
+    for (let i = 0; i < turns - 1; i++) m.handOver()
+    expect(m.grid.smokeAt(10, 12)).toBe(1)
+    m.handOver()
+    expect(m.grid.smokeAt(10, 12)).toBe(0)
+  })
+
+  test('a fire smokes while it burns and for a turn after', () => {
+    const m = match(always(0.99))
+    const index = m.grid.index(10, 10)
+    kindle(m.ground, { x: 10, y: 10 }, 0, 1)
+    expect(m.grid.smokeAt(10, 10)).toBeGreaterThan(0)
+
+    burn(m.ground, always(0.99)) // burns out
+    expect(m.grid.fire[index]).toBe(0)
+    expect(m.grid.smokeAt(10, 10)).toBe(1)
+    burn(m.ground, always(0.99))
+    expect(m.grid.smokeAt(10, 10)).toBe(0)
   })
 })
 

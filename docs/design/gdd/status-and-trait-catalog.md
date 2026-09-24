@@ -34,7 +34,6 @@ is not meant to pile up says `1`.
 | Id | Name | Per stack | Turns | Max stacks |
 | --- | --- | --- | --- | --- |
 | `flashed` | Flashed | -40 to hit | 2 | 1 |
-| `smoked` | Smoked | -35 to be hit | 2 | 1 |
 | `shredded` | Shredded | +25% damage taken | 3 | 1 |
 | `stimmed` | Stimmed | +20% AP | 4 | 1 |
 | `suppressed` | Suppressed | -12 to hit, -10% AP | 2 | 3 |
@@ -228,6 +227,8 @@ with no wall between, alight at that neighbour's chance. Standing in fire costs 
 | Crate (on any floor) | 50% | 3 handovers, then gone |
 
 Incendiary: 4 AP, thrown up to 10 m; everything within 1 tile of where it lands burns for at least 2 handovers.
+
+Smoke Grenade: 2 AP, thrown up to 10 m; every tile within 3 of where it lands, short of a wall, is smoke for 4 handovers. A burning tile smokes for its fire's turns and one more. Sight does not pass into, out of or through smoke, except between neighbouring tiles.
 
 ---
 

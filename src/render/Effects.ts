@@ -9,7 +9,6 @@ import {
 } from 'three'
 import { FX } from '../config'
 import { GrenadeId } from '../core/Arsenal'
-import type { Tile } from '../core/Grid'
 import type { EngineContext } from '../engine'
 
 interface FlashState {
@@ -28,11 +27,11 @@ interface SmokePuff {
 }
 
 /**
- * Visual effects for grenades: fullscreen DOM flash, 3D transient blast puffs
- * and persistent turn-based smoke fields.
+ * Visual effects for grenades: the fullscreen DOM flash and transient blast
+ * puffs. Smoke that lasts is the ground's (`GroundFx`), because how long it
+ * lasts is a rule.
  *
- * Persists across frames. The controller updates it in its frame loop and ticks
- * turns on turn switches.
+ * Persists across frames. The controller updates it in its frame loop.
  */
 export class Effects {
   private readonly flashEl: HTMLDivElement
@@ -40,9 +39,6 @@ export class Effects {
 
   private flash: FlashState | null = null
   private readonly puffs: SmokePuff[] = []
-
-  /** Persistent smoke clouds, keyed by tile index. */
-  private readonly persistentClouds = new Map<number, { sprites: Sprite[]; age: number; turnsLeft: number }>()
 
   private smokeTexture: CanvasTexture | null = null
 
@@ -69,12 +65,6 @@ export class Effects {
     for (const p of this.puffs) {
       p.sprite.geometry.dispose()
       ;(p.sprite.material as SpriteMaterial).dispose()
-    }
-    for (const cloud of this.persistentClouds.values()) {
-      for (const s of cloud.sprites) {
-        s.geometry.dispose()
-        ;(s.material as SpriteMaterial).dispose()
-      }
     }
     this.smokeTexture?.dispose()
   }
@@ -134,66 +124,6 @@ export class Effects {
     }
   }
 
-  /** Spawn a persistent smoke cloud over a tile that stays for `turns`. */
-  spawnPersistentSmoke(tileIdx: number, worldPos: Vector3, radius: number, turns = 2): void {
-    if (this.persistentClouds.has(tileIdx)) return
-
-    const texture = this.getSmokeTexture()
-    const sprites: Sprite[] = []
-    const count = Math.round(7 * radius)
-    for (let i = 0; i < count; i++) {
-      const mat = new SpriteMaterial({
-        map: texture,
-        transparent: true,
-        blending: NormalBlending,
-        depthWrite: false,
-        opacity: 0.65,
-      })
-      const sprite = new Sprite(mat)
-
-      const a = Math.random() * Math.PI * 2
-      const r = Math.random() * radius * 0.82
-      sprite.position.set(
-        worldPos.x + Math.cos(a) * r,
-        FX.smokeHeight + (Math.random() * 0.5 - 0.25),
-        worldPos.z + Math.sin(a) * r,
-      )
-      const sz = FX.smokeSpriteSize * (0.8 + Math.random() * 0.6)
-      sprite.scale.set(sz, sz, 1)
-      sprite.material.rotation = Math.random() * Math.PI * 2
-      this.smokeGroup.add(sprite)
-      sprites.push(sprite)
-    }
-
-    this.persistentClouds.set(tileIdx, { sprites, age: 0, turnsLeft: turns })
-  }
-
-  /** Clear the persistent smoke cloud over a tile, fading it out. */
-  clearPersistentSmoke(tileIdx: number): void {
-    const cloud = this.persistentClouds.get(tileIdx)
-    if (!cloud) return
-
-    // Simple transition: spawn them as transient puffs with no speed, just
-    // letting them fade out naturally.
-    for (const sprite of cloud.sprites) {
-      this.puffs.push({
-        sprite,
-        velocity: new Vector3(0, 0.15, 0), // slow drift
-        spin: (Math.random() * 2 - 1) * 0.2,
-        age: 0,
-        lifetime: 0.5, // quick fade
-      })
-    }
-    this.persistentClouds.delete(tileIdx)
-  }
-  /** Count down persistent smoke turns, fading out expired ones. */
-  tickTurn(): void {
-    for (const [tileIdx, cloud] of this.persistentClouds.entries()) {
-      cloud.turnsLeft -= 1
-      if (cloud.turnsLeft <= 0) this.clearPersistentSmoke(tileIdx)
-    }
-  }
-
   /** Per-frame update: animates flash, ticks transient puffs. */
   update(delta: number): void {
     // 1. Fullscreen flash
@@ -234,15 +164,6 @@ export class Effects {
       p.sprite.scale.set(sz, sz, 1)
       // Fade out
       p.sprite.material.opacity = (1 - progress) * 0.85
-    }
-
-    // 3. Idle drift on persistent clouds (gentle bobbing/spin)
-    for (const cloud of this.persistentClouds.values()) {
-      cloud.age += delta
-      for (const s of cloud.sprites) {
-        s.position.y += Math.sin(cloud.age * 2 + s.position.x) * 0.05 * delta
-        s.material.rotation += 0.05 * delta
-      }
     }
   }
 

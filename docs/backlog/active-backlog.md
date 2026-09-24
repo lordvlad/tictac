@@ -158,8 +158,8 @@ Built in slices:
    each handover by the neighbour's flammability from the match's dice; burn-out to ash; a
    crate burned away is cover lost; 15 armour-ignoring damage for stepping in, starting a turn
    in it, or being caught by the blast.
-3. **Smoke.** A cloud on tiles with a clock, from the smoke grenade and from fire; sight does not
-   pass through it; the `Smoked` status goes.
+3. ✅ **Smoke.** A cloud on tiles with a clock, from the smoke grenade (4 handovers) and from
+   fire; sight does not pass through it; the `Smoked` status is gone.
 4. **Keeping out of it.** The sweep's AI and a panicking unit avoid fire; sweep measurement.
 
 #### Affected Files
@@ -174,7 +174,7 @@ Built in slices:
 - [x] An incendiary grenade starts a fire that spreads over timber and grass and stops at paving
       and concrete; what burned becomes ash; a crate that burns away no longer gives cover.
 - [x] Fire hurts whoever steps into it or starts a turn in it.
-- [ ] Smoke blocks sight, from a smoke grenade and from fire.
+- [x] Smoke blocks sight, from a smoke grenade and from fire.
 - [x] Both peers agree (the ground component rebuilds the same ground from what a peer
       sends), and a rewound replay puts the ground back.
 

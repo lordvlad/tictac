@@ -623,7 +623,7 @@ export interface TileReadout {
 
 /**
  * What a tile is, for a player deciding whether to stand on it or set it
- * alight: its surface, a crate on it, and whether it is burning.
+ * alight: its surface, a crate on it, and whether it is burning or smoky.
  */
 export function tileReadout(grid: Grid, tile: Tile): TileReadout {
   const surface = SURFACES[grid.surfaceAt(tile.x, tile.y)]
@@ -636,6 +636,14 @@ export function tileReadout(grid: Grid, tile: Tile): TileReadout {
     lines.push({
       name: 'Burning',
       detail: `${fire} more turn${fire === 1 ? '' : 's'}: ${FIRE.damage} damage, whatever the armour, to whoever steps in or starts a turn here.`,
+      tone: 'hazard',
+    })
+  }
+  const smoke = grid.smokeAt(tile.x, tile.y)
+  if (smoke > 0) {
+    lines.push({
+      name: 'Smoke',
+      detail: `${smoke} more turn${smoke === 1 ? '' : 's'}: nobody sees into it or out of it past the next tile.`,
       tone: 'hazard',
     })
   }

@@ -151,16 +151,10 @@ export class GrenadePlanner {
     const worldPos = this.grid.tileToWorld(targetTile)
     this.effects.triggerFlash(kind)
 
-    if (kind === 'frag') {
-      this.rig.shake(FX.shakeIntensityFrag, FX.shakeDurationFrag)
-      this.effects.spawnBlastPuffs(worldPos, areaRadius)
-    } else if (kind === 'incendiary') {
-      // The whoomph; the fire itself is the ground's, drawn while it burns.
-      this.effects.spawnBlastPuffs(worldPos, areaRadius)
-    } else if (kind === 'smoke') {
-      const tileIdx = this.grid.index(targetTile.x, targetTile.y)
-      this.effects.spawnPersistentSmoke(tileIdx, worldPos, areaRadius)
-    }
+    if (kind === 'frag') this.rig.shake(FX.shakeIntensityFrag, FX.shakeDurationFrag)
+    // A pop for anything that goes off. A fire or a cloud afterwards is the
+    // ground's, drawn for as long as the rules say it lasts.
+    if (kind === 'frag' || kind === 'incendiary' || kind === 'smoke') this.effects.spawnBlastPuffs(worldPos, areaRadius)
 
     for (const hit of hits) {
       // Over the victim's tile rather than its mesh: the tile is the resolved

@@ -960,7 +960,6 @@ export class InteractionController {
     this.unitViewRequested = false
     if (this.rig.isShoulderViewActive) this.rig.exitShoulderView()
     this.exitShootMode()
-    this.effects.tickTurn()
 
     if (this.network && this.network.mode !== 'local') {
       const myFaction = this.network.myFaction

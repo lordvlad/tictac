@@ -395,8 +395,6 @@ export const SHOT_MODES: Record<ShotMode, ShotModeSpec> = {
 export const StatusKind = {
   /** Blinded: this unit's own shots suffer. */
   Flashed: 'flashed',
-  /** Concealed by smoke: shots *at* this unit suffer. */
-  Smoked: 'smoked',
   /** Armour compromised: incoming damage is amplified. */
   Shredded: 'shredded',
   /** Stimulated: action points are raised while it lasts. */
@@ -435,16 +433,6 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     turns: 2,
     accuracyPenalty: 40,
     defenceBonus: 0,
-    damageTakenBonus: 0,
-    apBonus: 0,
-    maxStacks: 1,
-  },
-  [StatusKind.Smoked]: {
-    kind: StatusKind.Smoked,
-    name: 'Smoked',
-    turns: 2,
-    accuracyPenalty: 0,
-    defenceBonus: 35,
     damageTakenBonus: 0,
     apBonus: 0,
     maxStacks: 1,
@@ -541,6 +529,11 @@ export interface GrenadeSpec {
    * grenade that sets nothing alight.
    */
   ignites: number
+  /**
+   * Handovers every tile in the blast is filled with smoke for (`core/Fire`),
+   * which sight does not pass through. Nought for a grenade that makes none.
+   */
+  smokes: number
 }
 
 export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
@@ -560,6 +553,7 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     loudness: 1000,
     issued: 0,
     ignites: 0,
+    smokes: 0,
   },
   [GrenadeId.Flash]: {
     id: GrenadeId.Flash,
@@ -574,6 +568,7 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     loudness: 20,
     issued: 0,
     ignites: 0,
+    smokes: 0,
   },
   [GrenadeId.Smoke]: {
     id: GrenadeId.Smoke,
@@ -583,11 +578,13 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     damage: 0,
     armorShred: 0,
     throwRange: 10,
-    applies: StatusKind.Smoked,
+    applies: null,
     friendly: true,
     loudness: 6,
     issued: 0,
     ignites: 0,
+    // Two of each side's turns: long enough to cross behind it and be across.
+    smokes: 4,
   },
   // Not a grenade at all: something picked up and thrown. It does nothing
   // where it lands except be heard there — the first thing in the game that
@@ -606,6 +603,7 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     loudness: 8,
     issued: 2,
     ignites: 0,
+    smokes: 0,
   },
   // Brings its own fuel: whatever it lands on burns, and whatever can catch
   // from there does (`core/Fire`). The blast itself hurts nobody; the fire
@@ -623,10 +621,11 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     loudness: 25,
     issued: 0,
     ignites: 2,
+    smokes: 0,
   },
 }
 
 /** True for a throw that hurts nobody and gives nobody away: it is only a noise. */
 export function harmless(spec: GrenadeSpec): boolean {
-  return spec.damage === 0 && spec.applies === null && spec.ignites === 0
+  return spec.damage === 0 && spec.applies === null && spec.ignites === 0 && spec.smokes === 0
 }

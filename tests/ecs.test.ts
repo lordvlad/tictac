@@ -218,7 +218,7 @@ describe('Components', () => {
       [new ActionPointsComponent(3, 9), new ActionPointsComponent()],
       [new ArmorComponent(15, 22), new ArmorComponent()],
       [new StanceComponent(true, true, [{ x: 5, y: 10 }], true), new StanceComponent()],
-      [new StatusesComponent([{ kind: StatusKind.Smoked, turnsLeft: 2 }]), new StatusesComponent()],
+      [new StatusesComponent([{ kind: StatusKind.Flashed, turnsLeft: 2 }]), new StatusesComponent()],
       [new InventoryComponent({ frag: 3, flash: 0, smoke: 1, stone: 2, incendiary: 1 }), new InventoryComponent()],
       [new GrenadeSpecsComponent(), new GrenadeSpecsComponent()],
     ]

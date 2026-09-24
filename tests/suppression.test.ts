@@ -131,7 +131,7 @@ describe('Statuses that are not meant to pile up', () => {
     // Peer traffic and older saves omit it; absent must mean one, never none,
     // or a replicated status would silently do nothing.
     const target = unit()
-    target.statuses.push({ kind: StatusKind.Smoked, turnsLeft: 2 })
+    target.statuses.push({ kind: StatusKind.Shredded, turnsLeft: 2 })
 
     expect(statusStacks(target.statuses[0]!)).toBe(1)
   })

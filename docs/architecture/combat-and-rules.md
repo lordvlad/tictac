@@ -316,6 +316,16 @@ and blocks in step.
   the incoming side's units standing in fire at a handover, and to whoever a blast sets
   alight. Nobody is credited with a death by fire.
 
+### Smoke
+Smoke is `Grid.smoke`, turns left per tile, written by `GroundSystem` like fire. The smoke
+grenade (`GrenadeSpec.smokes`, 4 handovers) fills its blast through `billow`: every tile within
+`areaRadius` on the landing floor that a line from the centre reaches without crossing any wall
+(glass included). A burning tile smokes for its fire's turns plus one. At each handover, before
+the fire moves, all smoke thins by one. **Sight** (`hasLineOfSight`, so fog, watchers, the AI's
+knowledge, the shot overlay and melee reach alike) is blocked by a line that enters a smoky tile —
+the target's included — or starts in one, unless the two tiles are neighbours. The old `Smoked`
+status (a defence bonus on whoever stood in the blast) is gone.
+
 ## 3. Damage Resolution & Armor
 
 ```mermaid

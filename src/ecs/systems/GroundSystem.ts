@@ -60,6 +60,14 @@ export class GroundSystem extends System implements Ground {
     this.onGroundChanged?.()
   }
 
+  setSmoke(index: number, turns: number): void {
+    const state = this.state
+    if (turns > 0) state.smoke.set(index, turns)
+    else state.smoke.delete(index)
+    this.grid.smoke[index] = turns
+    this.onGroundChanged?.()
+  }
+
   burnOut(index: number): void {
     const state = this.state
     const surface = this.grid.surfaces[index] as Surface

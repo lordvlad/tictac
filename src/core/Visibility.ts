@@ -103,14 +103,22 @@ export function walkLine(
  * Where the ray threads a lattice point exactly — the diagonal case — it slips
  * past unless both walls meeting at that corner are opaque. That is what lets
  * a unit see diagonally around the end of a wall.
+ *
+ * Smoke (`Grid.smoke`) stops it too: a line that enters a smoky tile — the
+ * target's included — is blocked, and so is one that starts in smoke. Only a
+ * neighbouring tile sees into or out of a cloud, which is also what keeps a
+ * blow in smoke possible.
  */
 export function hasLineOfSight(grid: Grid, from: Tile, to: Tile): boolean {
   const observerFloorY = grid.levelAt(from.x, from.y) * LEVEL_HEIGHT
+  const near = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) <= 1
+  if (!near && grid.smokeAt(from.x, from.y) > 0) return false
+  const smoky = (tile: Tile) => !near && grid.smokeAt(tile.x, tile.y) > 0
   return !walkLine(
     from,
     to,
-    (a, b) => grid.blocksSightBetween(a, b, observerFloorY),
-    (a, b) => grid.cornerClosed(a, b, observerFloorY),
+    (a, b) => grid.blocksSightBetween(a, b, observerFloorY) || smoky(b),
+    (a, b) => grid.cornerClosed(a, b, observerFloorY) || smoky(b),
   )
 }
 

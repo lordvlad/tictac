@@ -110,8 +110,9 @@ shape as a broken window: a change to terrain both peers make by the same rule a
 
 **Smoke** is fire's other half, and the smoke grenade's whole point:
 
-- A **cloud on tiles**, with a clock: a smoke grenade fills its blast for 3 turns; a burning tile
-  smokes while it burns and for a turn after.
+- A **cloud on tiles**, with a clock: a smoke grenade fills its blast (3 tiles, not through any
+  wall, glass included) for 4 handovers — two of each side's turns; a burning tile smokes while
+  it burns and for a handover after.
 - **Sight does not pass through it.** A line that crosses a smoky tile is blocked, and a unit
   standing in smoke is seen only from a neighbouring tile — and sees only that far out itself.
 - It replaces the `Smoked` status: concealment is now where the cloud is, for whoever walks

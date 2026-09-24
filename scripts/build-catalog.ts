@@ -434,6 +434,11 @@ function build(): string {
   lines.push(
     `${incendiary.name}: ${incendiary.apCost} AP, thrown up to ${incendiary.throwRange} m; everything within ${incendiary.areaRadius} tile of where it lands burns for at least ${incendiary.ignites} handovers.`,
   )
+  const smoke = GRENADES[GrenadeId.Smoke]
+  lines.push('')
+  lines.push(
+    `${smoke.name}: ${smoke.apCost} AP, thrown up to ${smoke.throwRange} m; every tile within ${smoke.areaRadius} of where it lands, short of a wall, is smoke for ${smoke.smokes} handovers. A burning tile smokes for its fire's turns and one more. Sight does not pass into, out of or through smoke, except between neighbouring tiles.`,
+  )
   lines.push('')
   lines.push('---')
   lines.push('')

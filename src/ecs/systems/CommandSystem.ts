@@ -17,7 +17,7 @@ import type { MovementSystem } from './MovementSystem'
 import type { WallSystem } from './WallSystem'
 import type { GroundSystem } from './GroundSystem'
 import { MoraleBreak, rollMorale } from '../../core/Morale'
-import { burn, kindle } from '../../core/Fire'
+import { billow, burn, kindle } from '../../core/Fire'
 import type { GrenadeSpec } from '../../core/Arsenal'
 import type { Tile } from '../../core/Grid'
 import { brokenStep } from '../../game/Breakdown'
@@ -410,6 +410,7 @@ export class CommandSystem extends System {
         if (!grenade.thrown) return refuse('throw refused by the rules')
         const spec = thrower.grenadeSpecs[command.kind]
         if (spec.ignites > 0) this.kindle(command.targetTile, spec)
+        if (spec.smokes > 0) billow(this.ground, command.targetTile, spec.areaRadius, spec.smokes)
         return { applied: true, grenade }
       }
       case 'reload': {
