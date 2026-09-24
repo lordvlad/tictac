@@ -29,6 +29,8 @@ reaction fire and a roster that survives a match.
 - Open from ITEM-019: the sweep's policy neither sneaks nor throws stones (only ~3% of its
   attacks land on a target not yet in the fight), so stealth is a player's tool the balance
   sweep does not measure.
+- Open from ITEM-034: the policy never throws smoke and throws an incendiary only when it has
+  no shot, so fire and smoke are player's tools the sweep barely measures.
 
 ### 📋 Ready (Pull Queue)
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for
@@ -71,8 +73,8 @@ reaction fire and a roster that survives a match.
 - **`[ITEM-017]`**: Item verbs on tiles and objects — keys, locks, doors. The cheap half of
   [Interaction & Environment](../design/gdd/interaction-and-environment.md): walls are
   already replicated entities whose `kind` every consumer reads, so a door costs no new wire
-  message. Fire is deliberately *not* in it — a burning tile is a per-tile effect with a
-  clock, and every effect today is a status on a unit.
+  message. Fire landed separately (`[ITEM-034]`), and with it ground state on the map, which a
+  place-targeted verb (a flare, a placed charge) can now use.
 
 ### ✅ Completed
 - **`[ITEM-001]`**: Narrow ports (`Combatant`, `CombatFx`, focus port for `TurnManager`).
@@ -116,6 +118,8 @@ reaction fire and a roster that survives a match.
   run by the rules on both peers; steadying rolled with rising odds.
 - **`[ITEM-033]`**: Character — temperament decides panic or frenzy past a freeze;
   Daredevil, Teamplayer and Loner bend how morale moves.
+- **`[ITEM-034]`**: Tile properties, fire and smoke — surfaces decide the spread; smoke is a
+  cloud on the ground that sight does not pass.
 
 ### 🚫 Struck
 - **`[ITEM-003.4]`** — "Remove `installCanvasStub` from `movement`, `camera`, `pathmarker`,

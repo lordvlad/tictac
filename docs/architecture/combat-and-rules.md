@@ -315,6 +315,10 @@ and blocks in step.
   wound costs, to a unit that steps onto a burning tile (after any reaction to the step), to
   the incoming side's units standing in fire at a handover, and to whoever a blast sets
   alight. Nobody is credited with a death by fire.
+- **Kept out of** by the sweep's policy only: `tryReposition` passes `burningTiles` to the
+  pathfinder as ground it cannot cross, and `chooseDestination` counts `FIRE.damage` as exposure
+  on a burning tile, so a unit standing in fire walks out. A broken unit's run (`Breakdown`)
+  does not look at fire at all, by design.
 
 ### Smoke
 Smoke is `Grid.smoke`, turns left per tile, written by `GroundSystem` like fire. The smoke

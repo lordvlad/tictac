@@ -19,8 +19,8 @@ tags: ["interaction", "items", "environment", "design"]
 
 # GDD: Interaction — Using Things On People, Places and Objects
 
-**Status: draft**, except §2.4 — tile properties, fire and smoke — which is being built as
-ITEM-034. Numbers here are proposals, not current values; anything that ships gets its numbers
+**Status: draft**, except §2.4 — tile properties, fire and smoke — which is built (ITEM-034).
+Numbers elsewhere are proposals, not current values; anything that ships gets its numbers
 from the code and appears in the [generated catalogue](status-and-trait-catalog.md).
 
 ## 1. The idea in one line
@@ -119,8 +119,14 @@ shape as a broken window: a change to terrain both peers make by the same rule a
   into it, rather than a mark on whoever happened to be standing there when the grenade landed.
 
 Players see surfaces as the floor's colour and pattern, fire and smoke where they are, and what
-a tile is and what is on it when they point at it. The sweep's AI and a panicking unit keep out
-of fire.
+a tile is and what is on it when they point at it.
+
+**Who keeps out of it.** The sweep's AI plans its walks round burning tiles and counts a turn
+ending in fire as fire's damage taken. A **broken unit does not**: a panicking unit runs from
+the enemy and a frenzied one charges it by the shortest way, fire or no fire — panicked people
+have run into fires before, and a break is where a soldier stops thinking (decided with the
+user). The AI throws an incendiary only at an enemy it can see and has no shot at, with none of
+its own side within two tiles of it.
 
 Walls do not burn (yet): masonry, parapets and glass are left as they are.
 

@@ -133,53 +133,6 @@ record, it is a diary.
 
 ---
 
-### [ITEM-034] Tile Properties, Fire and Smoke
-**Type:** Feature  
-**Priority:** P2  
-**Status:** In Progress  
-**Milestone:** M2 — Tactical Depth  
-
-#### Why
-[GDD: Interaction & Environment §2.4](../design/gdd/interaction-and-environment.md). Every
-lasting effect is a status on a unit; nothing lives on the ground. Fire needs the ground to be
-something — whether a tile burns has to depend on what it is — and smoke that only marks whoever
-stood in the blast is not smoke. Scoped with the user on 2026-09-24: tile properties drive the
-spread, fire and smoke go together, the incendiary grenade is the only source for now.
-
-#### Change
-Built in slices:
-
-1. ✅ **Surfaces.** Every tile has one — paving, grass, concrete, timber, ash — generated from the
-   seed on a stream of its own (so the terrain every existing seed makes is unchanged), each with
-   a flammability and a burn time. Crates are timber. Shown on the floor; a tile readout names
-   what is under the pointer.
-2. ✅ **Fire.** Ground state (burning, burnt, crates burned away) on one entity, replicated,
-   digested and kept in a rewind moment. The incendiary grenade (two in the crate); spread at
-   each handover by the neighbour's flammability from the match's dice; burn-out to ash; a
-   crate burned away is cover lost; 15 armour-ignoring damage for stepping in, starting a turn
-   in it, or being caught by the blast.
-3. ✅ **Smoke.** A cloud on tiles with a clock, from the smoke grenade (4 handovers) and from
-   fire; sight does not pass through it; the `Smoked` status is gone.
-4. **Keeping out of it.** The sweep's AI and a panicking unit avoid fire; sweep measurement.
-
-#### Affected Files
-- `src/core/Surfaces.ts` (new)
-- `src/core/Grid.ts`, `src/core/MapGenerator.ts`
-- `src/core/Visibility.ts`
-- `src/core/Arsenal.ts`
-- `src/render/Ground.ts`, `src/render/Blocks.ts`
-
-#### Acceptance Criteria
-- [x] Every tile has a surface, and whether fire spreads onto it depends on that surface.
-- [x] An incendiary grenade starts a fire that spreads over timber and grass and stops at paving
-      and concrete; what burned becomes ash; a crate that burns away no longer gives cover.
-- [x] Fire hurts whoever steps into it or starts a turn in it.
-- [x] Smoke blocks sight, from a smoke grenade and from fire.
-- [x] Both peers agree (the ground component rebuilds the same ground from what a peer
-      sends), and a rewound replay puts the ground back.
-
----
-
 ### [ITEM-017] Item Verbs on Tiles and Objects
 **Type:** Feature  
 **Priority:** P2  
@@ -199,10 +152,8 @@ key, no door, and no way to set anything alight — a pouch that only points at 
 3. A key: an item whose contribution is a *permission* rather than an effect.
 
 #### Blocker
-Nothing blocks the door half. **Fire does not belong in this item**: a fire that sits in a
-doorway and burns whoever stands there is a per-tile effect with a clock, and every effect
-today is a status on a unit ticked by the turn system. That is a separate kind of state and
-should be its own item, so locks can ship without waiting for it.
+Nothing blocks the door half. Fire was split out and built as ITEM-034, which put per-tile
+state with a clock on the map (`GroundComponent`); a tile-targeted verb here writes to it.
 
 #### Affected Files
 - `src/core/Items.ts`

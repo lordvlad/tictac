@@ -1073,3 +1073,51 @@ none 11.5, teamplayer 7.9, loner 4.4, daredevil 3.5.
       tests for each, proven red; in the sweep all three break less than nobody-in-particular).
 - [ ] Open: every predisposition is a net gain. Whether one should cost something is a design
       question, not settled here.
+
+---
+
+### [ITEM-034] Tile Properties, Fire and Smoke
+**Completed Date:** 2026-09-24  
+**Type:** Feature  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+Every lasting effect was a status on a unit; nothing lived on the ground. Fire needs the ground
+to be something, and smoke that only marked whoever stood in the blast was not smoke. Scoped
+with the user: tile properties drive the spread, fire and smoke go together, the incendiary
+grenade is the only source for now.
+
+#### Key Changes
+- **Surfaces** (`core/Surfaces`): paving, grass, concrete, timber, ash, laid by the map
+  generator on a stream of its own so existing seeds make the same terrain. Crates are timber.
+  The floor shows them; a tile readout names what is under the pointer.
+- **Ground state** on one host-owned entity (`GroundComponent`, written only by
+  `GroundSystem`): fire, smoke, ash, crates burned away. Replicated, digested, rewound.
+- **Fire** (`core/Fire`): the incendiary grenade (two in the crate) lights its blast; at each
+  handover fire spreads to orthogonal neighbours at their flammability, from the match's dice,
+  and burns down to ash; a crate burned out is cover gone. 15 armour-ignoring damage for
+  stepping in, starting a turn in it, or being caught by the blast.
+- **Smoke** is ground state too: the smoke grenade fills its blast (not past any wall) for 4
+  handovers, fire smokes while it burns and one handover after, and sight does not pass into,
+  out of or through it except between neighbours. The `Smoked` status is gone.
+- **Keeping out of it**: the sweep's policy walks round fire and walks out of it; it throws an
+  incendiary at an enemy it sees but cannot shoot. A **broken unit does not avoid fire** —
+  panicked people run into fires; decided with the user, after an avoiding version was built
+  and removed. `--blueGrenades` / `--redGrenades` on the balance script; the report's
+  `grenades:` line counts throws and hit points lost to fire.
+
+#### Measured
+Mirror on blocks 1000/5000/9000: 605 / 564 / 31, unchanged. Blue with two incendiaries:
+605 / 559 / 36. Red loses 2–3 hp a match to fire. Thrown in place of a poor shot, the policy
+lost ~8 points on block 1000, so it throws only with no shot on offer.
+
+#### Acceptance Criteria
+- [x] Every tile has a surface, and whether fire spreads onto it depends on that surface.
+- [x] An incendiary grenade starts a fire that spreads over timber and grass and stops at paving
+      and concrete; what burned becomes ash; a crate that burns away no longer gives cover.
+- [x] Fire hurts whoever steps into it or starts a turn in it.
+- [x] Smoke blocks sight, from a smoke grenade and from fire.
+- [x] Both peers agree (the ground component rebuilds the same ground from what a peer
+      sends), and a rewound replay puts the ground back. Not verified in two live browsers.
+- [ ] Open: the policy never throws smoke, and uses incendiaries rarely; fire and smoke are a
+      player's tools that the sweep barely measures.

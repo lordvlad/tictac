@@ -9,6 +9,7 @@
  *   bun run balance -- --redAmmo=ap --blueItems=plate:1 --blueMods=scope,bipod
  *   bun run balance -- --blueWatch=off
  *   bun run balance -- --blueSidearm=knife --redSidearm=club
+ *   bun run balance -- --blueGrenades=frag:1,incendiary:2
  *   bun run balance -- --mapSize=72 --spawns=edge
  *   bun run balance -- --record=recordings
  *   bun run balance -- --json
@@ -22,7 +23,7 @@
  * arguments or reading stdout.
  */
 import { mkdir } from 'node:fs/promises'
-import { AmmoId, WeaponId } from '../src/core/Arsenal'
+import { AmmoId, GrenadeId, WeaponId } from '../src/core/Arsenal'
 import { AttachmentId } from '../src/core/Attachments'
 import { ItemId } from '../src/core/Items'
 import { MeleeId } from '../src/core/Melee'
@@ -53,15 +54,23 @@ function pick<T extends string>(table: Record<string, T>, name: string, raw: str
 
 /** `scope:1,plate:2` — a pouch, spelled out. */
 function itemsFor(side: 'blue' | 'red', raw: string): Partial<Record<ItemId, number>> {
-  const items: Partial<Record<ItemId, number>> = {}
+  return countsFor(ItemId, `${side}Items`, raw)
+}
+
+/** `frag:1,incendiary:2` — the grenades in the pouch; any not named is none. */
+function grenadesFor(side: 'blue' | 'red', raw: string): Partial<Record<GrenadeId, number>> {
+  return { frag: 0, ...countsFor(GrenadeId, `${side}Grenades`, raw) }
+}
+
+function countsFor<T extends string>(table: Record<string, T>, name: string, raw: string): Partial<Record<T, number>> {
+  const counts: Partial<Record<T, number>> = {}
   for (const entry of raw.split(',')) {
-    const [name, count] = entry.split(':')
-    const id = pick(ItemId, `${side}Items`, (name ?? '').trim())
+    const [id, count] = entry.split(':')
     const many = count === undefined ? 1 : Number(count)
-    if (!Number.isFinite(many)) throw new Error(`--${side}Items: "${entry}" needs a count`)
-    items[id] = many
+    if (!Number.isFinite(many)) throw new Error(`--${name}: "${entry}" needs a count`)
+    counts[pick(table, name, (id ?? '').trim())] = many
   }
-  return items
+  return counts
 }
 
 function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
@@ -71,13 +80,15 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   const mods = arg(`${side}Mods`)
   const watch = arg(`${side}Watch`)
   const sidearm = arg(`${side}Sidearm`)
+  const grenades = arg(`${side}Grenades`)
   if (
     sidearm === undefined &&
     weapons === undefined &&
     ammo === undefined &&
     items === undefined &&
     mods === undefined &&
-    watch === undefined
+    watch === undefined &&
+    grenades === undefined
   ) {
     return undefined
   }
@@ -99,6 +110,7 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
     // Policy rather than kit: prices the ability by taking it away.
     watch: watch !== 'off',
     sidearm: sidearm === undefined ? undefined : pick(MeleeId, `${side}Sidearm`, sidearm),
+    grenades: grenades === undefined ? undefined : grenadesFor(side, grenades),
   }
 }
 

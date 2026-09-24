@@ -1,4 +1,4 @@
-import { RULES } from '../config'
+import { FIRE, RULES } from '../config'
 import { ShotMode } from '../core/Arsenal'
 import {
   effectiveWeapon,
@@ -231,6 +231,9 @@ export function chooseDestination(
         inReach(grid, tile, at) ? blow(enemy, unit) : 0,
       )
     }
+    // Standing in fire at the next handover costs its damage as surely as a
+    // shot that cannot miss. Only the start can burn: the reach goes round fire.
+    if (grid.fireAt(at.x, at.y) > 0) exposure += FIRE.damage
     return { offense, exposure, nearest, danger: routeDanger }
   }
 

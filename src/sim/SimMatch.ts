@@ -1,10 +1,11 @@
 import { Faction, RULES, SQUAD_SIZE } from '../config'
 import type { MapOptions } from '../core/MapGenerator'
-import { AmmoId, type GrenadeId, GRENADES, type ShotMode, type WeaponId } from '../core/Arsenal'
+import { AmmoId, GrenadeId, GRENADES, type ShotMode, type WeaponId } from '../core/Arsenal'
 import type { AttachmentId } from '../core/Attachments'
 import { MELEE, MeleeId } from '../core/Melee'
 import { type CharacterSheet, rollSquadSheets } from '../core/Characters'
 import type { MoraleBreak } from '../core/Morale'
+import { burningTiles } from '../core/Fire'
 import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
@@ -120,6 +121,8 @@ export interface MatchOutcome {
   ground: Record<Faction, GroundCovered>
   /** Units that broke, by the break. */
   breaks: Record<MoraleBreak, number>
+  /** Hit points each side lost to fire. */
+  burned: Record<Faction, number>
 }
 
 const DEFAULT_TURN_CAP = 40
@@ -187,6 +190,7 @@ export class SimMatch {
   /** What each side knows about the other; see {@link Intel}. */
   private readonly intel: Record<Faction, Intel>
   private readonly breaks: Record<MoraleBreak, number> = { panic: 0, frenzy: 0, freeze: 0 }
+  private readonly burned: Record<Faction, number> = { [Faction.Blue]: 0, [Faction.Red]: 0 }
 
   constructor(private readonly setup: MatchSetup) {
     this.turnCap = setup.turnCap ?? DEFAULT_TURN_CAP
@@ -241,6 +245,9 @@ export class SimMatch {
       this.intel[Faction.Blue].forgetGround()
       this.intel[Faction.Red].forgetGround()
     }
+    this.host.commands.onBurned = (unit, damage) => {
+      this.burned[unit.faction] += damage
+    }
     this.host.commands.onMorale = (_unit, broke) => {
       if (broke) this.breaks[broke] += 1
     }
@@ -286,6 +293,7 @@ export class SimMatch {
       watches: this.watches,
       reactions: this.host.reactions,
       breaks: { ...this.breaks },
+      burned: { ...this.burned },
       ground: {
         [Faction.Blue]: this.ground.of(Faction.Blue),
         [Faction.Red]: this.ground.of(Faction.Red),
@@ -355,7 +363,7 @@ export class SimMatch {
     let moved = false
     for (let guard = 0; guard < 64 && unit.ap > 0 && !unit.isDead; guard++) {
       if (this.tryReload(unit, 'empty')) continue
-      if (this.tryGrenade(unit)) continue
+      if (this.tryFrag(unit)) continue
 
       // Where to stand first, then whether to shoot. The scorer counts staying
       // put and firing from here as one of its candidates, so a unit only moves
@@ -389,6 +397,10 @@ export class SimMatch {
         this.fireAt(unit, lastResort)
         continue
       }
+
+      // No shot at all: an enemy it can see but not hit — behind a crate, or
+      // out of the gun's reach — can still be burned out of where it is.
+      if (this.tryIncendiary(unit)) continue
 
       if (this.tryReload(unit, 'low')) continue
       if (this.tryCover(unit)) continue
@@ -503,7 +515,7 @@ export class SimMatch {
    * also refuses to catch its own side, which is the rule a player is applying
    * when they decide not to throw.
    */
-  private tryGrenade(unit: Soldier): boolean {
+  private tryFrag(unit: Soldier): boolean {
     const spec = unit.grenadeSpecs.frag
     if ((unit.grenades.frag ?? 0) <= 0 || unit.ap < GRENADES.frag.apCost) return false
 
@@ -517,18 +529,42 @@ export class SimMatch {
       const caught = (other: Soldier) => !other.isDead && this.grid.distance(centre.tile, other.tile) <= spec.areaRadius
       if (enemies.filter(caught).length < 2) continue
       if (this.host.squads.byFaction[unit.faction].some(caught)) continue
-
-      this.act({
-        type: 'throwGrenade',
-        shooterFaction: unit.faction,
-        shooterIndex: unit.squadIndex,
-        kind: 'frag' as GrenadeId,
-        targetTile: { x: centre.tile.x, y: centre.tile.y },
-      })
-      this.grenadesThrown += 1
+      this.throwAt(unit, GrenadeId.Frag, centre)
       return true
     }
     return false
+  }
+
+  /**
+   * Set an enemy it can see alight, when none of its own side is near enough
+   * to be caught by the blast or by what spreads from it in a turn. One body
+   * is enough here, unlike a frag: the fire keeps burning it, and the ground
+   * it stands on is denied to it.
+   */
+  private tryIncendiary(unit: Soldier): boolean {
+    const spec = unit.grenadeSpecs.incendiary
+    if ((unit.grenades.incendiary ?? 0) <= 0 || unit.ap < spec.apCost) return false
+    const clear = spec.areaRadius + 1
+    for (const target of this.visibleEnemies(unit)) {
+      if (this.grid.distance(unit.tile, target.tile) > spec.throwRange) continue
+      if (this.grid.fireAt(target.tile.x, target.tile.y) > 0) continue
+      const near = (other: Soldier) => !other.isDead && this.grid.distance(target.tile, other.tile) <= clear
+      if (this.host.squads.byFaction[unit.faction].some(near)) continue
+      this.throwAt(unit, GrenadeId.Incendiary, target)
+      return true
+    }
+    return false
+  }
+
+  private throwAt(unit: Soldier, kind: GrenadeId, target: Soldier): void {
+    this.act({
+      type: 'throwGrenade',
+      shooterFaction: unit.faction,
+      shooterIndex: unit.squadIndex,
+      kind,
+      targetTile: { x: target.tile.x, y: target.tile.y },
+    })
+    this.grenadesThrown += 1
   }
 
   /**
@@ -543,7 +579,8 @@ export class SimMatch {
    *   as its points allowed; null when it stayed put.
    */
   private tryReposition(unit: Soldier): 'arrived' | 'spotted' | null {
-    const occupied = new Set<number>()
+    // Fire is ground nobody walks through by choice.
+    const occupied = burningTiles(this.grid)
     for (const other of this.host.squads.soldiers) {
       if (other === unit || other.isDead) continue
       occupied.add(this.grid.index(other.tile.x, other.tile.y))

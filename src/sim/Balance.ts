@@ -92,6 +92,9 @@ export interface SweepReport {
   reactionsPerMatch: number
   /** Breaks per match, by kind: whether morale is doing anything at all. */
   breaksPerMatch: Record<MoraleBreak, number>
+  grenadesPerMatch: number
+  /** Hit points each side lost to fire, per match: whether fire is doing anything at all. */
+  burnedPerMatch: Record<'blue' | 'red', number>
   /**
    * Ground used per match, by side and by result. The win rates say who won;
    * this says whether anybody went round rather than through.
@@ -231,6 +234,11 @@ export function sweep(options: SweepOptions): SweepReport {
       frenzy: round(outcomes.reduce((n, o) => n + o.breaks.frenzy, 0) / outcomes.length),
       freeze: round(outcomes.reduce((n, o) => n + o.breaks.freeze, 0) / outcomes.length),
     },
+    grenadesPerMatch: round(outcomes.reduce((n, o) => n + o.grenadesThrown, 0) / outcomes.length),
+    burnedPerMatch: {
+      blue: round(outcomes.reduce((n, o) => n + o.burned[Faction.Blue], 0) / outcomes.length),
+      red: round(outcomes.reduce((n, o) => n + o.burned[Faction.Red], 0) / outcomes.length),
+    },
     ground: {
       blue: meanGround(outcomes.map((o) => o.ground[Faction.Blue])),
       red: meanGround(outcomes.map((o) => o.ground[Faction.Red])),
@@ -292,6 +300,9 @@ export function formatReport(report: SweepReport): string {
   )
   lines.push(
     `morale: per match ${report.breaksPerMatch.panic} panics, ${report.breaksPerMatch.frenzy} frenzies, ${report.breaksPerMatch.freeze} freezes`,
+  )
+  lines.push(
+    `grenades: ${report.grenadesPerMatch} thrown per match; fire burned blue ${report.burnedPerMatch.blue} hp, red ${report.burnedPerMatch.red} hp`,
   )
   lines.push('')
   lines.push(

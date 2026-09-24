@@ -74,7 +74,7 @@ Each unit, in squad order, spends its points in this order until nothing applies
 1. **Reload** if nothing its weapon can fire is loaded.
 2. **Grenade** a cluster of two or more enemies that catches no friend.
 3. **Shoot** if a shot of at least 50% is on offer (best expected damage per AP).
-4. **Reposition**, once per turn, to where `src/sim/Tactics.ts` says. Every tile
+4. **Reposition**, once per turn, to where `src/sim/Tactics.ts` says, never through fire. Every tile
    reachable this turn is scored in expected hit points against the side's
    *contacts*: what the unit could do from there with the points left, minus
    the reactions the route provokes (once per known watcher, at the first tile
@@ -88,7 +88,8 @@ Each unit, in squad order, spends its points in this order until nothing applies
    tile per intent, so a reaction can interrupt it, and so can spotting an
    enemy (the unit then chooses again).
 5. **Shoot** the best poor shot, if any.
-6. **Reload** at half a magazine, **get low** when hurt, and **go on watch**
+6. **Incendiary** at a visible enemy it has no shot at, with no friend within two tiles.
+7. **Reload** at half a magazine, **get low** when hurt, and **go on watch**
    with whatever is left.
 
 Watching is last on purpose. An earlier version held a watch in place of a poor
@@ -178,6 +179,17 @@ blocks 1000–1399, a unit with no predisposition breaks 11.5 times, a teamplaye
 and a daredevil 3.5; skittish units split panic 71 / freeze 41, hotheads frenzy 79 / freeze 53.
 The traits table's win rates for the three sit between 41% and 57% across blocks — noise of
 that size, no signal.
+
+**Fire** (2026-09-24, same blocks): mirror 605 / 564 / 31, unchanged. The policy walks round
+burning tiles and prices a tile on fire at `FIRE.damage`, so a unit standing in fire walks out;
+a broken unit does not care (by design). `--blueGrenades=frag:1,incendiary:2` gives Blue two
+incendiaries: **605 / 559 / 36**, even — Blue throws ~0.1 more grenades a match and Red loses
+2–3 hp a match to fire. It is barely used because it is thrown only with no shot at all on
+offer. Thrown in place of a *poor* shot instead, it was used twice as often, burned ~31 hp a
+match off Red, and lost Blue ~8 points on block 1000 (169 / 216 against 200 / 187): a poor shot
+is worth more than a fire, and the fire's own smoke blinds the thrower's side too. With the
+avoidance switched off, Red lost ~45 hp to fire instead of ~33. The policy never throws smoke.
+The report's `grenades:` line counts throws per match and hit points each side lost to fire.
 
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles

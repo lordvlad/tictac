@@ -174,6 +174,16 @@ export function billow(ground: Ground, at: Tile, radius: number, turns: number):
   return filled
 }
 
+/**
+ * Every tile on fire, as a set of indices — the shape the pathfinders take
+ * for ground they must not cross, for a route chosen with a cool head.
+ */
+export function burningTiles(grid: Grid): Set<number> {
+  const tiles = new Set<number>()
+  for (let i = 0; i < grid.fire.length; i++) if (grid.fire[i]! > 0) tiles.add(i)
+  return tiles
+}
+
 /** What a tile is once it has burned: ash, if its floor burns at all. */
 export function burnedSurface(surface: Surface): Surface {
   return SURFACES[surface].flammability > 0 ? Surface.Ash : surface
