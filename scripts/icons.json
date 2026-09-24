@@ -11,6 +11,7 @@
   "grenade-flash": "lorc/flash-grenade",
   "grenade-smoke": "darkzaitzev/smoke-bomb",
   "grenade-stone": "lorc/rock",
+  "grenade-incendiary": "lorc/molotov",
   "item-stim": "sbed/syringe",
   "item-firstAid": "delapouite/first-aid-kit",
   "item-nullweave": "skoll/kevlar-vest",

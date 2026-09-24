@@ -113,6 +113,13 @@ export class Grid {
    * generator says otherwise; fire turns what burned to ash.
    */
   readonly surfaces: Uint8Array
+  /**
+   * Handovers each tile has left to burn, and of smoke over it. An index over
+   * the replicated ground state (`GroundSystem` writes both), because sight
+   * lines and every step ask about them far too often for an entity lookup.
+   */
+  readonly fire: Uint8Array
+  readonly smoke: Uint8Array
 
   /**
    * Wall kinds on the edges running north-south, one slot per edge.
@@ -144,6 +151,8 @@ export class Grid {
     this.ladderFaces = new Uint8Array(size * size)
     this.roofs = new Uint8Array(size * size)
     this.surfaces = new Uint8Array(size * size)
+    this.fire = new Uint8Array(size * size)
+    this.smoke = new Uint8Array(size * size)
     this.wallsV = new Uint8Array((size + 1) * size)
     this.wallsH = new Uint8Array(size * (size + 1))
     this.openingsV = new Uint8Array((size + 1) * size)
@@ -169,6 +178,18 @@ export class Grid {
   setSurface(x: number, y: number, surface: Surface): void {
     if (!this.inBounds(x, y)) return
     this.surfaces[y * this.size + x] = surface
+  }
+
+  /** Handovers a tile has left to burn; 0 when it is not alight. */
+  fireAt(x: number, y: number): number {
+    if (!this.inBounds(x, y)) return 0
+    return this.fire[y * this.size + x]!
+  }
+
+  /** Handovers of smoke a tile has left; 0 when the air is clear. */
+  smokeAt(x: number, y: number): number {
+    if (!this.inBounds(x, y)) return 0
+    return this.smoke[y * this.size + x]!
   }
 
 

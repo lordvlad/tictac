@@ -191,6 +191,16 @@ export const WOUNDS = {
   concussed: 0.25,
 }
 
+/** What fire does to whoever is in it (`core/Fire`). */
+export const FIRE = {
+  /**
+   * Hit points lost for stepping onto a burning tile, or for starting one's
+   * own turn on one. Armour does nothing against it: that is what makes fire
+   * a different kind of threat from a bullet.
+   */
+  damage: 15,
+}
+
 /**
  * How much a unit can take before it stops taking orders (`core/Morale`).
  *

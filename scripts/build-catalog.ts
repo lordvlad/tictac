@@ -13,10 +13,11 @@
  * `TRAITS`, `ITEMS` and the tunables, so the only way for it to be wrong is for
  * the game to be wrong.
  */
-import { SHOT_MODES, STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src/core/Arsenal'
+import { GRENADES, GrenadeId, SHOT_MODES, STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { LONG_GUN_PARRY, MELEE, MeleeId } from '../src/core/Melee'
 import { NOISE } from '../src/core/Noise'
-import { AIM, CHARACTER, COVER, CRIT, MORALE, RULES, WOUNDS } from '../src/config'
+import { AIM, CHARACTER, COVER, CRIT, FIRE, MORALE, RULES, WOUNDS } from '../src/config'
+import { CRATE_FIRE, SURFACES } from '../src/core/Surfaces'
 import { PREDISPOSITIONS, steadyChance, TEMPERAMENTS } from '../src/core/Morale'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
@@ -413,7 +414,30 @@ function build(): string {
   lines.push('')
   lines.push('---')
   lines.push('')
-  lines.push('## 8. Where the numbers come from')
+  lines.push('## 8. Ground and fire')
+  lines.push('')
+  lines.push(
+    'Every tile has a surface. At each handover a burning tile may set each orthogonal neighbour on its floor,',
+  )
+  lines.push(
+    `with no wall between, alight at that neighbour's chance. Standing in fire costs ${FIRE.damage} HP a time, whatever the armour.`,
+  )
+  lines.push('')
+  lines.push('| Surface | Catches from a burning neighbour | Burns for |')
+  lines.push('| --- | --- | --- |')
+  for (const spec of Object.values(SURFACES)) {
+    lines.push(`| ${spec.name} | ${spec.flammability > 0 ? `${spec.flammability}%` : 'never'} | ${spec.burns > 0 ? `${spec.burns} handover${spec.burns === 1 ? '' : 's'}` : '—'} |`)
+  }
+  lines.push(`| Crate (on any floor) | ${CRATE_FIRE.flammability}% | ${CRATE_FIRE.burns} handovers, then gone |`)
+  lines.push('')
+  const incendiary = GRENADES[GrenadeId.Incendiary]
+  lines.push(
+    `${incendiary.name}: ${incendiary.apCost} AP, thrown up to ${incendiary.throwRange} m; everything within ${incendiary.areaRadius} tile of where it lands burns for at least ${incendiary.ignites} handovers.`,
+  )
+  lines.push('')
+  lines.push('---')
+  lines.push('')
+  lines.push('## 9. Where the numbers come from')
   lines.push('')
   lines.push('| Rule | Value | Source |')
   lines.push('| --- | --- | --- |')

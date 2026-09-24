@@ -288,6 +288,8 @@ interface BlockLayer {
    * arrived a tile at a time as the floor below was explored — a patchwork.
    */
   isRoof?: boolean
+  /** Crates, stairs and raised floors: rebuilt as a group when fire changes the ground. */
+  isGround?: boolean
 }
 
 /** The colour an instance is drawn in before fog dims it. */
@@ -347,22 +349,8 @@ export class Blocks {
     }
     this.group.name = 'blocks'
 
-    const kinds = Object.keys(BLOCK_COLORS).map(Number) as Exclude<Block, typeof Block.None>[]
-
-    const tilesByKind = new Map<Block, BlockInstance[]>(kinds.map((kind) => [kind, []]))
-    grid.forEach((x, y, block) => {
-      const tiles = tilesByKind.get(block)
-      if (tiles) tiles.push({ x, y, index: tiles.length })
-    })
-
-    for (const kind of kinds) {
-      const instances = tilesByKind.get(kind) ?? []
-      const layer = this.buildLayer(kind, instances)
-      this.layers.push(layer)
-      this.group.add(layer.mesh)
-    }
-
-    for (const extra of [this.buildUpperFloors(), this.buildRoofs(), this.buildLadders()]) {
+    this.addGroundLayers()
+    for (const extra of [this.buildRoofs(), this.buildLadders()]) {
       if (extra === null) continue
       this.layers.push(extra)
       this.group.add(extra.mesh)
@@ -379,18 +367,51 @@ export class Blocks {
    * rather than patched in place.
    */
   rebuildWalls(): void {
+    this.dropLayers((layer) => layer.isWall === true)
+    this.addWallLayers()
+  }
+
+  /**
+   * Rebuild what stands on the floors, and the floors: a crate that burned
+   * away is gone, and a floor that burned is ash. Same approach as the walls.
+   * Fog and the level filter are re-applied by the caller's next pass.
+   */
+  rebuildGround(): void {
+    this.dropLayers((layer) => layer.isGround === true)
+    this.addGroundLayers()
+  }
+
+  private dropLayers(which: (layer: BlockLayer) => boolean): void {
     for (const layer of this.layers) {
-      if (!layer.isWall) continue
+      if (!which(layer)) continue
       this.group.remove(layer.mesh)
       layer.mesh.geometry.dispose()
       ;(layer.mesh.material as MeshStandardMaterial).dispose()
       layer.mesh.dispose()
     }
     let kept = 0
-    for (const layer of this.layers) if (!layer.isWall) this.layers[kept++] = layer
+    for (const layer of this.layers) if (!which(layer)) this.layers[kept++] = layer
     this.layers.length = kept
+  }
 
-    this.addWallLayers()
+  /** One layer per block kind on the floors, and the raised floors themselves. */
+  private addGroundLayers(): void {
+    const kinds = Object.keys(BLOCK_COLORS).map(Number) as Exclude<Block, typeof Block.None>[]
+
+    const tilesByKind = new Map<Block, BlockInstance[]>(kinds.map((kind) => [kind, []]))
+    this.grid.forEach((x, y, block) => {
+      const tiles = tilesByKind.get(block)
+      if (tiles) tiles.push({ x, y, index: tiles.length })
+    })
+
+    const layers: (BlockLayer | null)[] = kinds.map((kind) => this.buildLayer(kind, tilesByKind.get(kind) ?? []))
+    layers.push(this.buildUpperFloors())
+    for (const layer of layers) {
+      if (layer === null) continue
+      layer.isGround = true
+      this.layers.push(layer)
+      this.group.add(layer.mesh)
+    }
   }
 
   private addWallLayers(): void {

@@ -6,6 +6,8 @@ import { STOCK_PLAN } from '../src/sim/Balance'
 import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'
 import { SimMatch } from '../src/sim/SimMatch'
+import { Faction } from '../src/config'
+import { GrenadeId } from '../src/core/Arsenal'
 
 /**
  * A recorded match in which a window got broken: found rather than named,
@@ -48,5 +50,28 @@ describe('Stepping a replay back', () => {
       for (const { command } of events.slice(from)) host.apply(command)
       expect({ from, digest: host.digest() }).toEqual({ from, digest: straight })
     }
+  })
+
+  test('going back past a fire puts the ground back: nothing burning, nothing burned', () => {
+    const { header } = new SimMatch({ seed: 5, blue: STOCK_PLAN, red: STOCK_PLAN, record: true }).recording!
+    const host = new MatchHost(header)
+    const thrower = host.squads.byFaction[Faction.Blue][0]!
+    thrower.grenades[GrenadeId.Incendiary] = 1
+    const before = host.moment()
+    const untouched = host.digest()
+
+    host.apply({
+      type: 'throwGrenade',
+      shooterFaction: Faction.Blue,
+      shooterIndex: 0,
+      kind: GrenadeId.Incendiary,
+      targetTile: { x: thrower.tile.x, y: thrower.tile.y + 3 },
+    })
+    host.apply({ type: 'endTurn', faction: Faction.Blue })
+    expect(host.digest().terrain).not.toBe(untouched.terrain)
+
+    host.rewind(before)
+    expect(host.digest()).toEqual(untouched)
+    expect(host.grid.fire.every((turns) => turns === 0)).toBe(true)
   })
 })

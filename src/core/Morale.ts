@@ -144,7 +144,7 @@ function steadiedBy(unit: Combatant, units: readonly Combatant[]): boolean {
 }
 
 /**
- * What an attack by `by` did to everyone's nerve.
+ * What an attack by `by` — or by nobody, for a fire — did to everyone's nerve.
  *
  * Read off the resolved hits, so every path that hurts somebody — a shot, a
  * reaction, a blow, a blast — reports it the same way. A wound costs the
@@ -157,7 +157,7 @@ function steadiedBy(unit: Combatant, units: readonly Combatant[]): boolean {
  */
 export function shake(
   units: readonly Combatant[],
-  by: Combatant,
+  by: Combatant | null,
   hits: readonly Harm[],
   target?: Combatant,
   misses = 0,
@@ -173,10 +173,10 @@ export function shake(
         if (other.faction === victim.faction) {
           if (other.predisposition !== TraitId.Loner) shift(other, -MORALE.mateDown)
         }
-        // Killing your own is not a kill. The victim's side is `by`'s side
-        // exactly when it was friendly fire. A loner's own kill counts; the
+        // Killing your own is not a kill, and nor is dying in a fire: `by` is
+        // null for harm nobody did in person. A loner's own kill counts; the
         // squad's does not.
-        else if (by.faction !== victim.faction) {
+        else if (by && by.faction !== victim.faction) {
           if (other === by) shift(other, MORALE.kill)
           else if (other.predisposition !== TraitId.Loner) shift(other, MORALE.enemyDown)
         }

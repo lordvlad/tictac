@@ -15,6 +15,7 @@ export class GrenadeSpecsComponent extends Component {
       [GrenadeId.Flash]: { ...GRENADES[GrenadeId.Flash] },
       [GrenadeId.Smoke]: { ...GRENADES[GrenadeId.Smoke] },
       [GrenadeId.Stone]: { ...GRENADES[GrenadeId.Stone] },
+      [GrenadeId.Incendiary]: { ...GRENADES[GrenadeId.Incendiary] },
     }
   ) {
     super()

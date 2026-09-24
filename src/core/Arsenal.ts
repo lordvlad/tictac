@@ -505,6 +505,7 @@ export const GrenadeId = {
   Flash: 'flash',
   Smoke: 'smoke',
   Stone: 'stone',
+  Incendiary: 'incendiary',
 } as const
 export type GrenadeId = (typeof GrenadeId)[keyof typeof GrenadeId]
 
@@ -534,6 +535,12 @@ export interface GrenadeSpec {
    * and not counted against the grenade cap. Nought for anything that is.
    */
   issued: number
+  /**
+   * Handovers every tile in the blast burns for at the least — the fuel the
+   * grenade brings — or its own burn time where that is longer. Nought for a
+   * grenade that sets nothing alight.
+   */
+  ignites: number
 }
 
 export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
@@ -552,6 +559,7 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     // JSON, and JSON has no Infinity.
     loudness: 1000,
     issued: 0,
+    ignites: 0,
   },
   [GrenadeId.Flash]: {
     id: GrenadeId.Flash,
@@ -565,6 +573,7 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     friendly: false,
     loudness: 20,
     issued: 0,
+    ignites: 0,
   },
   [GrenadeId.Smoke]: {
     id: GrenadeId.Smoke,
@@ -578,6 +587,7 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     friendly: true,
     loudness: 6,
     issued: 0,
+    ignites: 0,
   },
   // Not a grenade at all: something picked up and thrown. It does nothing
   // where it lands except be heard there — the first thing in the game that
@@ -595,10 +605,28 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     friendly: false,
     loudness: 8,
     issued: 2,
+    ignites: 0,
+  },
+  // Brings its own fuel: whatever it lands on burns, and whatever can catch
+  // from there does (`core/Fire`). The blast itself hurts nobody; the fire
+  // does, to whoever is in it.
+  [GrenadeId.Incendiary]: {
+    id: GrenadeId.Incendiary,
+    name: 'Incendiary',
+    apCost: 4,
+    areaRadius: 1,
+    damage: 0,
+    armorShred: 0,
+    throwRange: 10,
+    applies: null,
+    friendly: false,
+    loudness: 25,
+    issued: 0,
+    ignites: 2,
   },
 }
 
 /** True for a throw that hurts nobody and gives nobody away: it is only a noise. */
 export function harmless(spec: GrenadeSpec): boolean {
-  return spec.damage === 0 && spec.applies === null
+  return spec.damage === 0 && spec.applies === null && spec.ignites === 0
 }

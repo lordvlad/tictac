@@ -154,6 +154,9 @@ export class GrenadePlanner {
     if (kind === 'frag') {
       this.rig.shake(FX.shakeIntensityFrag, FX.shakeDurationFrag)
       this.effects.spawnBlastPuffs(worldPos, areaRadius)
+    } else if (kind === 'incendiary') {
+      // The whoomph; the fire itself is the ground's, drawn while it burns.
+      this.effects.spawnBlastPuffs(worldPos, areaRadius)
     } else if (kind === 'smoke') {
       const tileIdx = this.grid.index(targetTile.x, targetTile.y)
       this.effects.spawnPersistentSmoke(tileIdx, worldPos, areaRadius)

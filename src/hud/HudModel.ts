@@ -1,4 +1,4 @@
-import { FACTION_INFO, Faction, RULES } from '../config'
+import { FACTION_INFO, Faction, FIRE, RULES } from '../config'
 import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
 import { ITEMS, type ItemEffect, ItemId, itemApCost, itemTargetsAlly } from '../core/Items'
 import { UtilityId } from '../core/Characters'
@@ -623,13 +623,21 @@ export interface TileReadout {
 
 /**
  * What a tile is, for a player deciding whether to stand on it or set it
- * alight: its surface, and a crate on it, if there is one.
+ * alight: its surface, a crate on it, and whether it is burning.
  */
 export function tileReadout(grid: Grid, tile: Tile): TileReadout {
   const surface = SURFACES[grid.surfaceAt(tile.x, tile.y)]
   const lines: TileReadoutLine[] = [{ name: surface.name, detail: surface.description, tone: 'plain' }]
   if (grid.blockAt(tile.x, tile.y) === Block.Half) {
     lines.push({ name: 'Crate', detail: 'Wooden: burns, and is gone when it has.', tone: 'plain' })
+  }
+  const fire = grid.fireAt(tile.x, tile.y)
+  if (fire > 0) {
+    lines.push({
+      name: 'Burning',
+      detail: `${fire} more turn${fire === 1 ? '' : 's'}: ${FIRE.damage} damage, whatever the armour, to whoever steps in or starts a turn here.`,
+      tone: 'hazard',
+    })
   }
   return { lines }
 }

@@ -63,7 +63,9 @@ export function planToLoadout(plan: SquadPlan): SquadLoadout {
       frag: plan.grenades?.frag ?? 1,
       flash: plan.grenades?.flash ?? 0,
       smoke: plan.grenades?.smoke ?? 0,
-    } as Record<GrenadeId, number>,
+      stone: 0,
+      incendiary: plan.grenades?.incendiary ?? 0,
+    },
     // Every id, so a plan naming one piece does not leave the rest undefined
     // for the trait fold to read.
     items: Object.fromEntries(

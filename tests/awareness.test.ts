@@ -11,7 +11,7 @@ import { WallKind } from '../src/core/Walls'
 import { World } from '../src/ecs/World'
 import { WallComponent } from '../src/ecs/components'
 import { createGlobalRules } from '../src/ecs/globals'
-import { CombatSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
+import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
 import { Squads } from '../src/game/Squads'
 import { TurnManager } from '../src/game/TurnManager'
@@ -47,7 +47,9 @@ function match(sharp = false, build: (grid: Grid) => void = () => {}) {
   const turnManager = new TurnManager(world, turns, squads, NO_FOCUS)
   const walls = new WallSystem(grid)
   walls.spawnFromGrid(world)
-  const commands = new CommandSystem(world, squads, turnManager, movement, combat, new ItemSystem(), walls)
+  const ground = new GroundSystem(grid)
+  ground.spawn(world)
+  const commands = new CommandSystem(world, squads, turnManager, movement, combat, new ItemSystem(), walls, ground)
   for (const system of [commands, movement, combat, turns]) world.addSystem(system)
   const intruder = squads.byFaction[Faction.Blue][0]!
   const sentry = squads.byFaction[Faction.Red][0]!

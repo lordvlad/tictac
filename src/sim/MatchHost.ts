@@ -10,7 +10,7 @@ import { Squads } from '../game/Squads'
 import { digestWorld, type StateDigest } from '../game/StateDigest'
 import { TurnManager } from '../game/TurnManager'
 import { createGlobalRules } from '../ecs/globals'
-import { CombatSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../ecs/systems'
+import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../ecs/systems'
 import { type Applied, CommandSystem, isCommand } from '../ecs/systems/CommandSystem'
 import { World } from '../ecs/World'
 
@@ -63,6 +63,7 @@ export class MatchHost {
 
   readonly commands: CommandSystem
   readonly walls: WallSystem
+  readonly ground: GroundSystem
   /** The match's dice, held rather than wrapped so a rewind can put them back. */
   private readonly dice: Rng
   private readonly movement: MovementSystem
@@ -106,8 +107,20 @@ export class MatchHost {
     // with a peer's replicated walls, and a host has no peer.
     this.walls = new WallSystem(map.grid)
     this.walls.spawnFromGrid(this.world)
+    // Fire and smoke: state on an entity of its own, as in a played match.
+    this.ground = new GroundSystem(map.grid)
+    this.ground.spawn(this.world)
     this.turnManager = new TurnManager(this.world, turns, this.squads, NO_FOCUS)
-    this.commands = new CommandSystem(this.world, this.squads, this.turnManager, this.movement, combat, items, this.walls)
+    this.commands = new CommandSystem(
+      this.world,
+      this.squads,
+      this.turnManager,
+      this.movement,
+      combat,
+      items,
+      this.walls,
+      this.ground,
+    )
     this.world.addSystem(this.commands)
     this.world.addSystem(this.movement)
     this.world.addSystem(combat)
@@ -122,6 +135,7 @@ export class MatchHost {
       world: this.world,
       unitIds: this.squads.soldiers.map((unit) => unit.entityId),
       walls: this.walls,
+      ground: this.ground,
       turns: this.turnManager.turns,
       dice: this.dice,
       movement: this.movement,

@@ -15,6 +15,7 @@ export class InventoryComponent extends Component {
       [GrenadeId.Flash]: 1,
       [GrenadeId.Smoke]: 1,
       [GrenadeId.Stone]: GRENADES[GrenadeId.Stone].issued,
+      [GrenadeId.Incendiary]: 0,
     },
     /** Fists when the slot is empty: every soldier can do that much. */
     public sidearm: MeleeId = MeleeId.Fists,

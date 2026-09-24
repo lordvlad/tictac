@@ -576,6 +576,7 @@ function startPlayback(recording: CombatRecording): void {
     world,
     unitIds: squads.soldiers.map((soldier) => soldier.entityId),
     walls: controller.wallSystem,
+    ground: controller.groundSystem,
     turns: turnSystem,
     dice,
     movement: controller.movementSystem,

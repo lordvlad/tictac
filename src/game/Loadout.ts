@@ -80,6 +80,7 @@ export const DEMO_INVENTORY: Inventory = {
     [GrenadeId.Smoke]: 3,
     // Issued to every soldier instead (`GrenadeSpec.issued`): nobody packs a stone.
     [GrenadeId.Stone]: 0,
+    [GrenadeId.Incendiary]: 2,
   },
   items: {
     [ItemId.StimPack]: 4,
@@ -119,7 +120,13 @@ export function defaultLoadout(): SquadLoadout {
   return weapons.map((weaponId) => ({
     weaponId,
     ammoId: AmmoId.Standard,
-    grenades: { [GrenadeId.Frag]: 1, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0, [GrenadeId.Stone]: 0 },
+    grenades: {
+      [GrenadeId.Frag]: 1,
+      [GrenadeId.Flash]: 0,
+      [GrenadeId.Smoke]: 0,
+      [GrenadeId.Stone]: 0,
+      [GrenadeId.Incendiary]: 0,
+    },
     items: {
       [ItemId.StimPack]: 0,
       [ItemId.FirstAidKit]: 0,

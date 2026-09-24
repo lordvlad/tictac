@@ -1,7 +1,7 @@
 import { System } from '../System'
 import type { World } from '../World'
 import { StanceComponent } from '../components/StanceComponent'
-import { type Faction, RULES } from '../../config'
+import { FIRE, type Faction, RULES } from '../../config'
 import type { GrenadeId, ShotMode } from '../../core/Arsenal'
 import type { Tile } from '../../core/Grid'
 import type { Grid } from '../../core/Grid'
@@ -182,6 +182,20 @@ export class CombatSystem extends System {
       this.onShotResolved?.(watcher, mover, result)
     }
     return fired.length
+  }
+
+  /**
+   * Fire takes its toll of `unit`: the same damage however much plate it
+   * wears, and the morale a wound costs. Nobody did it, so nobody is paid for
+   * a death. Resolved by the rules on both peers, like a reaction.
+   *
+   * @returns the damage done; nought for a unit already dead.
+   */
+  burn(unit: Soldier): number {
+    if (unit.isDead) return 0
+    applyHitEffects(unit, FIRE.damage, 0, null, this.fx)
+    shake(this.squads.soldiers, null, [{ soldier: unit, damage: FIRE.damage, killed: unit.isDead }])
+    return FIRE.damage
   }
 
   /**

@@ -73,6 +73,7 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | `GrenadeSpecsComponent` | Per-unit ordnance: throw range from Strength, blast radius and armour shred from the thrower's Demolitions training. Stamped into the unit's own specs rather than applied at the throw site, so the planner's preview, the range check and the debug panel all read the numbers *this* arm can reach — and a peer sees the arm it is up against rather than its own stock copy | Yes |
 | `CoverRulesComponent`, `AimRulesComponent`, `MatchRulesComponent`, `StatusSpecsComponent` | Rule tables on the global entity, so both peers resolve against the same constants | Yes (global entity) |
 | `WallComponent` | Wall segment state for the terrain entities | Yes |
+| `GroundComponent` | What has happened to the ground since the map was made, sparse and sorted by tile: burning tiles and turns left, smoke, tiles burned to ash, crates burned away. One entity for the map, owned by the host | Yes |
 
 Nothing about a character's derived stats replicates in its own right. A sheet carries four
 attributes and no ceilings, and each side runs `derive()` over the attributes it holds, so the
@@ -112,6 +113,7 @@ Systems execute business logic across entities on each tick or action:
 - **`ItemSystem`**: Command-driven, not ticked. Applies an item's ordered effect list to a target that defaults to the user; charges the turn's price and the pouch to the *user* whoever is being worked on. The only place that knows what an effect does.
 - **`TurnSystem`**: Manages round handovers, resets AP pools, decrements status durations.
 - **`WallSystem`**: Updates structural integrity and occlusion of destructible barricades.
+- **`GroundSystem`**: The one writer of what is on the ground — fire, smoke, ash, crates burned away (`GroundComponent`, one entity for the map) — and of the grid's dense index over it (`Grid.fire`, `Grid.smoke`, surfaces, blocks), which the rules read on every step and sight line. Implements `core/Fire`'s `Ground` port; a change that arrives from outside (replication, a rewind) bumps the component's revision and `update` rebuilds the index from the generated map plus the component.
 - **`RenderSystem`**: Reads component state (`PositionComponent`, `StanceComponent`) and updates corresponding 3D view representations.
 
 ---

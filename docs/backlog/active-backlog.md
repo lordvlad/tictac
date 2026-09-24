@@ -149,13 +149,15 @@ spread, fire and smoke go together, the incendiary grenade is the only source fo
 #### Change
 Built in slices:
 
-1. **Surfaces.** Every tile has one — paving, grass, concrete, timber, ash — generated from the
+1. ✅ **Surfaces.** Every tile has one — paving, grass, concrete, timber, ash — generated from the
    seed on a stream of its own (so the terrain every existing seed makes is unchanged), each with
-   a flammability and a burn time. Crates are timber. Shown on the floor.
-2. **Fire.** Ground state (burning, burnt, crates burned away) replicated, digested and kept in a
-   rewind moment. The incendiary grenade; spread at each handover by the neighbour's
-   flammability from the match's dice; burn-out to ash; a crate burned away is cover lost;
-   15 armour-ignoring damage for stepping in or starting a turn in it.
+   a flammability and a burn time. Crates are timber. Shown on the floor; a tile readout names
+   what is under the pointer.
+2. ✅ **Fire.** Ground state (burning, burnt, crates burned away) on one entity, replicated,
+   digested and kept in a rewind moment. The incendiary grenade (two in the crate); spread at
+   each handover by the neighbour's flammability from the match's dice; burn-out to ash; a
+   crate burned away is cover lost; 15 armour-ignoring damage for stepping in, starting a turn
+   in it, or being caught by the blast.
 3. **Smoke.** A cloud on tiles with a clock, from the smoke grenade and from fire; sight does not
    pass through it; the `Smoked` status goes.
 4. **Keeping out of it.** The sweep's AI and a panicking unit avoid fire; sweep measurement.
@@ -168,12 +170,13 @@ Built in slices:
 - `src/render/Ground.ts`, `src/render/Blocks.ts`
 
 #### Acceptance Criteria
-- [ ] Every tile has a surface, and whether fire spreads onto it depends on that surface.
-- [ ] An incendiary grenade starts a fire that spreads over timber and grass and stops at paving
+- [x] Every tile has a surface, and whether fire spreads onto it depends on that surface.
+- [x] An incendiary grenade starts a fire that spreads over timber and grass and stops at paving
       and concrete; what burned becomes ash; a crate that burns away no longer gives cover.
-- [ ] Fire hurts whoever steps into it or starts a turn in it.
+- [x] Fire hurts whoever steps into it or starts a turn in it.
 - [ ] Smoke blocks sight, from a smoke grenade and from fire.
-- [ ] Both peers agree, and a rewound replay puts the ground back.
+- [x] Both peers agree (the ground component rebuilds the same ground from what a peer
+      sends), and a rewound replay puts the ground back.
 
 ---
 

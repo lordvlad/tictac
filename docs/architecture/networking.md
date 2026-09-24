@@ -194,11 +194,15 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   event, and a restored frame clears the queue, which was about the moment being left.
 - **Stepping back** is not replay: no command is invertible. `Playback` keeps a `Moment`
   (`src/game/Rewind.ts`) at every event boundary and puts one back with `restoreMoment`. A
-  moment is three things, and playing on from a restored one reaches the match the file
-  records only if all three come back: the soldiers' components (`World.snapshot`, restored
+  moment is four things, and playing on from a restored one reaches the match the file
+  records only if all four come back: the soldiers' components (`World.snapshot`, restored
   with echoes suppressed and the dirty diff re-baselined, as `applyRemote` does); every wall's
-  kind, one byte each (`WallSystem.kinds`), since a round through a window breaks it; and the
-  position of the match's dice (`Rng.snapshot`), since every roll depends on all the rolls
-  before it. Until 2026-09-24 only the first was kept: a stepped-back replay left broken
-  windows broken and played on with dice that had moved on, so it diverged from the file.
-  `MatchHost.moment()` / `rewind()` do the same headlessly (`tests/rewind.test.ts`).
+  kind, one byte each (`WallSystem.kinds`), since a round through a window breaks it; the
+  ground entity (fire, smoke, ash, crates burned away — `GroundSystem` rebuilds the grid from
+  it); and the position of the match's dice (`Rng.snapshot`), since every roll depends on all
+  the rolls before it. Until 2026-09-24 only the first was kept: a stepped-back replay left
+  broken windows broken and played on with dice that had moved on, so it diverged from the
+  file. `MatchHost.moment()` / `rewind()` do the same headlessly (`tests/rewind.test.ts`).
+- **The ground entity** is replicated like the walls: it belongs to no faction, so the host is
+  its authority. Both peers make it at the same point (after the walls), so it has the same id
+  on both and on the referee, which the digest's terrain fold depends on.

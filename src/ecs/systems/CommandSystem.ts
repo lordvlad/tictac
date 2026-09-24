@@ -15,7 +15,11 @@ import type { CombatSystem } from './CombatSystem'
 import type { ItemSystem } from './ItemSystem'
 import type { MovementSystem } from './MovementSystem'
 import type { WallSystem } from './WallSystem'
+import type { GroundSystem } from './GroundSystem'
 import { MoraleBreak, rollMorale } from '../../core/Morale'
+import { burn, kindle } from '../../core/Fire'
+import type { GrenadeSpec } from '../../core/Arsenal'
+import type { Tile } from '../../core/Grid'
 import { brokenStep } from '../../game/Breakdown'
 
 /**
@@ -144,6 +148,8 @@ export class CommandSystem extends System {
   onNoise?: (noise: Noise, heard: Soldier[]) => void
   /** A unit broke (into `broke`) or steadied (`broke` null) at a handover. */
   onMorale?: (unit: Soldier, broke: MoraleBreak | null) => void
+  /** Fire burned a unit: stepping in, starting its turn there, or caught by the blast. */
+  onBurned?: (unit: Soldier, damage: number) => void
 
   /** Reactions fired so far: a fact about the match, not about any one command. */
   reactions = 0
@@ -162,6 +168,11 @@ export class CommandSystem extends System {
      * here, through the one writer every wall change goes through.
      */
     private readonly walls: WallSystem,
+    /**
+     * What is on the ground: fire is set, spread and put out through it, the
+     * one writer, and it is the dice's other customer at a handover.
+     */
+    private readonly ground: GroundSystem,
   ) {
     super()
     // The reaction trigger lives with the applier, not with whoever happens to
@@ -177,6 +188,8 @@ export class CommandSystem extends System {
       this.sound({ at: { ...mover.tile }, loudness: stepLoudness(mover.isCrouching), faction: mover.faction })
       this.look()
       this.reactions += this.combat.reactTo(mover)
+      // Walking into fire costs the step it took.
+      if (this.combat.grid.fireAt(mover.tile.x, mover.tile.y) > 0) this.scorch(mover)
       this.onStep?.(mover)
     }
     combat.onNoise = (noise) => this.sound(noise)
@@ -298,6 +311,33 @@ export class CommandSystem extends System {
   }
 
   /**
+   * Fire's turn, at the handover: it spreads and burns down (`core/Fire`,
+   * from the match's dice), and then whoever on the incoming side is standing
+   * in it is burned for starting a turn there — before their nerve is rolled,
+   * which the burn has just shaken.
+   */
+  private burnDown(): void {
+    burn(this.ground, this.combat.roll)
+    for (const unit of this.squads.byFaction[this.turns.activeFaction] ?? []) {
+      if (!unit.isDead && this.combat.grid.fireAt(unit.tile.x, unit.tile.y) > 0) this.scorch(unit)
+    }
+  }
+
+  /** An incendiary's blast catches, and whoever is standing in it burns. */
+  private kindle(at: Tile, spec: GrenadeSpec): void {
+    const lit = new Set(kindle(this.ground, at, spec.areaRadius, spec.ignites))
+    const { grid } = this.combat
+    for (const unit of this.squads.soldiers) {
+      if (!unit.isDead && lit.has(grid.index(unit.tile.x, unit.tile.y))) this.scorch(unit)
+    }
+  }
+
+  private scorch(unit: Soldier): void {
+    const damage = this.combat.burn(unit)
+    if (damage > 0) this.onBurned?.(unit, damage)
+  }
+
+  /**
    * The incoming side's nerve, at the handover: who breaks and who steadies
    * (`core/Morale`), rolled from the match's dice — then the rules take over
    * whoever is panicking or in a frenzy, one at a time, before anybody else
@@ -367,7 +407,10 @@ export class CommandSystem extends System {
         const thrower = this.unit(command.shooterFaction, command.shooterIndex)
         if (!thrower) return refuse('no such thrower')
         const grenade = this.combat.throwGrenade(thrower, command.targetTile, command.kind)
-        return grenade.thrown ? { applied: true, grenade } : refuse('throw refused by the rules')
+        if (!grenade.thrown) return refuse('throw refused by the rules')
+        const spec = thrower.grenadeSpecs[command.kind]
+        if (spec.ignites > 0) this.kindle(command.targetTile, spec)
+        return { applied: true, grenade }
       }
       case 'reload': {
         const soldier = this.unit(command.faction, command.squadIndex)
@@ -409,6 +452,7 @@ export class CommandSystem extends System {
       }
       case 'endTurn': {
         this.turns.startNextTurn()
+        this.burnDown()
         this.rally()
         return carried
       }

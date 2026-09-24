@@ -28,12 +28,21 @@ import { SceneCombatFx } from '../render/SceneCombatFx'
 import { SquadViews } from '../render/SquadViews'
 import { WallXray } from './WallXray'
 import { NoiseMarks } from '../render/NoiseMarks'
+import { GroundFx } from '../render/GroundFx'
 import { roughly } from '../core/Noise'
 import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
-import { MovementSystem, CombatSystem, CommandSystem, ItemSystem, RenderSystem, WallSystem } from '../ecs/systems'
+import {
+  MovementSystem,
+  CombatSystem,
+  CommandSystem,
+  GroundSystem,
+  ItemSystem,
+  RenderSystem,
+  WallSystem,
+} from '../ecs/systems'
 import { type Carried, type Command, type CommandOrigin, isCommand } from '../ecs/systems/CommandSystem'
 import { MELEE } from '../core/Melee'
 import { ITEMS, type ItemId, itemTargetsAlly } from '../core/Items'
@@ -106,6 +115,7 @@ export class InteractionController {
   readonly itemSystem: ItemSystem
   readonly renderSystem: RenderSystem
   readonly wallSystem: WallSystem
+  readonly groundSystem: GroundSystem
   // Hover state (mouse only — touch has no hover phase).
   /**
    * The item waiting for a patient, and the squadmate picked for it.
@@ -147,6 +157,10 @@ export class InteractionController {
   private recordingStarted = false
   /** Whether the applier's queue held anything last tick; see `update`. */
   private rulesActing = false
+  /** The ground changed since the view last caught up with it; see `update`. */
+  private groundDirty = false
+  /** Fire on the ground, as the grid has it. */
+  private readonly groundFx: GroundFx
   /**
    * Every command the world applied while armed, from either side. Fed by the
    * applier rather than by the network's send, which only ever saw this side.
@@ -194,6 +208,7 @@ export class InteractionController {
       dice,
     )
     this.wallSystem = new WallSystem(battlefield.grid)
+    this.groundSystem = new GroundSystem(battlefield.grid)
     this.commands = new CommandSystem(
       world,
       squads,
@@ -202,6 +217,7 @@ export class InteractionController {
       this.combatSystem,
       this.itemSystem,
       this.wallSystem,
+      this.groundSystem,
     )
 
     // First, so a queued command is applied before the tick that walks it.
@@ -212,6 +228,7 @@ export class InteractionController {
     this.world.addSystem(turnManager.turns)
     this.world.addSystem(this.renderSystem)
     this.world.addSystem(this.wallSystem)
+    this.world.addSystem(this.groundSystem)
 
     // One entity per wall, so the map's boundaries are state the systems and
     // the network can reach like any other.
@@ -221,6 +238,15 @@ export class InteractionController {
       this.recomputeVisibility()
       this.renderOverlay()
       this.battlefield.flush()
+    }
+    // After the walls, in the same order the headless host makes it, so the
+    // ground is the same entity for both peers and the referee.
+    this.groundSystem.spawn(this.world)
+    this.groundFx = new GroundFx(engine, battlefield.grid)
+    // A fire changes the ground many tiles at a time; the view catches up once
+    // per frame (`update`) rather than once per tile.
+    this.groundSystem.onGroundChanged = () => {
+      this.groundDirty = true
     }
 
     this.itemSystem.onItemUsed = () => {
@@ -242,6 +268,9 @@ export class InteractionController {
       this.noiseMarks.add(roughly(noise.at), heard[0]!.faction, this.handovers)
     }
     this.callouts = new DamageIndicators(engine)
+    this.commands.onBurned = (unit, damage) => {
+      this.callouts.say(unit.position, `\u2212${damage} FIRE`, '#ff8a4a')
+    }
     // Said over the unit on both screens: the rules already took it over, and
     // the other player has to be able to watch it happen.
     this.commands.onMorale = (unit, broke) => {
@@ -284,7 +313,7 @@ export class InteractionController {
       const wallEntities = new Set(this.wallSystem.entityIds)
       network.bindWorld(this.world, (entityId) => {
         if (entityId === GLOBAL_ENTITY_ID) return network.mode !== 'join'
-        if (wallEntities.has(entityId)) return network.mode !== 'join'
+        if (wallEntities.has(entityId) || entityId === this.groundSystem.entity) return network.mode !== 'join'
         return squads.byEntityId(entityId)?.faction === network.myFaction
       })
       // Peer state landed in components; the view has to catch up with it.
@@ -763,6 +792,7 @@ export class InteractionController {
     this.shoot.dispose()
     this.noiseMarks.dispose()
     this.callouts.dispose()
+    this.groundFx.dispose()
     this.grenade.dispose()
     this.debug.dispose()
     this.debugMap.dispose()
@@ -1199,6 +1229,17 @@ export class InteractionController {
       this.rulesActing = this.commands.pending
       this.refreshHud()
     }
+    if (this.groundDirty) {
+      this.groundDirty = false
+      this.battlefield.ground.refreshSurfaces()
+      this.battlefield.blocks.rebuildGround()
+      this.groundFx.sync()
+      this.recomputeVisibility()
+      this.renderOverlay()
+      this.battlefield.flush()
+      if (this.hoveredTile) this.hud.showTile(tileReadout(this.battlefield.grid, this.hoveredTile))
+    }
+    this.groundFx.update(delta)
     this.effects.update(delta)
     this.planner.update(delta)
 

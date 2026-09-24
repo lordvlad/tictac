@@ -213,7 +213,25 @@ A predisposition (35% of characters, beside any combat trait) bends how morale m
 
 ---
 
-## 8. Where the numbers come from
+## 8. Ground and fire
+
+Every tile has a surface. At each handover a burning tile may set each orthogonal neighbour on its floor,
+with no wall between, alight at that neighbour's chance. Standing in fire costs 15 HP a time, whatever the armour.
+
+| Surface | Catches from a burning neighbour | Burns for |
+| --- | --- | --- |
+| Paving | never | — |
+| Dry grass | 60% | 1 handover |
+| Concrete | never | — |
+| Timber floor | 35% | 3 handovers |
+| Ash | never | — |
+| Crate (on any floor) | 50% | 3 handovers, then gone |
+
+Incendiary: 4 AP, thrown up to 10 m; everything within 1 tile of where it lands burns for at least 2 handovers.
+
+---
+
+## 9. Where the numbers come from
 
 | Rule | Value | Source |
 | --- | --- | --- |

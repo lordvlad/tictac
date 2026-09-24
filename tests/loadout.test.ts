@@ -95,6 +95,7 @@ describe('Shared crate', () => {
       [GrenadeId.Flash]: 3,
       [GrenadeId.Smoke]: 3,
       [GrenadeId.Stone]: 0,
+      [GrenadeId.Incendiary]: 2,
     })
     expect(left.items).toEqual({
       [ItemId.StimPack]: 4,
@@ -390,7 +391,7 @@ describe('Stamping a loadout onto a soldier', () => {
     applyUnitLoadout(soldier, {
       weaponId: WeaponId.Sniper,
       ammoId: AmmoId.ArmorPiercing,
-      grenades: { [GrenadeId.Frag]: 2, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0, [GrenadeId.Stone]: 0 },
+      grenades: { [GrenadeId.Frag]: 2, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0, [GrenadeId.Stone]: 0, [GrenadeId.Incendiary]: 0 },
       items: {
         [ItemId.StimPack]: 0,
         [ItemId.FirstAidKit]: 2,
@@ -410,6 +411,7 @@ describe('Stamping a loadout onto a soldier', () => {
       [GrenadeId.Smoke]: 0,
       // Nobody packs stones; every soldier has a couple.
       [GrenadeId.Stone]: GRENADES[GrenadeId.Stone].issued,
+      [GrenadeId.Incendiary]: 0,
     })
     expect(soldier.items).toEqual({
       [ItemId.StimPack]: 0,
@@ -427,7 +429,7 @@ describe('Stamping a loadout onto a soldier', () => {
     applyUnitLoadout(soldier, {
       weaponId: WeaponId.Sniper,
       ammoId: AmmoId.Standard,
-      grenades: { [GrenadeId.Frag]: 0, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0, [GrenadeId.Stone]: 0 },
+      grenades: { [GrenadeId.Frag]: 0, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0, [GrenadeId.Stone]: 0, [GrenadeId.Incendiary]: 0 },
       items: {
         [ItemId.StimPack]: 0,
         [ItemId.FirstAidKit]: 0,

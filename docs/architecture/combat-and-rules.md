@@ -11,6 +11,8 @@ appliesTo:
   - "src/core/Visibility.ts"
   - "src/core/Cover.ts"
   - "src/game/Combat.ts"
+  - "src/core/Fire.ts"
+  - "src/core/Surfaces.ts"
   - "src/core/Morale.ts"
   - "src/game/Breakdown.ts"
   - "src/core/Traits.ts"
@@ -290,6 +292,29 @@ Integer comparisons only, ties by squad order and tile index, and only enemies t
 can see — a flight away from an enemy nobody has spotted would tell its player where they are.
 The run ends with `endUnitTurn`. A broken unit refuses every command from any other origin
 except `endUnitTurn`, and a `local` command is refused while the rules are still running anyone.
+
+### Fire
+Every tile has a surface (`src/core/Surfaces.ts`: paving, dry grass, concrete, timber, ash), laid
+by the map generator on a stream of its own; a crate is timber in its own right. What burns and
+for how long is read off the surface's `flammability` and `burns`, or the crate's where higher
+(`core/Fire`: `flammability`, `burnTime`). Ground state lives on one entity (`GroundComponent`)
+written only by `GroundSystem`, which keeps `Grid.fire` / `Grid.smoke` and the burned surfaces
+and blocks in step.
+
+- **Started** by the incendiary grenade (`GrenadeSpec.ignites`): `CommandSystem` calls `kindle`
+  after the throw — every tile within `areaRadius` on the landing tile's floor, reached without
+  a wall, burns for `ignites` handovers or its own burn time if longer — and burns whoever is
+  standing there.
+- **Spreads** at each handover (`burn`, from the match's dice, before morale is rolled): each
+  tile burning at the start, in index order, tries each orthogonal neighbour in `ORTHOGONAL`
+  order that is on its floor, has no wall on the shared edge, is not burning, and can burn —
+  one draw against the neighbour's flammability. Then every tile that was burning burns down
+  by one; at nothing it has burned out: a floor that burns becomes ash, a crate is gone.
+  What caught starts burning next handover.
+- **Hurts** (`CombatSystem.burn`): `FIRE.damage` (15) with armour ignored, and the morale a
+  wound costs, to a unit that steps onto a burning tile (after any reaction to the step), to
+  the incoming side's units standing in fire at a handover, and to whoever a blast sets
+  alight. Nobody is credited with a death by fire.
 
 ## 3. Damage Resolution & Armor
 
