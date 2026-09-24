@@ -4,6 +4,7 @@ import { ITEMS, type ItemEffect, ItemId, itemApCost, itemTargetsAlly } from '../
 import { UtilityId } from '../core/Characters'
 import { effectiveWeapon, statusStacks } from '../core/Ballistics'
 import type { MeleeId } from '../core/Melee'
+import { Awareness } from '../core/Awareness'
 import { canWatch, watchCost } from '../game/Overwatch'
 import { TRAITS, woundTraits } from '../core/Traits'
 import type { OrbitRig } from '../camera/OrbitRig'
@@ -105,6 +106,12 @@ export interface HudTargetIcon {
   selected: boolean
   /** False until this side has worked the unit out. */
   known: boolean
+  /**
+   * Whether it knows anything is going on, when that is worth saying: null for
+   * a squadmate, and for an enemy already in the fight — that is the ordinary
+   * state, and the strip only calls out the ones a quiet approach can exploit.
+   */
+  awareness: 'unaware' | 'alerted' | null
 }
 
 /** One line of the "why is my chance this bad" breakdown. */
@@ -159,6 +166,8 @@ export interface HudShotPanel {
    * act on it.
    */
   targetKnown: boolean
+  /** As on the target strip: called out only when it is not already in the fight. */
+  targetAwareness: 'unaware' | 'alerted' | null
   weaponName: string
   ammoName: string
   currentClip: number
@@ -449,6 +458,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       selected: soldier === item.target,
       // Own squad: there is nothing about a squadmate left to work out.
       known: true,
+      awareness: null,
     }))
   } else {
     const enemyIndex = new Map(squads.byFaction[nextFaction].map((s, i) => [s, i]))
@@ -461,6 +471,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       hitChance,
       selected: soldier === shoot?.pending?.target,
       known: soldier.known,
+      awareness: awarenessLabel(soldier.awareness),
     }))
   }
 
@@ -554,6 +565,17 @@ function statusChips(soldier: Soldier): HudStatusChip[] {
   return chips
 }
 
+/**
+ * What the strip and the panel call out about an enemy's awareness. Engaged
+ * is the ordinary state of a fight and says nothing; the other two are what a
+ * quiet approach or a knife is planned around.
+ */
+function awarenessLabel(state: Awareness): 'unaware' | 'alerted' | null {
+  if (state === Awareness.Unaware) return 'unaware'
+  if (state === Awareness.Alerted) return 'alerted'
+  return null
+}
+
 /** Turn a pending shot into the panel: the plainest shot's numbers, then one row per mode. */
 function shotPanelOf(pending: PendingShot): HudShotPanel {
   const first = pending.options[0]
@@ -562,6 +584,7 @@ function shotPanelOf(pending: PendingShot): HudShotPanel {
     targetHp: pending.target.hp,
     targetArmor: pending.target.armor,
     targetKnown: pending.target.known,
+    targetAwareness: awarenessLabel(pending.target.awareness),
     weaponName: pending.weaponName,
     ammoName: pending.ammoName,
     currentClip: pending.currentClip,

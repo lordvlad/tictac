@@ -157,6 +157,14 @@ all; that is the only time the policy acts on one, which is why nothing moved. F
 suppressors against stock: 212 / 175, from 213 / 176 before noise. Noise has no rule
 consequence yet; awareness is what will give it one.
 
+**Awareness** (2026-09-24, same blocks): 605 / 557 / 38 with the rules alone, 595 / 569 / 36 once
+the policy faces its watches toward the nearest contact or latest noise (kept). On block 1000,
+62 of 5091 attacks (1.2%) land on an unaware target and 89 (1.7%) on an alerted one: contact is
+mutual sight, and the side whose turn comes next looks all round and engages. A trial rule —
+crouch before moving when an enemy that is not engaged is within 10 m — changed nothing (62 of
+5181; with knives, 61 of 5112) and was removed: the trigger almost never fires. Stealth is a
+player's tool so far; the policy does not sneak.
+
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles
 walked indoors and the share of unit-turns *ended* indoors; the weapon table reports each

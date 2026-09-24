@@ -30,8 +30,12 @@ import type { Tile } from './Grid'
 export const NOISE = {
   /** A standing step. Carries a few tiles. */
   step: 4,
-  /** A crouched step: heard beside you by a sharp ear, not by an ordinary one. */
-  crouchStep: 1,
+  /**
+   * A crouched step: heard beside you by a sharp ear, not by an ordinary one.
+   * Just under a metre, because a neighbouring tile is exactly one away and an
+   * ordinary ear must not catch it.
+   */
+  crouchStep: 0.9,
   /** What a suppressor leaves of a shot's loudness. */
   suppressed: 0.25,
   /** How coarse "roughly where" is: noises are placed to the middle of a block this many tiles wide. */
@@ -41,7 +45,7 @@ export const NOISE = {
 /** Something made a sound. */
 export interface Noise {
   at: Tile
-  /** Metres an ordinary ear hears it at. `Infinity` is heard everywhere. */
+  /** Metres an ordinary ear hears it at. */
   loudness: number
   /** Whose noise it was: only the other side is listening for it. */
   faction: Faction

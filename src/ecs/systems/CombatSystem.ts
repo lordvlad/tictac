@@ -33,7 +33,7 @@ import { executeMelee,
  */
 export class CombatSystem extends System {
   constructor(
-    private readonly grid: Grid,
+    readonly grid: Grid,
     private readonly squads: Squads,
     private readonly fx: CombatFx = NO_FX,
     /**

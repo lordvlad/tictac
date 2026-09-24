@@ -350,13 +350,14 @@ export class Hud {
         const figure = patient ? `${Math.round(t.hpFraction * 100)}%` : `${t.hitChance}%`
         const title = patient
           ? `${t.name} — ${figure} HP`
-          : `${t.name} — ${figure} to hit${t.known ? '' : ' · unread'}`
+          : `${t.name} — ${figure} to hit${t.known ? '' : ' · unread'}${t.awareness ? ` · ${t.awareness}` : ''}`
         return `
       <button class="target-icon interactive ${patient ? 'patient' : ''} ${t.selected ? 'selected' : ''} ${t.known ? '' : 'unread'}"
               title="${title}"
               ${Hud.intentAttr({ type: 'selectTarget', index: t.index })}>
         <img class="target-portrait" src="${t.portrait}" alt="${t.name}" />
         ${t.known ? '' : '<span class="target-unread">?</span>'}
+        ${t.awareness ? `<span class="target-awareness ${t.awareness}">${t.awareness === 'unaware' ? 'z' : '!'}</span>` : ''}
         <span class="target-chance">${figure}</span>
         <span class="target-hp"><span class="target-hp-fill" style="width: ${Math.round(t.hpFraction * 100)}%;"></span></span>
         <span class="target-ar"><span class="target-ar-fill" style="width: ${Math.round(t.armorFraction * 100)}%;"></span></span>
@@ -471,7 +472,13 @@ export class Hud {
   private shotCard(shot: HudShotPanel): string {
     return `
       <div class="action-header">
-        Firing at ${shot.targetName}${shot.targetKnown ? '' : ' <span class="shot-unknown" title="Unread: shoot at it, or be shot at by it, to learn what it is">UNREAD</span>'}
+        Firing at ${shot.targetName}${shot.targetKnown ? '' : ' <span class="shot-unknown" title="Unread: shoot at it, or be shot at by it, to learn what it is">UNREAD</span>'}${
+          shot.targetAwareness === 'unaware'
+            ? ' <span class="shot-awareness unaware" title="Has seen and heard nothing: it faces where it last turned, and only a watcher in the fight reacts all round">UNAWARE</span>'
+            : shot.targetAwareness === 'alerted'
+              ? ' <span class="shot-awareness alerted" title="Heard something and turned toward it, but has seen nobody">ALERTED</span>'
+              : ''
+        }
       </div>
       <div class="shot-card">
         <div class="shot-target">${shot.weaponName} (${shot.currentClip}/${shot.maxClip} ammo) · ${shot.ammoName} — target ${shot.targetHp} HP · ${shot.targetArmor} AR</div>

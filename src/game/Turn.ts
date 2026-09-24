@@ -3,6 +3,7 @@ import { RULES } from '../config'
 import { StatusKind } from '../core/Arsenal'
 import type { Combatant } from '../core/Combatant'
 import { applyStatus, tickStatuses } from './Combat'
+import { calmDown } from '../core/Awareness'
 
 /**
  * Everything that happens when a side hands over.
@@ -18,6 +19,7 @@ export function settleTurn(units: readonly Combatant[], incoming: Faction): void
     if (unit.isDead || unit.faction === incoming) continue
     accountExhaustion(unit)
   }
+  calmDown(units, incoming)
 
   tickStatuses(units)
 

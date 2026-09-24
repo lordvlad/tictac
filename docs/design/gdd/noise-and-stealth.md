@@ -18,8 +18,8 @@ tags: ["stealth", "noise", "awareness", "design"]
 
 # GDD: Noise & Stealth — Being Heard, and Not Being
 
-**Status: in progress (ITEM-019).** Built: crouched movement, attacks from behind, and
-noise (§3). Not yet built: awareness (§4), glass and the stone (§5), awareness on the HUD.
+**Status: in progress (ITEM-019).** Built: crouched movement, attacks from behind, noise (§3)
+and awareness (§4). Not yet built: glass and the stone (§5).
 Shipped numbers live in the code and appear in the [generated
 catalogue](status-and-trait-catalog.md).
 
@@ -63,7 +63,7 @@ different channel from sight rather than a worse copy of it. Nobody listens for 
 
 | Noise | Heard at (ordinary ear) | Notes |
 | --- | --- | --- |
-| Crouched step | 1 m | A sharp ear beside you hears it; an ordinary one does not |
+| Crouched step | 0.9 m | Just short of a neighbouring tile: a sharp ear beside you hears it, an ordinary one does not |
 | Standing step | 4 m | |
 | Fists, knife | silent | |
 | Club | 12 m | And it gives the position away, like a shot |
@@ -79,29 +79,39 @@ Still proposals: sprinting as its own noise, plate as a noisy option, doors and 
 still needs sight. `CommandSystem.onNoise(noise, heard)` reports every noise somebody heard,
 with who: worked out from state both peers hold, so both get the same list.
 
-## 4. Alertness, and the unaware kill
+## 4. Alertness, and the quiet kill
 
-Sound is only interesting if somebody can be **unaware**. That is a state the game does not
-have: a unit is currently always ready, and the only thing it does not know is where the enemy
-is.
+**Built** (`src/core/Awareness.ts`, `AwarenessComponent`). Three states per unit, replicated
+and in the state digest, resolved by the same rules on both peers:
 
-Three states, per unit, per side that is looking at it:
+1. **Unaware** — has seen and heard nothing. Faces wherever it last turned.
+2. **Alerted** — heard something, and turned toward it (the nearest of eight directions: toward
+   where the noise *was*, not at whoever made it). Settles back to unaware after two of its own
+   turns hearing nothing new (`CALM_AFTER`).
+3. **Engaged** — has seen an enemy, fired, been shot at, fought, or been caught by an enemy
+   grenade. Does not wear off.
 
-1. **Unaware** — has seen and heard nothing. Can be killed silently from behind, and does not
-   react.
-2. **Alerted** — has heard something, or had a squadmate die nearby. Knows to look; does not
-   know at what. Should cost the intruder their free kill without giving the defender a target.
-3. **Engaged** — has seen the enemy, or been shot at. Normal combat, which is the whole game
-   today.
+**Noticing.** After every step, command and handover (`lookAround`): the side whose turn it
+is looks all round — the player is looking — and engages on any enemy it sees. The side
+waiting notices only what is strictly in front of each unit, unless that unit is already
+engaged. That asymmetry is what lets someone be approached from behind at all: sight is
+otherwise all round, and a sentry would see you step up beside it. Fog on screen stays all
+round; the half-view decides awareness only.
 
-A **silent kill** is then a specific, checkable conjunction: the target is unaware, the
-attacker is behind them, the weapon is quiet — and no third party is in a position to see or
-hear it. That last clause is what makes it a tactical puzzle rather than a button: killing the
-sentry is easy, killing the sentry *without the room hearing* is the interesting part.
+**What it changes.** A watcher that is not engaged reacts only to what is in front of it, so an
+unengaged sentry's watch covers the way it faces and nothing else; hearing turns a unit, and
+turning it is what exposes or covers its back. Put together: a standing approach is heard at
+4 m, the sentry turns toward it, and the intruder arrives in front of it; a crouched approach is
+not heard by an ordinary ear, and arrives at its back, where a knife does five times its damage
+(§ attacks from behind, `docs/architecture/combat-and-rules.md`). A frag heard map-wide turns
+every unaware unit toward where it landed.
 
-The consequence that makes it a real mechanic: a squad that never alerts anybody should be
-able to clear a building in a way that shooting cannot. If sneaking is only "shooting, later",
-it is not worth building.
+Deliberately *not* built: an outright silent kill. The quiet kill is the knife from behind, and
+it needs the target's back, which is what awareness decides. Whether anybody else heard is
+the noise model's answer (a knife is silent; a club is heard at 12 m).
+
+**The GDD's earlier worry** — that a silent kill "is resolved by the attacker and must be
+believed" — predates ADR-0004. Every attack is intent on the wire and resolved on both sides.
 
 ## 5. Glass, and the thrown stone
 
@@ -133,9 +143,12 @@ awareness to be real: a distraction is meaningless if nobody can be distracted.
   to tell an unaware sentry from an alerted one. Intel fog already withholds an enemy's
   *sheet* until they have been read; awareness is the opposite — it should be shown, because
   it is the thing the player is acting on.
+  *Built*: on the target strip an unaware enemy carries a pale-blue "z" and an alerted one an
+  amber "!"; the shot panel's header says UNAWARE or ALERTED beside UNREAD. An engaged enemy
+  carries nothing — that is the ordinary state of a fight.
 - **Loudness is shown before the action, not after.** The move preview should say the route is
   audible, the same way the shot panel says what a shot's odds are. *Built*: the move label
-  reads "heard at 4 m" standing, "heard at 1 m" crouched, under the AP the walk actually
+  reads "heard at 4 m" standing, "heard at 0.9 m" crouched, under the AP the walk actually
   costs (it used to show the terrain's price, which understated a crouched or limping unit's).
 - **Crouching should visibly say "quiet"**, since it now means two things. The button reads
   "Crouch"; the loadout names each sidearm's noise ("silent", "heard at 12 m").

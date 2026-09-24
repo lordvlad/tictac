@@ -213,8 +213,7 @@ Every soldier carries a **sidearm** in its own loadout slot, beside the primary 
 (`HEADINGS`), set by a step (the direction walked), a shot or a blow (toward the target) and a
 facing order — each worked out from tile or world offsets by comparison alone, since
 `targetYaw` is a float from `atan2` and banned from rules code. It replicates and is in the
-state digest. Awareness (and with it a *silent* kill) is still to come in ITEM-019; a non-lethal
-knockout belongs with the campaign roster (ITEM-012).
+state digest. A non-lethal knockout belongs with the campaign roster (ITEM-012).
 
 ### Noise
 Every step, shot, audible blow and grenade is a `Noise` (`src/core/Noise.ts`): a tile, the
@@ -222,12 +221,22 @@ side that made it, and a **loudness** — metres an ordinary ear hears it at. A 
 other side hears it when `dx² + dy² ≤ (loudness × hearing)²`: inverse-square falloff against
 the listener's own threshold, `hearing` being `1 + derive(sheet).hearing / 100` from
 Intelligence. Squares and products only, so both peers agree about who heard what; walls do
-not muffle. Sources: `NOISE.step` (4 m) / `NOISE.crouchStep` (1 m), `Weapon.loudness` (40–55 m,
+not muffle. Sources: `NOISE.step` (4 m) / `NOISE.crouchStep` (0.9 m), `Weapon.loudness` (40–55 m,
 × `NOISE.suppressed` = 0.25 behind a suppressor), `MeleeSpec.loudness` (0 or 12 m),
 `GrenadeSpec.loudness` (frag 1000 m — every map; flash 20; smoke 6), a grenade's heard where it
-lands. `CommandSystem.onNoise(noise, heard)` reports each noise somebody heard. Hearing yields
-`roughly(at)` — the middle of the 3×3 block — and never a firing solution. Noise does not yet
-change any rule; awareness, which it will drive, is the next part of ITEM-019.
+lands. `CommandSystem.onNoise(noise, heard)` reports each noise somebody heard. Knowledge of a
+noise is `roughly(at)` — the middle of the 3×3 block — and never a firing solution.
+
+### Awareness
+`AwarenessComponent` (replicated, digested): **unaware**, **alerted** or **engaged**
+(`src/core/Awareness.ts`). A unit that hears a noise and is not engaged is alerted and turns
+toward it (`hear`: heading to the nearest of eight directions). Firing, being shot at, a blow
+either way and an enemy grenade engage (`engage`, called from the resolvers where `known` is
+set). After every step, command and handover `lookAround` engages any unit that sees an enemy
+— all round on its own side's turn, only strictly in front (`inFront`) on the other side's, until
+it is engaged. A watcher that is not engaged reacts only to what is in front of it
+(`reactToArrival`). An alerted unit that hears nothing new for `CALM_AFTER` (2) of its own
+turns settles back to unaware (`calmDown`, in `settleTurn`). Engaged does not wear off.
 
 ## 3. Damage Resolution & Armor
 

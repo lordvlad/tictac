@@ -1,5 +1,6 @@
 import type { Vector3 } from 'three'
 import type { MeleeId } from '../core/Melee'
+import type { Awareness } from '../core/Awareness'
 import { Faction, RULES } from '../config'
 import {
   type AmmoSpec,
@@ -44,6 +45,7 @@ import {
   PositionComponent,
   StanceComponent,
   SightedComponent,
+  AwarenessComponent,
   StatusesComponent,
   WeaponComponent,
   ItemsComponent,
@@ -76,6 +78,7 @@ export class Soldier {
   private readonly stance: StanceComponent
   private readonly statusesComponent: StatusesComponent
   private readonly sighted: SightedComponent
+  private readonly awarenessComponent: AwarenessComponent
   private readonly positionComponent: PositionComponent
 
   /**
@@ -152,6 +155,7 @@ export class Soldier {
     this.stance = world.addComponent(this.entityId, new StanceComponent())
     this.statusesComponent = world.addComponent(this.entityId, new StatusesComponent())
     this.sighted = world.addComponent(this.entityId, new SightedComponent())
+    this.awarenessComponent = world.addComponent(this.entityId, new AwarenessComponent())
     this.traitsComponent = world.addComponent(this.entityId, new TraitsComponent())
     this.stampGrenades()
     this.refreshTraits()
@@ -646,6 +650,21 @@ export class Soldier {
   }
   set known(value: boolean) {
     this.sighted.known = value
+  }
+
+  /** What it knows is going on around it (`core/Awareness`). */
+  get awareness(): Awareness {
+    return this.awarenessComponent.state
+  }
+  set awareness(value: Awareness) {
+    this.awarenessComponent.state = value
+  }
+
+  get quietTurns(): number {
+    return this.awarenessComponent.quietTurns
+  }
+  set quietTurns(value: number) {
+    this.awarenessComponent.quietTurns = value
   }
 
   /** Re-stamp the loadout from the shared templates. */

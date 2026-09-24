@@ -19,6 +19,7 @@ import { type Casualty, type Combatant, type CombatFx, NO_FX } from '../core/Com
 import type { Roll } from '../core/rng'
 import { distance, facingYaw } from '../core/math'
 import { fromBehind, headingToward } from '../core/Facing'
+import { engage } from '../core/Awareness'
 
 export interface ShotResult {
   hit: boolean
@@ -170,6 +171,10 @@ export function executeShot(
   // unless it gives nothing away, which is what `unreadable` is for. Note it
   // does not stop the target being *seen*, only read.
   if (!target.unreadable) target.known = true
+  // Nobody is unaware of a fight they are in: not the one firing, and not
+  // the one being fired at, hit or miss.
+  engage(shooter)
+  engage(target)
 
   const odds = shotBreakdown(grid, shooter, target, mode)
   const crit = critBreakdown(eff, target, grid.distance(shooter.tile, target.tile))
@@ -298,6 +303,8 @@ export function executeMelee(
   attacker.known = true
   if (!target.unreadable) target.known = true
   if (spec.loudness > 0) attacker.firedThisTurn = true
+  engage(attacker)
+  engage(target)
 
   const dx = target.tile.x - attacker.tile.x
   const dz = target.tile.y - attacker.tile.y
@@ -446,6 +453,8 @@ export function throwGrenade(
   // one: the thrower is on show whatever they are carrying.
   thrower.firedThisTurn = true
   thrower.known = true
+  // Smoke for your own side is cover, not an attack; anything else is a fight.
+  if (!spec.friendly) engage(thrower)
   fx.shoot(thrower)
 
   const hits: ResolvedHit[] = []
@@ -457,6 +466,7 @@ export function throwGrenade(
     const result = grenadeDamageAt(spec, distance, soldier)
     applyHitEffects(soldier, result.damage, result.armorShred, spec.applies, fx)
     if (!soldier.unreadable) soldier.known = true
+    if (soldier.faction !== thrower.faction) engage(soldier)
 
     hits.push({
       soldier,

@@ -297,6 +297,38 @@ canvas {
   text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
 }
 
+/* Not yet in the fight: what a quiet approach and a knife are planned around.
+   A fight is the ordinary state and gets no badge. */
+.target-awareness {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 11px;
+  font-weight: 900;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+}
+
+.target-awareness.unaware,
+.shot-awareness.unaware {
+  color: #8fd3ff;
+}
+
+.target-awareness.alerted,
+.shot-awareness.alerted {
+  color: #ffd166;
+}
+
+.shot-awareness {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 1px 4px;
+  margin-left: 6px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  cursor: help;
+}
+
 /* A row of what is currently in force on a unit. Text, not glyphs: there are
    few enough at once that a word is quicker to read than a symbol to learn. */
 .squad-statuses {

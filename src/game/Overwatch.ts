@@ -5,6 +5,7 @@ import type { Grid, Tile } from '../core/Grid'
 import type { Roll } from '../core/rng'
 import { effectiveWeapon } from '../core/Ballistics'
 import { eyesOf, sees } from '../core/Visibility'
+import { Awareness, inFront } from '../core/Awareness'
 import { canShoot, fireWeapon, type ShotResult } from './Combat'
 
 /**
@@ -97,6 +98,9 @@ export function reactToArrival<T extends Combatant>(
     // special is granted; what it bought was the *timing*. (`canShoot` alone
     // asks range, not sight, because a player's shots are already chosen from
     // what is visible. Without this check a watcher fired through walls.)
+    // One not yet in the fight is watching the way it faces: behind it, or
+    // level with its shoulders, it is not watching at all.
+    if (watcher.awareness !== Awareness.Engaged && !inFront(watcher, mover.tile)) continue
     if (!sees(grid, watcher.tile, eyesOf(grid, watcher), mover.tile)) continue
     if (!canShoot(grid, watcher, mover, ShotMode.Reaction)) continue
 

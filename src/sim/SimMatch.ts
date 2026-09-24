@@ -8,7 +8,7 @@ import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
 import { hasLineOfSight } from '../core/Visibility'
-import { fromBehind } from '../core/Facing'
+import { fromBehind, headingToward } from '../core/Facing'
 import { effectiveWeapon, expectedRoundDamage, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
 import type { Soldier } from '../entities/Soldier'
 import { canMelee, canShoot, shotApCost, shotBreakdown } from '../game/Combat'
@@ -596,10 +596,19 @@ export class SimMatch {
    * requires the AI to use it — a mechanic the sweep's policy ignores reads as
    * worthless in every report, which is exactly how the shotgun once measured
    * by never closing to its own range band.
+   *
+   * Faced first, toward where trouble is expected: a watcher that is not yet in
+   * the fight only reacts to what is in front of it, and a unit's facing is
+   * otherwise wherever its last step happened to point.
    */
   private tryWatch(unit: Soldier): boolean {
     const plan = unit.faction === Faction.Blue ? this.setup.blue : this.setup.red
     if (plan.watch === false || !canWatch(unit)) return false
+    const toward = this.intel[unit.faction].expectFrom(unit)
+    if (headingToward(toward.x - unit.tile.x, toward.y - unit.tile.y, unit.heading) !== unit.heading) {
+      const at = this.grid.tileToWorld(toward)
+      this.act({ type: 'rightClickFacing', faction: unit.faction, squadIndex: unit.squadIndex, x: at.x, z: at.z })
+    }
     this.act({ type: 'overwatch', faction: unit.faction, squadIndex: unit.squadIndex })
     this.watches += 1
     return true

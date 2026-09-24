@@ -34,8 +34,10 @@ reaction fire and a roster that survives a match.
   4. ✅ Noise: loudness per source (per weapon, muffled by a suppressor) falling off with the
      square of distance against each listener's own threshold; a frag is heard map-wide,
      smoke and flash much less. Rings on the map, "heard at" on the move preview.
-  5. Next: awareness (unaware / alerted / engaged) as replicated state noise and sight drive,
-     then glass and the stone.
+  5. ✅ Awareness: unaware / alerted / engaged, replicated; hearing turns a unit toward the
+     noise; the waiting side notices only in front; unengaged watchers react only in front.
+  6. Next: glass and the stone. Open: the sweep's policy never sneaks (3% of attacks land on
+     a target not yet in the fight).
 
 ### 📋 Ready (Pull Queue)
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for

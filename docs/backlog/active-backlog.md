@@ -242,20 +242,25 @@ Built in slices, mechanics before noise (agreed 2026-09-24):
    hears it at) that falls off with the square of distance, and each listener its **own
    threshold** (hearing, from Intelligence). Loudness per weapon (40–55 m), a suppressor
    keeps a quarter; a frag grenade is heard map-wide, a flashbang at 20 m, smoke at 6 m;
-   standing steps 4 m, crouched 1 m, club 12 m, knife and fists silent. Hearing gives
+   standing steps 4 m, crouched 0.9 m, club 12 m, knife and fists silent. Hearing gives
    roughly where, never a firing solution. Players see amber rings where their side heard
    something and "heard at N m" on the move preview; the policy investigates what it heard
-   when it has no contacts. No rule consequence yet — that is awareness.
-4. Awareness per unit — unaware, alerted, engaged — as replicated, digested state resolved
-   by the rules on both peers (the GDD's "the attacker's answer must be believed" predates
-   ADR-0004 and no longer applies).
+   when it has no contacts.
+4. ✅ **Awareness** (`src/core/Awareness.ts`, `AwarenessComponent`): unaware, alerted,
+   engaged — replicated, digested, resolved by the rules on both peers (the GDD's "the
+   attacker's answer must be believed" predated ADR-0004). Hearing alerts and turns a unit
+   toward the noise; seeing an enemy, firing, being fired at or fought engages. The waiting
+   side notices only what is in front of each unengaged unit, and an unengaged watcher only
+   reacts in front. Alerted settles after two quiet turns. Target strip and shot panel show
+   unaware / alerted. The policy faces a watch toward the nearest contact or latest noise.
 5. Breakable glazing and a thrown stone that makes its noise where it *lands*.
 
 #### Blocker
-Enemies cannot currently be unaware, so there is nothing to sneak past and nothing to
-distract. Turn-based stealth also needs the enemy to *act* on its own turn, or sneaking
-degenerates into walking around statues — patrol behaviour is part of this item, not
-separate from it.
+Enemies could not be unaware, so there was nothing to sneak past and nothing to distract —
+built now. Still open: the sweep's policy never *sneaks*. Only 3% of its attacks land on a
+target that is not engaged, because contact is mutual sight and the side whose turn comes
+next looks all round; a "crouch when an unengaged enemy is near" rule was tried and changed
+nothing (the trigger almost never fires). Patrol behaviour exists only as the search.
 
 #### Affected Files
 - `src/ecs/components/SightedComponent.ts`
@@ -265,8 +270,8 @@ separate from it.
 - `src/hud/HudModel.ts`
 
 #### Acceptance Criteria
-- [ ] Being heard alerts a unit without handing the listener a firing solution.
-- [ ] A crouched approach can reach an unaware enemy; a standing one cannot.
+- [x] Being heard alerts a unit without handing the listener a firing solution.
+- [x] A crouched approach can reach an unaware enemy; a standing one cannot.
 - [ ] A stone alerts enemies toward where it landed, not toward the thrower.
 - [ ] Breaking glass alerts, and the segment is gone for both peers.
 ---

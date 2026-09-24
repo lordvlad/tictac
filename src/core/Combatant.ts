@@ -1,5 +1,6 @@
 import type { Vector3 } from 'three'
 import type { Faction } from '../config'
+import type { Awareness } from './Awareness'
 import type { GrenadeId, GrenadeSpec } from './Arsenal'
 import type { CombatantStats, StatusState } from './Ballistics'
 import type { Tile } from './Grid'
@@ -55,6 +56,10 @@ export interface Combatant extends CombatantStats, Casualty {
   heading: number
   /** Multiplier on the distance this unit hears anything at (`core/Noise`); 1 is ordinary. */
   readonly hearing: number
+  /** What it knows is going on around it (`core/Awareness`). */
+  awareness: Awareness
+  /** Of its own turns spent alerted without hearing anything new. */
+  quietTurns: number
   /** The AP ceiling with live statuses folded in. */
   readonly effectiveMaxAp: number
   /** What a step costs this unit, as a multiple of the terrain's own price. */

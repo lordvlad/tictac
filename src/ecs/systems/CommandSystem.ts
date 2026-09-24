@@ -1,6 +1,7 @@
 import type { Faction } from '../../config'
 import { distance, facingYaw } from '../../core/math'
 import { hears, type Noise, stepLoudness } from '../../core/Noise'
+import { hear, lookAround } from '../../core/Awareness'
 import { headingToward } from '../../core/Facing'
 import type { Soldier } from '../../entities/Soldier'
 import type { GrenadeResult, ShotResult } from '../../game/Combat'
@@ -150,8 +151,11 @@ export class CommandSystem extends System {
       const mover = this.squads.byEntityId(entityId)
       if (!mover) return
       // The step is made before anybody reacts to it: a watcher's shot is an
-      // answer to the arrival, and its report follows the footfall.
+      // answer to the arrival, and its report follows the footfall. Hearing
+      // it may turn a watcher round; seeing it may engage one — both before
+      // the reaction, which is what they are for.
       this.sound({ at: { ...mover.tile }, loudness: stepLoudness(mover.isCrouching), faction: mover.faction })
+      this.look()
       this.reactions += this.combat.reactTo(mover)
       this.onStep?.(mover)
     }
@@ -160,11 +164,19 @@ export class CommandSystem extends System {
 
   /**
    * Who heard `noise`, by the one rule (`hears`): the same list on both peers,
-   * in squad order, because it is worked out from state both hold.
+   * in squad order, because it is worked out from state both hold. Each of
+   * them is alerted by it and turns toward it (`core/Awareness`).
    */
   private sound(noise: Noise): void {
     const heard = this.squads.soldiers.filter((unit) => hears(unit, noise))
-    if (heard.length > 0) this.onNoise?.(noise, heard)
+    if (heard.length === 0) return
+    for (const unit of heard) hear(unit, noise)
+    this.onNoise?.(noise, heard)
+  }
+
+  /** Whoever can now see an enemy is in the fight (`lookAround`). */
+  private look(): void {
+    lookAround(this.combat.grid, this.squads.soldiers, this.turns.activeFaction)
   }
 
   /** True while any unit is still walking a route. */
@@ -215,6 +227,9 @@ export class CommandSystem extends System {
   apply(command: Command, origin: CommandOrigin): Applied {
     this.onBeforeApply?.(command, origin)
     const result = this.resolve(command, origin)
+    // Whatever changed — a shot, a turn, a handover — may have put an enemy
+    // in somebody's view.
+    if (result.applied) this.look()
     if (result.applied) this.onApplied?.(command, result, origin)
     else this.onRefused?.(command, result, origin)
     return result

@@ -81,6 +81,29 @@ export class Intel {
   }
 
   /**
+   * Where `unit` should expect trouble from: the nearest enemy believed to be
+   * anywhere, else the latest thing heard, else the middle of the map. What a
+   * watcher faces — one that is not yet in the fight only reacts to what is in
+   * front of it.
+   */
+  expectFrom(unit: Combatant): Tile {
+    let best: Tile | null = null
+    let bestDistance = Infinity
+    for (const contact of this.contacts) {
+      const d = this.grid.distance(unit.tile, contact.tile)
+      if (d < bestDistance) {
+        bestDistance = d
+        best = contact.tile
+      }
+    }
+    if (best) return best
+    const latest = this.heard[this.heard.length - 1]
+    if (latest) return latest.at
+    const middle = Math.floor(this.grid.size / 2)
+    return { x: middle, y: middle }
+  }
+
+  /**
    * Look, now. Cheap enough to call after every intent — four pairs of
    * sightlines each way — which is what lets an enemy walking past between
    * two of this side's own actions still be noticed.
