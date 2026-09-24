@@ -7,6 +7,7 @@ import type {
   HudShotPanel,
   HudStrikeOption,
   HudThrowPanel,
+  TileReadout,
 } from './HudModel'
 import { bottomLeftRow } from './CornerStack'
 import { icon } from './icons'
@@ -41,6 +42,8 @@ export class Hud {
   private readonly cornerActionsEl: HTMLElement
   private readonly turnOverlayEl: HTMLElement
   private readonly contextMenuEl: HTMLElement
+  /** What the tile under the pointer is; see {@link showTile}. */
+  private readonly tileReadoutEl: HTMLElement
 
   private turnOverlayVisible = false
   /**
@@ -84,6 +87,9 @@ export class Hud {
     this.contextMenuEl.className = 'hud-context-menu'
     this.contextMenuEl.style.display = 'none'
 
+    this.tileReadoutEl = document.createElement('div')
+    this.tileReadoutEl.className = 'hud-tile-readout'
+
     this.uiRoot.append(
       this.topCentreEl,
       this.levelSelectorEl,
@@ -92,6 +98,7 @@ export class Hud {
       this.endTurnEl,
       this.turnOverlayEl,
       this.contextMenuEl,
+      this.tileReadoutEl,
     )
 
     // The developer tools live in the bottom-left corner beside the frame
@@ -118,9 +125,26 @@ export class Hud {
       this.cornerActionsEl,
       this.turnOverlayEl,
       this.contextMenuEl,
+      this.tileReadoutEl,
     ]) {
       el.remove()
     }
+  }
+
+  /**
+   * What the pointer is over: the tile's surface, and whatever is on it.
+   * Written straight into its element rather than through the model, because
+   * it changes on every pointer move and nothing else on the HUD does.
+   */
+  showTile(readout: TileReadout | null): void {
+    if (!readout) {
+      this.tileReadoutEl.classList.remove('visible')
+      return
+    }
+    this.tileReadoutEl.classList.add('visible')
+    this.tileReadoutEl.innerHTML = readout.lines
+      .map((line) => `<div class="hud-tile-line ${line.tone}"><b>${line.name}</b> ${line.detail}</div>`)
+      .join('')
   }
 
   /**

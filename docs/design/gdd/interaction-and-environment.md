@@ -19,9 +19,9 @@ tags: ["interaction", "items", "environment", "design"]
 
 # GDD: Interaction — Using Things On People, Places and Objects
 
-**Status: draft.** This is a design proposal. Numbers in it are proposals, not current
-values; anything that ships gets its numbers from the code and appears in the
-[generated catalogue](status-and-trait-catalog.md).
+**Status: draft**, except §2.4 — tile properties, fire and smoke — which is being built as
+ITEM-034. Numbers here are proposals, not current values; anything that ships gets its numbers
+from the code and appears in the [generated catalogue](status-and-trait-catalog.md).
 
 ## 1. The idea in one line
 
@@ -54,16 +54,7 @@ Some uses have no object at all. They happen at a spot on the ground.
 - **A flare or chemlight** dropped on a tile: lights it, and — see
   [Noise & Stealth](noise-and-stealth.md) — advertises it.
 - **A charge** placed rather than thrown, going off on a later turn.
-- **A fire** started on something that burns.
-
-A tile target needs nothing about objects to exist. It needs a hazard that *lives on the
-grid and ticks*, which the game does not have: every effect today is a status on a unit,
-counted down per unit by the turn system. Fire that sits in a doorway for three turns and
-hurts whoever is standing in it is a genuinely new kind of state — a per-tile effect with a
-duration, an owner, and rules for spreading.
-
-That is the expensive part of this proposal, and it is worth being honest that "set something
-on fire" is mostly a request for **tile hazards**, not for a lighter.
+- **A fire** started on something that burns — designed in §2.4 (ITEM-034).
 
 ### 2.3 An object — a wall segment with state
 This is the cheap one, and it is cheap because of a decision already taken: walls are
@@ -86,6 +77,51 @@ it is missing in an interesting way: the map generator already places **doorways
 run of wall, chosen along a spanning tree over the rooms so every room is reachable. Those
 gaps are where doors would go, and the generator already knows which of them are interior and
 which lead outside.
+
+### 2.4 Tile properties, fire and smoke (ITEM-034)
+
+A fire needs the ground to *be* something. Every tile has a **surface**, generated with the map
+from its seed, and the surface decides what fire does there:
+
+| Surface | Where | Catches from a burning neighbour | Burns for |
+| --- | --- | --- | --- |
+| Paving | outdoors, the default | never | — |
+| Grass | outdoor patches | often (60% a turn) | 1 turn: fast, and gone |
+| Concrete | some rooms, rooftops | never | — |
+| Timber | wooden-floored rooms | sometimes (35% a turn) | 3 turns |
+| Ash | what anything that burned becomes | never | — |
+
+And what stands on the tile burns too: a **crate** is timber (50% a turn, 3 turns), and when it
+burns out it is **gone** — the half cover it gave goes with it. Destruction by fire is the same
+shape as a broken window: a change to terrain both peers make by the same rule and replicate.
+
+**Fire:**
+
+- **Started by an incendiary grenade** (the only source for now). It brings its own fuel: every
+  tile in its small blast burns for 2 turns whatever the surface, or for the surface's own time
+  if that is longer.
+- **Spreads by the tile's properties**, at each handover: every burning tile may light each
+  orthogonal neighbour on the same level, with no wall between, that can burn — at that
+  neighbour's chance, rolled from the match's dice in tile order. Paving and concrete stop it;
+  a timber floor carries it through a building; a grass patch goes up at once.
+- **Burns out** into ash, which never burns again, and leaves smoke.
+- **Hurts whoever is in it**: stepping onto a burning tile, or starting one's own turn on one,
+  costs 15 hit points that armour does nothing against, and the morale a wound costs.
+
+**Smoke** is fire's other half, and the smoke grenade's whole point:
+
+- A **cloud on tiles**, with a clock: a smoke grenade fills its blast for 3 turns; a burning tile
+  smokes while it burns and for a turn after.
+- **Sight does not pass through it.** A line that crosses a smoky tile is blocked, and a unit
+  standing in smoke is seen only from a neighbouring tile — and sees only that far out itself.
+- It replaces the `Smoked` status: concealment is now where the cloud is, for whoever walks
+  into it, rather than a mark on whoever happened to be standing there when the grenade landed.
+
+Players see surfaces as the floor's colour and pattern, fire and smoke where they are, and what
+a tile is and what is on it when they point at it. The sweep's AI and a panicking unit keep out
+of fire.
+
+Walls do not burn (yet): masonry, parapets and glass are left as they are.
 
 ## 3. Keys, and why a lock is a good idea
 

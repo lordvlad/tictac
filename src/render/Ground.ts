@@ -1,4 +1,5 @@
 import {
+  Color,
   DataTexture,
   LinearFilter,
   Mesh,
@@ -12,19 +13,21 @@ import {
 } from 'three'
 import { TILE } from '../config'
 import type { Grid } from '../core/Grid'
+import { Surface, SURFACES } from '../core/Surfaces'
 import { VIS_BRIGHTNESS, VisState } from '../core/Visibility'
 
 /**
  * The battlefield floor.
  *
  * Rather than spawning one mesh per tile (784 draw calls), the whole floor is a
- * single plane whose material is patched to sample two per-tile data textures:
+ * single plane whose material is patched to sample three per-tile data textures:
  *
+ *   uSurface RGBA8 what the tile is made of (`core/Surfaces`), as its colour
  *   uFog     R8   0 = unknown, 0.5 = explored (remembered), 1 = visible
  *   uOverlay RGBA8 per-tile highlight colour + alpha (paths, LOS, waypoints)
  *
- * Both are uploaded only when marked dirty. Grid lines are drawn analytically
- * in the fragment shader.
+ * Fog and overlay are uploaded only when marked dirty; the surface when the
+ * ground changes. Grid lines are drawn analytically in the fragment shader.
  */
 export class Ground {
   readonly mesh: Mesh
@@ -34,6 +37,9 @@ export class Ground {
   private readonly size: number
   private readonly fogData: Uint8Array
   private readonly overlayData: Uint8Array
+  /** What each tile is made of, as a colour (`core/Surfaces`). */
+  readonly surfaceTexture: DataTexture
+  private readonly surfaceData: Uint8Array
   private fogDirty = true
   private overlayDirty = true
 
@@ -67,12 +73,19 @@ export class Ground {
     this.overlayTexture.magFilter = NearestFilter
     this.overlayTexture.needsUpdate = true
 
+    this.surfaceData = new Uint8Array(this.size * this.size * 4)
+    this.surfaceTexture = new DataTexture(this.surfaceData, this.size, this.size, RGBAFormat, UnsignedByteType)
+    this.surfaceTexture.minFilter = NearestFilter
+    this.surfaceTexture.magFilter = NearestFilter
+    this.refreshSurfaces()
+
     const extent = this.size * TILE
     const geometry = new PlaneGeometry(extent, extent)
     geometry.rotateX(-Math.PI / 2)
 
     const material = new MeshStandardMaterial({
-      color: 0x6c6f63,
+      // Overwritten per tile by the surface texture; white so nothing tints it.
+      color: 0xffffff,
       roughness: 0.95,
       metalness: 0.0,
     })
@@ -80,6 +93,7 @@ export class Ground {
     material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
       shader.uniforms.uFog = { value: this.fogTexture }
       shader.uniforms.uOverlay = { value: this.overlayTexture }
+      shader.uniforms.uSurface = { value: this.surfaceTexture }
       shader.uniforms.uGridSize = { value: this.size }
       shader.uniforms.uHalfExtent = { value: (this.size * TILE) / 2 }
 
@@ -100,6 +114,7 @@ export class Ground {
           #include <common>
           uniform sampler2D uFog;
           uniform sampler2D uOverlay;
+          uniform sampler2D uSurface;
           uniform float uGridSize;
           uniform float uHalfExtent;
           varying vec2 vWorldXZ;
@@ -113,6 +128,11 @@ export class Ground {
           // World -> tile space. Tile (x, y) spans [x, x+1) x [y, y+1).
           vec2 tileCoord = (vWorldXZ + uHalfExtent) / ${TILE.toFixed(1)};
           vec2 tileUv = tileCoord / uGridSize;
+
+          // --- surface ----------------------------------------------------
+          // What the tile is made of, crisp to its edges: grass and timber
+          // have to read as themselves before anything is burning.
+          diffuseColor.rgb = texture2D(uSurface, tileUv).rgb;
 
           // --- grid lines -------------------------------------------------
           vec2 gridDist = abs(fract(tileCoord) - 0.5);
@@ -147,6 +167,23 @@ export class Ground {
     this.mesh.receiveShadow = true
     this.mesh.name = 'ground'
     this.mesh.userData.type = 'ground'
+  }
+
+  /**
+   * Re-read every tile's surface into the floor's colour, in linear space
+   * (the shader writes it straight into the lit colour). Called once at
+   * construction and again whenever something has changed what the ground is.
+   */
+  refreshSurfaces(): void {
+    const color = new Color()
+    for (let i = 0; i < this.size * this.size; i++) {
+      color.setHex(SURFACES[(this.grid.surfaces[i] ?? Surface.Paving) as Surface].color)
+      this.surfaceData[i * 4] = Math.round(color.r * 255)
+      this.surfaceData[i * 4 + 1] = Math.round(color.g * 255)
+      this.surfaceData[i * 4 + 2] = Math.round(color.b * 255)
+      this.surfaceData[i * 4 + 3] = 255
+    }
+    this.surfaceTexture.needsUpdate = true
   }
 
   // ---------------------------------------------------------------------------
@@ -209,6 +246,7 @@ export class Ground {
   dispose(): void {
     this.fogTexture.dispose()
     this.overlayTexture.dispose()
+    this.surfaceTexture.dispose()
     this.mesh.geometry.dispose()
     ;(this.mesh.material as MeshStandardMaterial).dispose()
   }

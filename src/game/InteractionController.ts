@@ -3,12 +3,12 @@ import { Raycaster, Vector2, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
 import { CAM, Faction, LEVEL_HEIGHT } from '../config'
 import { clientToNdc } from '../core/screen'
-import type { Tile } from '../core/Grid'
+import { type Tile, tileEquals } from '../core/Grid'
 import type { Soldier } from '../entities/Soldier'
 import type { OrbitRig } from '../camera/OrbitRig'
 import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
-import { buildHudModel, type HudIntent } from '../hud/HudModel'
+import { buildHudModel, type HudIntent, tileReadout } from '../hud/HudModel'
 import { calculateHitChance } from './Combat'
 import { compareDigests, digestWorld, reportDivergence, type StateDigest } from './StateDigest'
 import { RpcMethods } from './JsonRpc'
@@ -1009,7 +1009,9 @@ export class InteractionController {
   private readonly onPointerMove = (event: PointerEvent): void => {
     if (this.rig.isDragging) return
 
-    this.hoveredTile = this.tileFromEvent(event)
+    const tile = this.tileFromEvent(event)
+    if (!tileEquals(tile, this.hoveredTile)) this.hud.showTile(tile ? tileReadout(this.battlefield.grid, tile) : null)
+    this.hoveredTile = tile
     this.hoveredEnemy = this.pickSoldierUnderCursor(event, this.enemyFaction)
     this.renderOverlay()
   }

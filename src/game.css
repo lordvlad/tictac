@@ -88,6 +88,31 @@ canvas {
   gap: 6px;
 }
 
+/* What the tile under the pointer is made of, and what is on it. Above the level selector. */
+.hud-tile-readout {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  max-width: 280px;
+  padding: 6px 10px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--hud-text);
+  pointer-events: none;
+  display: none;
+}
+
+.hud-tile-readout.visible {
+  display: block;
+}
+
+.hud-tile-line.hazard b {
+  color: #ff8a4a;
+}
+
 /* The minimap moved to the corner tools, beside the frame counter. */
 #loadingBar {
   position: fixed;

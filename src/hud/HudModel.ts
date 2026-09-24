@@ -6,6 +6,8 @@ import { effectiveWeapon, statusStacks } from '../core/Ballistics'
 import type { MeleeId } from '../core/Melee'
 import { Awareness } from '../core/Awareness'
 import { breakChance, type MoraleBreak, steadyChance } from '../core/Morale'
+import { Block, type Grid, type Tile } from '../core/Grid'
+import { SURFACES } from '../core/Surfaces'
 import { canWatch, watchCost } from '../game/Overwatch'
 import { TRAITS, woundTraits } from '../core/Traits'
 import type { OrbitRig } from '../camera/OrbitRig'
@@ -606,6 +608,30 @@ function moraleChip(soldier: Soldier): HudStatusChip | null {
     detail: `Morale ${soldier.morale} · ${chance}% to break at the start of its turn`,
     good: false,
   }
+}
+
+/** One line of the tile readout. `hazard` lines are drawn as a warning. */
+export interface TileReadoutLine {
+  name: string
+  detail: string
+  tone: 'plain' | 'hazard'
+}
+
+export interface TileReadout {
+  lines: TileReadoutLine[]
+}
+
+/**
+ * What a tile is, for a player deciding whether to stand on it or set it
+ * alight: its surface, and a crate on it, if there is one.
+ */
+export function tileReadout(grid: Grid, tile: Tile): TileReadout {
+  const surface = SURFACES[grid.surfaceAt(tile.x, tile.y)]
+  const lines: TileReadoutLine[] = [{ name: surface.name, detail: surface.description, tone: 'plain' }]
+  if (grid.blockAt(tile.x, tile.y) === Block.Half) {
+    lines.push({ name: 'Crate', detail: 'Wooden: burns, and is gone when it has.', tone: 'plain' })
+  }
+  return { lines }
 }
 
 /**

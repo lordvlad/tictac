@@ -8,6 +8,7 @@ import {
   StairDirection,
   type Tile,
 } from './Grid'
+import { Surface } from './Surfaces'
 import { WallKind } from './Walls'
 import { clamp } from './math'
 import { Rng } from './rng'
@@ -279,7 +280,59 @@ export function generateMap(seed: number, options: MapOptions = {}): GeneratedMa
     [Faction.Red]: pickSpawns(grid, rng, redZone),
   }
 
+  laySurfaces(grid, buildings, new Rng((seed ^ SURFACE_STREAM) >>> 0), scaled)
+
   return { grid, spawns, buildings: footprints }
+}
+
+/**
+ * Mixed into the seed for the surfaces' own stream. Their draws come after
+ * everything else and from a stream of their own, so giving the ground a
+ * material moved no wall, crate or spawn of any seed that existed before.
+ */
+const SURFACE_STREAM = 0x9e3779b9
+
+/**
+ * Say what every floor is made of (`core/Surfaces`), once the terrain is final.
+ *
+ * Outdoors is paving, with patches of dry grass. A room is timber or concrete
+ * as a whole — a fire that gets into a wooden room has the room — and a flat
+ * roof, open to the sky, is concrete. Only tiles whose floor really is the
+ * room's storey are laid: connectivity repairs may have lowered some.
+ */
+function laySurfaces(grid: Grid, buildings: readonly Building[], rng: Rng, scaled: (count: number) => number): void {
+  const inside = new Uint8Array(grid.size * grid.size)
+  for (const building of buildings) forEachTile(building.footprint, (x, y) => (inside[grid.index(x, y)] = 1))
+
+  const patches = scaled(rng.int(5, 9))
+  for (let p = 0; p < patches; p++) {
+    const cx = rng.int(1, grid.size - 2)
+    const cy = rng.int(1, grid.size - 2)
+    const radius = rng.int(1, 3)
+    for (let y = cy - radius; y <= cy + radius; y++) {
+      for (let x = cx - radius; x <= cx + radius; x++) {
+        if (!grid.inBounds(x, y) || inside[grid.index(x, y)]) continue
+        if ((x - cx) ** 2 + (y - cy) ** 2 > radius * radius + 1) continue
+        // Ragged at the rim, so a patch reads as growth rather than a disc.
+        if (!rng.chance(0.8)) continue
+        grid.setSurface(x, y, Surface.Grass)
+      }
+    }
+  }
+
+  for (const building of buildings) {
+    for (const storey of building.storeys) {
+      for (const room of storey.rooms) {
+        const floor = rng.chance(0.55) ? Surface.Timber : Surface.Concrete
+        forEachTile(room, (x, y) => {
+          if (grid.levelAt(x, y) === storey.level) grid.setSurface(x, y, floor)
+        })
+      }
+    }
+    forEachTile(building.footprint, (x, y) => {
+      if (grid.roofAt(x, y) === 0 && grid.levelAt(x, y) > 0) grid.setSurface(x, y, Surface.Concrete)
+    })
+  }
 }
 
 /**

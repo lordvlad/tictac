@@ -15,6 +15,7 @@ import { LEVEL_HEIGHT, TILE } from '../config'
 import { Block, blockHeight, type Grid, Side } from '../core/Grid'
 import { markOccluders, type OcclusionMasks } from '../core/Occlusion'
 import { VIS_BRIGHTNESS, VisState } from '../core/Visibility'
+import { Surface, SURFACES } from '../core/Surfaces'
 import { WALLS, WallKind } from '../core/Walls'
 
 /** Per-instance opacity attribute name (the wall x-ray fade). */
@@ -271,6 +272,8 @@ interface BlockLayer {
   mesh: InstancedMesh
   instances: BlockInstance[]
   baseColor: Color
+  /** A colour per instance, where the kind is not one colour (floors, by surface). */
+  colors?: Color[]
   fade: InstancedBufferAttribute
   /** Fog of war: 1 once the instance's tile has been seen, 0 while unknown. */
   known: Uint8Array
@@ -285,6 +288,11 @@ interface BlockLayer {
    * arrived a tile at a time as the floor below was explored — a patchwork.
    */
   isRoof?: boolean
+}
+
+/** The colour an instance is drawn in before fog dims it. */
+function baseColorOf(layer: BlockLayer, instance: BlockInstance): Color {
+  return layer.colors?.[instance.index] ?? layer.baseColor
 }
 
 /**
@@ -567,11 +575,13 @@ export class Blocks {
     mesh.userData.type = 'floor'
     mesh.frustumCulled = false
 
-    const baseColor = new Color(0x64748b)
+    const baseColor = new Color(SURFACES[Surface.Concrete].color)
     const layer: BlockLayer = {
       mesh,
       instances,
       baseColor,
+      // What each floor is made of shows before anything is burning on it.
+      colors: instances.map((tile) => new Color(SURFACES[this.grid.surfaceAt(tile.x, tile.y)].color)),
       fade,
       known: new Uint8Array(capacity),
       levels: new Uint8Array(capacity),
@@ -587,7 +597,7 @@ export class Blocks {
       this.dummy.rotation.y = 0
       this.dummy.updateMatrix()
       layer.mesh.setMatrixAt(tile.index, this.dummy.matrix)
-      layer.mesh.setColorAt(tile.index, baseColor)
+      layer.mesh.setColorAt(tile.index, baseColorOf(layer, tile))
     }
     layer.mesh.instanceMatrix.needsUpdate = true
     if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
@@ -756,7 +766,7 @@ export class Blocks {
 
       this.dummy.updateMatrix()
       layer.mesh.setMatrixAt(tile.index, this.dummy.matrix)
-      layer.mesh.setColorAt(tile.index, layer.baseColor)
+      layer.mesh.setColorAt(tile.index, baseColorOf(layer, tile))
     }
     layer.mesh.instanceMatrix.needsUpdate = true
     if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
@@ -781,7 +791,7 @@ export class Blocks {
             : VisState.Unknown
           if (beyond > state) state = beyond
         }
-        this.scratch.copy(layer.baseColor).multiplyScalar(VIS_BRIGHTNESS[state])
+        this.scratch.copy(baseColorOf(layer, inst)).multiplyScalar(VIS_BRIGHTNESS[state])
         layer.mesh.setColorAt(inst.index, this.scratch)
 
         // Unexplored instances must be hidden so they do not draw black cutout stencils
@@ -795,7 +805,7 @@ export class Blocks {
   /** Fully lit — used before the first visibility pass. */
   revealAll(): void {
     for (const layer of this.layers) {
-      for (const tile of layer.instances) layer.mesh.setColorAt(tile.index, layer.baseColor)
+      for (const tile of layer.instances) layer.mesh.setColorAt(tile.index, baseColorOf(layer, tile))
       if (layer.mesh.instanceColor !== null) layer.mesh.instanceColor.needsUpdate = true
       layer.known.fill(1)
       this.composeFade(layer)

@@ -1,6 +1,7 @@
 import { Vector3 } from 'three'
 import { GRID_SIZE, HALF_BLOCK_HEIGHT, LEVEL_HEIGHT, RULES, TILE } from '../config'
 import { WALLS, wallHidesSight, WallKind } from './Walls'
+import { Surface } from './Surfaces'
 import { distance } from './math'
 
 /**
@@ -107,6 +108,11 @@ export class Grid {
    * filtered away with its own storey when the player looks inside.
    */
   readonly roofs: Uint8Array
+  /**
+   * What each tile's floor is made of, a {@link Surface}. Paving until the map
+   * generator says otherwise; fire turns what burned to ash.
+   */
+  readonly surfaces: Uint8Array
 
   /**
    * Wall kinds on the edges running north-south, one slot per edge.
@@ -137,6 +143,7 @@ export class Grid {
     this.stairDirections = new Uint8Array(size * size)
     this.ladderFaces = new Uint8Array(size * size)
     this.roofs = new Uint8Array(size * size)
+    this.surfaces = new Uint8Array(size * size)
     this.wallsV = new Uint8Array((size + 1) * size)
     this.wallsH = new Uint8Array(size * (size + 1))
     this.openingsV = new Uint8Array((size + 1) * size)
@@ -151,6 +158,17 @@ export class Grid {
   setRoof(x: number, y: number, level: number): void {
     if (!this.inBounds(x, y)) return
     this.roofs[y * this.size + x] = level
+  }
+
+  /** What the tile's floor is made of ({@link Surface}). */
+  surfaceAt(x: number, y: number): Surface {
+    if (!this.inBounds(x, y)) return Surface.Paving
+    return this.surfaces[y * this.size + x] as Surface
+  }
+
+  setSurface(x: number, y: number, surface: Surface): void {
+    if (!this.inBounds(x, y)) return
+    this.surfaces[y * this.size + x] = surface
   }
 
 

@@ -5,6 +5,7 @@ import { Block, Grid, ORTHOGONAL, Side, faceToward, type Tile } from '../src/cor
 import { CoverLevel, WallKind } from '../src/core/Walls'
 import { coverLevelInDir } from '../src/core/Cover'
 import { Faction, LEVEL_HEIGHT } from '../src/config'
+import { Surface } from '../src/core/Surfaces'
 
 const SEEDS = [1, 7, 42, 99, 1337, 5150, 90210, 24601]
 
@@ -451,5 +452,22 @@ describe('Another battlefield: size and deployment', () => {
     }
     expect(lateral('edge')).toEqual({ left: true, right: true })
     expect(lateral('centre')).toEqual({ left: false, right: false })
+  })
+
+  test('grass grows only outdoors, and a roof you stand on is concrete', () => {
+    // Fire reads the ground, so the ground has to be where the map says it is:
+    // grass indoors would carry a fire through a concrete building.
+    for (const seed of SEEDS) {
+      const { grid, buildings } = generateMap(seed)
+      const inside = (x: number, y: number) =>
+        buildings.some((b) => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h)
+      grid.forEach((x, y) => {
+        const surface = grid.surfaceAt(x, y)
+        if (surface === Surface.Grass) expect({ seed, x, y, inside: inside(x, y) }).toEqual({ seed, x, y, inside: false })
+        if (inside(x, y) && grid.levelAt(x, y) > 0 && grid.roofAt(x, y) === 0) {
+          expect({ seed, x, y, surface }).toEqual({ seed, x, y, surface: Surface.Concrete })
+        }
+      })
+    }
   })
 })
