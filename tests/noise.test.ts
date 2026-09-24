@@ -9,7 +9,7 @@ import { type Ear, hears, NOISE, type Noise, roughly, shotLoudness, stepLoudness
 import { matchDice, Rng } from '../src/core/rng'
 import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
-import { CombatSystem, ItemSystem, MovementSystem, TurnSystem } from '../src/ecs/systems'
+import { CombatSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
 import { Squads } from '../src/game/Squads'
 import { TurnManager } from '../src/game/TurnManager'
@@ -85,7 +85,9 @@ function match() {
   const combat = new CombatSystem(grid, squads, NO_FX, matchDice(7))
   const turns = new TurnSystem()
   const turnManager = new TurnManager(world, turns, squads, NO_FOCUS)
-  const commands = new CommandSystem(world, squads, turnManager, movement, combat, new ItemSystem())
+  const walls = new WallSystem(grid)
+  walls.spawnFromGrid(world)
+  const commands = new CommandSystem(world, squads, turnManager, movement, combat, new ItemSystem(), walls)
   for (const system of [commands, movement, combat, turns]) world.addSystem(system)
   const heard: { noise: Noise; by: Soldier[] }[] = []
   commands.onNoise = (noise, by) => heard.push({ noise, by })

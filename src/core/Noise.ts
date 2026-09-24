@@ -38,6 +38,8 @@ export const NOISE = {
   crouchStep: 0.9,
   /** What a suppressor leaves of a shot's loudness. */
   suppressed: 0.25,
+  /** A pane going: loud, and heard from the window, not from whoever broke it. */
+  glass: 15,
   /** How coarse "roughly where" is: noises are placed to the middle of a block this many tiles wide. */
   blur: 3,
 }

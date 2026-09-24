@@ -230,6 +230,11 @@ export class SimMatch {
     this.host.commands.onNoise = (noise, heard) => {
       this.intel[heard[0]!.faction].hear(noise, this.host.turnNumber)
     }
+    // A broken window is a new way through, which every cached walk has to know.
+    this.host.walls.onWallsChanged = () => {
+      this.intel[Faction.Blue].forgetGround()
+      this.intel[Faction.Red].forgetGround()
+    }
   }
 
   get grid(): Grid {

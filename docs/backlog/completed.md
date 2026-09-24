@@ -928,3 +928,55 @@ Blocks 1000/5000/9000, wins summed:
 Kept: **pellets 12 → 14**. Four shotguns 155 → 201 (17%, back to before this item), shotgun
 kills in the mirror up (~339 → ~356 a block), fights still at 6.9 m, mirror 575 / 583. At 16
 they won 224 but took their fights out to 7.5 m and the mirror tilted to 598 / 567.
+
+---
+
+### [ITEM-019] Noise, Awareness and the Quiet Kill
+**Completed Date:** 2026-09-24  
+**Type:** Feature  
+**Milestone:** M3 — Reconnaissance & Morale  
+
+#### Why
+[GDD: Noise & Stealth](../design/gdd/noise-and-stealth.md). Sight was modelled carefully and
+sound not at all, so there was no choice between crossing a room quickly and crossing it
+quietly.
+
+#### Key Changes
+Built in slices, mechanics before noise, each committed and measured on blocks 1000/5000/9000:
+
+0. **The sweep's policy knows only what its side has seen** (`src/sim/Intel.ts`): contacts where
+   an enemy was last seen, dropped when the tile is found empty; with none, a search of unseen
+   ground by walking distance, keeping a shot in hand. Mirror 608 / 563 / 29.
+1. **Crouched movement**: a crouched unit moves crouched at `RULES.crouchStepCost` (1.5×) a
+   step. Mirror 600 / 558 / 42.
+2. **Attacks from behind**: `PositionComponent.heading` (eight directions, no trigonometry);
+   from behind a shot ignores evasion and status defence, a blow ignores parry too, and a knife
+   does 5× damage. Cover still counts. Mirror 598 / 570 / 32.
+3. **Noise** (`src/core/Noise.ts`): loudness per source with inverse-square falloff against each
+   listener's own hearing (Intelligence); per-weapon loudness, a suppressor keeps a quarter, a
+   frag is heard map-wide. Rings on the map, "heard at N m" on the move preview (which now also
+   prices a crouched or limping walk at what the unit pays). Mirror 595 / 569 / 36.
+4. **Awareness** (`src/core/Awareness.ts`, `AwarenessComponent`, replicated and digested):
+   unaware, alerted, engaged. Hearing alerts and turns a unit toward the noise; the waiting side
+   notices only what is in front of it; an unengaged watcher reacts only in front. Target strip
+   and shot panel mark unaware / alerted. Mirror 595 / 569 / 36.
+5. **Glass and the stone**: a shot, reaction or throw through glazing breaks it (a replicated
+   wall change, heard at 15 m from the window); a stone (two per soldier, outside the crate) is
+   heard where it lands and gives the thrower away to nobody. `World.query` got a per-component
+   index, because wall entities in the headless host made every tick scan them. Mirror
+   593 / 568 / 39; about 1.6 windows break a match.
+
+Along the way: `NOISE.crouchStep` 1 → 0.9 m, since an ordinary ear on the neighbouring tile
+caught a crouched step and no crouched approach could arrive; `tests/intel.test.ts` was
+overwritten by the slice-0 commit and restored the next.
+
+#### Acceptance Criteria
+- [x] Being heard alerts a unit without handing the listener a firing solution.
+- [x] A crouched approach can reach an unaware enemy; a standing one cannot.
+- [x] A stone alerts enemies toward where it landed, not toward the thrower.
+- [x] Breaking glass alerts, and the segment is gone for both peers (the replicated wall
+      component, tested; not verified in two live browsers).
+- [ ] The policy uses any of it. Only ~3% of its attacks land on a target that is not engaged —
+      contact is mutual sight, and the side whose turn comes next looks all round — and a
+      "crouch near an unengaged enemy" rule changed nothing. It never throws a stone. Stealth
+      is a player's tool; the sweep does not measure it.

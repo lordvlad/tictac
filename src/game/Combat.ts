@@ -14,7 +14,7 @@ import {
 } from '../core/Ballistics'
 import { MELEE } from '../core/Melee'
 import { hasLineOfSight } from '../core/Visibility'
-import { type GrenadeId, ShotMode, STATUSES, StatusKind } from '../core/Arsenal'
+import { type GrenadeId, harmless, ShotMode, STATUSES, StatusKind } from '../core/Arsenal'
 import { type Casualty, type Combatant, type CombatFx, NO_FX } from '../core/Combatant'
 import type { Roll } from '../core/rng'
 import { distance, facingYaw } from '../core/math'
@@ -449,13 +449,17 @@ export function throwGrenade(
 
   thrower.ap = Math.max(0, thrower.ap - spec.apCost)
   thrower.grenades[kind] -= 1
+  fx.shoot(thrower)
+  // A stone is only a noise where it lands: the throw gives nothing away,
+  // and it catches nobody.
+  if (harmless(spec)) return { thrown: true, apSpent: spec.apCost, hits: [] }
+
   // A thrown grenade is not a quiet act, and there is no silenced version of
   // one: the thrower is on show whatever they are carrying.
   thrower.firedThisTurn = true
   thrower.known = true
   // Smoke for your own side is cover, not an attack; anything else is a fight.
   if (!spec.friendly) engage(thrower)
-  fx.shoot(thrower)
 
   const hits: ResolvedHit[] = []
   for (const soldier of soldiers) {

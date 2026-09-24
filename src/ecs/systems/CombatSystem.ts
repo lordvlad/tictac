@@ -1,7 +1,7 @@
 import { System } from '../System'
 import type { World } from '../World'
 import { StanceComponent } from '../components/StanceComponent'
-import { RULES } from '../../config'
+import { type Faction, RULES } from '../../config'
 import type { GrenadeId, ShotMode } from '../../core/Arsenal'
 import type { Tile } from '../../core/Grid'
 import type { Grid } from '../../core/Grid'
@@ -11,6 +11,7 @@ import { canWatch, reactToArrival, watchCost } from '../../game/Overwatch'
 import { NO_FX, type CombatFx } from '../../core/Combatant'
 import { MELEE } from '../../core/Melee'
 import { type Noise, shotLoudness } from '../../core/Noise'
+import { glassCrossed } from '../../core/Visibility'
 import type { Roll } from '../../core/rng'
 import { executeMelee,
   applyHitEffects,
@@ -59,6 +60,16 @@ export class CombatSystem extends System {
    * off. Owned by `CommandSystem`, which works out who heard it.
    */
   onNoise?: (noise: Noise) => void
+  /**
+   * A round or a throw by `faction` went through the glazing on `edge`. Owned
+   * by `CommandSystem`, which breaks it: a wall is the wall system's to change.
+   */
+  onGlass?: (edge: number, faction: Faction) => void
+
+  /** Everything glazed between two tiles, in the order a line from the first meets it. */
+  private through(from: Tile, to: Tile, faction: Faction): void {
+    for (const edge of glassCrossed(this.grid, from, to)) this.onGlass?.(edge, faction)
+  }
 
   /**
    * Fire at a target.
@@ -86,6 +97,8 @@ export class CombatSystem extends System {
     )
     if (!result) return null
     this.onNoise?.({ at: { ...shooter.tile }, loudness: shotLoudness(shooter), faction: shooter.faction })
+    // Every round goes somewhere: through a window, it takes the window with it.
+    this.through(shooter.tile, target.tile, shooter.faction)
     this.onShotResolved?.(shooter, target, result)
     return result
   }
@@ -104,9 +117,13 @@ export class CombatSystem extends System {
   }
 
   throwGrenade(thrower: Soldier, at: Tile, kind: GrenadeId): GrenadeResult {
+    const from = { ...thrower.tile }
     const result = throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx)
-    // Heard where it goes off, not where it was thrown from.
-    if (result.thrown) this.onNoise?.({ at: { ...at }, loudness: thrower.grenadeSpecs[kind].loudness, faction: thrower.faction })
+    if (!result.thrown) return result
+    // A throw that meets a window breaks it on the way, then goes off — and is
+    // heard — where it lands, not where it was thrown from.
+    this.through(from, at, thrower.faction)
+    this.onNoise?.({ at: { ...at }, loudness: thrower.grenadeSpecs[kind].loudness, faction: thrower.faction })
     return result
   }
 
@@ -148,6 +165,7 @@ export class CombatSystem extends System {
     const fired = reactToArrival(this.grid, mover, this.squads.soldiers, this.roll, this.fx)
     for (const { watcher, result } of fired) {
       this.onNoise?.({ at: { ...watcher.tile }, loudness: shotLoudness(watcher), faction: watcher.faction })
+      this.through(watcher.tile, mover.tile, watcher.faction)
       this.onShotResolved?.(watcher, mover, result)
     }
     return fired.length

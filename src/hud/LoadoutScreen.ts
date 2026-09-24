@@ -221,6 +221,8 @@ export class LoadoutScreen {
           .map((id) => row(`ammo-${id}`, AMMO[id].name, left.ammo[id]))
           .join('')}
         ${Object.values(GrenadeId)
+          // Issued kit (a stone) is nobody's to hand out.
+          .filter((id) => GRENADES[id].issued === 0)
           .map((id) => row(`grenade-${id}`, GRENADES[id].name, left.grenades[id]))
           .join('')}
         ${Object.values(ItemId)
@@ -365,6 +367,7 @@ export class LoadoutScreen {
 
         <div class="loadout-section">Grenades</div>
         ${Object.values(GrenadeId)
+          .filter((id) => GRENADES[id].issued === 0)
           .map((id) =>
             stepper(
               `grenade-${id}`,

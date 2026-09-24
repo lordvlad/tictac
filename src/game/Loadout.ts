@@ -1,5 +1,5 @@
 import { MeleeId } from '../core/Melee'
-import { AmmoId, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
+import { AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { ItemId } from '../core/Items'
 import type { Soldier } from '../entities/Soldier'
@@ -78,6 +78,8 @@ export const DEMO_INVENTORY: Inventory = {
     [GrenadeId.Frag]: 6,
     [GrenadeId.Flash]: 3,
     [GrenadeId.Smoke]: 3,
+    // Issued to every soldier instead (`GrenadeSpec.issued`): nobody packs a stone.
+    [GrenadeId.Stone]: 0,
   },
   items: {
     [ItemId.StimPack]: 4,
@@ -117,7 +119,7 @@ export function defaultLoadout(): SquadLoadout {
   return weapons.map((weaponId) => ({
     weaponId,
     ammoId: AmmoId.Standard,
-    grenades: { [GrenadeId.Frag]: 1, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0 },
+    grenades: { [GrenadeId.Frag]: 1, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0, [GrenadeId.Stone]: 0 },
     items: {
       [ItemId.StimPack]: 0,
       [ItemId.FirstAidKit]: 0,
@@ -391,7 +393,10 @@ export function unfitAttachment(loadout: SquadLoadout, index: number, id: Attach
  */
 export function applyUnitLoadout(soldier: Soldier, unit: UnitLoadout): void {
   soldier.equip(unit.weaponId, unit.ammoId)
-  for (const kind of Object.values(GrenadeId)) soldier.grenades[kind] = unit.grenades[kind] ?? 0
+  // What was packed, plus what everybody has anyway.
+  for (const kind of Object.values(GrenadeId)) {
+    soldier.grenades[kind] = (unit.grenades[kind] ?? 0) + GRENADES[kind].issued
+  }
   for (const id of Object.values(ItemId)) soldier.items[id] = unit.items[id] ?? 0
   // The pouch decides which worn gear is in force, so the traits it grants are
   // only known once it has been stamped. `equip` and every `fitAttachment`

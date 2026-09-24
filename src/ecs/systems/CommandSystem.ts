@@ -1,6 +1,7 @@
 import type { Faction } from '../../config'
 import { distance, facingYaw } from '../../core/math'
-import { hears, type Noise, stepLoudness } from '../../core/Noise'
+import { hears, NOISE, type Noise, stepLoudness } from '../../core/Noise'
+import { WallKind } from '../../core/Walls'
 import { hear, lookAround } from '../../core/Awareness'
 import { headingToward } from '../../core/Facing'
 import type { Soldier } from '../../entities/Soldier'
@@ -13,6 +14,7 @@ import type { World } from '../World'
 import type { CombatSystem } from './CombatSystem'
 import type { ItemSystem } from './ItemSystem'
 import type { MovementSystem } from './MovementSystem'
+import type { WallSystem } from './WallSystem'
 
 /** The messages that change the world. Everything else on the wire is session or diagnosis. */
 export type Command = Extract<
@@ -142,6 +144,11 @@ export class CommandSystem extends System {
     private readonly movement: MovementSystem,
     private readonly combat: CombatSystem,
     private readonly items: ItemSystem,
+    /**
+     * The map's walls: a window a round or a throw goes through is broken
+     * here, through the one writer every wall change goes through.
+     */
+    private readonly walls: WallSystem,
   ) {
     super()
     // The reaction trigger lives with the applier, not with whoever happens to
@@ -160,6 +167,12 @@ export class CommandSystem extends System {
       this.onStep?.(mover)
     }
     combat.onNoise = (noise) => this.sound(noise)
+    // Glass breaks where the line met it, and the breaking is heard from there.
+    combat.onGlass = (edge, faction) => {
+      this.walls.setKind(this.world, edge, WallKind.None)
+      const { x, y } = this.combat.grid.edgeTile(edge)
+      this.sound({ at: { x, y }, loudness: NOISE.glass, faction })
+    }
   }
 
   /**

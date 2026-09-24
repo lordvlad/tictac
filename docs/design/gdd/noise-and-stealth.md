@@ -2,7 +2,7 @@
 title: "GDD: Noise & Stealth — Being Heard, and Not Being"
 id: "GDD-NOISE"
 type: "gdd"
-status: "in-progress"
+status: "implemented"
 lastReviewed: "2026-09-24"
 appliesTo:
   - "src/game/FogOfWar.ts"
@@ -18,8 +18,8 @@ tags: ["stealth", "noise", "awareness", "design"]
 
 # GDD: Noise & Stealth — Being Heard, and Not Being
 
-**Status: in progress (ITEM-019).** Built: crouched movement, attacks from behind, noise (§3)
-and awareness (§4). Not yet built: glass and the stone (§5).
+**Status: implemented (ITEM-019)**: crouched movement, attacks from behind, noise (§3),
+awareness (§4), glass and the stone (§5). Open: the sweep's policy neither sneaks nor throws.
 Shipped numbers live in the code and appear in the [generated
 catalogue](status-and-trait-catalog.md).
 
@@ -71,8 +71,10 @@ different channel from sight rather than a worse copy of it. Nobody listens for 
 | Suppressed shot | a quarter of the weapon's | `NOISE.suppressed` |
 | Smoke / flashbang | 6 / 20 m | Where it lands |
 | Frag grenade | everywhere | Where it lands; every unit on any map hears it |
+| Stone | 8 m | Where it lands; the throw itself is silent |
+| Breaking glass | 15 m | From the window, whoever broke it |
 
-Still proposals: sprinting as its own noise, plate as a noisy option, doors and glass.
+Still proposals: sprinting as its own noise, plate as a noisy option, doors.
 
 **What hearing gives** is deliberately little: that something is there, and **roughly where**
 — the middle of the 3×3 block it was made in (`roughly`). Never a firing solution; a shot
@@ -115,23 +117,24 @@ believed" — predates ADR-0004. Every attack is intent on the wire and resolved
 
 ## 5. Glass, and the thrown stone
 
-Glazing is the best object in the game for this, and it already exists as a wall kind:
-transparent, stops nothing, and cannot be walked through. It is also the one piece of terrain
-whose destruction is obviously loud.
+**Built.** Glazing already existed as a wall kind: transparent, stops nothing, cannot be walked
+through — and the one piece of terrain whose destruction is obviously loud.
 
-- **Breaking glass is loud and permanent.** The wall segment becomes a gap. Both peers agree
-  immediately, because a wall's kind is replicated component state.
-- **Shooting through a window** should therefore be a decision with a cost: a free firing lane
-  that announces you made one.
-- **A thrown stone is a lie.** Throw something at a window across the room; the noise happens
-  *there*, not where you are. Every unit that hears it is alerted toward the wrong tile — the
-  first mechanic in the game that manipulates enemy information rather than enemy hit points.
-  It should be cheap, reusable and useless against an already-engaged enemy.
-- A stone thrown at nothing in particular still makes a noise where it lands, which is the
-  simpler and more general version of the same trick.
+- **A round or a throw that passes through a window breaks it** (`glassCrossed`, the same grid
+  walk sight uses; a line threading a corner passes between the panes and breaks neither). The
+  wall becomes a gap — `WallSystem.setKind`, so the component both peers replicate and the
+  grid move together — and it is walkable from then on. Breaking it is heard from the window
+  (`NOISE.glass`, 15 m), whoever broke it.
+- **Shooting through a window** is therefore a decision with a cost: a free firing lane that
+  announces you made one.
+- **A thrown stone is a lie.** Every soldier carries two (`GrenadeSpec.issued`: not from the
+  crate, not against the grenade cap), thrown like a grenade for 2 AP up to 12 m. It hurts
+  nobody and gives the thrower away to nobody; the only thing it does is be heard (8 m) where
+  it lands — and break any window on its way. Everyone who hears it is alerted and turns
+  toward where it landed, not toward the thrower. Useless against an engaged enemy, who does
+  not turn for noises.
 
-This is the feature this whole document is for. It is also the one that most needs enemy
-awareness to be real: a distraction is meaningless if nobody can be distracted.
+Not built: a stone is not reusable (two per match), and the sweep's policy never throws one.
 
 ## 6. What the player sees
 

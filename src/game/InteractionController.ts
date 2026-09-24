@@ -187,6 +187,7 @@ export class InteractionController {
       this.movementSystem,
       this.combatSystem,
       this.itemSystem,
+      this.wallSystem,
     )
 
     // First, so a queued command is applied before the tick that walks it.

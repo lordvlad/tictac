@@ -56,6 +56,14 @@ export class World {
   private readonly entityComponents = new Map<number, Map<string, Component>>()
   /** entityId -> componentName -> last broadcast snapshot, for dirty diffing. */
   private readonly snapshots = new Map<number, Map<string, Record<string, unknown>>>()
+  /**
+   * componentName -> entities carrying it.
+   *
+   * A query used to scan every entity, which was fine while the entities were
+   * a squad each; with one per wall it made systems that tick every frame —
+   * movement, above all — cost in proportion to the map's walls.
+   */
+  private readonly byComponent = new Map<string, Set<number>>()
 
   private readonly systems: System[] = []
   private readonly listeners: ComponentChangeListener[] = []
@@ -81,6 +89,7 @@ export class World {
   }
 
   destroyEntity(id: number): void {
+    for (const name of this.entityComponents.get(id)?.keys() ?? []) this.byComponent.get(name)?.delete(id)
     this.activeEntities.delete(id)
     this.entityComponents.delete(id)
     this.snapshots.delete(id)
@@ -112,6 +121,12 @@ export class World {
 
   addComponent<T extends Component>(entityId: number, component: T): T {
     this.registerEntity(entityId).set(component.name, component)
+    let holders = this.byComponent.get(component.name)
+    if (!holders) {
+      holders = new Set()
+      this.byComponent.set(component.name, holders)
+    }
+    holders.add(entityId)
     const data = component.serialize()
     this.snapshots.get(entityId)?.set(component.name, data)
     this.emit(entityId, component.name, data)
@@ -132,12 +147,25 @@ export class World {
   removeComponent(entityId: number, componentClass: ComponentClass): void {
     const map = this.entityComponents.get(entityId)
     if (!map?.delete(componentClass.componentName)) return
+    this.byComponent.get(componentClass.componentName)?.delete(entityId)
     this.snapshots.get(entityId)?.delete(componentClass.componentName)
   }
 
+  /**
+   * Entities carrying every one of `componentClasses`, in ascending id — the
+   * order they were created in, which is the order systems have always walked
+   * them, and an order both peers share.
+   */
   query(componentClasses: ComponentClass[]): number[] {
+    let smallest: Set<number> | undefined
+    for (const cls of componentClasses) {
+      const holders = this.byComponent.get(cls.componentName)
+      if (!holders || holders.size === 0) return []
+      if (!smallest || holders.size < smallest.size) smallest = holders
+    }
+    if (!smallest) return [...this.activeEntities]
     const result: number[] = []
-    for (const entityId of this.activeEntities) {
+    for (const entityId of smallest) {
       const map = this.entityComponents.get(entityId)
       if (!map) continue
       let match = true
@@ -149,7 +177,7 @@ export class World {
       }
       if (match) result.push(entityId)
     }
-    return result
+    return result.sort((a, b) => a - b)
   }
 
   addSystem(system: System): void {
@@ -264,6 +292,7 @@ export class World {
     this.activeEntities.clear()
     this.entityComponents.clear()
     this.snapshots.clear()
+    this.byComponent.clear()
     this.systems.length = 0
     this.listeners.length = 0
     this.nextEntityId = 1

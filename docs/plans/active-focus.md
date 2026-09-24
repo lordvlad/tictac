@@ -25,19 +25,9 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- **`[ITEM-019]`**: Noise, awareness and the quiet kill — built in slices, mechanics first:
-  1. ✅ The sweep's policy knows only what its side has seen (`src/sim/Intel.ts`): contacts
-     where an enemy was last seen, and a search when there are none.
-  2. ✅ Crouched movement: a crouched unit stays crouched when it moves, at 1.5× a step.
-  3. ✅ Attacks from behind: an integer heading; blows and shots from behind ignore evasion,
-     parry and defence (cover still counts), and a knife from behind does 5× its damage.
-  4. ✅ Noise: loudness per source (per weapon, muffled by a suppressor) falling off with the
-     square of distance against each listener's own threshold; a frag is heard map-wide,
-     smoke and flash much less. Rings on the map, "heard at" on the move preview.
-  5. ✅ Awareness: unaware / alerted / engaged, replicated; hearing turns a unit toward the
-     noise; the waiting side notices only in front; unengaged watchers react only in front.
-  6. Next: glass and the stone. Open: the sweep's policy never sneaks (3% of attacks land on
-     a target not yet in the fight).
+- Nothing in flight. Open from ITEM-019: the sweep's policy neither sneaks nor throws stones
+  (only ~3% of its attacks land on a target not yet in the fight), so stealth is a player's
+  tool the balance sweep does not measure.
 
 ### 📋 Ready (Pull Queue)
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for
@@ -121,6 +111,9 @@ reaction fire and a roster that survives a match.
 - **`[ITEM-029]`**: The sweep's policy weighs the ground it crosses, and reloads.
 - **`[ITEM-018]`**: Melee — a sidearm slot, fists, knife and club.
 - **`[ITEM-031]`**: One command applier for every caller, live play included.
+- **`[ITEM-032]`**: Projectile hit model — one straight line per projectile.
+- **`[ITEM-019]`**: Noise, awareness and the quiet kill — crouched movement, attacks from
+  behind, noise, awareness, glass and the stone; the policy knows only what it has seen.
 
 ### 🚫 Struck
 - **`[ITEM-003.4]`** — "Remove `installCanvasStub` from `movement`, `camera`, `pathmarker`,

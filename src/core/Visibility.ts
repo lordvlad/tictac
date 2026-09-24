@@ -1,5 +1,6 @@
 import { LEVEL_HEIGHT, RULES } from '../config'
-import { ORTHOGONAL, type Grid, type Tile } from './Grid'
+import { faceToward, ORTHOGONAL, type Grid, type Tile } from './Grid'
+import { WallKind } from './Walls'
 
 /**
  * Visibility states, and the one brightness ramp every renderer must use.
@@ -34,22 +35,27 @@ export function createVisibilityMap(size: number): Uint8Array {
 }
 
 /**
- * Is there clear line of sight from one tile centre to another?
+ * Walk the grid lines a straight line from one tile centre to another
+ * crosses, in order, calling `cross(from, to)` for each orthogonal step and
+ * `corner(from, to)` where the line threads a lattice point exactly — the
+ * diagonal case, where it passes between two walls rather than through one.
+ * Either returning true stops the walk; the result says whether it was
+ * stopped.
  *
- * Sight is blocked by the walls the ray *crosses*, so this walks grid lines
- * rather than tiles: a wall is a boundary with no footprint, and asking "does
- * this tile block sight" has no meaning any more.
- *
- * Where the ray threads a lattice point exactly — the diagonal case — it slips
- * past unless both walls meeting at that corner are opaque. That is what lets
- * a unit see diagonally around the end of a wall.
+ * The one statement of "what does this line cross", shared by sight and by
+ * anything that needs the edges themselves — a round breaking the window it
+ * passes through.
  */
-export function hasLineOfSight(grid: Grid, from: Tile, to: Tile): boolean {
+export function walkLine(
+  from: Tile,
+  to: Tile,
+  cross: (a: Tile, b: Tile) => boolean,
+  corner: (a: Tile, b: Tile) => boolean,
+): boolean {
   let x = from.x
   let y = from.y
-  if (x === to.x && y === to.y) return true
+  if (x === to.x && y === to.y) return false
 
-  const observerFloorY = grid.levelAt(from.x, from.y) * LEVEL_HEIGHT
   const spanX = Math.abs(to.x - from.x)
   const spanY = Math.abs(to.y - from.y)
   const stepX = Math.sign(to.x - from.x)
@@ -69,23 +75,63 @@ export function hasLineOfSight(grid: Grid, from: Tile, to: Tile): boolean {
     const dueY = y === to.y ? Infinity : nextY
 
     if (Math.abs(dueX - dueY) < 1e-9) {
-      if (grid.cornerClosed({ x, y }, { x: x + stepX, y: y + stepY }, observerFloorY)) return false
+      if (corner({ x, y }, { x: x + stepX, y: y + stepY })) return true
       x += stepX
       y += stepY
       nextX += strideX
       nextY += strideY
     } else if (dueX < dueY) {
-      if (grid.blocksSightBetween({ x, y }, { x: x + stepX, y }, observerFloorY)) return false
+      if (cross({ x, y }, { x: x + stepX, y })) return true
       x += stepX
       nextX += strideX
     } else {
-      if (grid.blocksSightBetween({ x, y }, { x, y: y + stepY }, observerFloorY)) return false
+      if (cross({ x, y }, { x, y: y + stepY })) return true
       y += stepY
       nextY += strideY
     }
   }
+  return false
+}
 
-  return true
+/**
+ * Is there clear line of sight from one tile centre to another?
+ *
+ * Sight is blocked by the walls the ray *crosses*, so this walks grid lines
+ * rather than tiles: a wall is a boundary with no footprint, and asking "does
+ * this tile block sight" has no meaning any more.
+ *
+ * Where the ray threads a lattice point exactly — the diagonal case — it slips
+ * past unless both walls meeting at that corner are opaque. That is what lets
+ * a unit see diagonally around the end of a wall.
+ */
+export function hasLineOfSight(grid: Grid, from: Tile, to: Tile): boolean {
+  const observerFloorY = grid.levelAt(from.x, from.y) * LEVEL_HEIGHT
+  return !walkLine(
+    from,
+    to,
+    (a, b) => grid.blocksSightBetween(a, b, observerFloorY),
+    (a, b) => grid.cornerClosed(a, b, observerFloorY),
+  )
+}
+
+/**
+ * The glazing a straight line from `from` to `to` passes through, as edge
+ * ids, in the order it meets them. A line that threads a corner passes
+ * between the panes rather than through one, and breaks neither.
+ */
+export function glassCrossed(grid: Grid, from: Tile, to: Tile): number[] {
+  const panes: number[] = []
+  walkLine(
+    from,
+    to,
+    (a, b) => {
+      const side = faceToward(a, b)
+      if (side !== 0 && grid.wallAt(a.x, a.y, side) === WallKind.Glass) panes.push(grid.edgeId(a.x, a.y, side))
+      return false
+    },
+    () => false,
+  )
+  return panes
 }
 
 /** A unit doing the looking. */

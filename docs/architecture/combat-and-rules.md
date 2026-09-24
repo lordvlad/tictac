@@ -238,6 +238,17 @@ it is engaged. A watcher that is not engaged reacts only to what is in front of 
 (`reactToArrival`). An alerted unit that hears nothing new for `CALM_AFTER` (2) of its own
 turns settles back to unaware (`calmDown`, in `settleTurn`). Engaged does not wear off.
 
+### Glass and the stone
+A shot, a reaction or a throw whose line passes through glazing breaks it: `glassCrossed`
+(`core/Visibility`, the same `walkLine` that decides sight) lists the panes, `CombatSystem`
+reports each through `onGlass`, and `CommandSystem` sets the wall to `WallKind.None` through
+`WallSystem.setKind` — the replicated component and the grid together — and makes it a noise at
+the window (`NOISE.glass`, 15 m). `MatchHost` now holds wall entities too, so a broken window is
+state there as in a played match. The **stone** is a `GrenadeId` with no damage and no status
+(`harmless`): the throw reveals nobody and catches nobody; it is heard (8 m) where it lands.
+`GrenadeSpec.issued` — two for a stone — is carried by every soldier outside the crate and the
+grenade cap (`applyUnitLoadout`).
+
 ## 3. Damage Resolution & Armor
 
 ```mermaid

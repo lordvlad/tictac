@@ -9,7 +9,7 @@ import { Squads } from '../game/Squads'
 import { digestWorld, type StateDigest } from '../game/StateDigest'
 import { TurnManager } from '../game/TurnManager'
 import { createGlobalRules } from '../ecs/globals'
-import { CombatSystem, ItemSystem, MovementSystem, TurnSystem } from '../ecs/systems'
+import { CombatSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../ecs/systems'
 import { type Applied, CommandSystem, isCommand } from '../ecs/systems/CommandSystem'
 import { World } from '../ecs/World'
 
@@ -61,6 +61,7 @@ export class MatchHost {
   readonly turnManager: TurnManager
 
   readonly commands: CommandSystem
+  readonly walls: WallSystem
   private readonly step: number
   private readonly maxSteps: number
 
@@ -95,8 +96,13 @@ export class MatchHost {
     const combat = new CombatSystem(map.grid, this.squads, NO_FX, matchDice(header.seed))
     const items = new ItemSystem()
     const turns = new TurnSystem()
+    // An entity per wall, as in a played match, so a broken window is state
+    // like any other. Not added as a system: its tick only catches the grid up
+    // with a peer's replicated walls, and a host has no peer.
+    this.walls = new WallSystem(map.grid)
+    this.walls.spawnFromGrid(this.world)
     this.turnManager = new TurnManager(this.world, turns, this.squads, NO_FOCUS)
-    this.commands = new CommandSystem(this.world, this.squads, this.turnManager, movement, combat, items)
+    this.commands = new CommandSystem(this.world, this.squads, this.turnManager, movement, combat, items, this.walls)
     this.world.addSystem(this.commands)
     this.world.addSystem(movement)
     this.world.addSystem(combat)

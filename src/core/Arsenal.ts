@@ -504,6 +504,7 @@ export const GrenadeId = {
   Frag: 'frag',
   Flash: 'flash',
   Smoke: 'smoke',
+  Stone: 'stone',
 } as const
 export type GrenadeId = (typeof GrenadeId)[keyof typeof GrenadeId]
 
@@ -528,6 +529,11 @@ export interface GrenadeSpec {
    * smoke canister hisses.
    */
   loudness: number
+  /**
+   * How many every soldier carries whatever the loadout: not from the crate,
+   * and not counted against the grenade cap. Nought for anything that is.
+   */
+  issued: number
 }
 
 export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
@@ -545,6 +551,7 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     // Everybody on any map hears it. Finite because grenade specs replicate as
     // JSON, and JSON has no Infinity.
     loudness: 1000,
+    issued: 0,
   },
   [GrenadeId.Flash]: {
     id: GrenadeId.Flash,
@@ -557,6 +564,7 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     applies: StatusKind.Flashed,
     friendly: false,
     loudness: 20,
+    issued: 0,
   },
   [GrenadeId.Smoke]: {
     id: GrenadeId.Smoke,
@@ -569,5 +577,28 @@ export const GRENADES: Record<GrenadeId, GrenadeSpec> = {
     applies: StatusKind.Smoked,
     friendly: true,
     loudness: 6,
+    issued: 0,
   },
+  // Not a grenade at all: something picked up and thrown. It does nothing
+  // where it lands except be heard there — the first thing in the game that
+  // works on what the other side knows rather than on its hit points. Every
+  // soldier has a couple.
+  [GrenadeId.Stone]: {
+    id: GrenadeId.Stone,
+    name: 'Stone',
+    apCost: 2,
+    areaRadius: 0,
+    damage: 0,
+    armorShred: 0,
+    throwRange: 12,
+    applies: null,
+    friendly: false,
+    loudness: 8,
+    issued: 2,
+  },
+}
+
+/** True for a throw that hurts nobody and gives nobody away: it is only a noise. */
+export function harmless(spec: GrenadeSpec): boolean {
+  return spec.damage === 0 && spec.applies === null
 }

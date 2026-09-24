@@ -42,9 +42,8 @@ export class Intel {
    * Walking cost from a tile to every other, by the source's index.
    *
    * Searching asks it twice per decision over the whole map, which made
-   * pathfinding most of what a sweep spent its time on. Kept for the match
-   * because the ground does not change under a headless policy; a rule that
-   * opens a wall mid-match has to clear this.
+   * pathfinding most of what a sweep spent its time on. Kept until the walls
+   * change — a broken window is a new way through — see {@link forgetGround}.
    */
   private readonly walks = new Map<number, Float32Array>()
   /** Ground joined to where the squad stands, so a search never picks a goal it cannot walk to. */
@@ -68,6 +67,12 @@ export class Intel {
       this.walks.set(index, walk)
     }
     return walk
+  }
+
+  /** The walls changed — a window broke — so every walking field is out of date. */
+  forgetGround(): void {
+    this.walks.clear()
+    this.connected = null
   }
 
   /** Enemies believed alive, where they were last seen. */

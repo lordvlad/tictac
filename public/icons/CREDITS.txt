@@ -11,6 +11,7 @@ ammo-hollow: bullet-impacts by delapouite
 grenade-frag: grenade by sbed
 grenade-flash: flash-grenade by lorc
 grenade-smoke: smoke-bomb by darkzaitzev
+grenade-stone: rock by lorc
 item-stim: syringe by sbed
 item-firstAid: first-aid-kit by delapouite
 item-nullweave: kevlar-vest by skoll

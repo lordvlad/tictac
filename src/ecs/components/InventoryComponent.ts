@@ -1,5 +1,5 @@
 import { Component } from '../Component'
-import { GrenadeId } from '../../core/Arsenal'
+import { GRENADES, GrenadeId } from '../../core/Arsenal'
 import { MELEE, MeleeId } from '../../core/Melee'
 
 /** Grenades still in the pouch, by kind, and what is in the sidearm slot. */
@@ -14,6 +14,7 @@ export class InventoryComponent extends Component {
       [GrenadeId.Frag]: 1,
       [GrenadeId.Flash]: 1,
       [GrenadeId.Smoke]: 1,
+      [GrenadeId.Stone]: GRENADES[GrenadeId.Stone].issued,
     },
     /** Fists when the slot is empty: every soldier can do that much. */
     public sidearm: MeleeId = MeleeId.Fists,

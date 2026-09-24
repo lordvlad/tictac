@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { MeleeId } from '../src/core/Melee'
-import { AmmoId, GrenadeId, WEAPONS, type Weapon, WeaponId } from '../src/core/Arsenal'
+import { AmmoId, GRENADES, GrenadeId, WEAPONS, type Weapon, WeaponId } from '../src/core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
 import { resolveTraits, type TraitId } from '../src/core/Traits'
@@ -94,6 +94,7 @@ describe('Shared crate', () => {
       [GrenadeId.Frag]: 2,
       [GrenadeId.Flash]: 3,
       [GrenadeId.Smoke]: 3,
+      [GrenadeId.Stone]: 0,
     })
     expect(left.items).toEqual({
       [ItemId.StimPack]: 4,
@@ -383,13 +384,13 @@ describe('Weapon rails', () => {
 })
 
 describe('Stamping a loadout onto a soldier', () => {
-  test('kinds the player left out are zeroed, not left at their defaults', () => {
+  test('kinds the player left out are zeroed, and what everybody is issued is added', () => {
     const soldier = stubSoldier()
 
     applyUnitLoadout(soldier, {
       weaponId: WeaponId.Sniper,
       ammoId: AmmoId.ArmorPiercing,
-      grenades: { [GrenadeId.Frag]: 2, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0 },
+      grenades: { [GrenadeId.Frag]: 2, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0, [GrenadeId.Stone]: 0 },
       items: {
         [ItemId.StimPack]: 0,
         [ItemId.FirstAidKit]: 2,
@@ -407,6 +408,8 @@ describe('Stamping a loadout onto a soldier', () => {
       [GrenadeId.Frag]: 2,
       [GrenadeId.Flash]: 0,
       [GrenadeId.Smoke]: 0,
+      // Nobody packs stones; every soldier has a couple.
+      [GrenadeId.Stone]: GRENADES[GrenadeId.Stone].issued,
     })
     expect(soldier.items).toEqual({
       [ItemId.StimPack]: 0,
@@ -424,7 +427,7 @@ describe('Stamping a loadout onto a soldier', () => {
     applyUnitLoadout(soldier, {
       weaponId: WeaponId.Sniper,
       ammoId: AmmoId.Standard,
-      grenades: { [GrenadeId.Frag]: 0, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0 },
+      grenades: { [GrenadeId.Frag]: 0, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0, [GrenadeId.Stone]: 0 },
       items: {
         [ItemId.StimPack]: 0,
         [ItemId.FirstAidKit]: 0,

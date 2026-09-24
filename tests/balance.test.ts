@@ -12,6 +12,9 @@ const STOCK: SquadPlan = {
   weapons: [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun],
 }
 
+/** Milliseconds for a test that runs a sweep of tens of matches. */
+const SWEEP_TIMEOUT = 20_000
+
 describe('A simulated match is a function of its setup', () => {
   /**
    * The whole point of the harness: a number that moved has to mean the rules
@@ -32,16 +35,22 @@ describe('A simulated match is a function of its setup', () => {
     expect(shapes.size).toBeGreaterThan(1)
   })
 
-  test('a sweep is reproducible, and its seeds are consecutive', () => {
-    const options = { seed: 5, matches: 6 }
-    expect(sweep(options)).toEqual(sweep(options))
-    expect(sweep(options).matches).toBe(6)
-    // Overlapping sweeps must agree about the matches they share, or the report
-    // depends on how many matches were asked for rather than on the game.
-    const long = sweep({ seed: 5, matches: 12 })
-    const short = sweep({ seed: 5, matches: 6 })
-    expect(long.turns.min).toBeLessThanOrEqual(short.turns.min)
-  })
+  // A sweep plays whole matches with the full policy — tens of them here — so
+  // it gets more than the default five seconds, which a loaded machine misses.
+  test(
+    'a sweep is reproducible, and its seeds are consecutive',
+    () => {
+      const options = { seed: 5, matches: 6 }
+      const short = sweep(options)
+      expect(sweep(options)).toEqual(short)
+      expect(short.matches).toBe(6)
+      // Overlapping sweeps must agree about the matches they share, or the report
+      // depends on how many matches were asked for rather than on the game.
+      const long = sweep({ seed: 5, matches: 12 })
+      expect(long.turns.min).toBeLessThanOrEqual(short.turns.min)
+    },
+    SWEEP_TIMEOUT,
+  )
 })
 
 describe('A simulated match obeys the rules it is measuring', () => {
@@ -146,14 +155,18 @@ describe('The report says what happened', () => {
    * excluded. Counting them would drag every common trait towards an even
    * split whatever it actually does.
    */
-  test('a trait is only judged where one side alone had it', () => {
-    const report = sweep({ seed: 1, matches: 30 })
-    for (const trait of report.traits) {
-      expect(trait.decided).toBeGreaterThan(0)
-      expect(trait.wins).toBeLessThanOrEqual(trait.decided)
-      expect(trait.winRate).toBeCloseTo(trait.wins / trait.decided, 3)
-    }
-  })
+  test(
+    'a trait is only judged where one side alone had it',
+    () => {
+      const report = sweep({ seed: 1, matches: 30 })
+      for (const trait of report.traits) {
+        expect(trait.decided).toBeGreaterThan(0)
+        expect(trait.wins).toBeLessThanOrEqual(trait.decided)
+        expect(trait.winRate).toBeCloseTo(trait.wins / trait.decided, 3)
+      }
+    },
+    SWEEP_TIMEOUT,
+  )
 
   test('the human-readable form carries the headline numbers', () => {
     const report = sweep({ seed: 1, matches: 5 })
