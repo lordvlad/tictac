@@ -113,6 +113,6 @@ Staged, in this order, and tracked in the [backlog](../../backlog/active-backlog
 | `ITEM-020` | Shadow resolution: re-derive a received attack and report disagreement | **Landed, then retired by `ITEM-023`** — with no numbers on the wire there is nothing to re-derive |
 | `ITEM-021` | State digest at the turn boundary, for drift | **Landed** — and now the only check on agreement |
 | `ITEM-023` | Intent-only wire; `WireHit` deleted | **Landed** |
-| `ITEM-024` | Transport port: PeerJS behind a seam, plus socket and loopback | Deferred until the referee is its second caller |
-| `ITEM-025` | The referee: witness, persistence, rejoin, abort on foul | Backlog |
+| `ITEM-024` | Transport port: PeerJS behind a seam, plus socket and loopback | **Landed** with `ITEM-025`, its second caller |
+| `ITEM-025` | The referee: witness, persistence, rejoin, abort on foul | **Landed** |
 | `ITEM-028` | Log and store schema drift guard | Ready |

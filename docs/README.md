@@ -37,13 +37,13 @@ docs/
 │
 ├── backlog/              # Prioritized Work & Task Tracking (Kanban)
 │   ├── README.md         # Backlog taxonomy & workflow
-│   ├── active-backlog.md # Active items (ENG-xxx, GAME-xxx, ARCH-xxx)
-│   └── completed.md      # Historical completed archive & findings
+│   ├── active-backlog.md # Specification of every open item (ITEM-xxx), unordered
+│   └── completed.md      # Closed items: delivered, measured, rejected
 │
 ├── plans/                # Roadmaps & Milestones
 │   ├── README.md         # Planning framework
 │   ├── roadmap.md        # Multi-milestone capability roadmap (M1–M4)
-│   └── active-focus.md   # Current Kanban focus and WIP items
+│   └── active-focus.md   # Pull order: in flight, next up, open threads (no specs)
 │
 ├── guides/               # Developer Guides & Operational Manuals
 │   ├── living-docs-maintenance.md # Living docs rules, metadata schemas, triggers
@@ -67,8 +67,8 @@ docs/
 - 📐 **Architecture**: [System Architecture Overview](architecture/overview.md)
 - 🎮 **Game Design**: [GDD: Tactical Combat Mechanics](design/gdd/combat-mechanics.md)
 - 📋 **Reference**: [Status, Trait & Worn Kit Catalogue](design/gdd/status-and-trait-catalog.md) — generated from the code by `bun run docs:catalog`
-- 🧪 **Proposed**: [Melee](design/gdd/melee-combat.md), [Noise & Stealth](design/gdd/noise-and-stealth.md) and [Interaction & Environment](design/gdd/interaction-and-environment.md) — drafts, not built; each lists what already exists and what it would need
-- 📋 **Active Tasks**: [Active Backlog](backlog/active-backlog.md)
-- 🎯 **Active Focus**: [Current Kanban Focus](plans/active-focus.md)
+- 🧪 **Designs**: [Noise & Stealth](design/gdd/noise-and-stealth.md) (built, ITEM-019), [Melee](design/gdd/melee-combat.md) (partly built, ITEM-018) and [Interaction & Environment](design/gdd/interaction-and-environment.md) (a draft apart from §2.4, fire and smoke, built in ITEM-034); each says what exists and what is still proposed
+- 📋 **Open work, specified**: [Active Backlog](backlog/active-backlog.md)
+- 🎯 **What is next, in order**: [Focus Board](plans/active-focus.md)
 - 🚀 **Milestones**: [Capability Roadmap](plans/roadmap.md)
 - 📖 **Doc Maintenance**: [Living Documentation Guide](guides/living-docs-maintenance.md)

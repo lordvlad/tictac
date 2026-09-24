@@ -3,7 +3,7 @@ title: "Multi-Milestone Capability Roadmap"
 id: "PLAN-ROADMAP"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-09-24"
 appliesTo:
   - "docs/plans/**"
 relatedDocs:
@@ -18,7 +18,7 @@ Milestones are ordered strictly by architectural dependency:
 
 ```mermaid
 graph TD
-    M1[Milestone 1: Headless Foundation & ECS Split] --> M2[Milestone 2: Tactical Depth & RPG Progression]
+    M1[Milestone 1: Headless Foundation & ECS Split] --> M2[Milestone 2: Tactical Depth]
     M2 --> M3[Milestone 3: Reconnaissance & Morale]
     M3 --> M4[Milestone 4: Competitive Meta & Campaign]
 ```
@@ -28,36 +28,39 @@ graph TD
 ## Milestone Sequence
 
 ### Milestone 1: Headless Foundation & ECS Split
-**Status:** In Progress  
+**Status:** Complete  
 **Focus:** Complete separation of game rules from rendering.
-- `[ITEM-001]` Narrow ports (`Combatant`, `CombatFx`). *(Completed)*
-- `[ITEM-002]` Deterministic balance simulation runner. *(Completed)*
-- `[ITEM-003]` `Soldier` as pure data unit; `SoldierView` owning Three.js meshes and animation mixers.
-- Elimination of canvas stubs across test suites.
+- Done: `[ITEM-001]` narrow ports, `[ITEM-002]` balance harness, `[ITEM-003]` data units vs view
+  units, `[ITEM-030]` one engine for sweep and play, `[ITEM-031]` one command applier.
+- Canvas stubs stay in the suites that draw textures; removing them was tried and struck (see
+  `ITEM-003` in the archive).
 
 ---
 
-### Milestone 2: Tactical Depth & RPG Progression
-**Status:** Planned  
-**Focus:** Character growth and mechanical stakes during combat.
-- `[ITEM-004]` In-match XP accrual and on-the-fly 3-perk promotion draft.
-- `[ITEM-005]` Lasting wound debuffs when crossing <50% and <25% HP thresholds.
-- `[ITEM-006]` Trait-bearing passive equipment: scopes, bipods, suppressors, plate carriers.
+### Milestone 2: Tactical Depth
+**Status:** Complete except `[ITEM-017]`  
+**Focus:** Mechanical stakes during combat.
+- Done: `[ITEM-005]` wounds, `[ITEM-006]` weapon rails and worn kit, `[ITEM-013]`/`[ITEM-015]`/
+  `[ITEM-016]` attributes at work, `[ITEM-018]` melee, `[ITEM-020]`–`[ITEM-023]` full-knowledge
+  lockstep, `[ITEM-032]` projectile hit model, `[ITEM-034]` tile properties, fire and smoke.
+- Open: `[ITEM-017]` item verbs on tiles and objects (doors, keys).
+- In-match progression (`[ITEM-004]`) moved to M4, where its payoff (a roster that keeps it) is.
 
 ---
 
 ### Milestone 3: Reconnaissance & Morale
-**Status:** Planned  
+**Status:** Complete  
 **Focus:** Information asymmetry and battlefield control.
-- `[ITEM-007]` Enemy intel fog hiding opposing character stat numbers until engaged.
-- `[ITEM-008]` Ballistic suppression mechanics applying accuracy debuffs on near-misses.
-- `[ITEM-009]` AP fatigue penalty for consecutive maximum-movement turns.
+- Done: `[ITEM-007]` intel fog, `[ITEM-008]` suppression, `[ITEM-009]` exhaustion, `[ITEM-029]`
+  covered-ground AI, `[ITEM-019]` noise and awareness, `[ITEM-014]` morale, `[ITEM-033]`
+  character.
 
 ---
 
 ### Milestone 4: Competitive Meta & Campaign
-**Status:** Planned  
+**Status:** In Progress  
 **Focus:** High-level tactics, team composition, and long-term roster persistence.
-- `[ITEM-010]` Tactical role specializations on loadout screen (Medic, Scout, Marksman, Gunner).
-- ~~`[ITEM-011]` Reaction fire and overwatch interleaving inside enemy movement paths.~~ Done.
-- `[ITEM-012]` LocalStorage and P2P campaign roster persistence across matches.
+- Done: `[ITEM-011]` overwatch, `[ITEM-024]` transport port, `[ITEM-025]` referee.
+- Open, in the order on the [focus board](./active-focus.md): `[ITEM-004]` in-match
+  progression, `[ITEM-010]` roles, `[ITEM-028]` schema drift guard, `[ITEM-012]` roster
+  persistence.

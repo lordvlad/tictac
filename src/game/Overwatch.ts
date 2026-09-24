@@ -13,7 +13,7 @@ import { canShoot, fireWeapon, type ShotResult } from './Combat'
  *
  * The classic tactical ability, and the counter the game has been missing:
  * without it, crossing open ground is free, which is why melee
- * ([ITEM-018](../../docs/backlog/active-backlog.md)) has nowhere to be a
+ * ([ITEM-018](../../docs/backlog/completed.md)) has nowhere to be a
  * decision and why a soldier in good cover is close to unkillable while being
  * trivially reachable.
  *

@@ -32,9 +32,9 @@ stateDiagram-v2
 ```
 
 ### Document Map
-- [Active Backlog](./active-backlog.md): Prioritized, actionable items ready for or currently in execution.
-- [Active Focus Board](../plans/active-focus.md): Current work-in-progress and immediate pull queue.
-- [Completed Archive](./completed.md): Historical record of delivered work, verification notes, and retrospective learnings.
+- [Active Backlog](./active-backlog.md): the specification of every open item — why, change, acceptance. Unordered.
+- [Focus Board](../plans/active-focus.md): what is in flight and the order the Ready items are pulled in. No specifications.
+- [Completed Archive](./completed.md): closed items — what was delivered, measured and left open, and rejected items with their reasoning.
 
 ### Item ID Convention
 All work items follow a single, unified sequential key:
