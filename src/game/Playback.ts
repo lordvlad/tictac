@@ -1,17 +1,9 @@
 import { PLAYBACK } from '../config'
-import type { WorldSnapshot } from '../ecs/World'
-import type { Faction } from '../config'
 import type { CombatRecording } from './Recording'
 import type { NetworkMessage } from './NetworkManager'
+import type { Moment } from './Rewind'
 
 export type PlaybackSpeed = 0.5 | 1 | 2
-
-/** Every moment a replay can be put back to. */
-export interface PlaybackFrame {
-  entities: WorldSnapshot
-  activeFaction: Faction
-  turnNumber: number
-}
 
 export interface PlaybackDeps {
   recording: CombatRecording
@@ -19,8 +11,8 @@ export interface PlaybackDeps {
   apply: (command: NetworkMessage) => void
   /** True while something is still animating; the next event waits for false. */
   busy: () => boolean
-  capture: () => PlaybackFrame
-  restore: (frame: PlaybackFrame) => void
+  capture: () => Moment
+  restore: (frame: Moment) => void
 }
 
 /**
@@ -41,7 +33,7 @@ export class Playback {
   readonly total: number
 
   /** `frames[i]` is the state immediately before event `i` was applied. */
-  private readonly frames: PlaybackFrame[] = []
+  private readonly frames: Moment[] = []
   private cursor = 0
   private running = false
   private rate: PlaybackSpeed = 1

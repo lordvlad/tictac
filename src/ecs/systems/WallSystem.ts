@@ -1,5 +1,5 @@
 import { System } from '../System'
-import type { World } from '../World'
+import type { World, WorldSnapshot } from '../World'
 import type { Grid } from '../../core/Grid'
 import { WallKind } from '../../core/Walls'
 import { WallComponent } from '../components/WallComponent'
@@ -58,6 +58,40 @@ export class WallSystem extends System {
     wall.kind = kind
     this.writeToGrid(wall.edge, kind)
     this.onWallsChanged?.()
+  }
+
+  /**
+   * Every wall's kind, one byte each in entity order: a whole map's walls as
+   * a few hundred bytes, which a replay can afford to keep at every event.
+   */
+  kinds(world: World): Uint8Array {
+    const kinds = new Uint8Array(this.byEdge.size)
+    let i = 0
+    for (const entityId of this.byEdge.values()) {
+      kinds[i++] = world.getComponent(entityId, WallComponent)?.kind ?? WallKind.None
+    }
+    return kinds
+  }
+
+  /**
+   * Put the walls back to `kinds`, as {@link kinds} took them.
+   *
+   * Through `World.restore`, so a rewound window is not announced as a change
+   * nobody made, and then the same catch-up a peer's walls get: the grid is an
+   * index over the components.
+   */
+  restoreKinds(world: World, kinds: Uint8Array): void {
+    const changed: WorldSnapshot = []
+    let i = 0
+    for (const entityId of this.byEdge.values()) {
+      const wall = world.getComponent(entityId, WallComponent)
+      const kind = kinds[i++] as WallKind | undefined
+      if (!wall || kind === undefined || wall.kind === kind) continue
+      changed.push({ entityId, components: { [WallComponent.componentName]: { edge: wall.edge, kind } } })
+    }
+    if (changed.length === 0) return
+    world.restore(changed)
+    this.update(0, world)
   }
 
   /**

@@ -4,7 +4,7 @@ import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
 import { createEngineContext } from './engine'
 import { Faction, SIM } from './config'
-import { matchDice, resolveSeed } from './core/rng'
+import { matchDice, resolveSeed, Rng } from './core/rng'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
 import { Battlefield } from './game/Battlefield'
@@ -24,6 +24,7 @@ import { World } from './ecs/World'
 import { createGlobalRules } from './ecs/globals'
 import { TurnSystem } from './ecs/systems'
 import { Playback } from './game/Playback'
+import { captureMoment, restoreMoment, type Rewindable } from './game/Rewind'
 import { PlaybackControls } from './hud/PlaybackControls'
 import {
   type CombatRecording,
@@ -529,9 +530,8 @@ function startPlayback(recording: CombatRecording): void {
     Faction.Blue,
     header.sheets,
   )
-  // Both sides, from the file: a replay resolves nothing itself, but every
-  // panel reads the kit, and half a squad on the stock spread would be a
-  // different fight on screen than the one that was recorded.
+  // Both sides, from the file: the replay resolves every attack again, so it
+  // needs the kit both squads actually fought with.
   squads.equipFaction(Faction.Blue, header.loadouts[Faction.Blue])
   squads.equipFaction(Faction.Red, header.loadouts[Faction.Red])
 
@@ -543,6 +543,7 @@ function startPlayback(recording: CombatRecording): void {
   const tracers = new Tracers(engine)
   const turnSystem = new TurnSystem()
   const turnManager = new TurnManager(world, turnSystem, squads, rig)
+  const dice = new Rng(header.seed)
 
   let controller!: InteractionController
   const hud = new Hud((intent) => {
@@ -558,10 +559,10 @@ function startPlayback(recording: CombatRecording): void {
     hud,
     portraits,
     header.seedLabel,
-    // A playback resolves nothing itself — every outcome comes off the file —
-    // but the resolvers still need a stream, and the recording's own seed is
-    // the one the match was fought with.
-    matchDice(header.seed),
+    // Every outcome is resolved here, from the dice the match was fought
+    // with. Held as the generator rather than a wrapped stream, because
+    // stepping back has to put the dice back as well as the world.
+    () => dice.next(),
     tracers,
     engine,
     null,
@@ -571,30 +572,23 @@ function startPlayback(recording: CombatRecording): void {
   turnManager.autoSelectFirst()
   controller.recomputeVisibility()
 
-  // Only the soldiers: no recorded command can change a wall, and snapshotting
-  // a map's worth of wall entities at every event would cost a great deal to
-  // restore terrain that never moved.
-  const soldierIds = squads.soldiers.map((soldier) => soldier.entityId)
+  const rewindable: Rewindable = {
+    world,
+    unitIds: squads.soldiers.map((soldier) => soldier.entityId),
+    walls: controller.wallSystem,
+    turns: turnSystem,
+    dice,
+    movement: controller.movementSystem,
+    commands: controller.commands,
+  }
 
   const playback = new Playback({
     recording,
     apply: (command) => controller.applyRecordedCommand(command),
     busy: () => controller.busy,
-    capture: () => ({
-      entities: world.snapshot(soldierIds),
-      activeFaction: turnSystem.activeFaction,
-      turnNumber: turnSystem.turnNumber,
-    }),
-    restore: (frame) => {
-      // Routes first: `pathIndices` is the one piece of movement state that is
-      // not a component, so a restored unit would otherwise resume walking a
-      // path it is no longer on. The same for whatever the rules still meant a
-      // broken unit to do: that was decided about the moment being left.
-      controller.movementSystem.clearRoutes(world, soldierIds)
-      controller.commands.clear()
-      world.restore(frame.entities)
-      turnSystem.activeFaction = frame.activeFaction
-      turnSystem.turnNumber = frame.turnNumber
+    capture: () => captureMoment(rewindable),
+    restore: (moment) => {
+      restoreMoment(rewindable, moment)
       turnManager.autoSelectFirst()
       controller.recomputeVisibility()
       battlefield.flush()

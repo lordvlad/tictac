@@ -192,8 +192,13 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   playback applies the handover and the rules run the unit again. `Playback` waits on
   `InteractionController.busy` — walking, or the applier's queue not yet empty — before the next
   event, and a restored frame clears the queue, which was about the moment being left.
-- **Stepping back** is not replay: no command is invertible. `Playback` keeps a
-  `World.snapshot()` of the soldier entities at every event boundary and
-  `World.restore()`s one, which suppresses echoes and re-baselines the dirty
-  diff exactly as `applyRemote` does. Walls are excluded — no recorded command
-  can change one.
+- **Stepping back** is not replay: no command is invertible. `Playback` keeps a `Moment`
+  (`src/game/Rewind.ts`) at every event boundary and puts one back with `restoreMoment`. A
+  moment is three things, and playing on from a restored one reaches the match the file
+  records only if all three come back: the soldiers' components (`World.snapshot`, restored
+  with echoes suppressed and the dirty diff re-baselined, as `applyRemote` does); every wall's
+  kind, one byte each (`WallSystem.kinds`), since a round through a window breaks it; and the
+  position of the match's dice (`Rng.snapshot`), since every roll depends on all the rolls
+  before it. Until 2026-09-24 only the first was kept: a stepped-back replay left broken
+  windows broken and played on with dice that had moved on, so it diverged from the file.
+  `MatchHost.moment()` / `rewind()` do the same headlessly (`tests/rewind.test.ts`).

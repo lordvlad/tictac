@@ -6,6 +6,20 @@ export class Rng {
     this.state = seed >>> 0
   }
 
+  /**
+   * Where the stream has got to. A replay stepped back to an earlier moment
+   * has to put the dice back too: the next roll is a function of every roll
+   * before it, so a world rewound with its dice left where they were plays on
+   * into a different match.
+   */
+  snapshot(): number {
+    return this.state
+  }
+
+  restore(state: number): void {
+    this.state = state >>> 0
+  }
+
   /** Float in [0, 1). */
   next(): number {
     this.state = (this.state + 0x6d2b79f5) >>> 0

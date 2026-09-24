@@ -239,10 +239,9 @@ export class World {
   /**
    * Serialise the named entities' components.
    *
-   * Named rather than "all", because a replay only ever rewinds the things a
-   * recorded command can move. Walls are entities too, and there are hundreds
-   * of them on a map: snapshotting them at every event would cost a great deal
-   * to restore terrain that nothing in the stream can change.
+   * Named rather than "all": walls are entities too, and there are hundreds of
+   * them on a map, so a replay keeps them as one byte each instead
+   * (`WallSystem.kinds`) and snapshots only the units here.
    */
   snapshot(entityIds: Iterable<number>): WorldSnapshot {
     const frame: WorldSnapshot = []

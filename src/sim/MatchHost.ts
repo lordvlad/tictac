@@ -1,7 +1,8 @@
 import { Faction, SIM } from '../config'
 import { NO_FOCUS, NO_FX } from '../core/Combatant'
 import { generateMap } from '../core/MapGenerator'
-import { matchDice } from '../core/rng'
+import { Rng } from '../core/rng'
+import { captureMoment, type Moment, restoreMoment, type Rewindable } from '../game/Rewind'
 import type { Grid } from '../core/Grid'
 import type { NetworkMessage } from '../game/NetworkManager'
 import type { RecordingHeader } from '../game/Recording'
@@ -62,6 +63,9 @@ export class MatchHost {
 
   readonly commands: CommandSystem
   readonly walls: WallSystem
+  /** The match's dice, held rather than wrapped so a rewind can put them back. */
+  private readonly dice: Rng
+  private readonly movement: MovementSystem
   private readonly step: number
   private readonly maxSteps: number
 
@@ -92,8 +96,9 @@ export class MatchHost {
     this.squads.equipFaction(Faction.Blue, header.loadouts[Faction.Blue])
     this.squads.equipFaction(Faction.Red, header.loadouts[Faction.Red])
 
-    const movement = new MovementSystem(map.grid)
-    const combat = new CombatSystem(map.grid, this.squads, NO_FX, matchDice(header.seed))
+    this.dice = new Rng(header.seed)
+    this.movement = new MovementSystem(map.grid)
+    const combat = new CombatSystem(map.grid, this.squads, NO_FX, () => this.dice.next())
     const items = new ItemSystem()
     const turns = new TurnSystem()
     // An entity per wall, as in a played match, so a broken window is state
@@ -102,13 +107,36 @@ export class MatchHost {
     this.walls = new WallSystem(map.grid)
     this.walls.spawnFromGrid(this.world)
     this.turnManager = new TurnManager(this.world, turns, this.squads, NO_FOCUS)
-    this.commands = new CommandSystem(this.world, this.squads, this.turnManager, movement, combat, items, this.walls)
+    this.commands = new CommandSystem(this.world, this.squads, this.turnManager, this.movement, combat, items, this.walls)
     this.world.addSystem(this.commands)
-    this.world.addSystem(movement)
+    this.world.addSystem(this.movement)
     this.world.addSystem(combat)
     this.world.addSystem(items)
     this.world.addSystem(turns)
     this.turnManager.autoSelectFirst()
+  }
+
+  /** The parts a moment is taken from; see `game/Rewind`. */
+  private get rewindable(): Rewindable {
+    return {
+      world: this.world,
+      unitIds: this.squads.soldiers.map((unit) => unit.entityId),
+      walls: this.walls,
+      turns: this.turnManager.turns,
+      dice: this.dice,
+      movement: this.movement,
+      commands: this.commands,
+    }
+  }
+
+  /** The match as it stands, to come back to. */
+  moment(): Moment {
+    return captureMoment(this.rewindable)
+  }
+
+  /** Put the match back to a moment taken earlier. */
+  rewind(moment: Moment): void {
+    restoreMoment(this.rewindable, moment)
   }
 
   /**
