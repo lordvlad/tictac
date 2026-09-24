@@ -38,12 +38,12 @@ graph TD
 ---
 
 ### Milestone 2: Tactical Depth
-**Status:** Complete except `[ITEM-017]`  
+**Status:** Complete  
 **Focus:** Mechanical stakes during combat.
 - Done: `[ITEM-005]` wounds, `[ITEM-006]` weapon rails and worn kit, `[ITEM-013]`/`[ITEM-015]`/
   `[ITEM-016]` attributes at work, `[ITEM-018]` melee, `[ITEM-020]`–`[ITEM-023]` full-knowledge
   lockstep, `[ITEM-032]` projectile hit model, `[ITEM-034]` tile properties, fire and smoke.
-- Open: `[ITEM-017]` item verbs on tiles and objects (doors, keys).
+- Done last: `[ITEM-017]` doors, locks and keys (2026-09-25).
 - In-match progression (`[ITEM-004]`) moved to M4, where its payoff (a roster that keeps it) is.
 
 ---

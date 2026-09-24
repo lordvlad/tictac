@@ -21,15 +21,14 @@ criteria are in the [active backlog](../backlog/active-backlog.md), and finished
 the [archive](../backlog/completed.md).
 
 ## Focus & Theme
-M1 (headless foundation) and M3 (reconnaissance & morale) are complete. M2 (tactical depth)
-is complete except `[ITEM-017]` (doors and keys), filed after it closed. What is left is the
-meta layer: a unit that grows during a match, roles, and a roster that outlives the match.
+M1 (headless foundation), M2 (tactical depth) and M3 (reconnaissance & morale) are complete;
+doors (`[ITEM-017]`) closed M2 on 2026-09-25. What is left is the meta layer: a unit that grows
+during a match, roles, and a roster that outlives the match.
 
 ---
 
 ## 🔄 In Progress
-- **`[ITEM-017]`** Doors: slice 1 (shut, open and locked doors in the rules, the HUD and the
-  view; shut doors on the map) done. Next: locks on the map and the sweep.
+- Nothing in flight.
 
 ## 📋 Ready — pull in this order
 1. **`[ITEM-004]`** In-match progression. First because persistence needs something worth
@@ -44,7 +43,7 @@ meta layer: a unit that grows during a match, roles, and a roster that outlives 
    (`[ITEM-025]`). Depends on 1 and 3.
 
 ## 🧊 Backlog — not yet queued
-- Nothing. `[ITEM-017]` was the last unqueued item.
+- Nothing.
 
 ## ⚠️ Left open by finished work
 - **ITEM-019**: the sweep's policy neither sneaks nor throws stones, so the balance sweep does
@@ -53,8 +52,11 @@ meta layer: a unit that grows during a match, roles, and a roster that outlives 
   open design question.
 - **ITEM-034**: the policy never throws smoke, and throws an incendiary only when it has no
   shot. The sweep barely measures fire and smoke.
-- **ITEM-014 / ITEM-024 / ITEM-034**: nobody has played peer-to-peer in two live browsers since
-  the transport cutover. Agreement is covered by the network, digest and rewind tests only.
+- **ITEM-017**: the policy walks through shut doors but never shuts, unlocks or forces one; keys
+  open every lock (where a key comes from is a campaign question).
+- **ITEM-014 / ITEM-017 / ITEM-024 / ITEM-034**: nobody has played peer-to-peer in two live
+  browsers since the transport cutover. Agreement is covered by the network, digest and rewind
+  tests only.
 
 ---
 

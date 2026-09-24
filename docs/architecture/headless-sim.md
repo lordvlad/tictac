@@ -191,6 +191,13 @@ is worth more than a fire, and the fire's own smoke blinds the thrower's side to
 avoidance switched off, Red lost ~45 hp to fire instead of ~33. The policy never throws smoke.
 The report's `grenades:` line counts throws per match and hit points each side lost to fire.
 
+**Doors** (2026-09-25, same blocks): mirror **607 / 562 / 31**, from 605 / 564 / 31 — no change
+beyond noise. A map has ~14 doors (a few locked); on block 1000 about 1.9 of them stand open at
+the end of a match. The policy walks through a shut door when its route runs that way, at the
+door's price, and treats a locked one as a wall; it never opens, shuts, unlocks or forces one on
+purpose, and most of its fighting happens outside. So doors, like stealth and smoke, are a
+player's tool the sweep barely measures. The report's `doors:` line counts them.
+
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles
 walked indoors and the share of unit-turns *ended* indoors; the weapon table reports each

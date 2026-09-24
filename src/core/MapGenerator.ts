@@ -282,7 +282,7 @@ export function generateMap(seed: number, options: MapOptions = {}): GeneratedMa
   }
 
   laySurfaces(grid, buildings, new Rng((seed ^ SURFACE_STREAM) >>> 0), scaled)
-  hangDoors(grid, doorways, new Rng((seed ^ DOOR_STREAM) >>> 0))
+  hangDoors(grid, doorways, new Rng((seed ^ DOOR_STREAM) >>> 0), spawns[Faction.Blue][0]!)
 
   return { grid, spawns, buildings: footprints }
 }
@@ -308,29 +308,49 @@ interface Doorway {
 /** Share of doorways that get a door, inside a building and into one. */
 const DOOR_CHANCE = { interior: 0.6, exterior: 0.8 }
 
+/** Share of hung doors that are locked, inside a building and into one. */
+const LOCK_CHANCE = { interior: 0.1, exterior: 0.35 }
+
 /**
- * Hang doors in the doorways round 3 cut, once the terrain is final.
+ * Hang doors in the doorways round 3 cut, once the terrain is final, and
+ * lock some of them.
  *
  * Only in a doorway that is still one — the repairs may have walled one up
  * or moved a floor — between two walkable tiles on one floor. A door hangs
  * shut: whoever wants the room opens it, and until then it is a wall to
- * anybody looking. Walking through a shut door is always possible, so no
- * door changes what can be reached.
+ * anybody looking. Walking through a shut door is always possible, so a shut
+ * door changes nothing about what can be reached.
+ *
+ * A locked door can: it wants keys or a shoulder. So a door is locked only
+ * where every tile reachable from `from` stays reachable without going
+ * through it — a lock is a reason to go round, never a room nobody without
+ * keys can get into. Mostly the way in from outside, which is where a lock
+ * is a decision about how to enter a building.
  */
-function hangDoors(grid: Grid, doorways: readonly Doorway[], rng: Rng): void {
+function hangDoors(grid: Grid, doorways: readonly Doorway[], rng: Rng, from: Tile): void {
+  const hung: Doorway[] = []
   for (const doorway of doorways) {
     const { x, y, side } = doorway
     const [dx, dy] = SIDE_OFFSET[side]!
     const nx = x + dx
     const ny = y + dy
     // Drawn for every doorway, valid or not, so one repair cannot shift which
-    // of the others get a door.
-    const hung = rng.chance(doorway.exterior ? DOOR_CHANCE.exterior : DOOR_CHANCE.interior)
-    if (!hung || !grid.inBounds(nx, ny)) continue
+    // of the others get a door, or a lock.
+    const hang = rng.chance(doorway.exterior ? DOOR_CHANCE.exterior : DOOR_CHANCE.interior)
+    const lock = rng.chance(doorway.exterior ? LOCK_CHANCE.exterior : LOCK_CHANCE.interior)
+    if (!hang || !grid.inBounds(nx, ny)) continue
     if (grid.wallAt(x, y, side) !== WallKind.None) continue
     if (!grid.isWalkable(x, y) || !grid.isWalkable(nx, ny)) continue
     if (grid.levelAt(x, y) !== grid.levelAt(nx, ny)) continue
     grid.setWall(x, y, side, WallKind.Door)
+    if (lock) hung.push(doorway)
+  }
+
+  const reached = (): number => grid.reachableMask(from).reduce((sum, bit) => sum + bit, 0)
+  const everywhere = reached()
+  for (const { x, y, side } of hung) {
+    grid.setWall(x, y, side, WallKind.Locked)
+    if (reached() < everywhere) grid.setWall(x, y, side, WallKind.Door)
   }
 }
 

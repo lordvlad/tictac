@@ -176,7 +176,7 @@ describe('The map hangs doors', () => {
     for (const seed of [1, 7, 1000, 5000, 9000]) {
       const { grid } = generateMap(seed)
       grid.forEachWall((x, y, side, kind) => {
-        if (kind !== WallKind.Door) return
+        if (kind !== WallKind.Door && kind !== WallKind.Locked) return
         doors++
         const beyond = side === Side.West ? { x: x - 1, y } : { x, y: y - 1 }
         expect(grid.isWalkable(x, y) && grid.isWalkable(beyond.x, beyond.y)).toBe(true)
@@ -184,5 +184,21 @@ describe('The map hangs doors', () => {
       })
     }
     expect(doors).toBeGreaterThan(0)
+  })
+
+  test('locks some, and never so that anywhere is left that only keys or a shoulder reach', () => {
+    let locked = 0
+    for (const seed of [1, 7, 1000, 5000, 9000]) {
+      const { grid, spawns } = generateMap(seed)
+      const from = spawns[Faction.Blue][0]!
+      const withLocks = grid.reachableMask(from)
+      grid.forEachWall((x, y, side, kind) => {
+        if (kind !== WallKind.Locked) return
+        locked++
+        grid.setWall(x, y, side, WallKind.Door)
+      })
+      expect([...grid.reachableMask(from)]).toEqual([...withLocks])
+    }
+    expect(locked).toBeGreaterThan(0)
   })
 })

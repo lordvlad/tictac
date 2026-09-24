@@ -90,6 +90,10 @@ Not built: a target that is a *tile* (§2.2) — nothing uses one yet — and ke
 some doors: every set of keys opens every lock on the map, since where keys come from is a
 campaign question (§3).
 
+**On the map**, about 14 doors, shut: 60% of the doorways inside a building and 80% of the ways
+in get one. Some are locked — a third of the ways in, a tenth inside — but never so that a room
+can only be reached through a lock: a lock is a reason to go round, or to bring the keys.
+
 ### 2.4 Tile properties, fire and smoke (ITEM-034)
 
 A fire needs the ground to *be* something. Every tile has a **surface**, generated with the map

@@ -270,7 +270,12 @@ bullets (`WALLS`); open it is `open` like `None`, which is also what lets fire a
   good). `cannotWorkDoor` is asked on both peers, not only the sender's. The HUD offers the verbs
   for the door the unit faces (`doorAhead`).
 - **The map** hangs doors in the doorways round 3 cut (`hangDoors`, on a stream of its own) once
-  the terrain is final, only between two walkable tiles on one floor.
+  the terrain is final, only between two walkable tiles on one floor (`DOOR_CHANCE`: 60% of
+  interior doorways, 80% of the ways in). It locks some (`LOCK_CHANCE`: 10% inside, 35% into a
+  building), and puts a lock back to a shut door if it left any tile reachable from Blue's first
+  spawn only through a lock — so a lock is a reason to go round, never a sealed room.
+- **The sweep's policy** walks through shut doors (they are in its routes at their price) and
+  treats a locked one as a wall: it never unlocks, forces, opens or shuts a door on purpose.
 
 ### Morale
 `MoraleComponent` (replicated, digested): **morale** 0–100, the **break** a unit is in, and the

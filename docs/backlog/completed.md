@@ -1289,6 +1289,59 @@ on port 0.
 
 ---
 
+### [ITEM-017] Doors, Locks and Keys
+**Completed Date:** 2026-09-25  
+**Type:** Feature  
+**Milestone:** M2 — Tactical Depth  
+
+#### Why
+Targeted item use reached a squadmate, not a place or a thing: no key, no door. Picked up as
+the next combat item after ITEM-034.
+
+#### Scope, as built
+The door half of [GDD: Interaction & Environment](../design/gdd/interaction-and-environment.md)
+§2.3, with the verbs worked on the door a unit faces rather than through a generic item-target
+step, and the keys as a permission the unlock verb asks for. A tile as an item's target was left
+out: no item uses one yet.
+
+#### Key Changes
+- **Three wall kinds** (`core/Walls`, `core/Doors`): shut, open, locked; forced, a door is `None`.
+  A door's state is the wall's `kind`, so it replicates, digests and rewinds with the walls.
+  Shut or locked it is masonry to sight, cover and bullets; open, it is `open` like no wall, so
+  fire and smoke go through it too.
+- **Walking through** a shut door opens it, for `DOORS.openAp` on the step (`Grid.getStepCost`),
+  so every planner prices it; the rules open it as the unit arrives, before anybody reacts.
+- **`operateDoor`**: open and close (1 AP), unlock with the keys (1 AP; not used up), force
+  (4 AP, heard 12 m off either way, gives at 30–75% by Strength — new derived stat `shoulder` —
+  from the match's dice; a forced door is gone). Checked on both peers (`cannotWorkDoor`).
+- **Keys**: a passive item with a permission (`ItemSpec.unlocks`) instead of a trait; two in the
+  crate. The worn-kit invariant now reads "a trait or a permission".
+- **The map** (`hangDoors`, own stream): shut doors in 60% of interior doorways and 80% of the
+  ways in; locks on 10% / 35% of those, undone wherever a lock would leave ground reachable only
+  through it.
+- **HUD and view**: a row per verb for the door the unit faces, with the shoulder's odds; the tile
+  readout names doors; timber doors, locked ones darker and redder; an open door drawn as its
+  leaf; the debug map shows them. Catalogue §9 "Doors".
+- Balance report: `doors:` line.
+
+#### Measured
+Mirror on blocks 1000/5000/9000: 607 / 562 / 31, from 605 / 564 / 31. About 14 doors a map; on
+block 1000, 1.9 stand open at the end of a match. The policy never works a door on purpose.
+
+#### Acceptance Criteria
+- [ ] ~~An item can be pointed at a unit, a tile or a wall segment, through one selection
+      step.~~ Restated with the scope above: a unit works the door it faces through one row in
+      the action panel, and the keys are what the unlock verb asks for. No tile target.
+- [x] A locked door refuses a push, opens to the keys, and both peers reach the same doors from
+      the same commands (`tests/doors.test.ts`; browser: unlock, and a shoulder that held once
+      and gave the second time). Keys open every lock: there is no "right" key yet.
+- [x] A door's state survives a recorded replay: the same commands applied again as `record`
+      leave the same doors.
+- [ ] Open: the sweep's policy walks through shut doors but never shuts, unlocks or forces one,
+      so doors are a player's tool the sweep barely measures. Not checked in two live browsers.
+
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

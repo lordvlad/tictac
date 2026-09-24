@@ -95,6 +95,8 @@ export interface SweepReport {
   grenadesPerMatch: number
   /** Hit points each side lost to fire, per match: whether fire is doing anything at all. */
   burnedPerMatch: Record<'blue' | 'red', number>
+  /** Doors per match and how many stood open at the end: whether the policy goes through them. */
+  doorsPerMatch: { hung: number; opened: number }
   /**
    * Ground used per match, by side and by result. The win rates say who won;
    * this says whether anybody went round rather than through.
@@ -239,6 +241,10 @@ export function sweep(options: SweepOptions): SweepReport {
       blue: round(outcomes.reduce((n, o) => n + o.burned[Faction.Blue], 0) / outcomes.length),
       red: round(outcomes.reduce((n, o) => n + o.burned[Faction.Red], 0) / outcomes.length),
     },
+    doorsPerMatch: {
+      hung: round(outcomes.reduce((n, o) => n + o.doors.hung, 0) / outcomes.length),
+      opened: round(outcomes.reduce((n, o) => n + o.doors.opened, 0) / outcomes.length),
+    },
     ground: {
       blue: meanGround(outcomes.map((o) => o.ground[Faction.Blue])),
       red: meanGround(outcomes.map((o) => o.ground[Faction.Red])),
@@ -303,6 +309,9 @@ export function formatReport(report: SweepReport): string {
   )
   lines.push(
     `grenades: ${report.grenadesPerMatch} thrown per match; fire burned blue ${report.burnedPerMatch.blue} hp, red ${report.burnedPerMatch.red} hp`,
+  )
+  lines.push(
+    `doors: ${report.doorsPerMatch.opened} of ${report.doorsPerMatch.hung} standing open at the end of a match`,
   )
   lines.push('')
   lines.push(

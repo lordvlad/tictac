@@ -6,6 +6,8 @@ import { MELEE, MeleeId } from '../core/Melee'
 import { type CharacterSheet, rollSquadSheets } from '../core/Characters'
 import type { MoraleBreak } from '../core/Morale'
 import { burningTiles } from '../core/Fire'
+import { isDoor } from '../core/Doors'
+import { WallKind } from '../core/Walls'
 import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
@@ -123,6 +125,8 @@ export interface MatchOutcome {
   breaks: Record<MoraleBreak, number>
   /** Hit points each side lost to fire. */
   burned: Record<Faction, number>
+  /** Doors on the map when it ended, and how many of them stood open. */
+  doors: { hung: number; opened: number }
 }
 
 const DEFAULT_TURN_CAP = 40
@@ -294,6 +298,7 @@ export class SimMatch {
       reactions: this.host.reactions,
       breaks: { ...this.breaks },
       burned: { ...this.burned },
+      doors: this.doorCount(),
       ground: {
         [Faction.Blue]: this.ground.of(Faction.Blue),
         [Faction.Red]: this.ground.of(Faction.Red),
@@ -326,6 +331,17 @@ export class SimMatch {
     let total = 0
     for (const unit of this.host.squads.soldiers) total += Math.max(0, unit.hp)
     return total
+  }
+
+  private doorCount(): { hung: number; opened: number } {
+    let hung = 0
+    let opened = 0
+    this.grid.forEachWall((_x, _y, _side, kind) => {
+      if (!isDoor(kind)) return
+      hung++
+      if (kind === WallKind.DoorOpen) opened++
+    })
+    return { hung, opened }
   }
 
   private living(faction: Faction): boolean {
