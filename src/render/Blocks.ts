@@ -35,7 +35,17 @@ const WALL_STYLE: Record<
   [WallKind.Solid]: { color: 0x8b8f96, opacity: 1 },
   [WallKind.Parapet]: { color: 0x7d8a7a, opacity: 1 },
   [WallKind.Glass]: { color: 0x9fd8e8, opacity: 0.3 },
+  // Timber, and a locked one a darker, redder timber: a lock should read as
+  // a lock from across the room, before anybody walks up to it.
+  [WallKind.Door]: { color: 0x9a6a3a, opacity: 1 },
+  [WallKind.Locked]: { color: 0x7a2f22, opacity: 1 },
+  // An open door is drawn as its leaf, swung back against the frame, so a
+  // doorway with a door in it reads differently from one without.
+  [WallKind.DoorOpen]: { color: 0x9a6a3a, opacity: 1 },
 }
+
+/** An open door's leaf, as a share of the tile it is hung across. */
+const DOOR_LEAF = 0.85
 
 /** Thickness of a wall face in metres — a boundary, not a room-sized block. */
 const WALL_THICKNESS = 0.12
@@ -461,6 +471,15 @@ export class Blocks {
     const bases: number[] = []
     const tops: number[] = []
     for (const edge of edges) {
+      if (kind === WallKind.DoorOpen) {
+        // An open door has no height in the rules; what is drawn is the leaf,
+        // a door's height from the floor it opens onto.
+        const floor = this.grid.wallTop(edge.x, edge.y, edge.side!)
+        instances.push({ ...edge, index: instances.length })
+        bases.push(floor)
+        tops.push(floor + WALLS[WallKind.Door].height)
+        continue
+      }
       const top = this.grid.wallTop(edge.x, edge.y, edge.side!)
       const storeys = Math.ceil(top / LEVEL_HEIGHT)
       for (let level = 0; level < storeys; level++) {
@@ -515,15 +534,28 @@ export class Blocks {
       const [dx, dz] = FACE_OFFSET[inst.side!]!
       const base = bases[i]!
       const top = tops[i]!
+      const centreX = this.grid.worldX(inst.x) + (dx * TILE) / 2
+      const centreZ = this.grid.worldZ(inst.y) + (dz * TILE) / 2
 
-      this.dummy.position.set(
-        this.grid.worldX(inst.x) + (dx * TILE) / 2,
-        (base + top) / 2,
-        this.grid.worldZ(inst.y) + (dz * TILE) / 2,
-      )
-      this.dummy.scale.set(1, top - base, 1)
-      // Geometry runs along X; a wall on an east/west face runs along Z.
-      this.dummy.rotation.y = dx !== 0 ? Math.PI / 2 : 0
+      if (kind === WallKind.DoorOpen) {
+        // The leaf swung back against the frame: hinged at one end of the
+        // edge and standing across it, into the tile the edge belongs to.
+        // Along the edge is x for a north/south face and z for an east/west one.
+        const [ax, az] = dx === 0 ? [1, 0] : [0, 1]
+        const hinge = (TILE - WALL_THICKNESS) / 2
+        this.dummy.position.set(
+          centreX - ax * hinge - (dx * TILE * DOOR_LEAF) / 2,
+          (base + top) / 2,
+          centreZ - az * hinge - (dz * TILE * DOOR_LEAF) / 2,
+        )
+        this.dummy.scale.set(DOOR_LEAF, top - base, 1)
+        this.dummy.rotation.y = dx !== 0 ? 0 : Math.PI / 2
+      } else {
+        this.dummy.position.set(centreX, (base + top) / 2, centreZ)
+        this.dummy.scale.set(1, top - base, 1)
+        // Geometry runs along X; a wall on an east/west face runs along Z.
+        this.dummy.rotation.y = dx !== 0 ? Math.PI / 2 : 0
+      }
       this.dummy.updateMatrix()
       mesh.setMatrixAt(inst.index, this.dummy.matrix)
       mesh.setColorAt(inst.index, baseColor)

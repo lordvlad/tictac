@@ -232,7 +232,24 @@ Smoke Grenade: 2 AP, thrown up to 10 m; every tile within 3 of where it lands, s
 
 ---
 
-## 9. Where the numbers come from
+## 9. Doors
+
+A door is a wall segment with a state. Shut or locked, it is a wall to the eye and to a bullet, and it covers whoever stands behind it; open, it is a doorway.
+A unit works the door on a side of the tile it stands on — the one it faces, when there are two.
+
+| Door | What can be done | AP | Becomes |
+| --- | --- | --- | --- |
+| Shut | Walk through it | step + 1 | open |
+| Shut | Open it | 1 | open |
+| Open | Shut it | 1 | shut |
+| Locked | Unlock it, carrying Keys | 1 | open |
+| Locked | Force it: 30 to 75% by Strength (`CHARACTER.shoulder`), heard 12 m off, given or not | 4 | gone, for good |
+
+Keys are not used up and have no action of their own: carrying them is the permission, and what they cost is the slot.
+
+---
+
+## 10. Where the numbers come from
 
 | Rule | Value | Source |
 | --- | --- | --- |

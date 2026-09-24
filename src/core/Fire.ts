@@ -3,7 +3,7 @@ import { Block, type Grid, ORTHOGONAL, type Tile } from './Grid'
 import type { Roll } from './rng'
 import { CRATE_FIRE, Surface, SURFACES } from './Surfaces'
 import { walkLine } from './Visibility'
-import { WallKind } from './Walls'
+import { WALLS } from './Walls'
 
 /**
  * Fire and smoke on the ground: what catches, how long it burns, where it
@@ -41,12 +41,13 @@ export function burnTime(grid: Grid, index: number): number {
 
 /**
  * Whether fire can pass from `a` to its orthogonal neighbour `b`: the same
- * floor, and nothing standing on the edge between — masonry and glass alike.
+ * floor, and nothing standing on the edge between — masonry, glass and a shut
+ * door alike. An open door is a doorway to a fire.
  */
 function passes(grid: Grid, a: Tile, b: Tile): boolean {
   if (!grid.inBounds(b.x, b.y)) return false
   if (grid.levelAt(a.x, a.y) !== grid.levelAt(b.x, b.y)) return false
-  return grid.wallBetween(a, b) === WallKind.None
+  return WALLS[grid.wallBetween(a, b)].open
 }
 
 /**
@@ -162,7 +163,7 @@ export function billow(ground: Ground, at: Tile, radius: number, turns: number):
       const walled = walkLine(
         at,
         tile,
-        (a, b) => grid.wallBetween(a, b) !== WallKind.None,
+        (a, b) => !WALLS[grid.wallBetween(a, b)].open,
         (a, b) => grid.cornerClosed(a, b, floorY),
       )
       if (walled) continue

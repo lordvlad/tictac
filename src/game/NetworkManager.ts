@@ -1,6 +1,7 @@
 import { Faction, SQUAD_SIZE } from '../config'
 import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
 import type { GrenadeId, ShotMode } from '../core/Arsenal'
+import type { DoorVerb } from '../core/Doors'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
 import { squadLoadoutFrom, type RecordedEvent, type RecordingHeader } from './Recording'
@@ -118,6 +119,8 @@ export type NetworkMessage =
   // no target named, or naming a unit this side cannot find, is a self-use.
   | { type: 'useItem'; faction: Faction; squadIndex: number; itemId: ItemId; targetFaction?: Faction; targetIndex?: number }
   | { type: 'endTurn'; faction: Faction }
+  /** Work the door on `edge`, beside the unit: open, close, unlock or force it (`core/Doors`). */
+  | { type: 'operateDoor'; faction: Faction; squadIndex: number; edge: number; verb: DoorVerb }
   | { type: 'rightClickFacing'; faction: Faction; squadIndex: number; x: number; z: number }
   /**
    * This side has finished equipping: its people, and what they are carrying.

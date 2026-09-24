@@ -19,9 +19,9 @@ tags: ["interaction", "items", "environment", "design"]
 
 # GDD: Interaction — Using Things On People, Places and Objects
 
-**Status: draft**, except §2.4 — tile properties, fire and smoke — which is built (ITEM-034).
-Numbers elsewhere are proposals, not current values; anything that ships gets its numbers
-from the code and appears in the [generated catalogue](status-and-trait-catalog.md).
+**Status: draft**, except §2.4 — tile properties, fire and smoke, built (ITEM-034) — and doors
+(§2.3, ITEM-017). Numbers elsewhere are proposals, not current values; anything that ships gets
+its numbers from the code and appears in the [generated catalogue](status-and-trait-catalog.md).
 
 ## 1. The idea in one line
 
@@ -72,11 +72,23 @@ So an interactive object is a wall kind that can change:
 | Shutter | closed | crowbar | open |
 | Glazing | transparent, stops nothing, cannot be walked through | any hit, or a thrown stone | gone — and loudly |
 
-Today's wall kinds are `None`, `Solid`, `Parapet` and `Glass`. A door is the missing one, and
-it is missing in an interesting way: the map generator already places **doorways** — gaps in a
-run of wall, chosen along a spanning tree over the rooms so every room is reachable. Those
-gaps are where doors would go, and the generator already knows which of them are interior and
-which lead outside.
+**Doors as built (ITEM-017).** A door is three wall kinds — shut, open, locked — hung by the map
+generator in the doorways it already cuts, so its state is the wall's `kind` and every consumer
+already agrees about it. What a door does in a fight is one sentence: **shut, it is a wall** (no
+sight, no fire, cover to whoever stands behind it); open, it is a doorway.
+
+- **Walking through** a shut door opens it: the step costs a point more, and the route preview
+  shows it. Nobody has to stop and push.
+- **Standing at a door**, a unit can open or shut it (a point each) — to look into a room without
+  going in, or to cut a watcher's line behind it. With two doors beside it, the one it faces.
+- **A locked door** refuses the walk. The **keys** (a pouch slot, not used up) open it quietly for
+  a point; anybody can **force** it — four points, heard twelve metres off whether it gives or
+  not, and it gives at 30–75% by Strength. A forced door is gone for good. The window beside it
+  is the third answer, as it always was.
+
+Not built: a target that is a *tile* (§2.2) — nothing uses one yet — and keys that open only
+some doors: every set of keys opens every lock on the map, since where keys come from is a
+campaign question (§3).
 
 ### 2.4 Tile properties, fire and smoke (ITEM-034)
 

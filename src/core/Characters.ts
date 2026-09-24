@@ -97,6 +97,8 @@ export interface DerivedStats {
   meleeSkill: number
   /** Percent on the damage a blow does. */
   meleePower: number
+  /** Percent chance a shoulder to a locked door gives (`core/Doors`). */
+  shoulder: number
 }
 
 /** Combat traits a character can be born with. `Nullweave` is a garment, not a person. */
@@ -139,6 +141,7 @@ export function derive(sheet: CharacterSheet): DerivedStats {
     gearRelief: band(strength, CHARACTER.gearRelief),
     meleeSkill: band(strength, CHARACTER.meleeSkill),
     meleePower: band(strength, CHARACTER.meleePower),
+    shoulder: band(strength, CHARACTER.shoulder),
   }
 }
 

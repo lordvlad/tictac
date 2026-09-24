@@ -17,12 +17,13 @@ export type CoverLevel = (typeof CoverLevel)[keyof typeof CoverLevel]
 /**
  * A wall is a boundary between two adjacent tiles, not an occupant of one.
  *
- * Every kind stops movement — a barrier that lets units through is simply
- * absent ({@link WallKind.None}), which is also what a doorway is. What varies
- * is how tall it stands and what its material does to a bullet or a view.
+ * Most kinds stop movement, and what varies is how tall they stand and what
+ * their material does to a bullet or a view. The exceptions are the open
+ * kinds ({@link WallSpec.open}) — nothing at all, or a door standing open —
+ * and a closed door, which a unit opens on its way through (`core/Doors`).
  */
 export const WallKind = {
-  /** No boundary: open ground, or a doorway punched through a run of wall. */
+  /** No boundary: open ground, a doorway with no door in it, or a door kicked in. */
   None: 0,
   /** 2 m masonry. Stops sight and bullets. */
   Solid: 1,
@@ -30,6 +31,12 @@ export const WallKind = {
   Parapet: 2,
   /** Glazing. Transparent and stops nothing, but you still cannot walk through it. */
   Glass: 3,
+  /** A closed door: a wall to the eye and to a bullet, opened by walking through it. */
+  Door: 4,
+  /** A door standing open: a doorway until somebody closes it. */
+  DoorOpen: 5,
+  /** A locked door: a wall until it is unlocked with keys or forced. */
+  Locked: 6,
 } as const
 export type WallKind = (typeof WallKind)[keyof typeof WallKind]
 
@@ -40,6 +47,11 @@ export interface WallSpec {
   transparent: boolean
   /** The material stops a bullet, so standing behind it is worth something. */
   shields: boolean
+  /**
+   * Nothing stands in the way: a body walks through without doing anything,
+   * and fire and smoke go through it as they do across open ground.
+   */
+  open: boolean
 }
 
 /**
@@ -53,12 +65,19 @@ export interface WallSpec {
  * gives. Neither is a fixed property of the kind, because both depend on which
  * storey you are standing on — see {@link wallHidesSight} and
  * {@link wallCover}.
+ *
+ * A closed door is masonry for everything but walking: nobody sees or shoots
+ * through it, and it covers whoever stands behind it. That keeps what a door
+ * does in a fight to one sentence — shut, it is a wall.
  */
 export const WALLS: Record<WallKind, WallSpec> = {
-  [WallKind.None]: { height: 0, transparent: true, shields: false },
-  [WallKind.Solid]: { height: FULL_BLOCK_HEIGHT, transparent: false, shields: true },
-  [WallKind.Parapet]: { height: HALF_BLOCK_HEIGHT, transparent: false, shields: true },
-  [WallKind.Glass]: { height: FULL_BLOCK_HEIGHT, transparent: true, shields: false },
+  [WallKind.None]: { height: 0, transparent: true, shields: false, open: true },
+  [WallKind.Solid]: { height: FULL_BLOCK_HEIGHT, transparent: false, shields: true, open: false },
+  [WallKind.Parapet]: { height: HALF_BLOCK_HEIGHT, transparent: false, shields: true, open: false },
+  [WallKind.Glass]: { height: FULL_BLOCK_HEIGHT, transparent: true, shields: false, open: false },
+  [WallKind.Door]: { height: FULL_BLOCK_HEIGHT, transparent: false, shields: true, open: false },
+  [WallKind.DoorOpen]: { height: 0, transparent: true, shields: false, open: true },
+  [WallKind.Locked]: { height: FULL_BLOCK_HEIGHT, transparent: false, shields: true, open: false },
 }
 
 /**

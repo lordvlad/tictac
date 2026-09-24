@@ -202,6 +202,25 @@ export const FIRE = {
 }
 
 /**
+ * What a door costs to work (`core/Doors`). Opening is also what walking
+ * through a closed door costs on top of the step.
+ */
+export const DOORS = {
+  /** Opening a closed door, standing at it or on the way through. */
+  openAp: 1,
+  /** Shutting an open one. */
+  closeAp: 1,
+  /** Unlocking a locked one with the keys, which opens it too. */
+  unlockAp: 1,
+  /**
+   * A shoulder to a locked door. Paid whether it gives or not; what decides
+   * that is the character's Strength (`CHARACTER.shoulder`), rolled from the
+   * match's dice.
+   */
+  forceAp: 4,
+}
+
+/**
  * How much a unit can take before it stops taking orders (`core/Morale`).
  *
  * Morale runs 0 to {@link MORALE.max}. Stress takes it down and a few things
@@ -317,6 +336,11 @@ export const CHARACTER = {
   meleeSkill: { min: -10, max: 10 },
   /** Percent on the damage a blow does. From Strength: melee is where Strength first fights. */
   meleePower: { min: -25, max: 50 },
+  /**
+   * Percent chance a shoulder to a locked door gives (`DOORS.forceAp`). From
+   * Strength: the weakest need a few goes, the strongest rarely a second.
+   */
+  shoulder: { min: 30, max: 75 },
   /**
    * Percent a utility discipline adds to what it governs, per discipline.
    *

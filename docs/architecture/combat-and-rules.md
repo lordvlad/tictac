@@ -253,6 +253,25 @@ state there as in a played match. The **stone** is a `GrenadeId` with no damage 
 `GrenadeSpec.issued` — two for a stone — is carried by every soldier outside the crate and the
 grenade cap (`applyUnitLoadout`).
 
+### Doors
+A door is a wall kind with a state (`src/core/Doors.ts`, numbers in `DOORS`): **shut**
+(`WallKind.Door`), **open** (`DoorOpen`) or **locked** (`Locked`); kicked in, it is `None`. So a
+door's state is its `WallComponent.kind`, written only through `WallSystem.setKind`, replicated,
+digested and rewound with every other wall. Shut or locked it is masonry to sight, cover and
+bullets (`WALLS`); open it is `open` like `None`, which is also what lets fire and smoke through.
+
+- **Walking through** a shut door is allowed (`Grid.canTraverse`) and costs `DOORS.openAp` on top
+  of the step (`Grid.getStepCost`), so every planner — the player's, the sweep's, a broken unit's
+  — prices it. The rules open it as the unit arrives (`CommandSystem`'s step handler), before
+  anybody looks round or reacts.
+- **`operateDoor`** works the door on a side of the unit's own tile: open, close, unlock (needs an
+  item with `unlocks` — the keys, not used up) or force (`DOORS.forceAp`, heard at `NOISE.force`,
+  gives at `CHARACTER.shoulder` percent from the match's dice, and a door forced is gone for
+  good). `cannotWorkDoor` is asked on both peers, not only the sender's. The HUD offers the verbs
+  for the door the unit faces (`doorAhead`).
+- **The map** hangs doors in the doorways round 3 cut (`hangDoors`, on a stream of its own) once
+  the terrain is final, only between two walkable tiles on one floor.
+
 ### Morale
 `MoraleComponent` (replicated, digested): **morale** 0–100, the **break** a unit is in, and the
 turns it has begun broken (`src/core/Morale.ts`, numbers in `MORALE`). `CombatSystem` calls

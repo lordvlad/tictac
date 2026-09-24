@@ -180,12 +180,13 @@ export function generateMap(seed: number, options: MapOptions = {}): GeneratedMa
     reserved.add(grid.index(x, y))
   }
 
+  const doorways: Doorway[] = []
   // --- Build each storey, in three rounds -----------------------------------
   for (const building of buildings) {
     for (const storey of building.storeys) {
       raiseOuterWalls(grid, storey, rng)
       raisePartitions(grid, storey)
-      openDoorsAndWindows(grid, rng, storey, buildings, reserve)
+      openDoorsAndWindows(grid, rng, storey, buildings, reserve, doorways)
     }
   }
 
@@ -281,6 +282,7 @@ export function generateMap(seed: number, options: MapOptions = {}): GeneratedMa
   }
 
   laySurfaces(grid, buildings, new Rng((seed ^ SURFACE_STREAM) >>> 0), scaled)
+  hangDoors(grid, doorways, new Rng((seed ^ DOOR_STREAM) >>> 0))
 
   return { grid, spawns, buildings: footprints }
 }
@@ -291,6 +293,46 @@ export function generateMap(seed: number, options: MapOptions = {}): GeneratedMa
  * material moved no wall, crate or spawn of any seed that existed before.
  */
 const SURFACE_STREAM = 0x9e3779b9
+
+/** The doors' own stream, for the same reason as {@link SURFACE_STREAM}. */
+const DOOR_STREAM = 0x85ebca6b
+
+/** A doorway round 3 cut, and whether it leads outside. */
+interface Doorway {
+  x: number
+  y: number
+  side: Side
+  exterior: boolean
+}
+
+/** Share of doorways that get a door, inside a building and into one. */
+const DOOR_CHANCE = { interior: 0.6, exterior: 0.8 }
+
+/**
+ * Hang doors in the doorways round 3 cut, once the terrain is final.
+ *
+ * Only in a doorway that is still one — the repairs may have walled one up
+ * or moved a floor — between two walkable tiles on one floor. A door hangs
+ * shut: whoever wants the room opens it, and until then it is a wall to
+ * anybody looking. Walking through a shut door is always possible, so no
+ * door changes what can be reached.
+ */
+function hangDoors(grid: Grid, doorways: readonly Doorway[], rng: Rng): void {
+  for (const doorway of doorways) {
+    const { x, y, side } = doorway
+    const [dx, dy] = SIDE_OFFSET[side]!
+    const nx = x + dx
+    const ny = y + dy
+    // Drawn for every doorway, valid or not, so one repair cannot shift which
+    // of the others get a door.
+    const hung = rng.chance(doorway.exterior ? DOOR_CHANCE.exterior : DOOR_CHANCE.interior)
+    if (!hung || !grid.inBounds(nx, ny)) continue
+    if (grid.wallAt(x, y, side) !== WallKind.None) continue
+    if (!grid.isWalkable(x, y) || !grid.isWalkable(nx, ny)) continue
+    if (grid.levelAt(x, y) !== grid.levelAt(nx, ny)) continue
+    grid.setWall(x, y, side, WallKind.Door)
+  }
+}
 
 /**
  * Say what every floor is made of (`core/Surfaces`), once the terrain is final.
@@ -801,6 +843,8 @@ function openDoorsAndWindows(
   storey: Storey,
   all: readonly Building[],
   reserve: (x: number, y: number) => void,
+  /** Every doorway cut, for the doors hung in them once the map is final. */
+  doorways: Doorway[],
 ): void {
   const rooms = storey.rooms
 
@@ -837,6 +881,7 @@ function openDoorsAndWindows(
 
     const spot = rng.pick(pair.shared.edges)
     grid.setWall(spot.x, spot.y, spot.side, WallKind.None)
+    doorways.push({ x: spot.x, y: spot.y, side: spot.side, exterior: false })
   }
 
   // --- exterior doors: one per four rooms, give or take --------------------
@@ -848,6 +893,7 @@ function openDoorsAndWindows(
     for (let i = 0; i < doors; i++) {
       const spot = outer[i]!
       grid.setWall(spot.x, spot.y, spot.side, WallKind.None)
+      doorways.push({ ...spot, exterior: true })
       // A door is no use if the next pass drops a crate against it.
       const [dx, dy] = SIDE_OFFSET[spot.side]!
       reserve(spot.x, spot.y)

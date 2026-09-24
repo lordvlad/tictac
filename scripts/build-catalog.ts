@@ -16,7 +16,7 @@
 import { GRENADES, GrenadeId, SHOT_MODES, STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { LONG_GUN_PARRY, MELEE, MeleeId } from '../src/core/Melee'
 import { NOISE } from '../src/core/Noise'
-import { AIM, CHARACTER, COVER, CRIT, FIRE, MORALE, RULES, WOUNDS } from '../src/config'
+import { AIM, CHARACTER, COVER, CRIT, DOORS, FIRE, MORALE, RULES, WOUNDS } from '../src/config'
 import { CRATE_FIRE, SURFACES } from '../src/core/Surfaces'
 import { PREDISPOSITIONS, steadyChance, TEMPERAMENTS } from '../src/core/Morale'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
@@ -261,7 +261,7 @@ function build(): string {
   lines.push('| --- | --- | --- |')
   for (const id of Object.values(ItemId)) {
     const spec = ITEMS[id]
-    if (!spec.passive) continue
+    if (!spec.passive || spec.unlocks) continue
     const granted = spec.traits ?? []
     lines.push(
       `| ${spec.name} | ${granted.map((t) => TRAITS[t].name).join(', ')} | ${traitEffects(resolveTraits(granted))} |`,
@@ -442,7 +442,32 @@ function build(): string {
   lines.push('')
   lines.push('---')
   lines.push('')
-  lines.push('## 9. Where the numbers come from')
+  lines.push('## 9. Doors')
+  lines.push('')
+  lines.push(
+    'A door is a wall segment with a state. Shut or locked, it is a wall to the eye and to a bullet, and it covers whoever stands behind it; open, it is a doorway.',
+  )
+  lines.push(
+    'A unit works the door on a side of the tile it stands on — the one it faces, when there are two.',
+  )
+  lines.push('')
+  lines.push('| Door | What can be done | AP | Becomes |')
+  lines.push('| --- | --- | --- | --- |')
+  lines.push(`| Shut | Walk through it | step + ${DOORS.openAp} | open |`)
+  lines.push(`| Shut | Open it | ${DOORS.openAp} | open |`)
+  lines.push(`| Open | Shut it | ${DOORS.closeAp} | shut |`)
+  lines.push(`| Locked | Unlock it, carrying ${ITEMS[ItemId.Keys].name} | ${DOORS.unlockAp} | open |`)
+  lines.push(
+    `| Locked | Force it: ${range(CHARACTER.shoulder.min, CHARACTER.shoulder.max)}% by Strength (\`CHARACTER.shoulder\`), heard ${NOISE.force} m off, given or not | ${DOORS.forceAp} | gone, for good |`,
+  )
+  lines.push('')
+  lines.push(
+    `${ITEMS[ItemId.Keys].name} are not used up and have no action of their own: carrying them is the permission, and what they cost is the slot.`,
+  )
+  lines.push('')
+  lines.push('---')
+  lines.push('')
+  lines.push('## 10. Where the numbers come from')
   lines.push('')
   lines.push('| Rule | Value | Source |')
   lines.push('| --- | --- | --- |')

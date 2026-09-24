@@ -71,6 +71,7 @@ export const RpcMethods = {
   endUnitTurn: 'tictac/system/turn/endUnitTurn',
   endTurn: 'tictac/system/turn/endTurn',
   useItem: 'tictac/system/items/useItem',
+  operateDoor: 'tictac/system/terrain/operateDoor',
   rightClickFacing: 'tictac/system/render/rightClickFacing',
   ready: 'tictac/system/session/ready',
 } as const satisfies Record<NetworkMessage['type'], string>

@@ -1,4 +1,4 @@
-import { FACTION_INFO, Faction, FIRE, RULES } from '../config'
+import { DOORS, FACTION_INFO, Faction, FIRE, RULES } from '../config'
 import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
 import { ITEMS, type ItemEffect, ItemId, itemApCost, itemTargetsAlly } from '../core/Items'
 import { UtilityId } from '../core/Characters'
@@ -6,8 +6,10 @@ import { effectiveWeapon, statusStacks } from '../core/Ballistics'
 import type { MeleeId } from '../core/Melee'
 import { Awareness } from '../core/Awareness'
 import { breakChance, type MoraleBreak, steadyChance } from '../core/Morale'
-import { Block, type Grid, type Tile } from '../core/Grid'
+import { Block, type Grid, Side, type Tile } from '../core/Grid'
 import { SURFACES } from '../core/Surfaces'
+import { cannotWorkDoor, doorAhead, doorApCost, type DoorVerb, doorVerbs, isDoor } from '../core/Doors'
+import { WallKind } from '../core/Walls'
 import { canWatch, watchCost } from '../game/Overwatch'
 import { TRAITS, woundTraits } from '../core/Traits'
 import type { OrbitRig } from '../camera/OrbitRig'
@@ -49,6 +51,8 @@ export type HudIntent =
   | { type: 'openDebug' }
   | { type: 'selectLevel'; level: number }
   | { type: 'toggleDebugMap' }
+  /** Work the door the selected unit is facing (`core/Doors`). */
+  | { type: 'operateDoor'; verb: DoorVerb }
 /** One button in the selected unit's action panel. */
 export interface HudAction {
   id: string
@@ -290,6 +294,8 @@ export interface HudModelSources {
    * applier refuses every order until they finish, so nothing is offered.
    */
   rulesActing: boolean
+  /** The map, for the door in front of the selected unit. */
+  grid: Grid
 }
 
 /** What the model builder needs from the shoot planner. */
@@ -435,6 +441,25 @@ export function buildHudModel(sources: HudModelSources): HudModel {
         targeted: itemTargetsAlly(spec),
         intent: { type: 'useItem', itemId: id },
       })
+    }
+    // The door the unit is facing, beside it: what can be done to it is a
+    // row each, priced, greyed when the unit cannot (no keys, no points).
+    const door = doorAhead(sources.grid, selected.tile, selected.heading)
+    if (door !== null) {
+      const { x, y, side } = sources.grid.edgeTile(door)
+      for (const verb of doorVerbs(sources.grid.wallAt(x, y, side))) {
+        const cost = doorApCost(verb)
+        actions.push({
+          id: `door-${verb}`,
+          label: DOOR_LABEL[verb],
+          icon: `door-${verb}`,
+          // The odds are the character's, so they are on the button.
+          tag: verb === 'force' ? `${cost} AP · ${selected.shoulder}%` : `${cost} AP`,
+          active: false,
+          disabled: cannotWorkDoor(sources.grid, selected, door, verb) !== null,
+          intent: { type: 'operateDoor', verb },
+        })
+      }
     }
     actions.push({
       id: 'reload',
@@ -647,7 +672,38 @@ export function tileReadout(grid: Grid, tile: Tile): TileReadout {
       tone: 'hazard',
     })
   }
+  for (const side of [Side.North, Side.East, Side.South, Side.West]) {
+    const kind = grid.wallAt(tile.x, tile.y, side)
+    if (!isDoor(kind)) continue
+    lines.push({ name: `${DOOR_STATE[kind]} door, ${SIDE_NAME[side]}`, detail: DOOR_DETAIL[kind] ?? '', tone: 'plain' })
+  }
   return { lines }
+}
+
+const DOOR_LABEL: Record<DoorVerb, string> = {
+  open: 'Open Door',
+  close: 'Close Door',
+  unlock: 'Unlock Door',
+  force: 'Force Door',
+}
+
+const SIDE_NAME: Record<Side, string> = {
+  [Side.North]: 'north',
+  [Side.East]: 'east',
+  [Side.South]: 'south',
+  [Side.West]: 'west',
+}
+
+const DOOR_STATE: Partial<Record<WallKind, string>> = {
+  [WallKind.Door]: 'Shut',
+  [WallKind.DoorOpen]: 'Open',
+  [WallKind.Locked]: 'Locked',
+}
+
+const DOOR_DETAIL: Partial<Record<WallKind, string>> = {
+  [WallKind.Door]: `Blocks sight and fire. Walking through opens it, ${DOORS.openAp} AP on the step.`,
+  [WallKind.DoorOpen]: `Shut it again for ${DOORS.closeAp} AP, standing at it.`,
+  [WallKind.Locked]: `Keys open it for ${DOORS.unlockAp} AP; a shoulder, ${DOORS.forceAp} AP, may break it in, loudly.`,
 }
 
 /**

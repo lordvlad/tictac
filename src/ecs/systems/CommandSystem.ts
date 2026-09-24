@@ -19,7 +19,8 @@ import type { GroundSystem } from './GroundSystem'
 import { MoraleBreak, rollMorale } from '../../core/Morale'
 import { billow, burn, kindle } from '../../core/Fire'
 import type { GrenadeSpec } from '../../core/Arsenal'
-import type { Tile } from '../../core/Grid'
+import { faceToward, type Tile } from '../../core/Grid'
+import { cannotWorkDoor, doorAfter, doorApCost } from '../../core/Doors'
 import { brokenStep } from '../../game/Breakdown'
 
 /**
@@ -41,6 +42,7 @@ export type Command = Extract<
       | 'toggleCover'
       | 'overwatch'
       | 'useItem'
+      | 'operateDoor'
       | 'endUnitTurn'
       | 'endTurn'
       | 'rightClickFacing'
@@ -56,6 +58,7 @@ const COMMAND_TYPES: ReadonlySet<string> = new Set<Command['type']>([
   'toggleCover',
   'overwatch',
   'useItem',
+  'operateDoor',
   'endUnitTurn',
   'endTurn',
   'rightClickFacing',
@@ -178,9 +181,15 @@ export class CommandSystem extends System {
     // The reaction trigger lives with the applier, not with whoever happens to
     // be showing the match: arriving on a tile is what a watcher was waiting
     // for, and every carrier of a match has to agree about that.
-    movement.onStep = (entityId) => {
+    movement.onStep = (entityId, _tile, from) => {
       const mover = this.squads.byEntityId(entityId)
       if (!mover) return
+      // A shut door on the way was opened by walking through it: the step
+      // paid for it, and whoever is beyond can see the unit that came through.
+      const side = faceToward(from, mover.tile)
+      if (side !== 0 && this.combat.grid.wallAt(from.x, from.y, side) === WallKind.Door) {
+        this.walls.setKind(this.world, this.combat.grid.edgeId(from.x, from.y, side), WallKind.DoorOpen)
+      }
       // The step is made before anybody reacts to it: a watcher's shot is an
       // answer to the arrival, and its report follows the footfall. Hearing
       // it may turn a watcher round; seeing it may engage one — both before
@@ -455,6 +464,22 @@ export class CommandSystem extends System {
         this.turns.startNextTurn()
         this.burnDown()
         this.rally()
+        return carried
+      }
+      case 'operateDoor': {
+        const unit = this.unit(command.faction, command.squadIndex)
+        if (!unit || unit.isDead) return refuse('no such live unit')
+        const { grid } = this.combat
+        const why = cannotWorkDoor(grid, unit, command.edge, command.verb)
+        if (why) return refuse(why)
+        unit.ap -= doorApCost(command.verb)
+        if (command.verb === 'force') {
+          // Heard whether it gives or not, from the door.
+          const { x, y } = grid.edgeTile(command.edge)
+          this.sound({ at: { x, y }, loudness: NOISE.force, faction: unit.faction })
+          if (this.combat.roll() >= unit.shoulder / 100) return carried
+        }
+        this.walls.setKind(this.world, command.edge, doorAfter(command.verb))
         return carried
       }
       case 'rightClickFacing': {

@@ -1,5 +1,5 @@
 import { Vector3 } from 'three'
-import { GRID_SIZE, HALF_BLOCK_HEIGHT, LEVEL_HEIGHT, RULES, TILE } from '../config'
+import { DOORS, GRID_SIZE, HALF_BLOCK_HEIGHT, LEVEL_HEIGHT, RULES, TILE } from '../config'
 import { WALLS, wallHidesSight, WallKind } from './Walls'
 import { Surface } from './Surfaces'
 import { distance } from './math'
@@ -394,7 +394,7 @@ export class Grid {
    */
   private edgeOpen(x: number, y: number, side: Side, observerFloorY: number | null): boolean {
     const kind = this.wallAt(x, y, side)
-    if (observerFloorY === null) return kind === WallKind.None
+    if (observerFloorY === null) return WALLS[kind].open
     if (this.wallOpenAt(x, y, side, Math.round(observerFloorY / LEVEL_HEIGHT))) return true
     const top = this.wallTop(x, y, side)
     return !wallHidesSight(kind, top, observerFloorY)
@@ -651,7 +651,9 @@ export class Grid {
       // Nothing more to check: a ladder exists only between two orthogonally
       // adjacent tiles exactly one storey apart.
     } else if (!isDiagonal) {
-      if (this.wallBetween(from, to) !== WallKind.None) return false
+      // A closed door is a way through, opened on the step (`getStepCost`).
+      const kind = this.wallBetween(from, to)
+      if (!WALLS[kind].open && kind !== WallKind.Door) return false
     } else {
       // A diagonal cuts a corner rather than crossing a face, so it is allowed
       // as long as a unit could have walked round that corner one way or the
@@ -693,7 +695,10 @@ export class Grid {
     }
 
     const isDiagonal = to.x !== from.x && to.y !== from.y
-    return isDiagonal ? RULES.stepDiagonal : RULES.stepOrthogonal
+    if (isDiagonal) return RULES.stepDiagonal
+    // A closed door is opened on the way through, and the opening is paid for
+    // with the step: whoever plans a route through it sees the price.
+    return this.wallBetween(from, to) === WallKind.Door ? RULES.stepOrthogonal + DOORS.openAp : RULES.stepOrthogonal
   }
   /** Which tile contains this world position? May be out of bounds. */
   worldToTile(x: number, z: number): Tile {

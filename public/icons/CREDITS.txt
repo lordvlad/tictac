@@ -50,3 +50,8 @@ shot-blinded: sight-disabled by skoll
 shot-conceal: hidden by lorc
 shot-damage: impact-point by lorc
 shot-shred: armor-punch by delapouite
+item-keys: keyring by delapouite
+door-open: entry-door by delapouite
+door-close: wooden-door by lorc
+door-unlock: padlock-open by delapouite
+door-force: boot-kick by lorc

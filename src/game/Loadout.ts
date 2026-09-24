@@ -93,6 +93,9 @@ export const DEMO_INVENTORY: Inventory = {
     // asks for Intelligence before it will work at all, so a stock matching
     // the squad would put one in a pouch that cannot use it.
     [ItemId.RepairKit]: 2,
+    // One set of keys each side of a pair: a locked door is quiet and cheap to
+    // whoever has them, and a shoulder or a window to everyone else.
+    [ItemId.Keys]: 2,
   },
   // Two of each mod against ten rail slots across the squad: enough to make
   // fitting one a choice about which weapon deserves it.
@@ -133,6 +136,7 @@ export function defaultLoadout(): SquadLoadout {
       [ItemId.NullweaveVest]: 0,
       [ItemId.PlateCarrier]: 0,
       [ItemId.RepairKit]: 0,
+      [ItemId.Keys]: 0,
     },
     attachments: [],
     sidearm: MeleeId.Fists,

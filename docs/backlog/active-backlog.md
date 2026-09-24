@@ -141,36 +141,43 @@ record, it is a diary.
 ### [ITEM-017] Item Verbs on Tiles and Objects
 **Type:** Feature  
 **Priority:** P2  
-**Status:** Backlog  
+**Status:** In Progress  
 **Milestone:** M2 — Tactical Depth  
 
 #### Why
 [GDD: Interaction & Environment](../design/gdd/interaction-and-environment.md). Targeted item
 use reaches a squadmate; it does not reach a *place* or a *thing*. Without that there is no
-key, no door, and no way to set anything alight — a pouch that only points at people.
+key and no door — a pouch that only points at people. Picked up on 2026-09-25 as the next
+combat item.
 
 #### Change
-1. `ItemSystem.use` takes a target that is one of several kinds — a unit, a tile, or a wall
-   segment — with the same two-tap interaction and the same wire shape as targeted treatment.
-2. A `Door` wall kind with lock state. Walls are already entities with a replicated `kind`,
-   so opening or breaking one needs no new message and every consumer agrees at once.
-3. A key: an item whose contribution is a *permission* rather than an effect.
+Scoped at the start: the door half, with the verbs worked on "the door in front of you" rather
+than through a generic item-target step, and the keys as a permission the unlock verb asks for.
+A tile as a target is left out: no item uses one yet.
 
-#### Blocker
-Nothing blocks the door half. Fire was split out and built as ITEM-034, which put per-tile
-state with a clock on the map (`GroundComponent`); a tile-targeted verb here writes to it.
+1. ✅ **Doors in the rules.** Shut, open and locked wall kinds (`core/Doors`); walking through a
+   shut door opens it for a point on the step; `operateDoor` opens, shuts, unlocks (keys, not used
+   up) or forces (4 AP, by Strength from the match's dice, loud; a forced door is gone). The map
+   hangs shut doors in its doorways on a stream of its own. HUD rows for the door the unit
+   faces; the tile readout names doors; an open door is drawn as its leaf.
+2. **Locks on the map, and measurement.** The generator locks some doors, never cutting off any
+   ground; sweep on blocks 1000/5000/9000.
 
 #### Affected Files
-- `src/core/Items.ts`
-- `src/ecs/systems/ItemSystem.ts`
-- `src/core/Walls.ts`
-- `src/ecs/components/WallComponent.ts`
-- `src/game/InteractionController.ts`
+- `src/core/Doors.ts` (new), `src/core/Walls.ts`, `src/core/Grid.ts`, `src/core/MapGenerator.ts`
+- `src/core/Items.ts` (keys), `src/game/Loadout.ts`
+- `src/ecs/systems/CommandSystem.ts`, `src/ecs/systems/MovementSystem.ts`
+- `src/hud/HudModel.ts`, `src/game/InteractionController.ts`, `src/render/Blocks.ts`
 
 #### Acceptance Criteria
-- [ ] An item can be pointed at a unit, a tile or a wall segment, through one selection step.
-- [ ] A locked door refuses a push, opens to the right key, and both peers see it open.
-- [ ] A door's state survives a recorded replay.
+- [ ] ~~An item can be pointed at a unit, a tile or a wall segment, through one selection
+      step.~~ Restated with the scope above: a unit works the door it faces through one row in
+      the action panel, and the keys are what the unlock verb asks for.
+- [x] A locked door refuses a push, opens to the keys, and both peers reach the same doors from
+      the same commands (`tests/doors.test.ts`).
+- [x] A door's state survives a recorded replay: the same commands applied again as `record`
+      leave the same doors.
+- [ ] Locked doors on generated maps, measured with the sweep.
 
 ---
 

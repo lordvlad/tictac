@@ -28,7 +28,8 @@ meta layer: a unit that grows during a match, roles, and a roster that outlives 
 ---
 
 ## 🔄 In Progress
-- Nothing in flight.
+- **`[ITEM-017]`** Doors: slice 1 (shut, open and locked doors in the rules, the HUD and the
+  view; shut doors on the map) done. Next: locks on the map and the sweep.
 
 ## 📋 Ready — pull in this order
 1. **`[ITEM-004]`** In-match progression. First because persistence needs something worth
@@ -43,8 +44,7 @@ meta layer: a unit that grows during a match, roles, and a roster that outlives 
    (`[ITEM-025]`). Depends on 1 and 3.
 
 ## 🧊 Backlog — not yet queued
-- **`[ITEM-017]`** Item verbs on tiles and objects: keys, locks, doors. Not blocked. Ground
-  state from `[ITEM-034]` is there for a tile-targeted verb to write to.
+- Nothing. `[ITEM-017]` was the last unqueued item.
 
 ## ⚠️ Left open by finished work
 - **ITEM-019**: the sweep's policy neither sneaks nor throws stones, so the balance sweep does

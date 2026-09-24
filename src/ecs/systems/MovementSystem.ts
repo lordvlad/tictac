@@ -21,8 +21,8 @@ export class MovementSystem extends System {
   /** How far into `movingPath` each unit has walked. Not networked: the peer replays its own route. */
   private readonly pathIndices = new Map<number, number>()
 
-  /** Fired on each tile boundary crossed, for visibility and HUD refreshes. */
-  onStep?: (entityId: number, tile: Tile) => void
+  /** Fired on each tile boundary crossed, with the tile it came from, for visibility and HUD refreshes. */
+  onStep?: (entityId: number, tile: Tile, from: Tile) => void
   /** Fired when a unit stops, whether it arrived or ran out of AP. */
   onArrived?: (entityId: number) => void
 
@@ -146,7 +146,7 @@ export class MovementSystem extends System {
         ap.ap -= spent
         ap.spentThisTurn += spent
 
-        this.onStep?.(entityId, nextTile)
+        this.onStep?.(entityId, nextTile, prev)
 
         index += 1
         this.pathIndices.set(entityId, index)

@@ -117,11 +117,11 @@ describe('The catalogue is in step with the code', () => {
 })
 
 describe('What the catalogue asserts about the data', () => {
-  test('a passive item grants at least one trait and has no action', () => {
+  test('a passive item has no action, and grants a trait or a permission', () => {
     for (const id of Object.values(ItemId)) {
       const spec = ITEMS[id]
       if (!spec.passive) continue
-      expect(spec.traits?.length ?? 0).toBeGreaterThan(0)
+      expect((spec.traits?.length ?? 0) > 0 || spec.unlocks === true).toBe(true)
       expect(spec.effects).toEqual([])
     }
   })

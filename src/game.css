@@ -1773,6 +1773,8 @@ canvas {
 .legend-box.wall-solid { background: #f8fafc; }
 .legend-box.wall-parapet { background: #fbbf24; }
 .legend-box.wall-glass { background: #38bdf8; }
+.legend-box.wall-door { background: #b07a45; }
+.legend-box.wall-locked { background: #dc2626; }
 .legend-box.crate { background: #d97706; }
 .legend-box.stair { background: #0284c7; }
 .legend-box.ladder { background: #f97316; }

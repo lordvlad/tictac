@@ -46,6 +46,7 @@ function stubSoldier() {
       [ItemId.NullweaveVest]: 0,
       [ItemId.PlateCarrier]: 0,
       [ItemId.RepairKit]: 0,
+      [ItemId.Keys]: 0,
     },
     traits: resolveTraits([]),
     equip(weaponId: WeaponId, ammoId: AmmoId): void {
@@ -103,6 +104,7 @@ describe('Shared crate', () => {
       [ItemId.NullweaveVest]: 2,
       [ItemId.PlateCarrier]: 2,
       [ItemId.RepairKit]: 2,
+      [ItemId.Keys]: 2,
     })
     expect(left.attachments).toEqual({
       [AttachmentId.Scope]: 2,
@@ -398,6 +400,7 @@ describe('Stamping a loadout onto a soldier', () => {
         [ItemId.NullweaveVest]: 0,
         [ItemId.PlateCarrier]: 0,
         [ItemId.RepairKit]: 0,
+        [ItemId.Keys]: 0,
       },
       attachments: [],
       sidearm: MeleeId.Fists,
@@ -419,6 +422,7 @@ describe('Stamping a loadout onto a soldier', () => {
       [ItemId.NullweaveVest]: 0,
       [ItemId.PlateCarrier]: 0,
       [ItemId.RepairKit]: 0,
+      [ItemId.Keys]: 0,
     })
     expect(soldier.weapon.attachments).toEqual([])
   })
@@ -436,6 +440,7 @@ describe('Stamping a loadout onto a soldier', () => {
         [ItemId.NullweaveVest]: 0,
         [ItemId.PlateCarrier]: 0,
         [ItemId.RepairKit]: 0,
+        [ItemId.Keys]: 0,
       },
       attachments: [AttachmentId.Scope, AttachmentId.Suppressor],
       sidearm: MeleeId.Fists,

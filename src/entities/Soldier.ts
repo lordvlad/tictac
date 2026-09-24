@@ -538,6 +538,10 @@ export class Soldier {
   get meleePower(): number {
     return this.derived.meleePower
   }
+  /** Percent chance a shoulder to a locked door gives. */
+  get shoulder(): number {
+    return this.derived.shoulder
+  }
   /** Consumables still in the pouch, by item. */
   get items(): Record<ItemId, number> {
     return this.itemsComponent.items

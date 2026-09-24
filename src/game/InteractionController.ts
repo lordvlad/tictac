@@ -4,6 +4,7 @@ import type { EngineContext } from '../engine'
 import { CAM, Faction, LEVEL_HEIGHT } from '../config'
 import { clientToNdc } from '../core/screen'
 import { type Tile, tileEquals } from '../core/Grid'
+import { doorAhead } from '../core/Doors'
 import type { Soldier } from '../entities/Soldier'
 import type { OrbitRig } from '../camera/OrbitRig'
 import { GroundPicker } from '../camera/GroundPicker'
@@ -410,6 +411,7 @@ export class InteractionController {
             : null,
         waypointActive: this.planner.waypointMode,
         rulesActing: this.commands.pending,
+        grid: this.battlefield.grid,
         selectedLevelFilter: this.selectedLevelFilter,
         topLevel: this.topLevel,
         debugMapOpen: this.debugMap.isOpen,
@@ -603,6 +605,17 @@ export class InteractionController {
         this.debugMap.refresh(this.battlefield.grid, this.squads, this.selectedLevelFilter, this.seedLabel)
         this.refreshHud()
         break
+      case 'operateDoor': {
+        const soldier = this.turnManager.selectedSoldier
+        const edge = soldier ? doorAhead(this.battlefield.grid, soldier.tile, soldier.heading) : null
+        if (soldier && edge !== null) {
+          this.commands.apply(
+            { type: 'operateDoor', faction: soldier.faction, squadIndex: soldier.squadIndex, edge, verb: intent.verb },
+            'local',
+          )
+        }
+        break
+      }
       case 'overwatch': {
         const soldier = this.turnManager.selectedSoldier
         if (soldier) this.commands.apply({ type: 'overwatch', faction: soldier.faction, squadIndex: soldier.squadIndex }, 'local')
@@ -731,6 +744,7 @@ export class InteractionController {
       case 'overwatch':
       case 'endUnitTurn':
       case 'rightClickFacing':
+      case 'operateDoor':
         this.refreshHud()
         return
     }

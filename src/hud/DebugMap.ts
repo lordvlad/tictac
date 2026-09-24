@@ -169,6 +169,8 @@ export class DebugMap {
       <div class="legend-item"><span class="legend-box wall-solid"></span>Solid Wall</div>
       <div class="legend-item"><span class="legend-box wall-parapet"></span>Parapet</div>
       <div class="legend-item"><span class="legend-box wall-glass"></span>Glass</div>
+      <div class="legend-item"><span class="legend-box wall-door"></span>Door (dashed: open)</div>
+      <div class="legend-item"><span class="legend-box wall-locked"></span>Locked Door</div>
       <div class="legend-item"><span class="legend-box crate"></span>Crate</div>
       <div class="legend-item"><span class="legend-box stair"></span>Stair (L&rarr;U)</div>
       <div class="legend-item"><span class="legend-box ladder"></span>Ladder</div>
@@ -339,6 +341,12 @@ export class DebugMap {
     } else if (kind === WallKind.Glass) {
       ctx.strokeStyle = '#38bdf8'
       ctx.setLineDash([3, 2])
+    } else if (kind === WallKind.Door || kind === WallKind.DoorOpen) {
+      ctx.strokeStyle = '#b07a45'
+      ctx.setLineDash(kind === WallKind.DoorOpen ? [2, 3] : [])
+    } else if (kind === WallKind.Locked) {
+      ctx.strokeStyle = '#dc2626'
+      ctx.setLineDash([])
     }
     ctx.beginPath()
     ctx.moveTo(x1, y1)

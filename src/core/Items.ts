@@ -15,6 +15,8 @@ export const ItemId = {
   RepairKit: 'repair',
   NullweaveVest: 'nullweave',
   PlateCarrier: 'plate',
+  /** The keys to the locked doors on the map: unlock one quietly, for a point. */
+  Keys: 'keys',
 } as const
 export type ItemId = (typeof ItemId)[keyof typeof ItemId]
 
@@ -61,6 +63,12 @@ export interface ItemSpec {
    * do with it. Absent means anyone can work it.
    */
   minIntelligence?: number
+  /**
+   * Carrying one lets the unit unlock a locked door (`core/Doors`). A
+   * permission rather than an effect: nothing is used up, and it is why a
+   * passive item can earn its slot without granting a trait.
+   */
+  unlocks?: boolean
 }
 
 /**
@@ -145,6 +153,16 @@ export const ITEMS: Record<ItemId, ItemSpec> = {
     traits: [TraitId.Plated],
     passive: true,
   },
+  [ItemId.Keys]: {
+    id: ItemId.Keys,
+    name: 'Keys',
+    apCost: 0,
+    // Not used up and never worked from the pouch: a permission a door asks
+    // for, not an effect. What it costs is the slot.
+    effects: [],
+    passive: true,
+    unlocks: true,
+  },
 }
 
 /** Starting pouch, by item. */
@@ -156,4 +174,5 @@ export const STARTING_ITEMS: Record<ItemId, number> = {
   [ItemId.RepairKit]: 0,
   [ItemId.NullweaveVest]: 0,
   [ItemId.PlateCarrier]: 0,
+  [ItemId.Keys]: 0,
 }

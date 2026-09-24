@@ -40,6 +40,8 @@ export const NOISE = {
   suppressed: 0.25,
   /** A pane going: loud, and heard from the window, not from whoever broke it. */
   glass: 15,
+  /** A shoulder to a locked door, whether it gives or not: heard from the door. */
+  force: 12,
   /** How coarse "roughly where" is: noises are placed to the middle of a block this many tiles wide. */
   blur: 3,
 }

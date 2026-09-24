@@ -48,5 +48,10 @@
   "shot-blinded": "skoll/sight-disabled",
   "shot-conceal": "lorc/hidden",
   "shot-damage": "lorc/impact-point",
-  "shot-shred": "delapouite/armor-punch"
+  "shot-shred": "delapouite/armor-punch",
+  "item-keys": "delapouite/keyring",
+  "door-open": "delapouite/entry-door",
+  "door-close": "lorc/wooden-door",
+  "door-unlock": "delapouite/padlock-open",
+  "door-force": "lorc/boot-kick"
 }

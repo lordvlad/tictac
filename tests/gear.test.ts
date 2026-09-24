@@ -20,9 +20,10 @@ import { matchDice } from '../src/core/rng'
  *
  * Read off `passive` rather than listed, so an item added later is either in
  * this invariant or provably outside it — a new worn piece that skipped the
- * list would look exempt from having to cost anything.
+ * list would look exempt from having to cost anything. A permission (the
+ * keys, `unlocks`) is passive too but worn by nobody: what it costs is its slot.
  */
-const WORN = Object.values(ItemId).filter((id) => ITEMS[id].passive === true)
+const WORN = Object.values(ItemId).filter((id) => ITEMS[id].passive === true && ITEMS[id].unlocks !== true)
 
 /** Weapon kit: it bolts to a rail and belongs to the weapon. */
 const FITTED = [AttachmentId.Scope, AttachmentId.Bipod, AttachmentId.Suppressor] as const

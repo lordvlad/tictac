@@ -100,6 +100,10 @@ against state they both hold. See
   resolve them from the mover's `moveUnit`.
 - `reload` / `toggleCover` / `useItem`: the intent to use an ability, with
   `useItem` naming a target when the kit is being used on somebody else.
+- `operateDoor`: the unit, the door's edge id and the verb (`open`, `close`, `unlock`,
+  `force`). Both peers check that the unit stands at the door, and a shoulder's outcome is
+  rolled from the match's dice on both sides; nothing about the result travels. A door walked
+  through is opened by the rules on the mover's `moveUnit`, with no message of its own.
 
 ### Applying a peer's commands
 Incoming commands are not applied on arrival. `handleRemoteNetworkMessage`
