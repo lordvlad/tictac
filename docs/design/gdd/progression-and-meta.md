@@ -3,14 +3,16 @@ title: "GDD: Squads, Progression & Meta Roster"
 id: "GDD-PROGRESSION"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-16"
+lastReviewed: "2026-09-24"
 appliesTo:
   - "src/core/Characters.ts"
   - "src/config.ts"
   - "src/core/Traits.ts"
+  - "src/core/Morale.ts"
+  - "src/game/Breakdown.ts"
 relatedDocs:
   - "docs/design/gdd/combat-mechanics.md"
-tags: ["progression", "rpg", "squads", "roster", "attributes"]
+tags: ["progression", "rpg", "squads", "roster", "attributes", "morale"]
 ---
 
 # GDD: Squads, Progression & Meta Roster
@@ -58,15 +60,68 @@ Beyond combat attributes, characters possess non-combat utility proficiencies th
 
 Units do not fight as emotionless robots; they have a psychological layer that fluctuates based on battlefield momentum.
 
-### The Morale & Stress Loop
-- **Stress Accumulation**: Taking damage, near misses (suppression), or witnessing allies fall accumulates Stress.
-- **Morale Breaks**: When Stress overtakes Morale thresholds, units may panic, suffer AP penalties, or become pinned. Conversely, high Morale triggers Surges, granting bonus AP or guaranteed criticals.
+**Status:** the morale loop and the three breaks are built (ITEM-014). Which way a character
+breaks, and the predispositions that bend how their morale moves, are ITEM-033. Surges are a
+proposal. Numbers are `MORALE` in `src/config.ts`, and the generated
+[catalogue](status-and-trait-catalog.md) §7 lists them as shipped.
 
-### Psychological Predispositions
+### Morale
+Every soldier has **morale**, 0 to 100, starting full. It is state like hit points: replicated,
+in the handover digest, and moved only by the rules, on both peers, from events both hold.
+
+What wears it down (stress), and what builds it back:
+
+| Event | Morale | Who |
+| --- | --- | --- |
+| Wounded | −½ point per percent of max HP lost | The one hit |
+| A round that went past | −3 | The one shot at (the same count that suppresses) |
+| A squadmate killed | −20 | Every living squadmate |
+| A squadmate breaks | −10 | Every living squadmate |
+| Killing an enemy | +15 | The killer |
+| An enemy killed by the side | +5 | The killer's squadmates |
+| A turn of its own, not broken | +5 | Everyone |
+
+### Breaking
+**The trigger is rolled, never a threshold.** At the start of each of its own turns, a unit
+below **steady** (50) rolls to break: 2% per point short, so 20% at 40 and certain at 0. At 50
+and above nothing is rolled. The roll comes from the match's dice, so both peers see the same
+unit break.
+
+A unit that breaks does one of three things:
+
+- **Panic.** The rules take the unit over and it flees: stands up, runs to the reachable
+  tile the fewest enemies its side can see would see it from, farthest from the nearest of
+  them, and gets down if it has the points left. Seeing no enemy, it cowers where it is.
+- **Frenzy.** The rules take the unit over and it throws itself into the fight: charges the
+  nearest enemy its side can see, strikes it if it arrives in reach, and otherwise empties its
+  cheapest shot at it. Seeing no enemy, it watches for one.
+- **Freeze.** Its action points drop to zero. It does nothing, and holds no watch.
+
+Which of the three is rolled evenly for now. **Character decides panic or frenzy** — a
+daredevil charges, a coward runs — which is ITEM-033.
+
+While broken, a unit takes no orders: the player cannot command it, and the rules refuse any
+command that names it. Both players see it happen — the unit's card and an enemy's target
+icon say which break it is in, and a line floats over it when it breaks and when it steadies.
+
+### Snapping out
+**Not a fixed cooldown: rolled, with rising odds.** A broken unit rolls to steady itself at the
+start of each of its own turns after the one it broke on: 25% the first time, 50%, 75%, then
+certainly. So a break costs at least one turn and at most four. A unit that steadies comes back
+to at least steady (50) morale, so it is not rolling to break again the same turn.
+
+### Surges (proposal)
+High morale granting bonus AP or a guaranteed critical. Not built: nothing yet says what
+morale *above* steady is worth, beyond distance from breaking.
+
+### Psychological Predispositions (ITEM-033)
 Characters possess inherent traits that alter how they process Stress and Morale:
 - **Daredevil**: Craves adrenaline. Slowly loses Morale (gets bored) if the combat is heavily in their favor and easy. Rapidly gains Morale and shines when outnumbered, flanked, or when the situation turns dire.
 - **Teamplayer**: Feeds off unit cohesion. Morale naturally boosts when the whole squad is healthy and successful. Acts as a localized aura, boosting the Morale recovery of adjacent allies.
 - **Loner**: Detached from squad dynamics. Does not suffer Morale penalties when allies are downed, routed, or panic, but also receives no Morale benefits from squad-wide buffs or assists.
+
+Character also decides the direction of a break: whether a unit that breaks panics or goes
+into a frenzy.
 
 ---
 

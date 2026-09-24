@@ -16,7 +16,8 @@
 import { SHOT_MODES, STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { LONG_GUN_PARRY, MELEE, MeleeId } from '../src/core/Melee'
 import { NOISE } from '../src/core/Noise'
-import { AIM, CHARACTER, COVER, CRIT, RULES, WOUNDS } from '../src/config'
+import { AIM, CHARACTER, COVER, CRIT, MORALE, RULES, WOUNDS } from '../src/config'
+import { steadyChance } from '../src/core/Morale'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
 import {
@@ -366,7 +367,32 @@ function build(): string {
   lines.push('')
   lines.push('---')
   lines.push('')
-  lines.push('## 7. Where the numbers come from')
+  lines.push('## 7. Morale')
+  lines.push('')
+  lines.push(
+    `Morale runs 0–${MORALE.max}. At the start of each of its own turns a unit below ${MORALE.steady} rolls to break, at`,
+  )
+  lines.push(
+    `${MORALE.breakPerPoint}% per point short; a broken one rolls to steady instead. Panic, frenzy and freeze are equally likely.`,
+  )
+  lines.push('')
+  lines.push('| Event | Morale | Who |')
+  lines.push('| --- | --- | --- |')
+  lines.push(`| Wounded | −${MORALE.wound} for a whole max HP, pro rata | The one hit |`)
+  lines.push(`| A round that went past | −${MORALE.nearMiss} | The one shot at |`)
+  lines.push(`| A squadmate killed | −${MORALE.mateDown} | Every living squadmate |`)
+  lines.push(`| A squadmate breaks | −${MORALE.mateBroke} | Every living squadmate |`)
+  lines.push(`| Killing an enemy | +${MORALE.kill} | The killer |`)
+  lines.push(`| An enemy killed by the side | +${MORALE.enemyDown} | The killer's squadmates |`)
+  lines.push(`| A turn of its own, not broken | +${MORALE.rally} | Everyone |`)
+  lines.push('')
+  lines.push('| Turns broken | Chance to steady |')
+  lines.push('| --- | --- |')
+  for (let turns = 1; steadyChance(turns - 1) < 100; turns++) lines.push(`| ${turns} | ${steadyChance(turns)}% |`)
+  lines.push('')
+  lines.push('---')
+  lines.push('')
+  lines.push('## 8. Where the numbers come from')
   lines.push('')
   lines.push('| Rule | Value | Source |')
   lines.push('| --- | --- | --- |')

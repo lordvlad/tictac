@@ -188,6 +188,10 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   `CommandSystem.apply(command, 'record')` — the same door as the player's own
   clicks and a peer's messages, so a replay exercises the path a live match
   takes.
+- **What the rules make a broken unit do** (`rules` origin, ITEM-014) is not in any file:
+  playback applies the handover and the rules run the unit again. `Playback` waits on
+  `InteractionController.busy` — walking, or the applier's queue not yet empty — before the next
+  event, and a restored frame clears the queue, which was about the moment being left.
 - **Stepping back** is not replay: no command is invertible. `Playback` keeps a
   `World.snapshot()` of the soldier entities at every event boundary and
   `World.restore()`s one, which suppresses echoes and re-baselines the dirty

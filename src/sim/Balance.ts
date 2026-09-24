@@ -1,5 +1,6 @@
 import { Faction } from '../config'
 import type { MapOptions } from '../core/MapGenerator'
+import type { MoraleBreak } from '../core/Morale'
 import type { GroundCovered } from './Ground'
 import { WeaponId } from '../core/Arsenal'
 import type { CombatRecording } from '../game/Recording'
@@ -89,6 +90,8 @@ export interface SweepReport {
    */
   watchesPerMatch: number
   reactionsPerMatch: number
+  /** Breaks per match, by kind: whether morale is doing anything at all. */
+  breaksPerMatch: Record<MoraleBreak, number>
   /**
    * Ground used per match, by side and by result. The win rates say who won;
    * this says whether anybody went round rather than through.
@@ -223,6 +226,11 @@ export function sweep(options: SweepOptions): SweepReport {
     meanWinnerSurvivors: decided === 0 ? 0 : round(winnerSurvivors / decided),
     watchesPerMatch: round(outcomes.reduce((n, o) => n + o.watches, 0) / outcomes.length),
     reactionsPerMatch: round(outcomes.reduce((n, o) => n + o.reactions, 0) / outcomes.length),
+    breaksPerMatch: {
+      panic: round(outcomes.reduce((n, o) => n + o.breaks.panic, 0) / outcomes.length),
+      frenzy: round(outcomes.reduce((n, o) => n + o.breaks.frenzy, 0) / outcomes.length),
+      freeze: round(outcomes.reduce((n, o) => n + o.breaks.freeze, 0) / outcomes.length),
+    },
     ground: {
       blue: meanGround(outcomes.map((o) => o.ground[Faction.Blue])),
       red: meanGround(outcomes.map((o) => o.ground[Faction.Red])),
@@ -281,6 +289,9 @@ export function formatReport(report: SweepReport): string {
   lines.push(`winner keeps ${report.meanWinnerSurvivors} of 4 on average`)
   lines.push(
     `overwatch: ${report.watchesPerMatch} watches per match, ${report.reactionsPerMatch} reactions fired`,
+  )
+  lines.push(
+    `morale: per match ${report.breaksPerMatch.panic} panics, ${report.breaksPerMatch.frenzy} frenzies, ${report.breaksPerMatch.freeze} freezes`,
   )
   lines.push('')
   lines.push(

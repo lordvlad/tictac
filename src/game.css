@@ -318,6 +318,34 @@ canvas {
   color: #ffd166;
 }
 
+/* A unit that has broken takes no orders: worth knowing before spending a shot on it. */
+.target-broken {
+  position: absolute;
+  top: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.7);
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+}
+
+.target-broken.panic {
+  color: #ffb347;
+}
+
+.target-broken.frenzy {
+  color: #ff4d6d;
+}
+
+.target-broken.freeze {
+  color: #9bd7ff;
+}
+
 .shot-awareness {
   font-size: 9px;
   font-weight: 800;

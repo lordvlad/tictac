@@ -1,6 +1,7 @@
 import type { Vector3 } from 'three'
 import type { Faction } from '../config'
 import type { Awareness } from './Awareness'
+import type { MoraleBreak } from './Morale'
 import type { GrenadeId, GrenadeSpec } from './Arsenal'
 import type { CombatantStats, StatusState } from './Ballistics'
 import type { Tile } from './Grid'
@@ -60,6 +61,12 @@ export interface Combatant extends CombatantStats, Casualty {
   awareness: Awareness
   /** Of its own turns spent alerted without hearing anything new. */
   quietTurns: number
+  /** Nerve left, 0 to `MORALE.max` (`core/Morale`). */
+  morale: number
+  /** The break it is in, or null while it holds. A broken unit takes no orders. */
+  broken: MoraleBreak | null
+  /** Of its own turns begun broken. */
+  brokenTurns: number
   /** The AP ceiling with live statuses folded in. */
   readonly effectiveMaxAp: number
   /** What a step costs this unit, as a multiple of the terrain's own price. */

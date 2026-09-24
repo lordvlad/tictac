@@ -133,47 +133,36 @@ record, it is a diary.
 
 ---
 
-### [ITEM-014] Morale, Stress & Psychological Predispositions
+### [ITEM-033] Character: Who Runs and Who Charges
 **Type:** Feature  
 **Priority:** P2  
-**Status:** Backlog  
+**Status:** Ready  
 **Milestone:** M3 — Reconnaissance & Morale  
 
 #### Why
-[GDD §3](../design/gdd/progression-and-meta.md) wants stress to accrue from damage, near
-misses and watching squadmates fall, with breaks (panic, AP loss, pinning) above a threshold
-and surges below it. M3 shipped its reconnaissance half only: the sole psychological state a
-unit has today is the `Suppressed` status, which costs accuracy and points and then decays.
+ITEM-014 rolls a break's direction evenly. The GDD wants the person to decide it: a daredevil
+who breaks charges, a coward runs. Split out of ITEM-014 on 2026-09-24 so the morale loop
+could land first.
 
 #### Change
-1. A `MoraleComponent` (morale, accumulated stress), replicated — a unit breaking is
-   something the other side has to be able to watch happen.
-2. Stress fed from events that already fire on both sides: damage applied, rounds that missed
-   (`Suppressed` is already counted identically by `executeShot` and `replayShot`), a
-   squadmate dying.
-3. Breaks and surges expressed as statuses wherever possible, so the modifier fold does not
-   grow a fifth source.
-4. Daredevil, Teamplayer and Loner as innate ids.
+1. Something on the character sheet that says which way a break goes — panic or frenzy
+   (freeze stays open: is it a third temperament, or the mild end of either?).
+2. Daredevil, Teamplayer and Loner (GDD §3) as innate ids that change how morale *moves*.
 
 #### Caveat
-The three predispositions are trait-shaped and would drop straight into `INNATE_TRAITS`, but
-`TraitEffects` are flat modifiers on combat numbers and a predisposition modifies *how morale
-moves* — nothing a hit chance can express. They need the loop above to exist first; shipping
-the ids alone would add three traits that do nothing.
+The predispositions are trait-shaped and would drop straight into `INNATE_TRAITS`, but
+`TraitEffects` are flat modifiers on combat numbers and a predisposition modifies how morale
+moves — nothing a hit chance can express. The sheet travels in the start handshake, so any
+new field needs `sanitizeSheet`.
 
 #### Affected Files
-- `src/ecs/components/MoraleComponent.ts` (new)
+- `src/core/Characters.ts`
+- `src/core/Morale.ts`
 - `src/core/Traits.ts`
-- `src/ecs/systems/CombatSystem.ts`
-- `src/ecs/systems/TurnSystem.ts`
-- `src/config.ts`
 
 #### Acceptance Criteria
-- [ ] Stress accrues from damage taken, near misses and squadmate deaths; both peers reach
-      the same morale for the same unit.
-- [ ] Crossing the break threshold costs the unit its turn in a way the other side sees.
+- [ ] A character's sheet decides whether they panic or go into a frenzy.
 - [ ] Daredevil, Teamplayer and Loner each measurably change how a unit's morale moves.
-
 ---
 
 ### [ITEM-017] Item Verbs on Tiles and Objects

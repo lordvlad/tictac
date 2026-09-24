@@ -5,6 +5,7 @@ import { UtilityId } from '../core/Characters'
 import { effectiveWeapon, statusStacks } from '../core/Ballistics'
 import type { MeleeId } from '../core/Melee'
 import { Awareness } from '../core/Awareness'
+import { breakChance, type MoraleBreak, steadyChance } from '../core/Morale'
 import { canWatch, watchCost } from '../game/Overwatch'
 import { TRAITS, woundTraits } from '../core/Traits'
 import type { OrbitRig } from '../camera/OrbitRig'
@@ -112,6 +113,8 @@ export interface HudTargetIcon {
    * state, and the strip only calls out the ones a quiet approach can exploit.
    */
   awareness: 'unaware' | 'alerted' | null
+  /** The break the unit is in: it takes no orders, and the other side should know. */
+  broken: MoraleBreak | null
 }
 
 /** One line of the "why is my chance this bad" breakdown. */
@@ -244,6 +247,8 @@ export interface HudModel {
   unitViewEnabled: boolean
   nextFactionName: string
   debugMapOpen: boolean
+  /** Nothing can be ordered yet: the rules are still running a broken unit. */
+  rulesActing: boolean
 }
 
 export interface HudModelSources {
@@ -278,6 +283,11 @@ export interface HudModelSources {
   selectedLevelFilter: number
   topLevel: number
   debugMapOpen: boolean
+  /**
+   * The rules are still running a broken unit at the start of the turn. The
+   * applier refuses every order until they finish, so nothing is offered.
+   */
+  rulesActing: boolean
 }
 
 /** What the model builder needs from the shoot planner. */
@@ -331,7 +341,9 @@ export function buildHudModel(sources: HudModelSources): HudModel {
 
   const shootApCost = selected ? weaponApCost(selected, ShotMode.Snap) : 0
   const actions: HudAction[] = []
-  if (selected && !selected.isDead) {
+  // A broken unit takes no orders, so it is offered none; nobody is offered
+  // any while the rules are still running one.
+  if (selected && !selected.isDead && !selected.broken && !sources.rulesActing) {
     actions.push({
       id: 'shoot',
       label: shootActive ? 'Cancel Shoot' : 'Shoot',
@@ -459,6 +471,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       // Own squad: there is nothing about a squadmate left to work out.
       known: true,
       awareness: null,
+      broken: soldier.broken,
     }))
   } else {
     const enemyIndex = new Map(squads.byFaction[nextFaction].map((s, i) => [s, i]))
@@ -472,6 +485,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
       selected: soldier === shoot?.pending?.target,
       known: soldier.known,
       awareness: awarenessLabel(soldier.awareness),
+      broken: soldier.broken,
     }))
   }
 
@@ -491,6 +505,7 @@ export function buildHudModel(sources: HudModelSources): HudModel {
 
   return {
     isMyTurn,
+    rulesActing: sources.rulesActing,
     networkMode: sources.networkMode ?? 'local',
     factionName: FACTION_INFO[faction].name,
     networkBadge,
@@ -562,7 +577,35 @@ function statusChips(soldier: Soldier): HudStatusChip[] {
       good: spec.apBonus > 0 || spec.defenceBonus > 0,
     })
   }
+  const morale = moraleChip(soldier)
+  if (morale) chips.push(morale)
   return chips
+}
+
+const BROKEN_CHIP: Record<MoraleBreak, { name: string; does: string }> = {
+  panic: { name: 'Panicking', does: 'Runs from the enemy its side can see; takes no orders' },
+  frenzy: { name: 'Frenzied', does: 'Charges the nearest enemy its side can see; takes no orders' },
+  freeze: { name: 'Frozen', does: 'No action points; takes no orders' },
+}
+
+/**
+ * The unit's nerve, when it says anything: the break it is in, or how likely
+ * it is to break. A unit at steady or above has nothing to report.
+ */
+function moraleChip(soldier: Soldier): HudStatusChip | null {
+  if (soldier.broken) {
+    const { name, does } = BROKEN_CHIP[soldier.broken]
+    // The chance it will be rolled against at the start of its next turn.
+    const chance = steadyChance(soldier.brokenTurns + 1)
+    return { name, detail: `${does} · ${chance}% to steady next turn`, good: false }
+  }
+  const chance = breakChance(soldier.morale)
+  if (chance <= 0) return null
+  return {
+    name: 'Shaken',
+    detail: `Morale ${soldier.morale} · ${chance}% to break at the start of its turn`,
+    good: false,
+  }
 }
 
 /**

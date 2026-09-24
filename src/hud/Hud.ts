@@ -249,10 +249,13 @@ export class Hud {
   /** Handing over is the last thing you do, so it sits on its own. */
   private renderEndTurn(model: HudModel): void {
     const isMyTurn = model.isMyTurn || model.networkMode === 'local'
+    // A handover while the rules are still running a broken unit would be
+    // refused, so it is not offered.
+    const ready = isMyTurn && !model.rulesActing
     this.endTurnEl.innerHTML = `
-      <button class="hud-btn interactive ${isMyTurn ? 'hud-btn-danger' : ''}"
-              title="${isMyTurn ? 'Hand over to the other faction' : "Opponent's Turn"}"
-              ${isMyTurn ? '' : 'disabled'} ${Hud.intentAttr({ type: 'requestTurnSwitch' })}>
+      <button class="hud-btn interactive ${ready ? 'hud-btn-danger' : ''}"
+              title="${!isMyTurn ? "Opponent's Turn" : ready ? 'Hand over to the other faction' : 'Waiting for the units that broke'}"
+              ${ready ? '' : 'disabled'} ${Hud.intentAttr({ type: 'requestTurnSwitch' })}>
         ${icon('ui-end-turn')} End Turn
       </button>
     `
@@ -350,7 +353,7 @@ export class Hud {
         const figure = patient ? `${Math.round(t.hpFraction * 100)}%` : `${t.hitChance}%`
         const title = patient
           ? `${t.name} — ${figure} HP`
-          : `${t.name} — ${figure} to hit${t.known ? '' : ' · unread'}${t.awareness ? ` · ${t.awareness}` : ''}`
+          : `${t.name} — ${figure} to hit${t.known ? '' : ' · unread'}${t.awareness ? ` · ${t.awareness}` : ''}${t.broken ? ` · ${t.broken}` : ''}`
         return `
       <button class="target-icon interactive ${patient ? 'patient' : ''} ${t.selected ? 'selected' : ''} ${t.known ? '' : 'unread'}"
               title="${title}"
@@ -358,6 +361,7 @@ export class Hud {
         <img class="target-portrait" src="${t.portrait}" alt="${t.name}" />
         ${t.known ? '' : '<span class="target-unread">?</span>'}
         ${t.awareness ? `<span class="target-awareness ${t.awareness}">${t.awareness === 'unaware' ? 'z' : '!'}</span>` : ''}
+        ${t.broken ? `<span class="target-broken ${t.broken}">${t.broken}</span>` : ''}
         <span class="target-chance">${figure}</span>
         <span class="target-hp"><span class="target-hp-fill" style="width: ${Math.round(t.hpFraction * 100)}%;"></span></span>
         <span class="target-ar"><span class="target-ar-fill" style="width: ${Math.round(t.armorFraction * 100)}%;"></span></span>

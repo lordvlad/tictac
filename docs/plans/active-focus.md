@@ -25,11 +25,14 @@ reaction fire and a roster that survives a match.
 ## Kanban Board
 
 ### 🔄 In Progress / Next Up
-- Nothing in flight. Open from ITEM-019: the sweep's policy neither sneaks nor throws stones
-  (only ~3% of its attacks land on a target not yet in the fight), so stealth is a player's
-  tool the balance sweep does not measure.
+- Nothing in flight.
+- Open from ITEM-019: the sweep's policy neither sneaks nor throws stones (only ~3% of its
+  attacks land on a target not yet in the fight), so stealth is a player's tool the balance
+  sweep does not measure.
 
 ### 📋 Ready (Pull Queue)
+- **`[ITEM-033]`**: Character — who runs and who charges. Split from ITEM-014: the sheet
+  decides panic or frenzy, and Daredevil, Teamplayer and Loner bend how morale moves.
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for
   rosters *and* matches as event logs. It is what the whole lockstep arc was for: a match is
   now a reproducible event log, so what persists is what happened rather than a summary of it.
@@ -43,9 +46,6 @@ reaction fire and a roster that survives a match.
   moment a roster is derived from a stored log, the log is a schema.
 
 ### 🧊 Backlog (needs its own pass)
-- **`[ITEM-014]`**: Morale, stress and predispositions. The unbuilt half of M3. Wants its own
-  replicated component and its own stress hooks; the three predispositions are trait-shaped
-  but have nothing to modify until the loop exists.
 - **`[ITEM-024]`** is **deferred**: a port with one implementation is an abstraction waiting
   for its second caller, and that caller is the referee. The transports come with it.
 - **`[ITEM-023]`**: Intent-only wire. **The agreed destination**
@@ -114,6 +114,8 @@ reaction fire and a roster that survives a match.
 - **`[ITEM-032]`**: Projectile hit model — one straight line per projectile.
 - **`[ITEM-019]`**: Noise, awareness and the quiet kill — crouched movement, attacks from
   behind, noise, awareness, glass and the stone; the policy knows only what it has seen.
+- **`[ITEM-014]`**: Morale, stress and breaking — rolled breaks into panic, frenzy or freeze,
+  run by the rules on both peers; steadying rolled with rising odds.
 
 ### 🚫 Struck
 - **`[ITEM-003.4]`** — "Remove `installCanvasStub` from `movement`, `camera`, `pathmarker`,

@@ -1,6 +1,7 @@
 import type { Vector3 } from 'three'
 import type { MeleeId } from '../core/Melee'
 import type { Awareness } from '../core/Awareness'
+import type { MoraleBreak } from '../core/Morale'
 import { Faction, RULES } from '../config'
 import {
   type AmmoSpec,
@@ -46,6 +47,7 @@ import {
   StanceComponent,
   SightedComponent,
   AwarenessComponent,
+  MoraleComponent,
   StatusesComponent,
   WeaponComponent,
   ItemsComponent,
@@ -79,6 +81,7 @@ export class Soldier {
   private readonly statusesComponent: StatusesComponent
   private readonly sighted: SightedComponent
   private readonly awarenessComponent: AwarenessComponent
+  private readonly moraleComponent: MoraleComponent
   private readonly positionComponent: PositionComponent
 
   /**
@@ -156,6 +159,7 @@ export class Soldier {
     this.statusesComponent = world.addComponent(this.entityId, new StatusesComponent())
     this.sighted = world.addComponent(this.entityId, new SightedComponent())
     this.awarenessComponent = world.addComponent(this.entityId, new AwarenessComponent())
+    this.moraleComponent = world.addComponent(this.entityId, new MoraleComponent())
     this.traitsComponent = world.addComponent(this.entityId, new TraitsComponent())
     this.stampGrenades()
     this.refreshTraits()
@@ -665,6 +669,29 @@ export class Soldier {
   }
   set quietTurns(value: number) {
     this.awarenessComponent.quietTurns = value
+  }
+
+  /** Nerve left (`core/Morale`). */
+  get morale(): number {
+    return this.moraleComponent.morale
+  }
+  set morale(value: number) {
+    this.moraleComponent.morale = value
+  }
+
+  /** The break it is in, or null while it holds. */
+  get broken(): MoraleBreak | null {
+    return this.moraleComponent.broken
+  }
+  set broken(value: MoraleBreak | null) {
+    this.moraleComponent.broken = value
+  }
+
+  get brokenTurns(): number {
+    return this.moraleComponent.brokenTurns
+  }
+  set brokenTurns(value: number) {
+    this.moraleComponent.brokenTurns = value
   }
 
   /** Re-stamp the loadout from the shared templates. */

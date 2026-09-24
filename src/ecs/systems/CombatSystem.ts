@@ -13,6 +13,7 @@ import { MELEE } from '../../core/Melee'
 import { type Noise, shotLoudness } from '../../core/Noise'
 import { glassCrossed } from '../../core/Visibility'
 import type { Roll } from '../../core/rng'
+import { shake } from '../../core/Morale'
 import { executeMelee,
   applyHitEffects,
   canShoot,
@@ -23,6 +24,13 @@ import { executeMelee,
   type ShotResult,
   throwGrenade,
 } from '../../game/Combat'
+
+/** Rounds of a shot that went past: what suppresses, and what shakes. */
+function misses(result: ShotResult): number {
+  let count = 0
+  for (const landed of result.rolls) if (!landed) count++
+  return count
+}
 
 /**
  * The single entry point for anything that spends AP to hurt someone.
@@ -39,9 +47,10 @@ export class CombatSystem extends System {
     private readonly fx: CombatFx = NO_FX,
     /**
      * The match's dice. Required, not defaulted: a default is how a match ends
-     * up drawing from a source the other side cannot reproduce.
+     * up drawing from a source the other side cannot reproduce. Readable by
+     * the applier, which rolls the handover's morale from the same stream.
      */
-    private readonly roll: Roll,
+    readonly roll: Roll,
   ) {
     super()
   }
@@ -96,6 +105,7 @@ export class CombatSystem extends System {
       rolls,
     )
     if (!result) return null
+    shake(this.squads.soldiers, shooter, result.hits, target, misses(result))
     this.onNoise?.({ at: { ...shooter.tile }, loudness: shotLoudness(shooter), faction: shooter.faction })
     // Every round goes somewhere: through a window, it takes the window with it.
     this.through(shooter.tile, target.tile, shooter.faction)
@@ -110,6 +120,7 @@ export class CombatSystem extends System {
   melee(attacker: Soldier, target: Soldier): ShotResult | null {
     const result = executeMelee(this.grid, attacker, target, this.fx, this.roll)
     if (!result) return null
+    shake(this.squads.soldiers, attacker, result.hits)
     const loudness = MELEE[attacker.sidearm].loudness
     if (loudness > 0) this.onNoise?.({ at: { ...attacker.tile }, loudness, faction: attacker.faction })
     this.onShotResolved?.(attacker, target, result)
@@ -120,6 +131,7 @@ export class CombatSystem extends System {
     const from = { ...thrower.tile }
     const result = throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx)
     if (!result.thrown) return result
+    shake(this.squads.soldiers, thrower, result.hits)
     // A throw that meets a window breaks it on the way, then goes off — and is
     // heard — where it lands, not where it was thrown from.
     this.through(from, at, thrower.faction)
@@ -164,6 +176,7 @@ export class CombatSystem extends System {
   reactTo(mover: Soldier): number {
     const fired = reactToArrival(this.grid, mover, this.squads.soldiers, this.roll, this.fx)
     for (const { watcher, result } of fired) {
+      shake(this.squads.soldiers, watcher, result.hits, mover, misses(result))
       this.onNoise?.({ at: { ...watcher.tile }, loudness: shotLoudness(watcher), faction: watcher.faction })
       this.through(watcher.tile, mover.tile, watcher.faction)
       this.onShotResolved?.(watcher, mover, result)

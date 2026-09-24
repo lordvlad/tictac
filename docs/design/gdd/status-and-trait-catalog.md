@@ -172,7 +172,31 @@ multiplied by the sidearm's own "From behind".
 
 ---
 
-## 7. Where the numbers come from
+## 7. Morale
+
+Morale runs 0–100. At the start of each of its own turns a unit below 50 rolls to break, at
+2% per point short; a broken one rolls to steady instead. Panic, frenzy and freeze are equally likely.
+
+| Event | Morale | Who |
+| --- | --- | --- |
+| Wounded | −50 for a whole max HP, pro rata | The one hit |
+| A round that went past | −3 | The one shot at |
+| A squadmate killed | −20 | Every living squadmate |
+| A squadmate breaks | −10 | Every living squadmate |
+| Killing an enemy | +15 | The killer |
+| An enemy killed by the side | +5 | The killer's squadmates |
+| A turn of its own, not broken | +5 | Everyone |
+
+| Turns broken | Chance to steady |
+| --- | --- |
+| 1 | 25% |
+| 2 | 50% |
+| 3 | 75% |
+| 4 | 100% |
+
+---
+
+## 8. Where the numbers come from
 
 | Rule | Value | Source |
 | --- | --- | --- |

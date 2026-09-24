@@ -980,3 +980,58 @@ overwritten by the slice-0 commit and restored the next.
       contact is mutual sight, and the side whose turn comes next looks all round — and a
       "crouch near an unengaged enemy" rule changed nothing. It never throws a stone. Stealth
       is a player's tool; the sweep does not measure it.
+
+---
+
+### [ITEM-014] Morale, Stress and Breaking
+**Completed Date:** 2026-09-24  
+**Type:** Feature  
+**Milestone:** M3 — Reconnaissance & Morale  
+
+#### Why
+[GDD §3](../design/gdd/progression-and-meta.md) wanted stress from damage, near misses and
+watching squadmates fall, and units that break under it. The only psychological state a unit
+had was the `Suppressed` status.
+
+#### Key Changes
+Scoped with the user: three breaks, a rolled trigger, a rolled recovery with rising odds, and
+character deciding panic or frenzy split out as ITEM-033 along with the predispositions.
+
+- `MoraleComponent` (replicated, digested): morale 0–100, the break, turns begun broken.
+  `src/core/Morale.ts`, numbers in `MORALE`, generated into the catalogue's §7.
+- **Stress** (`shake`, called by `CombatSystem` after every shot, reaction, blow and throw,
+  read off the resolved hits): a wound costs ½ point per percent of max HP, a round past the
+  target 3, a death 20 to every squadmate; a kill pays the killer 15 and its squadmates 5.
+- **Breaking** (`rollMorale`, at each handover, from the match's dice): below 50, 2% per point
+  short; the kind is an even second draw among panic, frenzy and freeze. Nobody at steady or
+  above draws. A break costs the breaker's squadmates 10.
+- **Steadying**: 25% on the first turn after breaking, +25% a turn, certain on the fourth; the
+  unit comes back to at least 50.
+- **Freeze**: points to zero, not counted as spent.
+- **Panic and frenzy are run by the rules** (`src/game/Breakdown.ts`): a panicking unit stands,
+  runs to where the fewest enemies its side can see would see it, farthest from the nearest,
+  and crouches; a frenzied one strikes or charges the nearest such enemy and shoots it with its
+  cheapest shot. Seeing nobody, one cowers and the other watches. `CommandSystem` queues each
+  run at the handover, one command at a time with the new origin `rules`: never sent, never
+  recorded, derived again by the peer, a replay and the referee. A broken unit refuses every
+  other command but `endUnitTurn`, and a `local` command is refused while the rules run anyone.
+  `MatchHost` and playback wait for the queue as well as for walking.
+- **HUD**: a card chip (Panicking / Frenzied / Frozen with the chance to steady, or Shaken with
+  the chance to break), no actions for a broken unit, End Turn disabled while the rules act, a
+  badge on an enemy's target icon, a callout over a unit that breaks or steadies, and the camera
+  following a unit the rules walk.
+- Sweep report: breaks per match.
+
+#### Measured
+Mirror on blocks 1000/5000/9000: 601 / 568 / 31, from 593 / 568 / 39. About one break a match,
+evenly split across the three kinds.
+
+#### Acceptance Criteria
+- [x] Stress accrues from damage taken, near misses and squadmate deaths; both peers reach
+      the same morale for the same unit (the component is in the digest; not verified in two
+      live browsers, the same tooling block as since ITEM-020).
+- [x] Breaking is rolled from morale; steadying is rolled with rising odds.
+- [x] A panicking unit flees and a frenzied one charges under the rules' control; a frozen
+      one has no points. None of them takes an order.
+- [x] The other side sees a unit break (callout, card chip, target badge; verified in a
+      hot-seat match in the browser).

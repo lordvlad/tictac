@@ -67,6 +67,7 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | `ItemsComponent` | Items carried, by id, including body-worn kit. Counts drop as items are spent, which is also how a peer sees a use happen. An item its carrier cannot operate still sits here — the Intelligence gate refuses the *use*, it does not empty the pouch. Weapon attachments are *not* here — a rail belongs to the weapon | Yes |
 | `SightedComponent` | What the other side perceives: `seen` (fog writes it, a view mirrors it onto a mesh) and `known` (whether its *sheet* has been worked out) | Local (per-peer knowledge) |
 | `AwarenessComponent` | What the unit knows is going on: unaware, alerted (heard something, turned toward it) or engaged (in the fight), plus the turns it has spent alerted without hearing anything new. Decides what a watcher reacts to, so both peers resolve it by the same rules (`core/Awareness`) | Yes |
+| `MoraleComponent` | Nerve left (0–100), the break the unit is in — panic, frenzy or freeze — and the turns it has begun broken. Moved by stress from resolved attacks and rolled at each handover from the match's dice (`core/Morale`); a broken unit takes no orders | Yes |
 | `TraitsComponent` | The trait-derived numbers an *enemy* must read: `evasion`, `critImmune`, `moveCostMul`. Everything a trait does to its own unit stays local or travels inside a resolved attack | Yes |
 | `StatusesComponent` | Turn-decaying statuses, each with `turnsLeft` and `stacks`; absent stacks mean one, so a peer omitting the count cannot disarm a status | Yes |
 | `GrenadeSpecsComponent` | Per-unit ordnance: throw range from Strength, blast radius and armour shred from the thrower's Demolitions training. Stamped into the unit's own specs rather than applied at the throw site, so the planner's preview, the range check and the debug panel all read the numbers *this* arm can reach — and a peer sees the arm it is up against rather than its own stock copy | Yes |
@@ -97,9 +98,15 @@ Systems execute business logic across entities on each tick or action:
   heard, with who, worked out from state both peers hold. Peer commands go through `enqueue`, and the queue drains only while
   nothing is walking, so a command is never resolved against a unit still between tiles on this
   screen; `whenSettled` queues a check (the peer's digest) behind them. Registered first, so a
-  queued command is applied before the tick that walks it. Origin decides three things only:
+  queued command is applied before the tick that walks it. Origin decides four things only:
   `local` is the one origin sent to the peer, item use is re-checked for legality only when
-  `local`, and a refusal is a finding from anywhere but `local`.
+  `local`, a refusal is a finding from anywhere but `local`, and `rules` — what the rules made
+  a broken unit do — is the one origin a broken unit takes a command from. At a handover it
+  rolls the incoming side's morale (`core/Morale`, `onMorale`) and queues each panicking or
+  frenzied unit's run (`game/Breakdown`), one command at a time ahead of anything else; a
+  `local` command is refused while the queue holds anything, so a player's order can never land
+  between two of those steps on one screen and after them on the other. `rules` commands are
+  neither sent nor recorded: every side, a replay and the referee derive them again.
 - **`MovementSystem`**: Steps entities along A* waypoints, deducts AP per tile, updates stance animations.
 - **`CombatSystem`**: One door for every attack, whoever intended it. It evaluates cover and LOS, rolls from the match stream, resolves damage, shreds armour and kills. A peer's shot arrives as an *intent* and goes through the same call the acting side makes — there is no second path that applies numbers somebody else resolved.
 - **`ItemSystem`**: Command-driven, not ticked. Applies an item's ordered effect list to a target that defaults to the user; charges the turn's price and the pouch to the *user* whoever is being worked on. The only place that knows what an effect does.

@@ -38,6 +38,8 @@ import { type Carried, type Command, type CommandOrigin, isCommand } from '../ec
 import { MELEE } from '../core/Melee'
 import { ITEMS, type ItemId, itemTargetsAlly } from '../core/Items'
 import { distance, facingYaw } from '../core/math'
+import type { MoraleBreak } from '../core/Morale'
+import { DamageIndicators } from '../render/DamageIndicators'
 
 /**
  * The intents a spectator may still press.
@@ -64,6 +66,14 @@ const SPECTATOR_INTENTS: Partial<Record<HudIntent['type'], true>> = {
   selectUnit: true,
 }
 
+/** What floats over a unit that breaks, by the break. */
+const BREAK_CALLOUT: Record<MoraleBreak, { text: string; color: string }> = {
+  panic: { text: 'PANIC', color: '#ffb347' },
+  frenzy: { text: 'FRENZY', color: '#ff4d6d' },
+  freeze: { text: 'FROZEN', color: '#9bd7ff' },
+}
+const STEADIED = { text: 'STEADIED', color: '#9be89b' }
+
 /**
  * Routes player input to the subsystem that owns the decision, and keeps the
  * HUD in step with it.
@@ -82,6 +92,8 @@ export class InteractionController {
   private readonly fog: FogOfWar
   private readonly xray: WallXray
   private readonly noiseMarks: NoiseMarks
+  /** A line over a unit that breaks or steadies. */
+  private readonly callouts: DamageIndicators
   private readonly effects: Effects
   readonly movementSystem: MovementSystem
   readonly combatSystem: CombatSystem
@@ -133,6 +145,8 @@ export class InteractionController {
   spectating = false
   /** A recording was armed once this match, so it cannot be armed again. */
   private recordingStarted = false
+  /** Whether the applier's queue held anything last tick; see `update`. */
+  private rulesActing = false
   /**
    * Every command the world applied while armed, from either side. Fed by the
    * applier rather than by the network's send, which only ever saw this side.
@@ -227,15 +241,24 @@ export class InteractionController {
     this.commands.onNoise = (noise, heard) => {
       this.noiseMarks.add(roughly(noise.at), heard[0]!.faction, this.handovers)
     }
+    this.callouts = new DamageIndicators(engine)
+    // Said over the unit on both screens: the rules already took it over, and
+    // the other player has to be able to watch it happen.
+    this.commands.onMorale = (unit, broke) => {
+      const { text, color } = broke ? BREAK_CALLOUT[broke] : STEADIED
+      this.callouts.say(unit.position, text, color)
+      this.refreshHud()
+    }
     this.commands.onBeforeApply = (command, origin) => {
       // The fingerprint is of the world as this side hands it over, so it is
       // taken at the last moment the handover has not happened yet.
       if (command.type === 'endTurn' && origin === 'local') this.sendStateDigest()
     }
     this.commands.onApplied = (command, result, origin) => {
-      // Everything that happened, from either side, is what a recording is
-      // of; a replay's own commands are already on file.
-      if (origin !== 'record') this.recorder?.record(command)
+      // Everything a player decided, from either side, is what a recording is
+      // of. A replay's own commands are already on file, and what the rules
+      // made a broken unit do is derived again by whoever plays it back.
+      if (origin === 'local' || origin === 'peer') this.recorder?.record(command)
       // Only this side's own decisions travel, and only once the rules took
       // them: a refusal spent nothing here and would be refused there too.
       if (origin === 'local') this.network?.send(command)
@@ -357,6 +380,7 @@ export class InteractionController {
             ? { sidearm: shooter.sidearm, name: MELEE[shooter.sidearm].name, apCost: MELEE[shooter.sidearm].apCost }
             : null,
         waypointActive: this.planner.waypointMode,
+        rulesActing: this.commands.pending,
         selectedLevelFilter: this.selectedLevelFilter,
         topLevel: this.topLevel,
         debugMapOpen: this.debugMap.isOpen,
@@ -426,16 +450,20 @@ export class InteractionController {
    * Apply a recorded command as a spectator.
    *
    * Through the same door as the player's own clicks and the peer's messages.
-   * Playback paces itself on {@link anyUnitMoving}, so the command is applied
-   * at once rather than queued.
+   * Playback paces itself on {@link busy}, so the command is applied at once
+   * rather than queued.
    */
   applyRecordedCommand(command: NetworkMessage): void {
     if (isCommand(command)) this.commands.apply(command, 'record')
   }
 
-  /** True while a unit is still walking, which is what paces a replay. */
-  get anyUnitMoving(): boolean {
-    return this.commands.busy
+  /**
+   * True while a unit is still walking or the rules are still moving a broken
+   * unit, which is what paces a replay: the next recorded command was decided
+   * after both.
+   */
+  get busy(): boolean {
+    return this.commands.busy || this.commands.pending
   }
 
   /** Single place where a HUD press becomes a change to the game. */
@@ -635,11 +663,15 @@ export class InteractionController {
    */
   private present(command: Command, result: Carried, origin: CommandOrigin): void {
     switch (command.type) {
-      case 'moveUnit':
+      case 'moveUnit': {
         // A peer's route replaces whatever this side was previewing.
         if (origin !== 'local') this.planner.clear()
+        // Nobody here chose this walk, so show the player who is making it.
+        const walker = origin === 'rules' ? this.squads.byFaction[command.faction][command.squadIndex] : undefined
+        if (walker) this.rig.focusOn(walker.position)
         this.refreshHud()
         return
+      }
       case 'throwGrenade': {
         const thrower = this.squads.byFaction[command.shooterFaction][command.shooterIndex]
         if (thrower && result.grenade) {
@@ -730,6 +762,7 @@ export class InteractionController {
     this.planner.dispose()
     this.shoot.dispose()
     this.noiseMarks.dispose()
+    this.callouts.dispose()
     this.grenade.dispose()
     this.debug.dispose()
     this.debugMap.dispose()
@@ -1158,6 +1191,12 @@ export class InteractionController {
   update(delta: number): void {
     // Systems advance the simulation; every mutation lands in a component.
     this.world.update(delta)
+    // The HUD offers nothing while the rules are running a broken unit, so it
+    // has to hear when they stop — which is a tick, not an event.
+    if (this.commands.pending !== this.rulesActing) {
+      this.rulesActing = this.commands.pending
+      this.refreshHud()
+    }
     this.effects.update(delta)
     this.planner.update(delta)
 

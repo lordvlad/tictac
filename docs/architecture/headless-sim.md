@@ -165,6 +165,13 @@ crouch before moving when an enemy that is not engaged is within 10 m — change
 5181; with knives, 61 of 5112) and was removed: the trigger almost never fires. Stealth is a
 player's tool so far; the policy does not sneak.
 
+**Morale** (2026-09-24, same blocks): mirror 601 / 568 / 31, from 593 / 568 / 39 with glass
+and the stone. About one break a match (0.28–0.37 each of panic, frenzy and freeze per
+block). The policy does nothing about morale: a broken unit is run by the rules at the handover
+(`game/Breakdown`) inside `MatchHost.apply`, which settles until the applier's queue is empty
+as well as until nobody is walking, and the policy's own turn loop finds it with no points. The
+report's `morale:` line counts breaks per match.
+
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles
 walked indoors and the share of unit-turns *ended* indoors; the weapon table reports each

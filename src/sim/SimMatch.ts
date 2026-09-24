@@ -4,6 +4,7 @@ import { AmmoId, type GrenadeId, GRENADES, type ShotMode, type WeaponId } from '
 import type { AttachmentId } from '../core/Attachments'
 import { MELEE, MeleeId } from '../core/Melee'
 import { type CharacterSheet, rollSquadSheets } from '../core/Characters'
+import type { MoraleBreak } from '../core/Morale'
 import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
@@ -115,6 +116,8 @@ export interface MatchOutcome {
   reactions: number
   /** How much of the map each side used; see {@link GroundCovered}. */
   ground: Record<Faction, GroundCovered>
+  /** Units that broke, by the break. */
+  breaks: Record<MoraleBreak, number>
 }
 
 const DEFAULT_TURN_CAP = 40
@@ -181,6 +184,7 @@ export class SimMatch {
   private quiet = 0
   /** What each side knows about the other; see {@link Intel}. */
   private readonly intel: Record<Faction, Intel>
+  private readonly breaks: Record<MoraleBreak, number> = { panic: 0, frenzy: 0, freeze: 0 }
 
   constructor(private readonly setup: MatchSetup) {
     this.turnCap = setup.turnCap ?? DEFAULT_TURN_CAP
@@ -235,6 +239,9 @@ export class SimMatch {
       this.intel[Faction.Blue].forgetGround()
       this.intel[Faction.Red].forgetGround()
     }
+    this.host.commands.onMorale = (_unit, broke) => {
+      if (broke) this.breaks[broke] += 1
+    }
   }
 
   get grid(): Grid {
@@ -276,6 +283,7 @@ export class SimMatch {
       grenadesThrown: this.grenadesThrown,
       watches: this.watches,
       reactions: this.host.reactions,
+      breaks: { ...this.breaks },
       ground: {
         [Faction.Blue]: this.ground.of(Faction.Blue),
         [Faction.Red]: this.ground.of(Faction.Red),

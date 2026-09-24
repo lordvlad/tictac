@@ -11,6 +11,8 @@ appliesTo:
   - "src/core/Visibility.ts"
   - "src/core/Cover.ts"
   - "src/game/Combat.ts"
+  - "src/core/Morale.ts"
+  - "src/game/Breakdown.ts"
   - "src/core/Traits.ts"
   - "src/core/Items.ts"
 relatedDocs:
@@ -248,6 +250,38 @@ state there as in a played match. The **stone** is a `GrenadeId` with no damage 
 (`harmless`): the throw reveals nobody and catches nobody; it is heard (8 m) where it lands.
 `GrenadeSpec.issued` — two for a stone — is carried by every soldier outside the crate and the
 grenade cap (`applyUnitLoadout`).
+
+### Morale
+`MoraleComponent` (replicated, digested): **morale** 0–100, the **break** a unit is in, and the
+turns it has begun broken (`src/core/Morale.ts`, numbers in `MORALE`). `CombatSystem` calls
+`shake` after every shot, reaction, blow and throw, reading the resolved hits: a wound costs the
+wounded ½ point per percent of its max HP, each round that went past the target costs it 3, a
+death costs every squadmate 20 and pays the killer 15 and its squadmates 5 (friendly fire pays
+nobody; a death is counted once, however many rounds land on the body).
+
+At each handover, after the incoming side's points are handed back, `CommandSystem` calls
+`rollMorale` with the match's dice. In squad order: a broken unit rolls to steady at
+`steadyChance` — 25% on the first of its turns after breaking, +25% each turn after, so certain
+on the fourth — and comes back to at least steady (50); anyone else below steady rolls to break
+at 2% per point short, and a break's kind is a second draw, evenly among **panic**, **frenzy**
+and **freeze** (the character deciding it is ITEM-033). A unit that holds gets 5 back; each
+break costs the breaker's squadmates 10, after every roll is made. Nobody at steady or above
+draws, so a match in which nobody was shaken draws what it drew before morale existed.
+
+A frozen unit's points go to zero (taken, not spent: exhaustion does not see them). Panicking
+and frenzied units are then run by the rules (`src/game/Breakdown.ts`), one command at a time,
+each asked for after the last was carried out and walked, with the origin `rules`:
+
+- **panic**: stand, walk to the reachable tile in sight of the fewest enemies its side can see,
+  farthest from the nearest of them, then crouch if it can afford to. Seeing nobody, it cowers.
+- **frenzy**: strike the nearest enemy its side can see if in reach; otherwise charge to the
+  reachable tile nearest it, then strike or fire the cheapest shot until the points or the rounds
+  run out, reloading an empty weapon once. Seeing nobody, it goes on watch.
+
+Integer comparisons only, ties by squad order and tile index, and only enemies the unit's own side
+can see — a flight away from an enemy nobody has spotted would tell its player where they are.
+The run ends with `endUnitTurn`. A broken unit refuses every command from any other origin
+except `endUnitTurn`, and a `local` command is refused while the rules are still running anyone.
 
 ## 3. Damage Resolution & Armor
 

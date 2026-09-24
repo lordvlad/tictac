@@ -192,6 +192,43 @@ export const WOUNDS = {
 }
 
 /**
+ * How much a unit can take before it stops taking orders (`core/Morale`).
+ *
+ * Morale runs 0 to {@link MORALE.max}. Stress takes it down and a few things
+ * give it back; below {@link MORALE.steady} a unit rolls to break at the start
+ * of each of its own turns. Whole numbers throughout, so two peers never
+ * disagree about a rounding.
+ */
+export const MORALE = {
+  max: 100,
+  /** At or above this nothing is rolled; below it, a unit may break. */
+  steady: 50,
+  /** Percent chance to break per point of morale below steady: certain at zero. */
+  breakPerPoint: 2,
+  /** Morale lost by losing a unit's whole maximum health; pro rata for less. */
+  wound: 50,
+  /** Per round that went past the unit rather than into it. */
+  nearMiss: 3,
+  /** To every living squadmate of a unit that is killed. */
+  mateDown: 20,
+  /** To every living squadmate of a unit that breaks. */
+  mateBroke: 10,
+  /** To the unit that made a kill. */
+  kill: 15,
+  /** To the killer's squadmates. */
+  enemyDown: 5,
+  /** Back at the start of each of a unit's own turns, unless it is broken. */
+  rally: 5,
+  /**
+   * Percent chance to steady on the first turn after breaking, and what each
+   * further turn adds: rising odds rather than a fixed cooldown, so a break
+   * lasts one turn at the least and four at the most.
+   */
+  snapFirst: 25,
+  snapStep: 25,
+}
+
+/**
  * How much the people differ from each other.
  *
  * Rolled per peer, not from the match seed: the seed is the host's map, and

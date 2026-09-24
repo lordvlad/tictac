@@ -15,6 +15,14 @@ import type { CombatSystem } from './CombatSystem'
 import type { ItemSystem } from './ItemSystem'
 import type { MovementSystem } from './MovementSystem'
 import type { WallSystem } from './WallSystem'
+import { MoraleBreak, rollMorale } from '../../core/Morale'
+import { brokenStep } from '../../game/Breakdown'
+
+/**
+ * Most commands the rules issue for one broken unit in one turn. Each one
+ * spends points or ends the run, so this is a guard against a bug, not a rule.
+ */
+const BROKEN_STEPS = 32
 
 /** The messages that change the world. Everything else on the wire is session or diagnosis. */
 export type Command = Extract<
@@ -60,13 +68,16 @@ export function isCommand(message: NetworkMessage): message is Command {
  *   and the only origin that is sent to a peer.
  * - `peer`: the other player, over the wire.
  * - `record`: a file, a referee's log, or the sweep's policy.
+ * - `rules`: what the rules made a broken unit do. Worked out on every side
+ *   from the handover, so never sent and never recorded: a replay derives it
+ *   again, exactly as it derives a watcher's reaction to a step.
  *
  * A command from anywhere but here is not second-guessed where the rules allow
  * the sender to have known better — item use is the one case — but every
  * refusal is reported, because from those origins a refusal means two sides
  * disagree about what was possible.
  */
-export type CommandOrigin = 'local' | 'peer' | 'record'
+export type CommandOrigin = 'local' | 'peer' | 'record' | 'rules'
 
 /** Why a command could not be carried out. */
 export interface Refusal {
@@ -131,6 +142,8 @@ export class CommandSystem extends System {
    * Called only when somebody did: a noise nobody hears is not an event.
    */
   onNoise?: (noise: Noise, heard: Soldier[]) => void
+  /** A unit broke (into `broke`) or steadied (`broke` null) at a handover. */
+  onMorale?: (unit: Soldier, broke: MoraleBreak | null) => void
 
   /** Reactions fired so far: a fact about the match, not about any one command. */
   reactions = 0
@@ -202,6 +215,14 @@ export class CommandSystem extends System {
     return this.queue.length > 0
   }
 
+  /**
+   * Forget everything waiting. For a replay put back to an earlier moment:
+   * what was queued was about the moment it left.
+   */
+  clear(): void {
+    this.queue.length = 0
+  }
+
   /** Queue a peer's command behind anything still waiting or walking. */
   enqueue(command: Command, origin: CommandOrigin): void {
     this.queue.push({ command, origin })
@@ -238,6 +259,14 @@ export class CommandSystem extends System {
    * the queue — waits for {@link busy} to clear.
    */
   apply(command: Command, origin: CommandOrigin): Applied {
+    // The player waits for the rules. While a broken unit is still being run
+    // at the start of the turn, an order given here would land between two of
+    // its steps on this screen and after all of them on the other peer's.
+    if (origin === 'local' && this.queue.length > 0) {
+      const refusal = refuse('the rules are still acting')
+      this.onRefused?.(command, refusal, origin)
+      return refusal
+    }
     this.onBeforeApply?.(command, origin)
     const result = this.resolve(command, origin)
     // Whatever changed — a shot, a turn, a handover — may have put an enemy
@@ -252,7 +281,61 @@ export class CommandSystem extends System {
     return this.squads.byFaction[faction]?.[index]
   }
 
+  /** Whoever a command would have act, when it names one. */
+  private actorOf(command: Command): Soldier | undefined {
+    switch (command.type) {
+      case 'fireShot':
+      case 'throwGrenade':
+        return this.unit(command.shooterFaction, command.shooterIndex)
+      case 'meleeAttack':
+        return this.unit(command.attackerFaction, command.attackerIndex)
+      case 'endUnitTurn':
+      case 'endTurn':
+        return undefined
+      default:
+        return this.unit(command.faction, command.squadIndex)
+    }
+  }
+
+  /**
+   * The incoming side's nerve, at the handover: who breaks and who steadies
+   * (`core/Morale`), rolled from the match's dice — then the rules take over
+   * whoever is panicking or in a frenzy, one at a time, before anybody else
+   * on that side does anything.
+   */
+  private rally(): void {
+    const incoming = this.turns.activeFaction
+    for (const change of rollMorale(this.squads.soldiers, incoming, this.combat.roll)) {
+      this.onMorale?.(change.unit, change.broke)
+    }
+    for (const unit of this.squads.byFaction[incoming] ?? []) {
+      if (unit.isDead) continue
+      if (unit.broken === MoraleBreak.Panic || unit.broken === MoraleBreak.Frenzy) {
+        this.queue.push(() => this.drive(unit, false, 0))
+      }
+    }
+  }
+
+  /**
+   * One command for a broken unit (`game/Breakdown`), then — once it has been
+   * carried out and walked — the next, ahead of anything else waiting. Ends
+   * the unit's turn when there is nothing left it would do.
+   */
+  private drive(unit: Soldier, moved: boolean, steps: number): void {
+    if (unit.isDead) return
+    const command = steps < BROKEN_STEPS ? brokenStep(this.combat.grid, unit, this.squads.soldiers, moved) : null
+    if (command && this.apply(command, 'rules').applied) {
+      this.queue.unshift(() => this.drive(unit, moved || command.type === 'moveUnit', steps + 1))
+      return
+    }
+    this.apply({ type: 'endUnitTurn', faction: unit.faction, squadIndex: unit.squadIndex }, 'rules')
+  }
+
   private resolve(command: Command, origin: CommandOrigin): Applied {
+    // A broken unit takes no orders. Its turn can still be ended for it, which
+    // is all a side that is carrying on without it needs.
+    const actor = this.actorOf(command)
+    if (actor?.broken && origin !== 'rules') return refuse(`${actor.name} has broken (${actor.broken})`)
     switch (command.type) {
       case 'moveUnit': {
         const soldier = this.unit(command.faction, command.squadIndex)
@@ -321,6 +404,7 @@ export class CommandSystem extends System {
       }
       case 'endTurn': {
         this.turns.startNextTurn()
+        this.rally()
         return carried
       }
       case 'rightClickFacing': {

@@ -111,10 +111,14 @@ export class MatchHost {
     this.turnManager.autoSelectFirst()
   }
 
-  /** Advance time until nothing is walking, so the next intent sees the arrival. */
+  /**
+   * Advance time until nothing is walking and nothing the rules queued is
+   * left — a broken unit's run at a handover — so the next intent sees the
+   * world it was decided against.
+   */
   private settleMovement(): void {
     for (let i = 0; i < this.maxSteps; i++) {
-      if (!this.commands.busy) return
+      if (!this.commands.busy && !this.commands.pending) return
       this.world.update(this.step)
     }
   }

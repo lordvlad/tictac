@@ -579,7 +579,7 @@ function startPlayback(recording: CombatRecording): void {
   const playback = new Playback({
     recording,
     apply: (command) => controller.applyRecordedCommand(command),
-    busy: () => controller.anyUnitMoving,
+    busy: () => controller.busy,
     capture: () => ({
       entities: world.snapshot(soldierIds),
       activeFaction: turnSystem.activeFaction,
@@ -588,8 +588,10 @@ function startPlayback(recording: CombatRecording): void {
     restore: (frame) => {
       // Routes first: `pathIndices` is the one piece of movement state that is
       // not a component, so a restored unit would otherwise resume walking a
-      // path it is no longer on.
+      // path it is no longer on. The same for whatever the rules still meant a
+      // broken unit to do: that was decided about the moment being left.
       controller.movementSystem.clearRoutes(world, soldierIds)
+      controller.commands.clear()
       world.restore(frame.entities)
       turnSystem.activeFaction = frame.activeFaction
       turnSystem.turnNumber = frame.turnNumber

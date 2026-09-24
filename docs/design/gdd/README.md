@@ -29,4 +29,4 @@ tags: ["gdd", "design", "gameplay"]
 | [Noise & Stealth](./noise-and-stealth.md) | Information (draft) | Crouching as sneaking, loudness per action, enemy awareness, breaking glass and thrown stones. |
 | [Interaction & Environment](./interaction-and-environment.md) | Verbs (draft) | Using items on squadmates, tiles and objects: keys and locks, doors, fire. |
 | [Economy & Base Building](./economy-and-bases.md) | Meta Strategy | Nomadic vs Settled bases, resource gathering, food, crafting, research. |
-| [Progression & Squads](./progression-and-meta.md) | RPG Progression | XP, promotions, wounds, permadeath, recruitment, campaign roster. |
+| [Progression & Squads](./progression-and-meta.md) | RPG Progression | XP, promotions, morale and breaking, wounds, permadeath, recruitment, campaign roster. |
