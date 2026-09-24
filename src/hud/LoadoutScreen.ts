@@ -3,6 +3,7 @@ import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { derive, rollSquadSheets, type CharacterSheet } from '../core/Characters'
 import { ITEMS, ItemId } from '../core/Items'
 import { MELEE, MeleeId } from '../core/Melee'
+import { TEMPERAMENTS } from '../core/Morale'
 import { resolveTraits, TRAITS, type TraitId } from '../core/Traits'
 import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
 import type { EngineContext } from '../engine'
@@ -601,6 +602,7 @@ export class LoadoutScreen {
           ${stat('Item', `${signed(stats.itemApDelta)} AP`, stats.itemApDelta > 0)}
         </div>
         <div class="loadout-spec">${WEAPONS[sheet.specialism].name} specialist</div>
+        <div class="loadout-spec" title="${TEMPERAMENTS[sheet.temperament].description}">${TEMPERAMENTS[sheet.temperament].name}</div>
         <div class="loadout-traits">
           ${
             traits.length === 0

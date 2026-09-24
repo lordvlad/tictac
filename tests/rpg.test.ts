@@ -16,6 +16,7 @@ import {
   sanitizeSheet,
 } from '../src/core/Characters'
 import { ITEMS, ItemId } from '../src/core/Items'
+import { PREDISPOSITIONS, Temperament } from '../src/core/Morale'
 import {
   NO_TRAITS,
   type ResolvedTraits,
@@ -238,9 +239,11 @@ describe('Rolling a character', () => {
     }
   })
 
-  test('a character is born with at most one trait, and always a known one', () => {
+  test('a character is born with at most one combat trait and one predisposition, all known', () => {
     for (const sheet of sampleSheets()) {
-      expect(sheet.traits.length).toBeLessThanOrEqual(1)
+      const predispositions = sheet.traits.filter((id) => (PREDISPOSITIONS as readonly TraitId[]).includes(id))
+      expect(predispositions.length).toBeLessThanOrEqual(1)
+      expect(sheet.traits.length - predispositions.length).toBeLessThanOrEqual(1)
       // Nullweave is a garment: nobody is born wearing one.
       expect(sheet.traits).not.toContain(TraitId.Nullweave)
       for (const id of sheet.traits) expect(TRAITS[id]).toBeDefined()
@@ -341,6 +344,14 @@ describe('Sanitising a sheet off the wire', () => {
     expect(sanitizeSheet({ specialism: 'crossbow' }).specialism).toBe(WeaponId.Rifle)
     expect(sanitizeSheet({ specialism: 3 }).specialism).toBe(WeaponId.Rifle)
     expect(sanitizeSheet({ specialism: WeaponId.Gatling }).specialism).toBe(WeaponId.Gatling)
+  })
+
+  test('a temperament off the wire is one this build knows, or a default', () => {
+    // It decides which way a unit breaks, so an unknown value would reach the
+    // rules as neither and be read as whichever branch a comparison fell to.
+    expect(sanitizeSheet({ temperament: 'berserk' }).temperament).toBe(Temperament.Skittish)
+    expect(sanitizeSheet({ temperament: 1 }).temperament).toBe(Temperament.Skittish)
+    expect(sanitizeSheet({ temperament: Temperament.Hothead }).temperament).toBe(Temperament.Hothead)
   })
 
   test('the proficiency ceiling leaves room for the specialist bonus and no more', () => {

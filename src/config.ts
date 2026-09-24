@@ -226,6 +226,22 @@ export const MORALE = {
    */
   snapFirst: 25,
   snapStep: 25,
+  /**
+   * A break at or above this much morale is a freeze; below it the unit goes
+   * the way its temperament takes it. The mild end is the one that does
+   * nothing; running or charging is what happens to somebody further gone.
+   */
+  freezeAbove: 25,
+  /** Daredevil, each own turn its side is outnumbered or it is below half health. */
+  daredevilDire: 10,
+  /** Daredevil, each own turn its side outnumbers the other by `daredevilBoredBy` or more. */
+  daredevilBored: 5,
+  daredevilBoredBy: 2,
+  /** Teamplayer, each own turn every living squadmate is above half health. */
+  teamplayerWhole: 5,
+  /** To a squadmate within `teamplayerReach` tiles of a teamplayer, each of their own turns. */
+  teamplayerAura: 5,
+  teamplayerReach: 2,
 }
 
 /**
@@ -313,8 +329,13 @@ export const CHARACTER = {
    * character in five was worse with the weapon they were named for.
    */
   specialistBonus: 15,
-  /** Chance a character is born with a trait at all. */
+  /** Chance a character is born with a combat trait at all. */
   traitChance: 0.55,
+  /**
+   * Chance of a predisposition (Daredevil, Teamplayer, Loner), rolled apart
+   * from the combat trait: a temperament is not a trade against a steady aim.
+   */
+  predispositionChance: 0.35,
 }
 
 /**

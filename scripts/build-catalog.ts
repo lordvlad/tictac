@@ -17,7 +17,7 @@ import { SHOT_MODES, STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src
 import { LONG_GUN_PARRY, MELEE, MeleeId } from '../src/core/Melee'
 import { NOISE } from '../src/core/Noise'
 import { AIM, CHARACTER, COVER, CRIT, MORALE, RULES, WOUNDS } from '../src/config'
-import { steadyChance } from '../src/core/Morale'
+import { PREDISPOSITIONS, steadyChance, TEMPERAMENTS } from '../src/core/Morale'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
 import {
@@ -196,7 +196,9 @@ function build(): string {
   lines.push('| Id | Name | Effects | Source |')
   lines.push('| --- | --- | --- | --- |')
   for (const spec of Object.values(TRAITS)) {
-    lines.push(`| \`${spec.id}\` | ${spec.name} | ${traitEffects(spec.effects)} | ${source(spec.id)} |`)
+    // A predisposition has no combat numbers; what it does is to morale.
+    const effects = (PREDISPOSITIONS as readonly TraitId[]).includes(spec.id) ? 'morale (§7)' : traitEffects(spec.effects)
+    lines.push(`| \`${spec.id}\` | ${spec.name} | ${effects} | ${source(spec.id)} |`)
   }
   lines.push('')
   lines.push('### 2.1 Conditional effects')
@@ -373,8 +375,9 @@ function build(): string {
     `Morale runs 0–${MORALE.max}. At the start of each of its own turns a unit below ${MORALE.steady} rolls to break, at`,
   )
   lines.push(
-    `${MORALE.breakPerPoint}% per point short; a broken one rolls to steady instead. Panic, frenzy and freeze are equally likely.`,
+    `${MORALE.breakPerPoint}% per point short; a broken one rolls to steady instead. A break at ${MORALE.freezeAbove} or more is a freeze;`,
   )
+  lines.push('below that the unit panics or goes into a frenzy, as its temperament takes it.')
   lines.push('')
   lines.push('| Event | Morale | Who |')
   lines.push('| --- | --- | --- |')
@@ -389,6 +392,24 @@ function build(): string {
   lines.push('| Turns broken | Chance to steady |')
   lines.push('| --- | --- |')
   for (let turns = 1; steadyChance(turns - 1) < 100; turns++) lines.push(`| ${turns} | ${steadyChance(turns)}% |`)
+  lines.push('')
+  lines.push('| Temperament | What it means |')
+  lines.push('| --- | --- |')
+  for (const spec of Object.values(TEMPERAMENTS)) lines.push(`| ${spec.name} | ${spec.description} |`)
+  lines.push('')
+  lines.push(
+    `A predisposition (${share(CHARACTER.predispositionChance)} of characters, beside any combat trait) bends how morale moves:`,
+  )
+  lines.push('')
+  lines.push('| Predisposition | Effect |')
+  lines.push('| --- | --- |')
+  lines.push(
+    `| Daredevil | +${MORALE.daredevilDire} at the start of its turn when its side is outnumbered or it is below half health; −${MORALE.daredevilBored} when its side outnumbers the other by ${MORALE.daredevilBoredBy} or more; a break is always a frenzy |`,
+  )
+  lines.push(
+    `| Teamplayer | +${MORALE.teamplayerWhole} at the start of its turn while every squadmate is above half health; +${MORALE.teamplayerAura} to squadmates within ${MORALE.teamplayerReach} tiles each of their turns, while it holds |`,
+  )
+  lines.push('| Loner | Nothing from a squadmate killed or breaking; nothing from the squad\'s kills or a teamplayer\'s company |')
   lines.push('')
   lines.push('---')
   lines.push('')

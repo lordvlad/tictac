@@ -133,38 +133,6 @@ record, it is a diary.
 
 ---
 
-### [ITEM-033] Character: Who Runs and Who Charges
-**Type:** Feature  
-**Priority:** P2  
-**Status:** Ready  
-**Milestone:** M3 — Reconnaissance & Morale  
-
-#### Why
-ITEM-014 rolls a break's direction evenly. The GDD wants the person to decide it: a daredevil
-who breaks charges, a coward runs. Split out of ITEM-014 on 2026-09-24 so the morale loop
-could land first.
-
-#### Change
-1. Something on the character sheet that says which way a break goes — panic or frenzy
-   (freeze stays open: is it a third temperament, or the mild end of either?).
-2. Daredevil, Teamplayer and Loner (GDD §3) as innate ids that change how morale *moves*.
-
-#### Caveat
-The predispositions are trait-shaped and would drop straight into `INNATE_TRAITS`, but
-`TraitEffects` are flat modifiers on combat numbers and a predisposition modifies how morale
-moves — nothing a hit chance can express. The sheet travels in the start handshake, so any
-new field needs `sanitizeSheet`.
-
-#### Affected Files
-- `src/core/Characters.ts`
-- `src/core/Morale.ts`
-- `src/core/Traits.ts`
-
-#### Acceptance Criteria
-- [ ] A character's sheet decides whether they panic or go into a frenzy.
-- [ ] Daredevil, Teamplayer and Loner each measurably change how a unit's morale moves.
----
-
 ### [ITEM-017] Item Verbs on Tiles and Objects
 **Type:** Feature  
 **Priority:** P2  

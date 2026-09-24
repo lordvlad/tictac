@@ -31,8 +31,6 @@ reaction fire and a roster that survives a match.
   sweep does not measure.
 
 ### 📋 Ready (Pull Queue)
-- **`[ITEM-033]`**: Character — who runs and who charges. Split from ITEM-014: the sheet
-  decides panic or frenzy, and Daredevil, Teamplayer and Loner bend how morale moves.
 - **`[ITEM-012]`**: Persistence as the foundation, not a save file — a store of record for
   rosters *and* matches as event logs. It is what the whole lockstep arc was for: a match is
   now a reproducible event log, so what persists is what happened rather than a summary of it.
@@ -116,6 +114,8 @@ reaction fire and a roster that survives a match.
   behind, noise, awareness, glass and the stone; the policy knows only what it has seen.
 - **`[ITEM-014]`**: Morale, stress and breaking — rolled breaks into panic, frenzy or freeze,
   run by the rules on both peers; steadying rolled with rising odds.
+- **`[ITEM-033]`**: Character — temperament decides panic or frenzy past a freeze;
+  Daredevil, Teamplayer and Loner bend how morale moves.
 
 ### 🚫 Struck
 - **`[ITEM-003.4]`** — "Remove `installCanvasStub` from `movement`, `camera`, `pathmarker`,

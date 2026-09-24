@@ -2,6 +2,7 @@ import { CHARACTER, RULES, SQUAD_SIZE } from '../config'
 import { WeaponId } from './Arsenal'
 import { clamp } from './math'
 import { Rng } from './rng'
+import { PREDISPOSITIONS, Temperament } from './Morale'
 import { TraitId, TRAITS } from './Traits'
 
 /**
@@ -64,6 +65,8 @@ export interface CharacterSheet {
   specialism: WeaponId
   /** What they were born with. Gear grants more, separately. */
   traits: TraitId[]
+  /** Which way they go when a break is more than a freeze (`core/Morale`). */
+  temperament: Temperament
 }
 
 /**
@@ -96,7 +99,7 @@ export interface DerivedStats {
   meleePower: number
 }
 
-/** Traits a character can be born with. `Nullweave` is a garment, not a person. */
+/** Combat traits a character can be born with. `Nullweave` is a garment, not a person. */
 const INNATE_TRAITS: readonly TraitId[] = [
   TraitId.Deadeye,
   TraitId.Nimble,
@@ -165,8 +168,11 @@ export function characterSheet(rng: Rng): CharacterSheet {
 
   // Rolled last so adding a trait to the table cannot shift the stats above it.
   const traits = rng.chance(CHARACTER.traitChance) ? [rng.pick(INNATE_TRAITS)] : []
+  // And the person after the soldier, for the same reason.
+  if (rng.chance(CHARACTER.predispositionChance)) traits.push(rng.pick(PREDISPOSITIONS))
+  const temperament = rng.chance(0.5) ? Temperament.Hothead : Temperament.Skittish
 
-  return { attributes, proficiency, utility, specialism, traits }
+  return { attributes, proficiency, utility, specialism, traits, temperament }
 }
 
 /**
@@ -212,6 +218,7 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
     utility: {} as Record<UtilityId, number>,
     specialism: WeaponId.Rifle,
     traits: [],
+    temperament: Temperament.Skittish,
   }
   for (const id of Object.values(WeaponId)) fallback.proficiency[id] = 0
   for (const id of Object.values(UtilityId)) fallback.utility[id] = 0
@@ -261,5 +268,8 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
         ? (sheet.specialism as WeaponId)
         : WeaponId.Rifle,
     traits,
+    temperament: (Object.values(Temperament) as unknown[]).includes(sheet.temperament)
+      ? (sheet.temperament as Temperament)
+      : fallback.temperament,
   }
 }

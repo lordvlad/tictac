@@ -60,10 +60,10 @@ Beyond combat attributes, characters possess non-combat utility proficiencies th
 
 Units do not fight as emotionless robots; they have a psychological layer that fluctuates based on battlefield momentum.
 
-**Status:** the morale loop and the three breaks are built (ITEM-014). Which way a character
-breaks, and the predispositions that bend how their morale moves, are ITEM-033. Surges are a
-proposal. Numbers are `MORALE` in `src/config.ts`, and the generated
-[catalogue](status-and-trait-catalog.md) §7 lists them as shipped.
+**Status:** the morale loop and the three breaks are built (ITEM-014), and so are temperament
+and the three predispositions (ITEM-033). Surges are a proposal. Numbers are `MORALE` in
+`src/config.ts`, and the generated [catalogue](status-and-trait-catalog.md) §7 lists them as
+shipped.
 
 ### Morale
 Every soldier has **morale**, 0 to 100, starting full. It is state like hit points: replicated,
@@ -97,8 +97,9 @@ A unit that breaks does one of three things:
   cheapest shot at it. Seeing no enemy, it watches for one.
 - **Freeze.** Its action points drop to zero. It does nothing, and holds no watch.
 
-Which of the three is rolled evenly for now. **Character decides panic or frenzy** — a
-daredevil charges, a coward runs — which is ITEM-033.
+**Which one is character, not luck.** A break at 25 morale or more is a **freeze** — the
+mild end. A unit further gone than that runs or charges as its **temperament** takes it, and a
+**daredevil** always charges.
 
 While broken, a unit takes no orders: the player cannot command it, and the rules refuse any
 command that names it. Both players see it happen — the unit's card and an enemy's target
@@ -114,14 +115,33 @@ to at least steady (50) morale, so it is not rolling to break again the same tur
 High morale granting bonus AP or a guaranteed critical. Not built: nothing yet says what
 morale *above* steady is worth, beyond distance from breaking.
 
-### Psychological Predispositions (ITEM-033)
-Characters possess inherent traits that alter how they process Stress and Morale:
-- **Daredevil**: Craves adrenaline. Slowly loses Morale (gets bored) if the combat is heavily in their favor and easy. Rapidly gains Morale and shines when outnumbered, flanked, or when the situation turns dire.
-- **Teamplayer**: Feeds off unit cohesion. Morale naturally boosts when the whole squad is healthy and successful. Acts as a localized aura, boosting the Morale recovery of adjacent allies.
-- **Loner**: Detached from squad dynamics. Does not suffer Morale penalties when allies are downed, routed, or panic, but also receives no Morale benefits from squad-wide buffs or assists.
+### Temperament and predispositions (ITEM-033)
+**Temperament** is dealt with every sheet, half and half, and shown on the loadout card:
 
-Character also decides the direction of a break: whether a unit that breaks panics or goes
-into a frenzy.
+- **Hothead** — broken past a freeze, charges.
+- **Skittish** — broken past a freeze, runs.
+
+A sheet from the other player that names a temperament this build does not know plays as
+skittish.
+
+About a third of characters are also born with a **predisposition**, rolled apart from the
+combat trait (so it costs nobody their Deadeye). It is a trait on the sheet and the card, with no
+combat numbers; what it bends is morale:
+
+- **Daredevil**: craves adrenaline. At the start of its turn it gains 10 when its side is
+  outnumbered or it is below half health, and loses 5 (bored) when its side outnumbers the
+  other by two or more. Its break is always a frenzy, whatever its temperament or its morale.
+- **Teamplayer**: feeds off cohesion. It gains 5 at the start of its turn while every squadmate
+  is above half health, and while it holds, squadmates within 2 tiles get 5 more back each of
+  their turns (once, however many teamplayers are near).
+- **Loner**: detached. It loses nothing when a squadmate is killed or breaks, and gains nothing
+  from the squad's kills or a teamplayer's company; its own kills still count.
+
+Measured (blocks 1000–1399): per hundred units, a unit with no predisposition breaks 11.5
+times over a match, a teamplayer 7.9, a loner 4.4 and a daredevil 3.5. All three are steadier
+than nobody-in-particular: the loner's immunity to losses outweighs what it gives up, and the
+daredevil's lift arrives exactly when a squad starts losing people. Whether a predisposition
+should be a trade rather than a gift is open.
 
 ---
 

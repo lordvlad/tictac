@@ -1,7 +1,7 @@
 import type { Vector3 } from 'three'
 import type { MeleeId } from '../core/Melee'
 import type { Awareness } from '../core/Awareness'
-import type { MoraleBreak } from '../core/Morale'
+import { type MoraleBreak, type Predisposition, predispositionOf, type Temperament } from '../core/Morale'
 import { Faction, RULES } from '../config'
 import {
   type AmmoSpec,
@@ -692,6 +692,16 @@ export class Soldier {
   }
   set brokenTurns(value: number) {
     this.moraleComponent.brokenTurns = value
+  }
+
+  /** Which way it goes when a break is more than a freeze: the sheet's. */
+  get temperament(): Temperament {
+    return this.sheet.temperament
+  }
+
+  /** Its predisposition, off the sheet's traits. */
+  get predisposition(): Predisposition | null {
+    return predispositionOf(this.sheet.traits)
   }
 
   /** Re-stamp the loadout from the shared templates. */

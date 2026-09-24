@@ -1,7 +1,7 @@
 import type { Vector3 } from 'three'
 import type { Faction } from '../config'
 import type { Awareness } from './Awareness'
-import type { MoraleBreak } from './Morale'
+import type { MoraleBreak, Predisposition, Temperament } from './Morale'
 import type { GrenadeId, GrenadeSpec } from './Arsenal'
 import type { CombatantStats, StatusState } from './Ballistics'
 import type { Tile } from './Grid'
@@ -67,6 +67,10 @@ export interface Combatant extends CombatantStats, Casualty {
   broken: MoraleBreak | null
   /** Of its own turns begun broken. */
   brokenTurns: number
+  /** Which way it goes when a break is more than a freeze (`core/Morale`). */
+  readonly temperament: Temperament
+  /** Daredevil, Teamplayer or Loner, if it was born one. */
+  readonly predisposition: Predisposition | null
   /** The AP ceiling with live statuses folded in. */
   readonly effectiveMaxAp: number
   /** What a step costs this unit, as a multiple of the terrain's own price. */

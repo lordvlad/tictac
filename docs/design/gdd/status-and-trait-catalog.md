@@ -63,6 +63,9 @@ be born with the same property a piece of kit grants.
 | `braced` | Braced | +10 accuracy crouched, +6 evasion crouched | fitted (Bipod) |
 | `silenced` | Silenced | -0.3 crit multiplier, firing does not reveal | fitted (Suppressor) |
 | `plated` | Plated | -4 evasion, -1 max AP, +9 armour, -20% damage taken, +15% step cost | worn (Plate Carrier) |
+| `daredevil` | Daredevil | morale (§7) | born with |
+| `teamplayer` | Teamplayer | morale (§7) | born with |
+| `loner` | Loner | morale (§7) | born with |
 
 ### 2.1 Conditional effects
 
@@ -175,7 +178,8 @@ multiplied by the sidearm's own "From behind".
 ## 7. Morale
 
 Morale runs 0–100. At the start of each of its own turns a unit below 50 rolls to break, at
-2% per point short; a broken one rolls to steady instead. Panic, frenzy and freeze are equally likely.
+2% per point short; a broken one rolls to steady instead. A break at 25 or more is a freeze;
+below that the unit panics or goes into a frenzy, as its temperament takes it.
 
 | Event | Morale | Who |
 | --- | --- | --- |
@@ -193,6 +197,19 @@ Morale runs 0–100. At the start of each of its own turns a unit below 50 rolls
 | 2 | 50% |
 | 3 | 75% |
 | 4 | 100% |
+
+| Temperament | What it means |
+| --- | --- |
+| Hothead | Broken past a freeze, charges the nearest enemy it can see. |
+| Skittish | Broken past a freeze, runs from the enemies it can see. |
+
+A predisposition (35% of characters, beside any combat trait) bends how morale moves:
+
+| Predisposition | Effect |
+| --- | --- |
+| Daredevil | +10 at the start of its turn when its side is outnumbered or it is below half health; −5 when its side outnumbers the other by 2 or more; a break is always a frenzy |
+| Teamplayer | +5 at the start of its turn while every squadmate is above half health; +5 to squadmates within 2 tiles each of their turns, while it holds |
+| Loner | Nothing from a squadmate killed or breaking; nothing from the squad's kills or a teamplayer's company |
 
 ---
 

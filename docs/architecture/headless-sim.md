@@ -172,6 +172,13 @@ block). The policy does nothing about morale: a broken unit is run by the rules 
 as well as until nobody is walking, and the policy's own turn loop finds it with no points. The
 report's `morale:` line counts breaks per match.
 
+**Character** (2026-09-24, same blocks): mirror 605 / 564 / 31. Breaks fall to ~0.8 a match,
+freezes now the most common (the mild end), then frenzies, then panics. Per hundred units over
+blocks 1000–1399, a unit with no predisposition breaks 11.5 times, a teamplayer 7.9, a loner 4.4
+and a daredevil 3.5; skittish units split panic 71 / freeze 41, hotheads frenzy 79 / freeze 53.
+The traits table's win rates for the three sit between 41% and 57% across blocks — noise of
+that size, no signal.
+
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles
 walked indoors and the share of unit-turns *ended* indoors; the weapon table reports each

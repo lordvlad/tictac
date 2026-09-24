@@ -139,18 +139,20 @@ graph TD
   strips more armour out of the same grenade — it is the charge that is better set, not the
   arm, so throwing distance stays a matter of strength.
 
-### 2.7 Proposed, not built
+### 2.7 Extensions: built, and still proposed
 
-Three design drafts extend the pillars above. None of them is implemented; each states what
-already exists in the code and what it would still need, so a reader can tell a plan from a
-rule.
+Design drafts that extend the pillars above. Each says what exists in the code and what is
+still a plan, so a reader can tell a plan from a rule.
 
-- [Melee Combat](melee-combat.md) — contact with a sidearm is **built** (fists, knife, club;
-  see [Combat & Rules](../../architecture/combat-and-rules.md#melee-a-blow-with-the-sidearm)).
-  What remains a proposal is the half that needs awareness: attacks from behind and the
-  silent kill.
-- [Noise & Stealth](noise-and-stealth.md) — crouching as sneaking, a loudness per action,
-  enemy awareness as a third state beside seen and read, and breaking glass as both a cost
-  and a tool.
-- [Interaction & Environment](interaction-and-environment.md) — the item verb pointed at
-  tiles and objects as well as people: keys and locks, doors, fire.
+- [Melee Combat](melee-combat.md) — **built**: a sidearm slot with fists, knife and club,
+  and attacks from behind (see
+  [Combat & Rules](../../architecture/combat-and-rules.md#melee-a-blow-with-the-sidearm)).
+  Non-lethal takedowns wait for the campaign roster.
+- [Noise & Stealth](noise-and-stealth.md) — **built**: crouched movement, loudness per action
+  heard against each listener's ears, awareness (unaware, alerted, engaged), breakable glass
+  and the thrown stone. Open: the sweep's AI neither sneaks nor throws.
+- [Morale](progression-and-meta.md#3-morale-stress--predispositions) — **built**: stress, a
+  rolled break into panic, frenzy or freeze, rolled steadying, temperament and the three
+  predispositions. Surges are a proposal.
+- [Interaction & Environment](interaction-and-environment.md) — **proposed**: the item verb
+  pointed at tiles and objects as well as people — keys and locks, doors, fire.

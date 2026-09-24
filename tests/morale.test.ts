@@ -4,7 +4,9 @@ import { AmmoId, ShotMode, WeaponId } from '../src/core/Arsenal'
 import { characterSheet } from '../src/core/Characters'
 import { NO_FOCUS, NO_FX } from '../src/core/Combatant'
 import { Grid, Side } from '../src/core/Grid'
-import { MoraleBreak } from '../src/core/Morale'
+import { MoraleBreak, type Predisposition, Temperament } from '../src/core/Morale'
+import { TraitId } from '../src/core/Traits'
+import type { Soldier } from '../src/entities/Soldier'
 import { Rng, type Roll } from '../src/core/rng'
 import { eyesOf, sees } from '../src/core/Visibility'
 import { WallKind } from '../src/core/Walls'
@@ -22,9 +24,8 @@ import { TurnManager } from '../src/game/TurnManager'
  * over, which is what {@link handOver} does.
  *
  * Constant dice make a roll's outcome a statement rather than luck: at 0.1
- * every roll under 10% fails and every one over succeeds, and a break's kind
- * is the first of the three (panic); 0.5 the second (frenzy); 0.9 the third
- * (freeze).
+ * every roll under 10% fails and every one over succeeds. Which way a break
+ * goes is not rolled; tests set the temperament ({@link be}).
  */
 function match(roll: Roll, build: (grid: Grid) => void = () => {}) {
   const world = new World()
@@ -62,6 +63,15 @@ function match(roll: Roll, build: (grid: Grid) => void = () => {}) {
 }
 
 const always = (value: number): Roll => () => value
+
+/** Make a unit somebody in particular: its sheet's temperament, and a predisposition or none. */
+function be(unit: Soldier, who: { temperament?: Temperament; predisposition?: Predisposition }): void {
+  unit.sheet = {
+    ...unit.sheet,
+    temperament: who.temperament ?? unit.sheet.temperament,
+    traits: who.predisposition ? [who.predisposition] : [],
+  }
+}
 
 describe('Stress', () => {
   test('a kill costs every one of the dead unit’s squadmates once, and pays the killer and theirs', () => {
@@ -143,9 +153,9 @@ describe('Breaking is rolled, from morale', () => {
 
 describe('A broken unit', () => {
   test('frozen, has no points and takes no orders from anybody', () => {
-    const m = match(always(0.9))
+    const m = match(always(0))
     m.red.tile = { x: 10, y: 10 }
-    m.red.morale = 0
+    m.red.morale = MORALE.freezeAbove
     m.handOver()
 
     expect(m.red.broken).toBe(MoraleBreak.Freeze)
@@ -166,6 +176,7 @@ describe('A broken unit', () => {
     m.red.tile = { x: 10, y: 10 }
     m.blue.tile = { x: 10, y: 16 }
     m.red.morale = 0
+    be(m.red, { temperament: Temperament.Skittish })
     expect(sees(m.grid, m.blue.tile, eyesOf(m.grid, m.blue), m.red.tile)).toBe(true)
     m.handOver()
 
@@ -183,6 +194,7 @@ describe('A broken unit', () => {
     m.red.tile = { x: 10, y: 10 }
     m.blue.tile = { x: 10, y: 16 }
     m.red.morale = 0
+    be(m.red, { temperament: Temperament.Hothead })
     m.handOver()
 
     expect(m.red.broken).toBe(MoraleBreak.Frenzy)
@@ -197,6 +209,7 @@ describe('A broken unit', () => {
     m.red.tile = { x: 10, y: 10 }
     m.blue.tile = { x: 10, y: 16 }
     m.red.morale = 0
+    be(m.red, { temperament: Temperament.Skittish })
     m.commands.apply({ type: 'endTurn', faction: Faction.Blue }, 'local')
     const mate: Command = { type: 'toggleCover', faction: Faction.Red, squadIndex: 1 }
 
@@ -204,5 +217,99 @@ describe('A broken unit', () => {
     expect(m.commands.apply(mate, 'local').applied).toBe(false)
     m.settle()
     expect(m.commands.apply(mate, 'local').applied).toBe(true)
+  })
+})
+
+describe('Character', () => {
+  test('which way a unit breaks: a freeze while not far gone, past that its temperament; a daredevil always charges', () => {
+    // At dice 0 every chance above nothing succeeds, so each of these breaks.
+    const breaks = (morale: number, who: Parameters<typeof be>[1]) => {
+      const m = match(always(0))
+      m.red.morale = morale
+      be(m.red, who)
+      m.handOver()
+      return m.red.broken
+    }
+    const edge = MORALE.freezeAbove
+    expect([
+      breaks(edge, { temperament: Temperament.Hothead }),
+      breaks(edge - 1, { temperament: Temperament.Skittish }),
+      breaks(edge - 1, { temperament: Temperament.Hothead }),
+      breaks(edge, { temperament: Temperament.Skittish, predisposition: TraitId.Daredevil }),
+    ]).toEqual([MoraleBreak.Freeze, MoraleBreak.Panic, MoraleBreak.Frenzy, MoraleBreak.Frenzy])
+  })
+
+  test('a loner feels nothing of a squadmate’s death, and takes no share of the squad’s kills', () => {
+    const { squads, combat, blue, red } = match(always(0.5))
+    blue.tile = { x: 10, y: 10 }
+    red.tile = { x: 10, y: 14 }
+    red.hp = 1
+    for (const unit of squads.soldiers) unit.morale = 50
+    const [, redLoner, redMate] = squads.byFaction[Faction.Red]
+    const [, blueLoner, blueMate] = squads.byFaction[Faction.Blue]
+    be(redLoner!, { predisposition: TraitId.Loner })
+    be(blueLoner!, { predisposition: TraitId.Loner })
+
+    combat.fireShot(blue, red, ShotMode.Snap, [true])
+
+    expect(red.isDead).toBe(true)
+    expect([redLoner!.morale, redMate!.morale]).toEqual([50, 50 - MORALE.mateDown])
+    expect([blueLoner!.morale, blueMate!.morale]).toEqual([50, 50 + MORALE.enemyDown])
+  })
+
+  test('a teamplayer steadies squadmates within reach, but not a loner and not from further off', () => {
+    const m = match(always(0.99))
+    const [teamplayer, near, far, loner] = m.squads.byFaction[Faction.Red]
+    be(teamplayer!, { predisposition: TraitId.Teamplayer })
+    be(loner!, { predisposition: TraitId.Loner })
+    teamplayer!.tile = { x: 10, y: 10 }
+    near!.tile = { x: 12, y: 12 }
+    loner!.tile = { x: 8, y: 11 }
+    far!.tile = { x: 13, y: 10 }
+    for (const unit of [near!, far!, loner!]) unit.morale = 60
+    m.handOver()
+
+    expect([near!.morale, far!.morale, loner!.morale]).toEqual([
+      60 + MORALE.rally + MORALE.teamplayerAura,
+      60 + MORALE.rally,
+      60 + MORALE.rally,
+    ])
+  })
+
+  test('a teamplayer holds while the squad is whole, and not once a squadmate is badly hurt', () => {
+    // Just short of steady: at dice 0 anybody who rolls, breaks.
+    const holds = (hurt: boolean) => {
+      const m = match(always(0))
+      const [teamplayer, mate] = m.squads.byFaction[Faction.Red]
+      be(teamplayer!, { predisposition: TraitId.Teamplayer })
+      teamplayer!.morale = MORALE.steady - 1
+      if (hurt) mate!.hp = Math.floor(mate!.maxHp / 2)
+      m.handOver()
+      return teamplayer!.broken === null
+    }
+    expect([holds(false), holds(true)]).toEqual([true, false])
+  })
+
+  test('a daredevil is lifted by long odds and bored by an easy win', () => {
+    // Just short of steady, where anybody who rolls at dice 0 breaks.
+    const holds = (blueDead: number, redDead: number) => {
+      const m = match(always(0))
+      const daredevil = m.red
+      be(daredevil, { predisposition: TraitId.Daredevil })
+      daredevil.morale = MORALE.steady - 1
+      for (const unit of m.squads.byFaction[Faction.Blue].slice(SQUAD_SIZE - blueDead)) unit.hp = 0
+      for (const unit of m.squads.byFaction[Faction.Red].slice(SQUAD_SIZE - redDead)) unit.hp = 0
+      m.handOver()
+      return daredevil.broken === null
+    }
+    // Outnumbered, it holds; even, it breaks as anyone would; winning by two,
+    // it breaks even from steady.
+    expect([holds(0, 1), holds(0, 0)]).toEqual([true, false])
+    const bored = match(always(0))
+    be(bored.red, { predisposition: TraitId.Daredevil })
+    bored.red.morale = MORALE.steady
+    for (const unit of bored.squads.byFaction[Faction.Blue].slice(SQUAD_SIZE - MORALE.daredevilBoredBy)) unit.hp = 0
+    bored.handOver()
+    expect(bored.red.broken).toBe(MoraleBreak.Frenzy)
   })
 })

@@ -33,6 +33,12 @@ export const TraitId = {
   Silenced: 'silenced',
   /** Worn: plate, at the price of moving freely. */
   Plated: 'plated',
+  /** Innate predisposition: morale rises when things are dire, and a break is a charge. */
+  Daredevil: 'daredevil',
+  /** Innate predisposition: steadied by a healthy squad, and steadies those near. */
+  Teamplayer: 'teamplayer',
+  /** Innate predisposition: untouched by what happens to squadmates, for good or ill. */
+  Loner: 'loner',
 } as const
 export type TraitId = (typeof TraitId)[keyof typeof TraitId]
 
@@ -193,6 +199,27 @@ export const TRAITS: Record<TraitId, TraitSpec> = {
     // to answer: broad shoulders carry the weight, they do not make the
     // wearer a smaller target.
     effects: { armor: 9, damageTaken: -0.2, evasion: -4, moveCost: 0.15, maxAp: -1 },
+  },
+  // Predispositions: nothing a hit chance can express, so no effects here. What
+  // they do is to how morale moves, and that is `core/Morale`'s.
+  [TraitId.Daredevil]: {
+    id: TraitId.Daredevil,
+    name: 'Daredevil',
+    description:
+      'Craves the odds against them: morale rises when outnumbered or badly hurt, sags when winning easily, and a break is always a charge.',
+    effects: {},
+  },
+  [TraitId.Teamplayer]: {
+    id: TraitId.Teamplayer,
+    name: 'Teamplayer',
+    description: 'Steadier while the squad is whole, and steadies squadmates within two tiles every turn.',
+    effects: {},
+  },
+  [TraitId.Loner]: {
+    id: TraitId.Loner,
+    name: 'Loner',
+    description: 'Shrugs off squadmates falling or breaking, and takes nothing from their kills or their company.',
+    effects: {},
   },
 }
 

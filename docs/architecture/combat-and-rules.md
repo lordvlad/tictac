@@ -260,17 +260,25 @@ death costs every squadmate 20 and pays the killer 15 and its squadmates 5 (frie
 nobody; a death is counted once, however many rounds land on the body).
 
 At each handover, after the incoming side's points are handed back, `CommandSystem` calls
-`rollMorale` with the match's dice. In squad order: a broken unit rolls to steady at
-`steadyChance` — 25% on the first of its turns after breaking, +25% each turn after, so certain
-on the fourth — and comes back to at least steady (50); anyone else below steady rolls to break
-at 2% per point short, and a break's kind is a second draw, evenly among **panic**, **frenzy**
-and **freeze** (the character deciding it is ITEM-033). A unit that holds gets 5 back; each
-break costs the breaker's squadmates 10, after every roll is made. Nobody at steady or above
-draws, so a match in which nobody was shaken draws what it drew before morale existed.
+`rollMorale` with the match's dice. In squad order, each unit's predisposition pulls first
+(`lean`: a daredevil +10 when its side is outnumbered or it is below half health, −5 when its
+side outnumbers the other by two; a teamplayer +5 while every squadmate is above half health).
+Then a broken unit rolls to steady at `steadyChance` — 25% on the first of its turns after
+breaking, +25% each turn after, so certain on the fourth — and comes back to at least steady
+(50); anyone else below steady rolls to break at 2% per point short. Which way it breaks is not
+drawn (`breakKind`): **freeze** at 25 morale or more, below that **frenzy** for a hothead and
+**panic** for a skittish one, and always frenzy for a daredevil. A unit that holds gets 5 back,
+10 within two tiles of a holding teamplayer; each break costs the breaker's squadmates 10,
+after every roll is made. A loner takes none of the squad's losses, breaks or kills, and no
+teamplayer's company. Temperament is on the sheet (`CharacterSheet.temperament`, checked by
+`sanitizeSheet`); a predisposition is an innate trait with no combat effects. Nobody at steady or
+above draws, so a match in which nobody was shaken draws what it drew before morale existed.
 
 A frozen unit's points go to zero (taken, not spent: exhaustion does not see them). Panicking
 and frenzied units are then run by the rules (`src/game/Breakdown.ts`), one command at a time,
-each asked for after the last was carried out and walked, with the origin `rules`:
+each asked for after the last was carried out and walked, with the origin `rules`. The runs go
+to the *front* of the applier's queue: a peer's commands for the turn can already be waiting
+behind the handover, and they were decided after the runs, on the peer that made them.
 
 - **panic**: stand, walk to the reachable tile in sight of the fewest enemies its side can see,
   farthest from the nearest of them, then crouch if it can afford to. Seeing nobody, it cowers.

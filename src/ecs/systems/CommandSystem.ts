@@ -308,12 +308,17 @@ export class CommandSystem extends System {
     for (const change of rollMorale(this.squads.soldiers, incoming, this.combat.roll)) {
       this.onMorale?.(change.unit, change.broke)
     }
+    // Ahead of anything already waiting, not behind it: a peer's commands for
+    // the turn can arrive before this side has got through the handover, and
+    // they were decided after these runs, on the peer that made them.
+    const runs: Array<() => void> = []
     for (const unit of this.squads.byFaction[incoming] ?? []) {
       if (unit.isDead) continue
       if (unit.broken === MoraleBreak.Panic || unit.broken === MoraleBreak.Frenzy) {
-        this.queue.push(() => this.drive(unit, false, 0))
+        runs.push(() => this.drive(unit, false, 0))
       }
     }
+    this.queue.unshift(...runs)
   }
 
   /**

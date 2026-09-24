@@ -1035,3 +1035,41 @@ evenly split across the three kinds.
       one has no points. None of them takes an order.
 - [x] The other side sees a unit break (callout, card chip, target badge; verified in a
       hot-seat match in the browser).
+
+---
+
+### [ITEM-033] Character: Who Runs and Who Charges
+**Completed Date:** 2026-09-24  
+**Type:** Feature  
+**Milestone:** M3 — Reconnaissance & Morale  
+
+#### Why
+ITEM-014 rolled a break's direction evenly. The GDD wants the person to decide it, and wants
+Daredevil, Teamplayer and Loner to change how morale moves.
+
+#### Key Changes
+- **Temperament** on every sheet, hothead or skittish, dealt half and half, checked by
+  `sanitizeSheet`, shown on the loadout card.
+- **Which break** is no longer drawn (`breakKind`): freeze at 25 morale or more, below that
+  frenzy for a hothead and panic for a skittish one; a daredevil always charges.
+- **Predispositions** as innate traits with no combat numbers, rolled apart from the combat
+  trait (35%): daredevil (+10 when outnumbered or below half health, −5 when winning by two),
+  teamplayer (+5 while the squad is above half health; +5 to squadmates within 2 tiles), loner
+  (none of the squad's losses, breaks, kills or company).
+- Catalogue §7 lists temperaments and predispositions; trait rows say "morale (§7)".
+- **Fixed on the way**: a broken unit's run was queued *behind* anything already waiting, so a
+  peer's next commands arriving before this side got through the handover were applied before
+  the rules' run here and after it on the peer. The existing live-queue test caught it once a
+  seed produced a panic; the runs now go to the front of the queue.
+- GDD combat §2.7 now says which extensions are built.
+
+#### Measured
+Mirror on blocks 1000/5000/9000: 605 / 564 / 31. Per hundred units (blocks 1000–1399), breaks:
+none 11.5, teamplayer 7.9, loner 4.4, daredevil 3.5.
+
+#### Acceptance Criteria
+- [x] A character's sheet decides whether they panic or go into a frenzy.
+- [x] Daredevil, Teamplayer and Loner each measurably change how a unit's morale moves (rule
+      tests for each, proven red; in the sweep all three break less than nobody-in-particular).
+- [ ] Open: every predisposition is a net gain. Whether one should cost something is a design
+      question, not settled here.
