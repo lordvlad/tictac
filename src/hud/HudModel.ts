@@ -601,6 +601,7 @@ function statusChips(soldier: Soldier): HudStatusChip[] {
     if (spec.apBonus) {
       terms.push(`${spec.apBonus > 0 ? '+' : ''}${Math.round(spec.apBonus * stacks * 100)}% AP`)
     }
+    if (spec.damagePerTurn) terms.push(`-${spec.damagePerTurn * stacks} HP at the start of each turn`)
 
     chips.push({
       name: stacks > 1 ? `${spec.name} x${stacks}` : spec.name,
@@ -789,6 +790,11 @@ function itemPanelOf(item: ItemTargetSnapshot, user: Soldier): HudItemPanel {
   }
 }
 
+/** The names of every ailment a kit can treat, as `treatAilments` reads in words. */
+const AILMENTS: readonly string[] = Object.values(STATUSES)
+  .filter((spec) => spec.ailment)
+  .map((spec) => spec.name)
+
 /** One effect in words. Deliberately no figures: see {@link HudItemPanel}. */
 function effectLine(effect: ItemEffect): string {
   switch (effect.kind) {
@@ -801,6 +807,8 @@ function effectLine(effect: ItemEffect): string {
       return "Tops up the user's points"
     case 'clearStatuses':
       return 'Clears every status'
+    case 'treatAilments':
+      return `Stops ${AILMENTS.join(' and ').toLowerCase()}`
     case 'applyStatus':
       return `Applies ${STATUSES[effect.status].name}`
   }

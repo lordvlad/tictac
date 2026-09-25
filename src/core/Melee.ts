@@ -47,6 +47,8 @@ export interface MeleeSpec {
   armorShred: number
   critChance: number
   critMultiplier: number
+  /** Chance, in percent, that a blow which lands starts the target bleeding, before armour. */
+  bleedChance: number
   /**
    * Metres an ordinary ear hears a blow at (`core/Noise`); nought is silent.
    * A knife in the dark makes no sound; a hammer on a plate carrier carries
@@ -75,6 +77,7 @@ export const MELEE: Record<MeleeId, MeleeSpec> = {
     armorShred: 0,
     critChance: 5,
     critMultiplier: 1.5,
+    bleedChance: 0,
     loudness: 0,
     fromBehind: 1,
   },
@@ -89,6 +92,8 @@ export const MELEE: Record<MeleeId, MeleeSpec> = {
     armorShred: 0,
     critChance: 25,
     critMultiplier: 2,
+    // What a blade is for.
+    bleedChance: 45,
     loudness: 0,
     fromBehind: 5,
   },
@@ -105,6 +110,8 @@ export const MELEE: Record<MeleeId, MeleeSpec> = {
     armorShred: 12,
     critChance: 0,
     critMultiplier: 1,
+    // Blunt: it breaks what is under the skin more often than the skin.
+    bleedChance: 10,
     loudness: 12,
     fromBehind: 1,
   },

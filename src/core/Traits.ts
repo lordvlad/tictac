@@ -19,6 +19,8 @@ export const TraitId = {
   Stoic: 'stoic',
   /** Innate: gives nothing away under fire. */
   Inscrutable: 'inscrutable',
+  /** Innate: wounds close on their own. */
+  Hardy: 'hardy',
   /** Worn: a weave that spreads the shock of a hit out of any one place. */
   Nullweave: 'nullweave',
   /** Wounded: hurt enough to slow down and tire early. */
@@ -62,6 +64,8 @@ export interface TraitEffects {
   maxAp?: number
   /** No hit on this unit can be a critical, whatever the attacker rolled. */
   critImmune?: boolean
+  /** No hit on this unit can start it bleeding (`StatusKind.Bleeding`). */
+  bleedImmune?: boolean
   /**
    * Extra fraction added to every step this unit takes: 0.5 is half again.
    *
@@ -150,11 +154,19 @@ export const TRAITS: Record<TraitId, TraitSpec> = {
     description: 'Gives nothing away: being shot at never reveals their sheet.',
     effects: { unreadable: true },
   },
+  [TraitId.Hardy]: {
+    id: TraitId.Hardy,
+    name: 'Hardy',
+    description: 'Wounds close on their own: never bleeds.',
+    effects: { bleedImmune: true },
+  },
   [TraitId.Nullweave]: {
     id: TraitId.Nullweave,
     name: 'Nullweave',
-    description: 'Spreads the shock of a hit: no critical can land, but bulky.',
-    effects: { critImmune: true, evasion: -3 },
+    // The weave that keeps a round from finding a vital keeps it from opening
+    // one up too: the vest's case against a critical is its case against a bleed.
+    description: 'Spreads the shock of a hit: no critical can land and no wound bleeds, but bulky.',
+    effects: { critImmune: true, bleedImmune: true, evasion: -3 },
   },
   [TraitId.Limping]: {
     id: TraitId.Limping,
@@ -260,6 +272,7 @@ export interface ResolvedTraits {
   maxHp: number
   maxAp: number
   critImmune: boolean
+  bleedImmune: boolean
 }
 
 export const NO_TRAITS: ResolvedTraits = {
@@ -278,6 +291,7 @@ export const NO_TRAITS: ResolvedTraits = {
   maxHp: 0,
   maxAp: 0,
   critImmune: false,
+  bleedImmune: false,
 }
 
 /**
@@ -324,6 +338,7 @@ function clearTraits(out: ResolvedTraits): void {
   out.maxHp = 0
   out.maxAp = 0
   out.critImmune = false
+  out.bleedImmune = false
 }
 
 /**
@@ -349,6 +364,7 @@ function addEffects(out: ResolvedTraits, e: TraitEffects): void {
   out.maxHp += e.maxHp ?? 0
   out.maxAp += e.maxAp ?? 0
   out.critImmune = out.critImmune || (e.critImmune ?? false)
+  out.bleedImmune = out.bleedImmune || (e.bleedImmune ?? false)
 }
 
 /**

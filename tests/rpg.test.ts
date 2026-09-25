@@ -45,6 +45,7 @@ function combatant(overrides: Partial<CombatantStats> = {}): CombatantStats {
     proficiency: 0,
     evasion: 0,
     critImmune: false,
+    bleedImmune: false,
     sidearm: MeleeId.Fists,
     meleeSkill: 0,
     meleePower: 0,

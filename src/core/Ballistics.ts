@@ -1,4 +1,4 @@
-import { AIM, COVER, CRIT } from '../config'
+import { AIM, BLEED, COVER, CRIT } from '../config'
 import {
   type AmmoSpec,
   type GrenadeSpec,
@@ -52,6 +52,8 @@ export interface CombatantStats {
   evasion: number
   /** No hit on this unit can be a critical. */
   critImmune: boolean
+  /** No hit on this unit can start it bleeding. */
+  bleedImmune: boolean
   /**
    * Extra fraction on the weapon's range falloff, from whatever this unit is
    * carrying. Negative is glass helping.
@@ -91,6 +93,8 @@ export interface EffectiveWeapon {
   critChance: number
   critMultiplier: number
   critRangeBias: number
+  /** Chance, in percent, that a round or blow which lands starts a bleed, before armour. */
+  bleedChance: number
 }
 
 /**
@@ -126,6 +130,7 @@ export function effectiveWeapon(stats: CombatantStats, mode: ShotMode): Effectiv
     critChance: weapon.critChance + stats.critChanceBonus,
     critMultiplier: Math.max(1, weapon.critMultiplier + stats.critMultiplierBonus),
     critRangeBias: weapon.critRangeBias,
+    bleedChance: weapon.bleedChance,
   }
 }
 
@@ -316,6 +321,21 @@ export function critBreakdown(
   }
 }
 
+/**
+ * The chance, in percent, that a round or blow which lands starts `target`
+ * bleeding (`StatusKind.Bleeding`).
+ *
+ * Built like a critical's (`critBreakdown`): the weapon sets the odds, the
+ * target's armour covers what a wound needs to reach — unless the round goes
+ * through it — and a target that cannot bleed ends the question. No distance
+ * term: a round opens a wound wherever it was fired from.
+ */
+export function bleedChance(eff: EffectiveWeapon, target: CombatantStats): number {
+  if (target.bleedImmune || eff.bleedChance <= 0) return 0
+  const armorTerm = BLEED.armorResist * Math.max(0, target.armor) * (1 - eff.armorPen)
+  return clamp(Math.round(eff.bleedChance - armorTerm), 0, BLEED.max)
+}
+
 /** What a hit actually does once armour has had its say. */
 export interface DamageResult {
   /** HP removed. */
@@ -483,5 +503,6 @@ export function meleeWeapon(attacker: CombatantStats, fromBehind = false): Effec
     critChance: spec.critChance > 0 ? spec.critChance + attacker.critChanceBonus : 0,
     critMultiplier: Math.max(1, spec.critMultiplier + (spec.critChance > 0 ? attacker.critMultiplierBonus : 0)),
     critRangeBias: 0,
+    bleedChance: spec.bleedChance,
   }
 }

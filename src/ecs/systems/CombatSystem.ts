@@ -2,7 +2,8 @@ import { System } from '../System'
 import type { World } from '../World'
 import { StanceComponent } from '../components/StanceComponent'
 import { FIRE, type Faction, RULES } from '../../config'
-import type { GrenadeId, ShotMode } from '../../core/Arsenal'
+import { type GrenadeId, type ShotMode, STATUSES } from '../../core/Arsenal'
+import { statusStacks } from '../../core/Ballistics'
 import type { Tile } from '../../core/Grid'
 import type { Grid } from '../../core/Grid'
 import type { Soldier } from '../../entities/Soldier'
@@ -214,6 +215,26 @@ export class CombatSystem extends System {
     shake(this.squads.soldiers, null, hits)
     this.record(null, hits, null)
     return FIRE.damage
+  }
+
+  /**
+   * What `unit`'s ailments cost it at the start of its own turn: every stack
+   * of a status with `damagePerTurn` — a bleed, and poison when there is one —
+   * armour or not, with the morale a wound costs. Nobody did it, as with fire.
+   * Resolved by the rules on both peers from state both hold; no dice.
+   *
+   * @returns the damage done.
+   */
+  suffer(unit: Soldier): number {
+    if (unit.isDead) return 0
+    let damage = 0
+    for (const state of unit.statuses) damage += STATUSES[state.kind].damagePerTurn * statusStacks(state)
+    if (damage <= 0) return 0
+    applyHitEffects(unit, damage, 0, null, this.fx)
+    const hits = [{ soldier: unit, damage, killed: unit.isDead, armorShred: 0, status: null, crit: false }]
+    shake(this.squads.soldiers, null, hits)
+    this.record(null, hits, null)
+    return damage
   }
 
   /**

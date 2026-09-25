@@ -444,6 +444,22 @@ export const CRIT = {
 }
 
 /**
+ * Who a wound starts bleeding, and what a bleed does (`StatusKind.Bleeding`).
+ * The chance per landed round or blow is the weapon's own `bleedChance`.
+ */
+export const BLEED = {
+  /**
+   * Percentage points off per point of the target's armour, before
+   * penetration: plate keeps a round off the skin as it keeps it off the
+   * vitals, and a round that goes through plate keeps its chance. The same
+   * figure as a critical's (`CRIT.armorResist`): both are about where a round
+   * gets to, and plate answers both the same way.
+   */
+  armorResist: 0.35,
+  max: 60,
+}
+
+/**
  * Share of the body still showing to a shooter, by the cover the line crosses
  * and the target's stance. Crouching always shows less than standing, and
  * hunkering behind real cover shows less than crouching in the open. Fitted to

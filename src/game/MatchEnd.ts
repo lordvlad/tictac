@@ -1,4 +1,5 @@
 import { Faction } from '../config'
+import { STATUSES } from '../core/Arsenal'
 import type { Grid } from '../core/Grid'
 import { type Growth, growthFrom } from '../core/Progression'
 import { Rng } from '../core/rng'
@@ -50,13 +51,16 @@ const SURVIVOR_STREAM = 0xc2b2ae35
  * Drawn at random from a stream of the match seed — both peers pick the same
  * one without anything travelling, and the match's dice are the rules' alone.
  * Preferably somebody whose condition was not still getting worse when they
- * fell: a body lying in fire keeps burning. Poison and bleeding would join
- * that test when they exist. When everyone is burning, anyone. Null when the
+ * fell: lying in fire, or with an ailment on them (bleeding; poison when it
+ * exists). When everyone was, anyone. Null when the
  * side has nobody at all, which does not happen in a squad.
  */
 export function carriedOut(squads: Sides, loser: Faction, grid: Grid, seed: number): Soldier | null {
   const fallen = squads.byFaction[loser]
   if (fallen.length === 0) return null
-  const steady = fallen.filter((unit) => grid.fireAt(unit.tile.x, unit.tile.y) === 0)
+  const steady = fallen.filter(
+    (unit) =>
+      grid.fireAt(unit.tile.x, unit.tile.y) === 0 && !unit.statuses.some((state) => STATUSES[state.kind].ailment),
+  )
   return new Rng((seed ^ SURVIVOR_STREAM) >>> 0).pick(steady.length > 0 ? steady : fallen)
 }

@@ -93,6 +93,20 @@ $$\text{crit}\% = \text{clamp}\Big(w_{\text{crit}} + S \cdot b_w\big(2\tfrac{d}{
 - A crit multiplies the round **before** armour subtracts, so plate blunts a critical hit with
   the same flat bite it takes out of an ordinary one rather than being bypassed.
 
+### Bleeding
+Built like a critical. `bleedChance(eff, target)` (`core/Ballistics`) takes the weapon's
+`bleedChance` (a gun's on `Weapon`, a sidearm's on `MeleeSpec`) and takes off
+`BLEED.armorResist` per point of armour the round does not penetrate — the crit's figure —
+capped at `BLEED.max`; a target with `bleedImmune` (trait flag: Hardy, Nullweave) gets 0. In
+`executeShot` and `executeMelee`, each landed round, after its crit draw, draws once more for
+the bleed (`openWound`) — but not when the chance is 0 or the target died of the hit, so both
+peers skip the same draws. A bleed is `StatusKind.Bleeding` (6 ticks: three of the unit's own
+turns; stacks to 3). At the handover, after fire, `CommandSystem.sufferAilments` has
+`CombatSystem.suffer` charge the incoming side every status's `damagePerTurn` per stack, armour
+ignored, with a wound's morale and the service record's wounds; no dice. `StatusSpec.ailment`
+marks what a first aid kit's `treatAilments` effect ends and what `carriedOut` passes over —
+bleeding now, poison later, with no other change.
+
 ### Where a modifier comes from
 A unit's effective numbers are one additive fold over four sources, none of which normally
 knows about the others: the **character sheet** it was rolled with, **wounds** derived from its

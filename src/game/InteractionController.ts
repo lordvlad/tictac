@@ -11,7 +11,7 @@ import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
 import { buildHudModel, type EndScreen, endScreens, type HudIntent, tileReadout } from '../hud/HudModel'
 import { carriedOut, debrief, winnerOf } from './MatchEnd'
-import { calculateHitChance } from './Combat'
+import { ailmentCost, calculateHitChance } from './Combat'
 import { compareDigests, digestWorld, reportDivergence, type StateDigest } from './StateDigest'
 import { RpcMethods } from './JsonRpc'
 import type { Roll } from '../core/rng'
@@ -529,6 +529,12 @@ export class InteractionController {
         this.exitShootMode()
         break
       case 'selectTarget': {
+        // The strip shows patients while a kit is in hand, and enemies otherwise.
+        if (this.aimedItem !== null) {
+          const mate = this.squads.byFaction[this.turnManager.activeFaction][intent.index]
+          if (mate) this.selectItemTarget(mate)
+          break
+        }
         const enemy = this.squads.byFaction[this.enemyFaction][intent.index]
         if (enemy && !enemy.isDead) this.shoot.selectTarget(enemy)
         this.renderOverlay()
@@ -929,18 +935,23 @@ export class InteractionController {
   /**
    * Who in reach is worst off in whatever the item restores, so the common
    * case is one tap — the same favour shoot mode does by pre-picking the best
-   * odds. Nobody is pre-picked when nobody needs it: spending a kit on a unit
-   * at full health should take a deliberate tap.
+   * odds. An ailment the kit ends counts as the hit points it will still cost
+   * (a bleed on a unit at full health is a need). Nobody is pre-picked when
+   * nobody needs it: spending a kit on a unit that does not should take a
+   * deliberate tap.
    */
   private neediestNearby(user: Soldier, itemId: ItemId): Soldier | null {
     const effects = ITEMS[itemId].effects
     const treats = effects.some((e) => e.kind === 'restoreHp')
     const repairs = effects.some((e) => e.kind === 'restoreArmor')
+    const stanches = effects.some((e) => e.kind === 'treatAilments')
     let best: Soldier | null = null
     let worst = 0
     for (const mate of this.itemCandidates(user)) {
       const need =
-        (treats ? mate.maxHp - mate.hp : 0) + (repairs ? mate.maxArmor - mate.armor : 0)
+        (treats ? mate.maxHp - mate.hp : 0) +
+        (repairs ? mate.maxArmor - mate.armor : 0) +
+        (stanches ? ailmentCost(mate) : 0)
       if (need > worst) {
         worst = need
         best = mate

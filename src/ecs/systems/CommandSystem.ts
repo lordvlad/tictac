@@ -154,6 +154,8 @@ export class CommandSystem extends System {
   onMorale?: (unit: Soldier, broke: MoraleBreak | null) => void
   /** Fire burned a unit: stepping in, starting its turn there, or caught by the blast. */
   onBurned?: (unit: Soldier, damage: number) => void
+  /** An ailment — a bleed, poison later — cost a unit this much as its turn began. */
+  onSuffered?: (unit: Soldier, damage: number) => void
 
   /** Reactions fired so far: a fact about the match, not about any one command. */
   reactions = 0
@@ -349,6 +351,18 @@ export class CommandSystem extends System {
     }
   }
 
+  /**
+   * The incoming side's ailments, at the handover: every unit bleeding (or,
+   * later, poisoned) pays for it as its turn starts — after the fire, before
+   * its nerve is rolled, which the loss has just shaken.
+   */
+  private sufferAilments(): void {
+    for (const unit of this.squads.byFaction[this.turns.activeFaction] ?? []) {
+      const damage = this.combat.suffer(unit)
+      if (damage > 0) this.onSuffered?.(unit, damage)
+    }
+  }
+
   /** An incendiary's blast catches, and whoever is standing in it burns. */
   private kindle(at: Tile, spec: GrenadeSpec): void {
     const lit = new Set(kindle(this.ground, at, spec.areaRadius, spec.ignites))
@@ -484,6 +498,7 @@ export class CommandSystem extends System {
         this.pushedThrough(this.turns.activeFaction)
         this.turns.startNextTurn()
         this.burnDown()
+        this.sufferAilments()
         this.rally()
         return carried
       }

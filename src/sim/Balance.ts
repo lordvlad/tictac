@@ -96,6 +96,8 @@ export interface SweepReport {
   grenadesPerMatch: number
   /** Hit points each side lost to fire, per match: whether fire is doing anything at all. */
   burnedPerMatch: Record<'blue' | 'red', number>
+  /** Hit points each side lost to bleeding, per match. */
+  bledPerMatch: Record<'blue' | 'red', number>
   /** Doors per match and how many stood open at the end: whether the policy goes through them. */
   doorsPerMatch: { hung: number; opened: number }
   /**
@@ -285,6 +287,10 @@ export function sweep(options: SweepOptions): SweepReport {
       blue: round(outcomes.reduce((n, o) => n + o.burned[Faction.Blue], 0) / outcomes.length),
       red: round(outcomes.reduce((n, o) => n + o.burned[Faction.Red], 0) / outcomes.length),
     },
+    bledPerMatch: {
+      blue: round(outcomes.reduce((n, o) => n + o.bled[Faction.Blue], 0) / outcomes.length),
+      red: round(outcomes.reduce((n, o) => n + o.bled[Faction.Red], 0) / outcomes.length),
+    },
     doorsPerMatch: {
       hung: round(outcomes.reduce((n, o) => n + o.doors.hung, 0) / outcomes.length),
       opened: round(outcomes.reduce((n, o) => n + o.doors.opened, 0) / outcomes.length),
@@ -353,7 +359,7 @@ export function formatReport(report: SweepReport): string {
     `morale: per match ${report.breaksPerMatch.panic} panics, ${report.breaksPerMatch.frenzy} frenzies, ${report.breaksPerMatch.freeze} freezes`,
   )
   lines.push(
-    `grenades: ${report.grenadesPerMatch} thrown per match; fire burned blue ${report.burnedPerMatch.blue} hp, red ${report.burnedPerMatch.red} hp`,
+    `grenades: ${report.grenadesPerMatch} thrown per match; fire burned blue ${report.burnedPerMatch.blue} hp, red ${report.burnedPerMatch.red} hp; bleeding cost blue ${report.bledPerMatch.blue} hp, red ${report.bledPerMatch.red} hp`,
   )
   lines.push(
     `doors: ${report.doorsPerMatch.opened} of ${report.doorsPerMatch.hung} standing open at the end of a match`,

@@ -1436,6 +1436,57 @@ the loser takes at least something out of the match.
 
 ---
 
+### [ITEM-036] Bleeding, and Ailments a First Aid Kit Treats
+**Completed Date:** 2026-09-25  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+The user, before persistence: one more combat item — a bleeding status that behaves like a
+critical. Any weapon, ranged or melee, may cause it, some more than others; some buffs prevent
+it, as a Nullweave vest prevents crits; health packs stop it — and will stop poison, so the
+design has to leave room for that.
+
+#### Key Changes
+- `Weapon.bleedChance` and `MeleeSpec.bleedChance`: sniper 35%, knife 45%, shotgun 25%, rifle
+  15%, Gatling 8% a round, club 10%, fists never. `bleedChance(eff, target)` takes armour off as a
+  crit's odds do (`BLEED.armorResist` = `CRIT.armorResist`), and nothing for `bleedImmune`.
+- **Rolled like a crit**: once per landed round or blow, after the crit's draw, from the match's
+  dice; no draw when the chance is 0 or the hit killed.
+- **`StatusKind.Bleeding`**: 8 HP a stack at the start of the unit's own turn, armour ignored,
+  with a wound's morale; stacks to 3; clots after three of its own turns.
+- **Immunity**: new trait flag `bleedImmune` (replicated with the traits), on a new innate trait
+  **Hardy** and on the **Nullweave** vest alongside its crit immunity.
+- **Ailments**: `StatusSpec.ailment` and `damagePerTurn` make bleeding data, not a special case.
+  The first aid kit gained a `treatAilments` effect that ends every ailment; `carriedOut`
+  (ITEM-035) now also passes over the ailing. Poison is one more status entry.
+- HUD: the status chip says what it costs a turn; the kit's panel says it stops bleeding. The
+  kit's pre-pick counts an ailment as the HP it will still cost (`ailmentCost`), so a bleeding
+  unit at full health is picked. **Fixed on the way**: picking a patient from the target strip
+  did nothing — the strip sent `selectTarget`, which only ever chose an enemy.
+  Catalogue: a Bleed column for guns and sidearms, and a paragraph on the rule.
+- Balance report: `bleeding cost` per side per match.
+
+#### Measured
+Mirror on blocks 1000/5000/9000: 623 / 551 / 26. With bleeding off on the same build (Hardy
+already reshuffles the rolled squads): 603 / 560 / 37. Bleeding costs a side 3–4 HP a match: the
+sweep's fights are short and lethal, and plate halves a rifle's odds.
+
+#### Acceptance Criteria
+- [x] Every weapon and sidearm has its own chance; armour lowers it; immunity zeroes it
+      (`tests/bleeding.test.ts`, red against mutants).
+- [x] A landed round rolls for it after the crit; an immune target costs no draw (and the dice
+      counts in `hitmodel` / `melee` tests say exactly what a round or blow draws).
+- [x] It costs HP per stack at the start of the unit's own turns and clots after three; a first
+      aid kit ends it and leaves other statuses; the one carried out is not a bleeding one while
+      anyone else is not.
+- [x] In the browser (seed 7): a unit at full health bleeding twice shows "Bleeding x2" on its
+      card; the first aid kit's panel lists "Treats wounds, Stops bleeding"; the kit pre-picks
+      that unit and ends the bleed.
+- [ ] Open: the sweep's policy never treats a bleed, and bleeding barely moves its numbers.
+
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

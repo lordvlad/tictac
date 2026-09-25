@@ -89,6 +89,12 @@ export abstract class Weapon {
    */
   critRangeBias = 0
   /**
+   * Chance, in percent, that a round which lands starts the target bleeding,
+   * before armour (`bleedChance` in `core/Ballistics`). Like a critical, once
+   * per round, however many pellets of it landed.
+   */
+  bleedChance = 15
+  /**
    * Metres an ordinary ear hears a shot at (`core/Noise`). Far past what can
    * be seen: a gunshot tells a whole quarter of the map that there is a fight.
    * A suppressor keeps `NOISE.suppressed` of it.
@@ -184,6 +190,7 @@ export class Rifle extends Weapon {
     // A service rifle is accurate at any sane distance and has no favourite.
     this.critChance = 12
     this.critMultiplier = 1.5
+    this.bleedChance = 15
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Snap, ShotMode.Aimed, ShotMode.Burst]
@@ -226,6 +233,8 @@ export class Shotgun extends Weapon {
     this.critMultiplier = 1.8
     this.critRangeBias = -1
     this.loudness = 45
+    // Nine holes at once: buckshot is what opens a body up.
+    this.bleedChance = 25
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Snap, ShotMode.Aimed]
@@ -257,6 +266,8 @@ export class Sniper extends Weapon {
     this.critRangeBias = 1
     // A full-power cartridge: the loudest thing on the map that is not a bomb.
     this.loudness = 55
+    // A full-power round leaves a wound that does not close by itself.
+    this.bleedChance = 35
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Snap, ShotMode.Aimed]
@@ -284,6 +295,8 @@ export class Gatling extends Weapon {
     this.critMultiplier = 1.3
     this.critRangeBias = -0.5
     this.loudness = 50
+    // Many small wounds, and ten chances a burst: each round's own is small.
+    this.bleedChance = 8
   }
   get availableModes(): readonly ShotMode[] {
     return [ShotMode.Burst] // ONLY option for Gatling
@@ -403,6 +416,8 @@ export const StatusKind = {
   Winded: 'winded',
   /** Rounds cracking past: harder to shoot back, and slower to move. */
   Suppressed: 'suppressed',
+  /** Losing blood at the start of each of its own turns, until treated or it clots. */
+  Bleeding: 'bleeding',
 } as const
 export type StatusKind = (typeof StatusKind)[keyof typeof StatusKind]
 
@@ -420,6 +435,18 @@ export interface StatusSpec {
   /** Extra action points, as a fraction of the unit's own maximum. */
   apBonus: number
   /**
+   * Hit points lost at the start of each of the unit's own turns, armour or
+   * not: a wound that keeps costing blood.
+   */
+  damagePerTurn: number
+  /**
+   * A condition that gets worse on its own and wants treating: a first aid
+   * kit stops it (`treatAilments`), and the one of a losing side carried out
+   * alive is preferably somebody without one. Bleeding now; poison, when it
+   * exists, is another of these and needs nothing else to be treated.
+   */
+  ailment: boolean
+  /**
    * How many times over it can be in force. Every numeric effect above is per
    * stack, so a status that is not meant to pile up says 1.
    */
@@ -435,6 +462,8 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0,
     apBonus: 0,
+    damagePerTurn: 0,
+    ailment: false,
     maxStacks: 1,
   },
   [StatusKind.Shredded]: {
@@ -445,6 +474,8 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0.25,
     apBonus: 0,
+    damagePerTurn: 0,
+    ailment: false,
     maxStacks: 1,
   },
   [StatusKind.Stimmed]: {
@@ -457,6 +488,8 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0,
     apBonus: 0.2,
+    damagePerTurn: 0,
+    ailment: false,
     maxStacks: 1,
   },
   [StatusKind.Suppressed]: {
@@ -469,6 +502,8 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0,
     apBonus: -0.1,
+    damagePerTurn: 0,
+    ailment: false,
     // Three is being pinned: -36 to hit and a third of the unit's points gone.
     // There is no separate pinned state because there does not need to be one -
     // the degree *is* the difference.
@@ -484,7 +519,24 @@ export const STATUSES: Record<StatusKind, StatusSpec> = {
     defenceBonus: 0,
     damageTakenBonus: 0,
     apBonus: -0.25,
+    damagePerTurn: 0,
+    ailment: false,
     maxStacks: 1,
+  },
+  [StatusKind.Bleeding]: {
+    kind: StatusKind.Bleeding,
+    name: 'Bleeding',
+    // Six ticks is three of the unit's own turns, each costing it blood, then
+    // it clots — unless something treats it first. Another wound that bleeds
+    // adds a stack and starts the clock again.
+    turns: 6,
+    accuracyPenalty: 0,
+    defenceBonus: 0,
+    damageTakenBonus: 0,
+    apBonus: 0,
+    damagePerTurn: 8,
+    ailment: true,
+    maxStacks: 3,
   },
 }
 

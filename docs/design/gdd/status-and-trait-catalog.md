@@ -38,6 +38,7 @@ is not meant to pile up says `1`.
 | `stimmed` | Stimmed | +20% AP | 4 | 1 |
 | `suppressed` | Suppressed | -12 to hit, -10% AP | 2 | 3 |
 | `winded` | Winded | -25% AP | 3 | 1 |
+| `bleeding` | Bleeding | -8 HP at the start of each own turn, an ailment: a first aid kit ends it | 6 | 3 |
 
 ---
 
@@ -55,7 +56,8 @@ be born with the same property a piece of kit grants.
 | `fleet` | Fleet | +2 max AP | born with |
 | `stoic` | Stoic | cannot be crit | born with |
 | `inscrutable` | Inscrutable | being shot at does not reveal | born with |
-| `nullweave` | Nullweave | -3 evasion, cannot be crit | worn (Nullweave Vest) |
+| `hardy` | Hardy | cannot bleed | born with |
+| `nullweave` | Nullweave | -3 evasion, cannot be crit, cannot bleed | worn (Nullweave Vest) |
 | `limping` | Limping | -2 max AP, +50% step cost | wound |
 | `concussed` | Concussed | -8 accuracy, -4 evasion | wound |
 | `scoped` | Scoped | -5 accuracy, -35% range falloff | fitted (Scope) |
@@ -107,7 +109,7 @@ stance.
 
 | Item | Grants | Net effect |
 | --- | --- | --- |
-| Nullweave Vest | Nullweave | -3 evasion, cannot be crit |
+| Nullweave Vest | Nullweave | -3 evasion, cannot be crit, cannot bleed |
 | Plate Carrier | Plated | -4 evasion, -1 max AP, +9 armour, -20% damage taken, +15% step cost |
 
 ### 4.1 Consumables, for contrast
@@ -115,7 +117,7 @@ stance.
 | Item | AP | Needs | Effects |
 | --- | --- | --- | --- |
 | Stim Pack | 1 | — | applyStatus, refillAp |
-| First Aid Kit | 2 | — | restoreHp |
+| First Aid Kit | 2 | — | restoreHp, treatAilments |
 | Repair Kit | 3 | Intelligence 5 | restoreArmor |
 
 ### 4.2 Utility proficiencies
@@ -140,12 +142,14 @@ half-width: 0.3 m (`AIM.targetSize`) times the share cover and stance leave show
 27% / 14% behind tall. A round lands if any of its projectiles does, and armour is
 subtracted once per round, not per projectile.
 
-| Weapon | AP | Damage | Pellets | Armour pen | Sway (m) | Spread (m per m) | Max range | Clip | Crit | Crit × | Heard at | Modes (error ×, AP ×) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Rifle | 4 | 55 | 1 | 25% | 0.075 | 0.02 | 22 m | 15 | 12% | 1.5 | 40 m (10 m suppressed) | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2), Burst Fire (×1.1, ×1.25) |
-| Shotgun | 4 | 14 | 9 | 5% | 0 | 0.05 | 12 m | 4 | 20% | 1.8 | 45 m (11.25 m suppressed) | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
-| Sniper Rifle | 6 | 70 | 1 | 50% | 0.11 | 0.0015 | 40 m | 5 | 25% | 2.2 | 55 m (13.75 m suppressed) | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
-| Gatling | 5 | 35 | 1 | 25% | 0.11 | 0.014 | 22 m | 30 | 5% | 1.3 | 50 m (12.5 m suppressed) | Burst Fire (×1.1, ×1.25) |
+| Weapon | AP | Damage | Pellets | Armour pen | Sway (m) | Spread (m per m) | Max range | Clip | Crit | Crit × | Bleed | Heard at | Modes (error ×, AP ×) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Rifle | 4 | 55 | 1 | 25% | 0.075 | 0.02 | 22 m | 15 | 12% | 1.5 | 15% | 40 m (10 m suppressed) | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2), Burst Fire (×1.1, ×1.25) |
+| Shotgun | 4 | 14 | 9 | 5% | 0 | 0.05 | 12 m | 4 | 20% | 1.8 | 25% | 45 m (11.25 m suppressed) | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
+| Sniper Rifle | 6 | 70 | 1 | 50% | 0.11 | 0.0015 | 40 m | 5 | 25% | 2.2 | 35% | 55 m (13.75 m suppressed) | Snap Shot (×1, ×1), Aimed Shot (×0.5, ×2) |
+| Gatling | 5 | 35 | 1 | 25% | 0.11 | 0.014 | 22 m | 30 | 5% | 1.3 | 8% | 50 m (12.5 m suppressed) | Burst Fire (×1.1, ×1.25) |
+
+**Bleed**: the chance a round or blow that lands starts the target bleeding — once per round, like a crit, less 0.35 points per point of armour the round does not go through, at most 60%. A unit that cannot bleed (Hardy, or a Nullweave vest) never does. A bleed costs 8 HP a stack at the start of each of its own turns, armour or not, stacks to 3, and stops when it clots or a first aid kit treats it.
 
 Overwatch fires as Reaction Fire (×1.4 error, ×0 AP), which no weapon lists as a mode of its own.
 
@@ -159,11 +163,11 @@ defender's parry is their sidearm's plus their primary weapon's handling. From b
 the defender's parry, evasion and status defence do not count, and the damage is
 multiplied by the sidearm's own "From behind".
 
-| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Heard at |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Fists | 3 | 75% | 0 | 14 | ×1 | 0% | 0 | 5% | 1.5 | silent |
-| Knife | 3 | 80% | +10 | 32 | ×5 | 50% | 0 | 25% | 2 | silent |
-| Club | 4 | 70% | +5 | 36 | ×1 | 90% | 12 | 0% | 1 | 12 m |
+| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Bleed | Heard at |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Fists | 3 | 75% | 0 | 14 | ×1 | 0% | 0 | 5% | 1.5 | 0% | silent |
+| Knife | 3 | 80% | +10 | 32 | ×5 | 50% | 0 | 25% | 2 | 45% | silent |
+| Club | 4 | 70% | +5 | 36 | ×1 | 90% | 12 | 0% | 1 | 10% | 12 m |
 
 | Primary weapon | Parry when held |
 | --- | --- |

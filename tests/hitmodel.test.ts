@@ -29,6 +29,7 @@ function body(weapon: Weapon = new Rifle(), over: Partial<CombatantStats> = {}):
     proficiency: 0,
     evasion: 0,
     critImmune: false,
+    bleedImmune: false,
     rangeFalloff: 0,
     damageTaken: 0,
     critChanceBonus: 0,
@@ -134,11 +135,13 @@ describe('Dice for a round', () => {
     return { grid, shooter, target }
   }
 
-  test('a shell rolls once per pellet, then once for the crit if anything landed', () => {
+  test('a shell rolls once per pellet, then once for the crit if anything landed, and a bleed only on a target still alive', () => {
     // The count and order of draws is what keeps two peers on one stream.
+    // Nine pellets at point blank kill outright, so there is nobody left to bleed.
     const hit = counted(0)
     const { grid, shooter, target } = duel(WeaponId.Shotgun)
     executeShot(grid, shooter, target, NO_FX, [shooter, target], ShotMode.Snap, hit.roll)
+    expect(target.isDead).toBe(true)
     expect(hit.draws()).toBe(new Shotgun().pellets + 1)
 
     const miss = counted(0.999)
@@ -147,10 +150,11 @@ describe('Dice for a round', () => {
     expect(miss.draws()).toBe(new Shotgun().pellets)
   })
 
-  test('a bullet is still one roll and one crit roll', () => {
+  test('a bullet that lands is one roll, one crit roll and one bleed roll', () => {
     const hit = counted(0)
     const { grid, shooter, target } = duel(WeaponId.Rifle)
     executeShot(grid, shooter, target, NO_FX, [shooter, target], ShotMode.Snap, hit.roll)
-    expect(hit.draws()).toBe(2)
+    expect(target.isDead).toBe(false)
+    expect(hit.draws()).toBe(3)
   })
 })

@@ -16,7 +16,7 @@
 import { GRENADES, GrenadeId, SHOT_MODES, STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { LONG_GUN_PARRY, MELEE, MeleeId } from '../src/core/Melee'
 import { NOISE } from '../src/core/Noise'
-import { AIM, CHARACTER, COVER, CRIT, DOORS, FIRE, MORALE, PROGRESSION, RULES, WOUNDS } from '../src/config'
+import { AIM, BLEED, CHARACTER, COVER, CRIT, DOORS, FIRE, MORALE, PROGRESSION, RULES, WOUNDS } from '../src/config'
 import { CRATE_FIRE, SURFACES } from '../src/core/Surfaces'
 import { PREDISPOSITIONS, steadyChance, TEMPERAMENTS } from '../src/core/Morale'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
@@ -60,6 +60,8 @@ function statusRow(spec: StatusSpec): string {
   if (spec.defenceBonus) effects.push(`${points(-spec.defenceBonus)} to be hit`)
   if (spec.damageTakenBonus) effects.push(`${percent(spec.damageTakenBonus)} damage taken`)
   if (spec.apBonus) effects.push(`${percent(spec.apBonus)} AP`)
+  if (spec.damagePerTurn) effects.push(`-${spec.damagePerTurn} HP at the start of each own turn`)
+  if (spec.ailment) effects.push('an ailment: a first aid kit ends it')
   return `| \`${spec.kind}\` | ${spec.name} | ${effects.join(', ') || '—'} | ${spec.turns} | ${spec.maxStacks} |`
 }
 
@@ -73,6 +75,7 @@ function traitEffects(effects: TraitEffects): string {
   if (effects.critChance) parts.push(`${points(effects.critChance)} crit chance`)
   if (effects.critMultiplier) parts.push(`${effects.critMultiplier > 0 ? '+' : ''}${effects.critMultiplier} crit multiplier`)
   if (effects.critImmune) parts.push('cannot be crit')
+  if (effects.bleedImmune) parts.push('cannot bleed')
   if (effects.maxHp) parts.push(`${points(effects.maxHp)} max HP`)
   if (effects.maxAp) parts.push(`${points(effects.maxAp)} max AP`)
   if (effects.armor) parts.push(`${points(effects.armor)} armour`)
@@ -324,18 +327,22 @@ function build(): string {
   lines.push('subtracted once per round, not per projectile.')
   lines.push('')
   lines.push(
-    '| Weapon | AP | Damage | Pellets | Armour pen | Sway (m) | Spread (m per m) | Max range | Clip | Crit | Crit × | Heard at | Modes (error ×, AP ×) |',
+    '| Weapon | AP | Damage | Pellets | Armour pen | Sway (m) | Spread (m per m) | Max range | Clip | Crit | Crit × | Bleed | Heard at | Modes (error ×, AP ×) |',
   )
-  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
   for (const id of Object.values(WeaponId)) {
     const w = WEAPONS[id]
     const modes = w.availableModes
       .map((mode) => `${SHOT_MODES[mode].name} (×${SHOT_MODES[mode].spreadMul}, ×${SHOT_MODES[mode].apMul})`)
       .join(', ')
     lines.push(
-      `| ${w.name} | ${w.apCost} | ${w.damage} | ${w.pellets} | ${share(w.armorPen)} | ${w.sway} | ${w.spread} | ${w.maxRange} m | ${w.maxClip} | ${w.critChance}% | ${w.critMultiplier} | ${w.loudness} m (${w.loudness * NOISE.suppressed} m suppressed) | ${modes} |`,
+      `| ${w.name} | ${w.apCost} | ${w.damage} | ${w.pellets} | ${share(w.armorPen)} | ${w.sway} | ${w.spread} | ${w.maxRange} m | ${w.maxClip} | ${w.critChance}% | ${w.critMultiplier} | ${w.bleedChance}% | ${w.loudness} m (${w.loudness * NOISE.suppressed} m suppressed) | ${modes} |`,
     )
   }
+  lines.push('')
+  lines.push(
+    `**Bleed**: the chance a round or blow that lands starts the target bleeding — once per round, like a crit, less ${BLEED.armorResist} points per point of armour the round does not go through, at most ${BLEED.max}%. A unit that cannot bleed (Hardy, or a Nullweave vest) never does. A bleed costs ${STATUSES.bleeding.damagePerTurn} HP a stack at the start of each of its own turns, armour or not, stacks to ${STATUSES.bleeding.maxStacks}, and stops when it clots or a first aid kit treats it.`,
+  )
   lines.push('')
   lines.push(
     `Overwatch fires as ${SHOT_MODES.reaction.name} (×${SHOT_MODES.reaction.spreadMul} error, ×${SHOT_MODES.reaction.apMul} AP), which no weapon lists as a mode of its own.`,
@@ -355,12 +362,12 @@ function build(): string {
   lines.push("the defender's parry, evasion and status defence do not count, and the damage is")
   lines.push('multiplied by the sidearm\'s own "From behind".')
   lines.push('')
-  lines.push('| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Heard at |')
-  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+  lines.push('| Sidearm | AP | Chance | Parry | Damage | From behind | Armour pen | Shred | Crit | Crit × | Bleed | Heard at |')
+  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
   for (const id of Object.values(MeleeId)) {
     const m = MELEE[id]
     lines.push(
-      `| ${m.name} | ${m.apCost} | ${m.accuracy}% | ${points(m.parry)} | ${m.damage} | ×${m.fromBehind} | ${share(m.armorPen)} | ${m.armorShred} | ${m.critChance}% | ${m.critMultiplier} | ${m.loudness > 0 ? `${m.loudness} m` : 'silent'} |`,
+      `| ${m.name} | ${m.apCost} | ${m.accuracy}% | ${points(m.parry)} | ${m.damage} | ×${m.fromBehind} | ${share(m.armorPen)} | ${m.armorShred} | ${m.critChance}% | ${m.critMultiplier} | ${m.bleedChance}% | ${m.loudness > 0 ? `${m.loudness} m` : 'silent'} |`,
     )
   }
   lines.push('')

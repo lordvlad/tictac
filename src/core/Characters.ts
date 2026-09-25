@@ -109,6 +109,7 @@ const INNATE_TRAITS: readonly TraitId[] = [
   TraitId.Fleet,
   TraitId.Stoic,
   TraitId.Inscrutable,
+  TraitId.Hardy,
 ]
 
 /**

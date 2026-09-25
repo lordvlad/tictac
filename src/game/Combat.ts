@@ -1,6 +1,7 @@
 import type { Grid, Tile } from '../core/Grid'
 import { shotCoverLevel } from '../core/Cover'
 import {
+  bleedChance,
   critBreakdown,
   type EffectiveWeapon,
   effectiveWeapon,
@@ -11,6 +12,7 @@ import {
   meleeWeapon,
   resolveDamage,
   statusStacks,
+  type StatusState,
 } from '../core/Ballistics'
 import { MELEE } from '../core/Melee'
 import { hasLineOfSight } from '../core/Visibility'
@@ -178,6 +180,7 @@ export function executeShot(
 
   const odds = shotBreakdown(grid, shooter, target, mode)
   const crit = critBreakdown(eff, target, grid.distance(shooter.tile, target.tile))
+  const bleed = bleedChance(eff, target)
   const shooterWorld = grid.tileToWorld(shooter.tile)
   const targetWorld = grid.tileToWorld(target.tile)
 
@@ -219,6 +222,8 @@ export function executeShot(
       const critical = roll() * 100 <= crit.chance
       if (critical) crits++
       const primary = applyWeaponDamage(eff, target, fx, 1, critical, landed)
+      // Likewise once per round, after the crit's draw and only when it can.
+      openWound(primary, bleed, roll)
       hits.push(primary)
       totalDamage += primary.damage
       totalArmorShred += primary.armorShred
@@ -318,7 +323,10 @@ export function executeMelee(
   if (hit) {
     const critical = eff.critChance > 0 && roll() * 100 <= critBreakdown(eff, target, 0).chance
     if (critical) crits++
-    hits.push(applyWeaponDamage(eff, target, fx, 1, critical))
+    const blow = applyWeaponDamage(eff, target, fx, 1, critical)
+    // Then, if it can and the target lived, the bleed: a third draw at most.
+    openWound(blow, bleedChance(eff, target), roll)
+    hits.push(blow)
   }
 
   return {
@@ -428,6 +436,20 @@ function applyWeaponDamage(
 }
 
 /**
+ * Roll whether the round or blow behind `hit` started a bleed, at `chance`
+ * percent (`bleedChance`), and start it. One draw from the match's dice, and
+ * none at all when it cannot bleed or has died of the hit: both peers skip
+ * the same draws, so the stream stays one stream.
+ */
+function openWound(hit: ResolvedHit, chance: number, roll: Roll): void {
+  const target = hit.soldier
+  if (chance <= 0 || hit.damage <= 0 || target.isDead) return
+  if (roll() * 100 > chance) return
+  applyStatus(target, StatusKind.Bleeding)
+  hit.status = StatusKind.Bleeding
+}
+
+/**
  * Throw a grenade at a tile.
  *
  * Blast effects are resolved per unit by distance from the centre, and the
@@ -513,4 +535,20 @@ export function tickStatuses(soldiers: readonly Combatant[]): void {
     soldier.statuses = soldier.statuses.filter((s) => s.turnsLeft > 0)
     soldier.ap = Math.min(soldier.ap, soldier.effectiveMaxAp)
   }
+}
+
+/**
+ * Hit points `unit`'s ailments will still cost it if left alone: each stack's
+ * `damagePerTurn` for every one of its own turns left on the clock (the clock
+ * ticks at both sides' handovers, so half of it, rounded up). What a first aid
+ * kit saves by ending them — the kit's measure of need beside missing health.
+ */
+export function ailmentCost(unit: { statuses: readonly StatusState[] }): number {
+  let cost = 0
+  for (const state of unit.statuses) {
+    const spec = STATUSES[state.kind]
+    if (!spec.ailment) continue
+    cost += spec.damagePerTurn * statusStacks(state) * Math.ceil(state.turnsLeft / 2)
+  }
+  return cost
 }

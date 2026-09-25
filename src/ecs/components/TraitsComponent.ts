@@ -51,6 +51,11 @@ export class TraitsComponent extends Component {
      * and read a unit that gives nothing away.
      */
     public unreadable: boolean = false,
+    /**
+     * No hit on this unit can start it bleeding. Replicated like `critImmune`:
+     * the shooter's side rolls against the target's word for it.
+     */
+    public bleedImmune: boolean = false,
   ) {
     super()
   }
@@ -63,6 +68,7 @@ export class TraitsComponent extends Component {
       evasionCrouched: this.evasionCrouched,
       damageTaken: this.damageTaken,
       unreadable: this.unreadable,
+      bleedImmune: this.bleedImmune,
     }
   }
 
@@ -75,5 +81,6 @@ export class TraitsComponent extends Component {
     if (typeof data.evasionCrouched === 'number') this.evasionCrouched = data.evasionCrouched
     if (typeof data.damageTaken === 'number') this.damageTaken = data.damageTaken
     if (typeof data.unreadable === 'boolean') this.unreadable = data.unreadable
+    if (typeof data.bleedImmune === 'boolean') this.bleedImmune = data.bleedImmune
   }
 }

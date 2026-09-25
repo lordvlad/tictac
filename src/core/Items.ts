@@ -29,6 +29,8 @@ export type ItemEffect =
   | { kind: 'refillAp' }
   /** Clear every live status effect. */
   | { kind: 'clearStatuses' }
+  /** End every ailment (`StatusSpec.ailment`): stop a bleed, and later a poison. */
+  | { kind: 'treatAilments' }
   /** Apply (or refresh) a status, carrying whatever that status does. */
   | { kind: 'applyStatus'; status: StatusKind }
 
@@ -106,7 +108,7 @@ export function itemApCost(spec: ItemSpec, apDelta: number, mechanics = 0): numb
  */
 export function itemTargetsAlly(spec: ItemSpec): boolean {
   return spec.effects.some(
-    (e) => e.kind === 'restoreHp' || e.kind === 'restoreArmor' || e.kind === 'clearStatuses',
+    (e) => e.kind === 'restoreHp' || e.kind === 'restoreArmor' || e.kind === 'clearStatuses' || e.kind === 'treatAilments',
   )
 }
 
@@ -121,7 +123,9 @@ export const ITEMS: Record<ItemId, ItemSpec> = {
     id: ItemId.FirstAidKit,
     name: 'First Aid Kit',
     apCost: 2,
-    effects: [{ kind: 'restoreHp', amount: 50 }],
+    // Dressing a wound stops it bleeding, and the same kit is what will treat
+    // poison: any ailment (`StatusSpec.ailment`), not a list of them.
+    effects: [{ kind: 'restoreHp', amount: 50 }, { kind: 'treatAilments' }],
   },
   [ItemId.RepairKit]: {
     id: ItemId.RepairKit,

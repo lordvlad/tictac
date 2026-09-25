@@ -127,6 +127,8 @@ export interface MatchOutcome {
   breaks: Record<MoraleBreak, number>
   /** Hit points each side lost to fire. */
   burned: Record<Faction, number>
+  /** Hit points each side lost to bleeding. */
+  bled: Record<Faction, number>
   /** Doors on the map when it ended, and how many of them stood open. */
   doors: { hung: number; opened: number }
   /** The winning side's survivors: what they did, and what it taught them. */
@@ -199,6 +201,7 @@ export class SimMatch {
   private readonly intel: Record<Faction, Intel>
   private readonly breaks: Record<MoraleBreak, number> = { panic: 0, frenzy: 0, freeze: 0 }
   private readonly burned: Record<Faction, number> = { [Faction.Blue]: 0, [Faction.Red]: 0 }
+  private readonly bled: Record<Faction, number> = { [Faction.Blue]: 0, [Faction.Red]: 0 }
 
   constructor(private readonly setup: MatchSetup) {
     this.turnCap = setup.turnCap ?? DEFAULT_TURN_CAP
@@ -256,6 +259,9 @@ export class SimMatch {
     this.host.commands.onBurned = (unit, damage) => {
       this.burned[unit.faction] += damage
     }
+    this.host.commands.onSuffered = (unit, damage) => {
+      this.bled[unit.faction] += damage
+    }
     this.host.commands.onMorale = (_unit, broke) => {
       if (broke) this.breaks[broke] += 1
     }
@@ -301,6 +307,7 @@ export class SimMatch {
       reactions: this.host.reactions,
       breaks: { ...this.breaks },
       burned: { ...this.burned },
+      bled: { ...this.bled },
       doors: this.doorCount(),
       debriefed:
         winner === null

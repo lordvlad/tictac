@@ -208,6 +208,15 @@ Intelligence barely move in the mirror because the policy carries no plate, swin
 uses no kit: with knives and two plate carriers on Blue, Strength grows for 36% of survivors
 (22 tiles in heavy kit each). Intelligence stays at 0, since the policy never repairs or unlocks.
 
+**Bleeding** (2026-09-25, same blocks): mirror **623 / 551 / 26**. The innate trait Hardy
+reshuffled every rolled squad, so the comparison that isolates bleeding is the same build with
+bleeding switched off: 603 / 560 / 37. Bleeding therefore takes a few draws away (37 to 26) and
+tilts toward Blue by ~1.7 points: a wounded unit that would have limped on to the cap bleeds
+out, and Blue, moving first, lands the first wounds. It costs each side only 3–4 HP a match
+(`bleeding cost` on the grenades line): most units hit hard enough to bleed are dead within a
+turn or two, and plate halves a rifle's chance. Blue with knives: 2.6 / 4.0 HP. The policy never
+uses a first aid kit to stop one.
+
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles
 walked indoors and the share of unit-turns *ended* indoors; the weapon table reports each

@@ -138,8 +138,9 @@ describe('What the three families are for', () => {
 })
 
 describe('A blow, resolved', () => {
-  test('a miss draws one number; a knife that lands draws two; a club that lands draws one', () => {
-    // The order and count of draws is what keeps two peers on the same stream.
+  test('a miss draws one number; a knife that lands draws three; a club that lands draws two', () => {
+    // The order and count of draws is what keeps two peers on the same stream:
+    // the blow, the crit if the sidearm can crit, the bleed if it can bleed.
     const miss = counted(0.999)
     const knife = contact(MeleeId.Knife)
     executeMelee(knife.grid, knife.attacker, knife.defender, NO_FX, miss.roll)
@@ -148,12 +149,18 @@ describe('A blow, resolved', () => {
     const hitKnife = counted(0)
     const again = contact(MeleeId.Knife)
     executeMelee(again.grid, again.attacker, again.defender, NO_FX, hitKnife.roll)
-    expect(hitKnife.draws()).toBe(2)
+    expect(hitKnife.draws()).toBe(3)
 
     const hitClub = counted(0)
     const club = contact(MeleeId.Club)
     executeMelee(club.grid, club.attacker, club.defender, NO_FX, hitClub.roll)
-    expect(hitClub.draws()).toBe(1)
+    expect(hitClub.draws()).toBe(2)
+
+    // Fists cannot open a wound, so a punch that lands is the blow and the crit.
+    const hitFists = counted(0)
+    const fists = contact(MeleeId.Fists)
+    executeMelee(fists.grid, fists.attacker, fists.defender, NO_FX, hitFists.roll)
+    expect(hitFists.draws()).toBe(2)
   })
 
   test('a landed blow hurts, spends the sidearm’s points, and suppresses nobody', () => {

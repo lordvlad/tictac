@@ -113,6 +113,14 @@ graph TD
   permanently.
 - **Wounds**: `Limping` below half health, `Concussed` below a quarter — derived from current
   health, so patching a soldier up lifts them. `Winded` is exhaustion, not a wound.
+- **Bleeding** (ITEM-036): any round or blow that lands may open a wound that bleeds, rolled
+  once per round like a critical and just as weapon-dependent — a knife or a sniper round most
+  often, buckshot often, a rifle sometimes, each round of a Gatling rarely, a club seldom, fists
+  never. Plate a round does not go through lowers the odds as it lowers a crit's. A bleeding
+  unit loses a few hit points at the start of each of its own turns, per wound, up to three;
+  armour does nothing for it. It clots after three of its turns, or a first aid kit stops it.
+  Some people never bleed: the **Hardy** (a trait one can be born with) and anyone in a
+  **Nullweave** vest, which already keeps a round from finding a vital.
 
 ### 2.6 Field Work: Treating, Repairing and Technical Kit
 - **A medic can work on somebody else.** Kit that treats a body or a plate can be used on a
@@ -124,6 +132,9 @@ graph TD
   noticeably more when treating a squadmate; nobody gets credit for bandaging their own arm.
   How well treatment takes also depends on the *patient's* constitution, so a tough soldier is
   a better patient than a frail one.
+- **A first aid kit also stops a bleed** — and any other *ailment*, a condition that gets worse
+  on its own. Bleeding is the first; poison, when it comes, will be treated by the same kit
+  with nothing new to learn.
 - **A repair kit patches armour** — the only thing in the game that undoes permanent loss, so
   a squad that has been shredded has an answer other than dying with bare plates. It is slower
   and gives back less than a first aid kit gives in health, because armour only blunts what

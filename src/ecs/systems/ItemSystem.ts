@@ -1,4 +1,5 @@
 import { System } from '../System'
+import { STATUSES } from '../../core/Arsenal'
 import { UtilityId } from '../../core/Characters'
 import { ITEMS, type ItemId, itemApCost } from '../../core/Items'
 import { applyStatus } from '../../game/Combat'
@@ -117,6 +118,9 @@ export class ItemSystem extends System {
           break
         case 'clearStatuses':
           target.statuses = []
+          break
+        case 'treatAilments':
+          target.statuses = target.statuses.filter((state) => !STATUSES[state.kind].ailment)
           break
         case 'applyStatus':
           // Through the shared rule rather than by hand, so stacking and the

@@ -221,6 +221,9 @@ export class Soldier {
     if (this.traitsComponent.unreadable !== this.resolvedTraits.unreadable) {
       this.traitsComponent.unreadable = this.resolvedTraits.unreadable
     }
+    if (this.traitsComponent.bleedImmune !== this.resolvedTraits.bleedImmune) {
+      this.traitsComponent.bleedImmune = this.resolvedTraits.bleedImmune
+    }
 
     // Trait ceilings sit on top of the sheet's own, and a unit at full health
     // keeps being at full health when the source of the lift changes.
@@ -424,6 +427,11 @@ export class Soldier {
   /** True when no hit on this unit can be a critical. Replicated, as above. */
   get critImmune(): boolean {
     return this.traitsComponent.critImmune
+  }
+
+  /** True when no hit on this unit can start it bleeding. Replicated, as above. */
+  get bleedImmune(): boolean {
+    return this.traitsComponent.bleedImmune
   }
 
   /**

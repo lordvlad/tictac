@@ -28,6 +28,7 @@ function body(over: Partial<CombatantStats> = {}): CombatantStats {
     proficiency: 0,
     evasion: 0,
     critImmune: false,
+    bleedImmune: false,
     rangeFalloff: 0,
     damageTaken: 0,
     critChanceBonus: 0,
