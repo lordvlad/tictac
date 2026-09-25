@@ -9,7 +9,8 @@ import type { Soldier } from '../entities/Soldier'
 import type { OrbitRig } from '../camera/OrbitRig'
 import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
-import { buildHudModel, type HudIntent, tileReadout } from '../hud/HudModel'
+import { buildHudModel, type EndScreen, endScreens, type HudIntent, tileReadout } from '../hud/HudModel'
+import { debrief, winnerOf } from './MatchEnd'
 import { calculateHitChance } from './Combat'
 import { compareDigests, digestWorld, reportDivergence, type StateDigest } from './StateDigest'
 import { RpcMethods } from './JsonRpc'
@@ -160,6 +161,8 @@ export class InteractionController {
   private rulesActing = false
   /** The ground changed since the view last caught up with it; see `update`. */
   private groundDirty = false
+  /** The end screen's pages still to show, once the match is over; null while it is being played. */
+  private endPages: EndScreen[] | null = null
   /** Fire on the ground, as the grid has it. */
   private readonly groundFx: GroundFx
   /**
@@ -604,6 +607,16 @@ export class InteractionController {
         this.debugMap.toggle()
         this.debugMap.refresh(this.battlefield.grid, this.squads, this.selectedLevelFilter, this.seedLabel)
         this.refreshHud()
+        break
+      case 'endScreenNext': {
+        this.endPages?.shift()
+        const page = this.endPages?.[0]
+        if (page) this.hud.showEndScreen(page)
+        break
+      }
+      case 'backToMenu':
+        // The start menu is what a fresh page load opens on.
+        window.location.reload()
         break
       case 'operateDoor': {
         const soldier = this.turnManager.selectedSoldier
@@ -1233,6 +1246,20 @@ export class InteractionController {
     }
   }
 
+  /**
+   * Show the end of the match: in a local match the loser's page first, then
+   * the winner's survivors and what they learned; online, this side's own.
+   */
+  private endMatch(winner: Faction): void {
+    const viewer = this.network && this.network.mode !== 'local' ? this.network.myFaction : null
+    this.endPages = endScreens(winner, viewer, debrief(this.squads, winner), this.portraits)
+    this.shoot.exit()
+    this.grenade.exit()
+    this.planner.clear()
+    const first = this.endPages[0]
+    if (first) this.hud.showEndScreen(first)
+  }
+
   update(delta: number): void {
     // Systems advance the simulation; every mutation lands in a component.
     this.world.update(delta)
@@ -1241,6 +1268,13 @@ export class InteractionController {
     if (this.commands.pending !== this.rulesActing) {
       this.rulesActing = this.commands.pending
       this.refreshHud()
+    }
+    // The match is over once a side has nobody standing — checked once
+    // everything has settled, so the last shot's walk and reactions are done.
+    // Not in a replay: there is nobody to show it to.
+    if (this.endPages === null && !this.hud.hidden && !this.commands.busy && !this.commands.pending) {
+      const winner = winnerOf(this.squads)
+      if (winner !== null) this.endMatch(winner)
     }
     if (this.groundDirty) {
       this.groundDirty = false

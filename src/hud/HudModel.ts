@@ -1,5 +1,5 @@
 import { DOORS, FACTION_INFO, Faction, FIRE, RULES } from '../config'
-import { GrenadeId, ShotMode, STATUSES } from '../core/Arsenal'
+import { GrenadeId, ShotMode, STATUSES, WEAPONS } from '../core/Arsenal'
 import { ITEMS, type ItemEffect, ItemId, itemApCost, itemTargetsAlly } from '../core/Items'
 import { UtilityId } from '../core/Characters'
 import { effectiveWeapon, statusStacks } from '../core/Ballistics'
@@ -19,6 +19,8 @@ import type { PendingShot } from '../game/ShootPlanner'
 import type { Squads } from '../game/Squads'
 import type { TurnManager } from '../game/TurnManager'
 import type { OffscreenPortraits } from '../render/Portraits'
+import type { Attribute } from '../core/Progression'
+import type { Debrief } from '../game/MatchEnd'
 /**
  * Everything the player can ask for by touching the HUD. The HUD emits these;
  * it never carries them out, so game state has exactly one mutator.
@@ -53,6 +55,10 @@ export type HudIntent =
   | { type: 'toggleDebugMap' }
   /** Work the door the selected unit is facing (`core/Doors`). */
   | { type: 'operateDoor'; verb: DoorVerb }
+  /** The end screen's next page: from the loser's to the winner's, in a local match. */
+  | { type: 'endScreenNext' }
+  /** Leave a finished match for the start menu. */
+  | { type: 'backToMenu' }
 /** One button in the selected unit's action panel. */
 export interface HudAction {
   id: string
@@ -798,4 +804,74 @@ function effectLine(effect: ItemEffect): string {
     case 'applyStatus':
       return `Applies ${STATUSES[effect.status].name}`
   }
+}
+
+/** One line of what a survivor learned: what grew, from what to what, and why. */
+export interface EndScreenLine {
+  label: string
+  from: number
+  to: number
+  because: string
+}
+
+/** One screen at the end of a match: the side it is for, and what it shows them. */
+export type EndScreen =
+  | { stage: 'lost'; factionName: string; blue: boolean; next: HudIntent }
+  | {
+      stage: 'won'
+      factionName: string
+      blue: boolean
+      survivors: { name: string; portrait: string; lines: EndScreenLine[] }[]
+      next: HudIntent
+    }
+
+const ATTRIBUTE_NAME: Record<Attribute, string> = {
+  health: 'Health',
+  agility: 'Agility',
+  strength: 'Strength',
+  intelligence: 'Intelligence',
+}
+
+/**
+ * The screens a finished match shows, in order.
+ *
+ * `viewer` is the side this screen belongs to online; null in a local match,
+ * where both sides share it: the loser's "you lost" first, then the winner's
+ * survivors and what they learned. Online each side sees only its own.
+ */
+export function endScreens(
+  winner: Faction,
+  viewer: Faction | null,
+  debriefs: readonly Debrief[],
+  portraits: Pick<OffscreenPortraits, 'getPortrait'>,
+): EndScreen[] {
+  const loser = winner === Faction.Blue ? Faction.Red : Faction.Blue
+  const done: HudIntent = { type: 'backToMenu' }
+  const lost = (next: HudIntent): EndScreen => ({
+    stage: 'lost',
+    factionName: FACTION_INFO[loser].name,
+    blue: loser === Faction.Blue,
+    next,
+  })
+  const won: EndScreen = {
+    stage: 'won',
+    factionName: FACTION_INFO[winner].name,
+    blue: winner === Faction.Blue,
+    survivors: debriefs.map(({ unit, growth }) => ({
+      name: unit.name,
+      portrait: portraits.getPortrait(unit.faction, unit.squadIndex),
+      lines: growth.map((change) => ({
+        label:
+          change.kind === 'attribute'
+            ? ATTRIBUTE_NAME[change.attribute]
+            : `${WEAPONS[change.weapon].name} proficiency`,
+        from: change.from,
+        to: change.to,
+        because: change.because,
+      })),
+    })),
+    next: done,
+  }
+  if (viewer === null) return [lost({ type: 'endScreenNext' }), won]
+  return viewer === winner ? [won] : [lost(done)]
 }

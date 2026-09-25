@@ -105,7 +105,8 @@ function attributeMarks(deeds: Deeds): Record<Attribute, { marks: number; becaus
  * the top of the scale. A weapon class's proficiency rises a point for every
  * {@link PROGRESSION.hitsPerProficiency} rounds landed with it (a critical
  * counting as {@link PROGRESSION.critHits}), up to
- * {@link PROGRESSION.proficiencyPerMatch} a match and the top of its band.
+ * {@link PROGRESSION.proficiencyPerMatch} a match and the top of its band — a
+ * specialist's trained class keeps its head start there too.
  * The learning rate is read off the sheet going in, so what a match taught
  * does not depend on the order it is written down in.
  */
@@ -117,7 +118,9 @@ export function growthFrom(sheet: CharacterSheet, deeds: Deeds): Growth[] {
     const landed = deeds.hits[weapon] + deeds.crits[weapon] * (PROGRESSION.critHits - 1)
     const earned = Math.min(PROGRESSION.proficiencyPerMatch, Math.floor((landed * rate) / PROGRESSION.hitsPerProficiency))
     const from = sheet.proficiency[weapon]
-    const to = Math.min(CHARACTER.proficiency.max, from + earned)
+    // The trained class keeps its specialist's head start at the top too.
+    const top = CHARACTER.proficiency.max + (weapon === sheet.specialism ? CHARACTER.specialistBonus : 0)
+    const to = Math.min(top, from + earned)
     if (to <= from) continue
     const crits = deeds.crits[weapon]
     growth.push({

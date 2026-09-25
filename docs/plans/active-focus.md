@@ -28,9 +28,8 @@ during a match, roles, and a roster that outlives the match.
 ---
 
 ## 🔄 In Progress
-- **`[ITEM-004]`** After-match progression and the end screen (rewritten 2026-09-25: growth
-  after the match, morale stays the in-match layer). Measure the records before setting the
-  thresholds.
+- Nothing in flight. `[ITEM-004]` (after-match progression and the end screen) finished on
+  2026-09-25; next is persistence, so the growth it shows is kept.
 
 ## 📋 Ready — pull in this order
 1. **`[ITEM-028]`** Log and store schema drift guard, with `[ITEM-012]`: once a roster is
@@ -53,9 +52,11 @@ during a match, roles, and a roster that outlives the match.
   shot. The sweep barely measures fire and smoke.
 - **ITEM-017**: the policy walks through shut doors but never shuts, unlocks or forces one; keys
   open every lock (where a key comes from is a campaign question).
-- **ITEM-014 / ITEM-017 / ITEM-024 / ITEM-034**: nobody has played peer-to-peer in two live
-  browsers since the transport cutover. Agreement is covered by the network, digest and rewind
-  tests only.
+- **ITEM-004**: growth is shown and lost until persistence; Strength and Intelligence barely grow
+  in the sweep because the policy carries no plate, swings no knife and uses no kit.
+- **ITEM-004 / ITEM-014 / ITEM-017 / ITEM-024 / ITEM-034**: nobody has played peer-to-peer in two
+  live browsers since the transport cutover (the online end screen included). Agreement is
+  covered by the network, digest and rewind tests only.
 
 ---
 

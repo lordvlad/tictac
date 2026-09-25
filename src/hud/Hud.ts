@@ -1,4 +1,5 @@
 import type {
+  EndScreen,
   HudAction,
   HudIntent,
   HudItemPanel,
@@ -41,11 +42,13 @@ export class Hud {
   private readonly endTurnEl: HTMLElement
   private readonly cornerActionsEl: HTMLElement
   private readonly turnOverlayEl: HTMLElement
+  private readonly endScreenEl: HTMLElement
   private readonly contextMenuEl: HTMLElement
   /** What the tile under the pointer is; see {@link showTile}. */
   private readonly tileReadoutEl: HTMLElement
 
   private turnOverlayVisible = false
+  private panelsHidden = false
   /**
    * Which group's submenu is open, if any. View state: which rows are folded
    * away is a property of this panel, not of the match. One at a time, because
@@ -83,6 +86,8 @@ export class Hud {
     this.turnOverlayEl = document.createElement('div')
     this.turnOverlayEl.className = 'turn-overlay'
 
+    this.endScreenEl = document.createElement('div')
+    this.endScreenEl.className = 'turn-overlay end-screen'
     this.contextMenuEl = document.createElement('div')
     this.contextMenuEl.className = 'hud-context-menu'
     this.contextMenuEl.style.display = 'none'
@@ -97,6 +102,7 @@ export class Hud {
       this.actionPanelEl,
       this.endTurnEl,
       this.turnOverlayEl,
+      this.endScreenEl,
       this.contextMenuEl,
       this.tileReadoutEl,
     )
@@ -124,6 +130,7 @@ export class Hud {
       this.endTurnEl,
       this.cornerActionsEl,
       this.turnOverlayEl,
+      this.endScreenEl,
       this.contextMenuEl,
       this.tileReadoutEl,
     ]) {
@@ -166,6 +173,7 @@ export class Hud {
     ]) {
       el.classList.toggle('hud-hidden', hidden)
     }
+    this.panelsHidden = hidden
   }
 
   /**
@@ -666,6 +674,47 @@ export class Hud {
   hideTurnOverlay(): void {
     this.turnOverlayVisible = false
     this.turnOverlayEl.classList.remove('visible')
+  }
+
+  /** Whether the in-match panels are hidden, as they are for a replay. */
+  get hidden(): boolean {
+    return this.panelsHidden
+  }
+
+  /**
+   * The end of the match: one page of it. Over everything else and it stays:
+   * the match is over, and the only way on is the page's own button.
+   */
+  showEndScreen(screen: EndScreen): void {
+    const side = screen.blue ? 'blue' : 'red'
+    const next = Hud.intentAttr(screen.next)
+    if (screen.stage === 'lost') {
+      this.endScreenEl.innerHTML = `
+        <div class="turn-title ${side}">${screen.factionName} — you lost</div>
+        <div class="turn-subtitle">Nobody left standing.</div>
+        <button class="turn-continue-btn interactive" ${next}>CONTINUE ${icon('ui-continue')}</button>`
+    } else {
+      const survivors = screen.survivors
+        .map((survivor) => {
+          const lines =
+            survivor.lines.length === 0
+              ? '<div class="end-line quiet">Nothing new this time.</div>'
+              : survivor.lines
+                  .map(
+                    (line) =>
+                      `<div class="end-line"><b>${line.label}</b> <span class="end-change">${line.from} → ${line.to}</span> <span class="end-because">${line.because}</span></div>`,
+                  )
+                  .join('')
+          return `<div class="end-survivor"><img class="end-portrait" src="${survivor.portrait}" alt="" /><div><div class="end-name">${survivor.name}</div>${lines}</div></div>`
+        })
+        .join('')
+      this.endScreenEl.innerHTML = `
+        <div class="turn-title ${side}">${screen.factionName} wins</div>
+        <div class="turn-subtitle">What the survivors learned</div>
+        <div class="end-survivors">${survivors}</div>
+        <button class="turn-continue-btn interactive" ${next}>BACK TO THE MENU ${icon('ui-continue')}</button>`
+    }
+    this.endScreenEl.classList.add('visible')
   }
 
   showContextMenu(x: number, y: number, items: ContextMenuItem[]): void {

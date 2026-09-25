@@ -354,6 +354,23 @@ knowledge, the shot overlay and melee reach alike) is blocked by a line that ent
 the target's included — or starts in one, unless the two tiles are neighbours. The old `Smoked`
 status (a defence bonus on whoever stood in the blast) is gone.
 
+### The service record, and after the match
+Every soldier carries `DeedsComponent` (replicated, digested, rewound with the unit), written by
+the rules on both peers: `CombatSystem.record` at every shot, reaction, blow, throw and burn
+(rounds landed and crits by the shooter's weapon class, deaths counted once per victim, damage
+taken by every victim, and whether the attacker's target had not seen it coming — judged before
+the attack engages it); `CommandSystem` at each step (tiles in gear that drags), each use of kit
+that asks for Intelligence, each lock opened with keys or forced, and at the handover (the
+outgoing side's turns spent to the last point that will not wind them). Friendly fire teaches
+nobody. Nothing in a match reads the record.
+
+Once one side has nobody standing (`game/MatchEnd.winnerOf`), `debrief` turns the winning side's
+survivors' records into growth with `core/Progression.growthFrom` — a pure function of the sheet
+going in and the record (numbers in `PROGRESSION`, catalogue §10) — and the controller shows the
+end screen (`HudModel.endScreens`): in a local match the loser's "you lost", then the winner's
+survivors; online, each side its own. `grown` applies growth to a sheet; nothing stores it yet
+(ITEM-012). The sweep reports records and growth (`progression:` line).
+
 ## 3. Damage Resolution & Armor
 
 ```mermaid

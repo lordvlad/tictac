@@ -60,7 +60,7 @@ graph TD
 ### Milestone 4: Competitive Meta & Campaign
 **Status:** In Progress  
 **Focus:** High-level tactics, team composition, and long-term roster persistence.
-- Done: `[ITEM-011]` overwatch, `[ITEM-024]` transport port, `[ITEM-025]` referee.
-- Open, in the order on the [focus board](./active-focus.md): `[ITEM-004]` after-match
-  progression and the end screen (in progress), `[ITEM-028]` schema drift guard with
-  `[ITEM-012]` roster persistence, `[ITEM-010]` roles.
+- Done: `[ITEM-011]` overwatch, `[ITEM-024]` transport port, `[ITEM-025]` referee, `[ITEM-004]`
+  after-match progression and the end screen.
+- Open, in the order on the [focus board](./active-focus.md): `[ITEM-028]` schema drift guard
+  with `[ITEM-012]` roster persistence, `[ITEM-010]` roles.

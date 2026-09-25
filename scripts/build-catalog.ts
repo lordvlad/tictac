@@ -476,7 +476,7 @@ function build(): string {
   lines.push('| Grows | From | For a point |')
   lines.push('| --- | --- | --- |')
   lines.push(
-    `| A weapon class's proficiency | Rounds landed with it; a critical counts ${PROGRESSION.critHits} | ${PROGRESSION.hitsPerProficiency} rounds, at most ${PROGRESSION.proficiencyPerMatch} points a match |`,
+    `| A weapon class's proficiency | Rounds landed with it; a critical counts ${PROGRESSION.critHits} | ${PROGRESSION.hitsPerProficiency} rounds, at most ${PROGRESSION.proficiencyPerMatch} points a match, up to ${CHARACTER.proficiency.max} (${CHARACTER.proficiency.max + CHARACTER.specialistBonus} for the class trained in) |`,
   )
   lines.push(
     `| Health | Damage taken and lived through: a mark per ${PROGRESSION.woundsPerMark} HP | ${PROGRESSION.marksPerPoint.health} marks |`,

@@ -14,6 +14,8 @@ import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, Wal
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
 import { Squads } from '../src/game/Squads'
 import { TurnManager } from '../src/game/TurnManager'
+import { debrief, winnerOf } from '../src/game/MatchEnd'
+import { endScreens } from '../src/hud/HudModel'
 
 /** A sheet with every attribute and proficiency set where the test wants it. */
 function sheet(attributes: Partial<CharacterSheet['attributes']> = {}): CharacterSheet {
@@ -22,6 +24,8 @@ function sheet(attributes: Partial<CharacterSheet['attributes']> = {}): Characte
     ...base,
     attributes: { health: 5, agility: 5, strength: 5, intelligence: 5, ...attributes },
     proficiency: { rifle: 0, shotgun: 0, sniper: 0, gatling: 0 },
+    // Not a class any test lands rounds with, so no class gets a specialist's top.
+    specialism: WeaponId.Gatling,
   }
 }
 
@@ -60,6 +64,13 @@ describe('What a match teaches', () => {
 
     const health = growthFrom(sheet(), deeds({ wounds: 10_000 })).filter((g) => g.kind === 'attribute')
     expect(health.map((g) => [g.from, g.to])).toEqual([[5, 6]])
+
+    // The class trained in keeps its head start at the top: it grows past
+    // where any other class stops, and no further than that plus the bonus.
+    const top = CHARACTER.proficiency.max
+    const specialist: CharacterSheet = { ...topped, specialism: WeaponId.Rifle }
+    const rifle = growthFrom(specialist, rifleHits(1000)).find((g) => g.kind === 'proficiency')
+    expect(rifle && [rifle.from, rifle.to]).toEqual([top, Math.min(top + PROGRESSION.proficiencyPerMatch, top + CHARACTER.specialistBonus)])
   })
 
   test('Intelligence speeds it: the same deeds teach the clever what they do not teach the slow', () => {
@@ -187,5 +198,33 @@ describe('The service record', () => {
     expect(there.blue.deeds.serialize()).toEqual(here.blue.deeds.serialize())
     expect(there.red.deeds.serialize()).toEqual(here.red.deeds.serialize())
     expect(here.blue.deeds.hits.rifle).toBeGreaterThan(0)
+  })
+})
+
+describe('The end of a match', () => {
+  test('comes when one side has nobody standing, and teaches only that side’s survivors', () => {
+    const m = match(always(0.5))
+    // An ordinary constitution, so there is a point of Health to gain.
+    m.blue.adoptSheet({ ...m.blue.sheet, attributes: { ...m.blue.sheet.attributes, health: 5 } })
+    expect(winnerOf(m.squads)).toBeNull()
+    for (const red of m.squads.byFaction[Faction.Red]) red.hp = 0
+    expect(winnerOf(m.squads)).toBe(Faction.Blue)
+
+    m.mate.hp = 0
+    m.blue.deeds.wounds = 1000
+    const debriefs = debrief(m.squads, Faction.Blue)
+    expect(debriefs.map((d) => d.unit)).toEqual(m.squads.byFaction[Faction.Blue].filter((unit) => !unit.isDead))
+    expect(debriefs.find((d) => d.unit === m.blue)!.growth.some((g) => g.kind === 'attribute' && g.attribute === 'health')).toBe(true)
+  })
+
+  test('shows a local match the loser’s page and then the winner’s; online, each side only its own', () => {
+    const portraits = { getPortrait: () => '' }
+    const stages = (viewer: Faction | null) => endScreens(Faction.Red, viewer, [], portraits).map((page) => [page.stage, page.next.type])
+    expect(stages(null)).toEqual([
+      ['lost', 'endScreenNext'],
+      ['won', 'backToMenu'],
+    ])
+    expect(stages(Faction.Red)).toEqual([['won', 'backToMenu']])
+    expect(stages(Faction.Blue)).toEqual([['lost', 'backToMenu']])
   })
 })

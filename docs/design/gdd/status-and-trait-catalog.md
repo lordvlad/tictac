@@ -255,7 +255,7 @@ The winning side's survivors grow from what they did (`core/Progression`), once 
 
 | Grows | From | For a point |
 | --- | --- | --- |
-| A weapon class's proficiency | Rounds landed with it; a critical counts 2 | 4 rounds, at most 2 points a match |
+| A weapon class's proficiency | Rounds landed with it; a critical counts 2 | 4 rounds, at most 2 points a match, up to 6 (21 for the class trained in) |
 | Health | Damage taken and lived through: a mark per 20 HP | 2 marks |
 | Agility | Attacks landed on the unaware or from behind; turns spent to the last point short of Winded | 3 marks |
 | Strength | Blows landed; doors forced (2 marks each); a mark per 8 tiles walked in gear that drags | 3 marks |

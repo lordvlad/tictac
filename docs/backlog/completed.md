@@ -1342,6 +1342,69 @@ block 1000, 1.9 stand open at the end of a match. The policy never works a door 
 
 ---
 
+### [ITEM-004] After-Match Progression & the End Screen
+**Completed Date:** 2026-09-25  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+Characters vary at deployment but never change, so nothing a unit does accrues to it. Rewritten
+with the user on 2026-09-25: **progression happens after the match, not during it**. Inside a
+match the character layer that moves is morale (ITEM-014), and it stays that way. A match that
+ends has to be *seen* to end, too — today nothing happens when a side is wiped out.
+
+#### Change
+1. **A service record per unit**, kept by the rules while the match is played: rounds landed and
+   criticals with each weapon class, kills, damage taken, attacks landed on a target that did not
+   see them coming, turns spent to the last point without being winded, blows landed, doors
+   forced, tiles walked in heavy kit, advanced kit used. A replicated, digested component
+   (`DeedsComponent`), written by the rules on both peers from the same commands — like morale —
+   so a peer, a replay and the referee all hold the same record, and a rewind puts it back.
+2. **Growth, after the match** (`core/Progression`, pure): the winning side's survivors turn their
+   record into growth, per [GDD §4](../design/gdd/progression-and-meta.md): a weapon class's
+   proficiency from hits and crits with it; Health from damage taken and lived through; Agility
+   from hitting the unaware or from behind, and from turns spent to the last point short of
+   `Winded`; Strength from melee, doors forced and heavy kit carried; Intelligence from advanced
+   kit used well. Intelligence speeds all of it. At most one point per attribute per match, capped
+   at the scale's top. Growth writes `sheet.attributes` and `sheet.proficiency`, so every derived
+   number follows from `derive()`.
+3. **Who grows**: the winning side's survivors. The dead do not (what dying costs is
+   `ITEM-012`'s permadeath); the losing side's survivors do not in this pass. Nothing about growth
+   travels: both peers derive it from state they both hold.
+4. **The end screen**: when a side has nobody standing, the match ends. In a local match the
+   loser gets a plain "you lost" screen, then the winner sees each surviving unit's growth —
+   what changed, from what to what, and which deeds earned it. Online, each side sees its own.
+5. **Thresholds measured, not guessed**: the sweep reports the survivors' records and the growth
+   they come to, per match, before the numbers are set.
+
+Out of scope: persistence — growth is shown and then lost until `ITEM-012`, which comes next —
+and the promotion perk draft, which the GDD's learn-by-doing replaces.
+
+#### Measured
+Block 1000, stock mirror; the rules are untouched (208 / 183 / 9). 2.6 surviving winners a match,
+each with 4.4 rounds landed, 0.3 crits, 1.2 kills, 23 damage taken, 0.3 attacks on the unaware and
+2.1 turns spent to the last point; at `PROGRESSION`'s thresholds each gains 0.53 attribute points
+(Health 27%, Agility 26%) and 0.39 points of proficiency: a point every two matches or so. The
+thresholds were set first and kept after the measurement, since that pace suits a roster that
+will play many matches. Strength needs melee or plate (with knives and plate on Blue, 36% of
+survivors); Intelligence stays at 0 because the policy never uses kit.
+
+#### Acceptance Criteria
+- [x] Both peers, and a replay, hold the same service record (`tests/progression.test.ts`: the
+      same command applied as `local` and as `record`); the component is digested like any other.
+- [x] Growth is a pure function of the sheet and the record; each change names its deeds; no
+      scale is passed (a specialist's trained class keeps its head start at the top) and no
+      attribute gains more than a point a match.
+- [x] When one side is wiped out the match ends: in the browser (hot seat, seed 7) the loser's
+      "Red — you lost", then "Blue wins" with each survivor's growth and "Nothing new this time"
+      for one who learned nothing. The last Red units were set to 0 HP from the console rather
+      than shot: the check is the same per-tick one either way.
+- [x] The sweep reports records and growth per match.
+- [ ] Not checked: the online end screen in two live browsers (each side its own page).
+- [ ] Open: growth is shown and lost until persistence (`ITEM-012`).
+
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the
