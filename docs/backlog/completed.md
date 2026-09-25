@@ -1397,6 +1397,14 @@ survivors); Intelligence stays at 0 because the policy never uses kit.
       attribute gains more than a point a match.
 - [x] When one side is wiped out the match ends: in the browser (hot seat, seed 7) the loser's
       "Red — you lost", then "Blue wins" with each survivor's growth and "Nothing new this time"
+      for one who learned nothing. The last Red units were set to 0 HP from the console rather
+      than shot: the check is the same per-tick one either way.
+- [x] The sweep reports records and growth per match.
+- [ ] Not checked: the online end screen in two live browsers (each side its own page).
+- [ ] Open: growth is shown and lost until persistence (`ITEM-012`).
+
+---
+
 ### [ITEM-035] One of the Losers Carried Out Alive
 **Completed Date:** 2026-09-25  
 **Type:** Feature  
@@ -1425,14 +1433,6 @@ the loser takes at least something out of the match.
       against mutants).
 - [x] Shown on the loser's page (browser, hot seat, seed 7: "Garnet — carried out alive, on 1 HP").
 - [ ] Open: persisted with 1 HP once ITEM-012 lands.
-
----
-
-      for one who learned nothing. The last Red units were set to 0 HP from the console rather
-      than shot: the check is the same per-tick one either way.
-- [x] The sweep reports records and growth per match.
-- [ ] Not checked: the online end screen in two live browsers (each side its own page).
-- [ ] Open: growth is shown and lost until persistence (`ITEM-012`).
 
 ---
 
