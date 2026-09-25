@@ -8,6 +8,8 @@ import type { MoraleBreak } from '../core/Morale'
 import { burningTiles } from '../core/Fire'
 import { isDoor } from '../core/Doors'
 import { WallKind } from '../core/Walls'
+import { copyDeeds, type Deeds, type Growth } from '../core/Progression'
+import { debrief, winnerOf } from '../game/MatchEnd'
 import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
@@ -127,6 +129,8 @@ export interface MatchOutcome {
   burned: Record<Faction, number>
   /** Doors on the map when it ended, and how many of them stood open. */
   doors: { hung: number; opened: number }
+  /** The winning side's survivors: what they did, and what it taught them. */
+  debriefed: { deeds: Deeds; growth: Growth[] }[]
 }
 
 const DEFAULT_TURN_CAP = 40
@@ -280,12 +284,11 @@ export class SimMatch {
       this.act({ type: 'endTurn', faction: this.host.activeFaction })
     }
 
-    const blueAlive = this.living(Faction.Blue)
-    const redAlive = this.living(Faction.Red)
+    const winner = winnerOf(this.host.squads)
 
     return {
       seed: this.setup.seed,
-      winner: blueAlive === redAlive ? null : blueAlive ? Faction.Blue : Faction.Red,
+      winner,
       turns: this.host.turnNumber,
       survivors: this.host.living,
       traits: {
@@ -299,6 +302,10 @@ export class SimMatch {
       breaks: { ...this.breaks },
       burned: { ...this.burned },
       doors: this.doorCount(),
+      debriefed:
+        winner === null
+          ? []
+          : debrief(this.host.squads, winner).map(({ unit, growth }) => ({ deeds: copyDeeds(unit.deeds), growth })),
       ground: {
         [Faction.Blue]: this.ground.of(Faction.Blue),
         [Faction.Red]: this.ground.of(Faction.Red),

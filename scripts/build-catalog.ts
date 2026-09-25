@@ -16,7 +16,7 @@
 import { GRENADES, GrenadeId, SHOT_MODES, STATUSES, type StatusSpec, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { LONG_GUN_PARRY, MELEE, MeleeId } from '../src/core/Melee'
 import { NOISE } from '../src/core/Noise'
-import { AIM, CHARACTER, COVER, CRIT, DOORS, FIRE, MORALE, RULES, WOUNDS } from '../src/config'
+import { AIM, CHARACTER, COVER, CRIT, DOORS, FIRE, MORALE, PROGRESSION, RULES, WOUNDS } from '../src/config'
 import { CRATE_FIRE, SURFACES } from '../src/core/Surfaces'
 import { PREDISPOSITIONS, steadyChance, TEMPERAMENTS } from '../src/core/Morale'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
@@ -467,7 +467,37 @@ function build(): string {
   lines.push('')
   lines.push('---')
   lines.push('')
-  lines.push('## 10. Where the numbers come from')
+  lines.push('## 10. After the match')
+  lines.push('')
+  lines.push(
+    "The winning side's survivors grow from what they did (`core/Progression`), once the match is over — never during it. At most one point of an attribute a match, never past the top of a scale; Intelligence speeds all of it.",
+  )
+  lines.push('')
+  lines.push('| Grows | From | For a point |')
+  lines.push('| --- | --- | --- |')
+  lines.push(
+    `| A weapon class's proficiency | Rounds landed with it; a critical counts ${PROGRESSION.critHits} | ${PROGRESSION.hitsPerProficiency} rounds, at most ${PROGRESSION.proficiencyPerMatch} points a match |`,
+  )
+  lines.push(
+    `| Health | Damage taken and lived through: a mark per ${PROGRESSION.woundsPerMark} HP | ${PROGRESSION.marksPerPoint.health} marks |`,
+  )
+  lines.push(
+    `| Agility | Attacks landed on the unaware or from behind; turns spent to the last point short of Winded | ${PROGRESSION.marksPerPoint.agility} marks |`,
+  )
+  lines.push(
+    `| Strength | Blows landed; doors forced (${PROGRESSION.forcedMarks} marks each); a mark per ${PROGRESSION.heavyTilesPerMark} tiles walked in gear that drags | ${PROGRESSION.marksPerPoint.strength} marks |`,
+  )
+  lines.push(
+    `| Intelligence | Kit that asks for Intelligence, worked; a lock opened with the keys | ${PROGRESSION.marksPerPoint.intelligence} marks |`,
+  )
+  lines.push('')
+  lines.push(
+    `Every mark is multiplied by the learning rate: ${PROGRESSION.learning.min} at the bottom of Intelligence to ${PROGRESSION.learning.max} at the top.`,
+  )
+  lines.push('')
+  lines.push('---')
+  lines.push('')
+  lines.push('## 11. Where the numbers come from')
   lines.push('')
   lines.push('| Rule | Value | Source |')
   lines.push('| --- | --- | --- |')

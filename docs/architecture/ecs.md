@@ -73,6 +73,7 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | `GrenadeSpecsComponent` | Per-unit ordnance: throw range from Strength, blast radius and armour shred from the thrower's Demolitions training. Stamped into the unit's own specs rather than applied at the throw site, so the planner's preview, the range check and the debug panel all read the numbers *this* arm can reach — and a peer sees the arm it is up against rather than its own stock copy | Yes |
 | `CoverRulesComponent`, `AimRulesComponent`, `MatchRulesComponent`, `StatusSpecsComponent` | Rule tables on the global entity, so both peers resolve against the same constants | Yes (global entity) |
 | `WallComponent` | Wall segment state for the terrain entities: its `kind`, which for a door is its state too — shut, open or locked (`core/Doors`) | Yes |
+| `DeedsComponent` | A unit's service record for the match — rounds landed and crits by weapon class, kills, damage taken, attacks on the unaware, turns spent to the last point, blows, doors forced, tiles in heavy kit, advanced kit used — written by the rules on both peers (`CombatSystem.record`, `CommandSystem`) and turned into growth after the match (`core/Progression`) | Yes |
 | `GroundComponent` | What has happened to the ground since the map was made, sparse and sorted by tile: burning tiles and turns left, smoke, tiles burned to ash, crates burned away. One entity for the map, owned by the host | Yes |
 
 Nothing about a character's derived stats replicates in its own right. A sheet carries four

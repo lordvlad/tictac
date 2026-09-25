@@ -220,6 +220,30 @@ export const DOORS = {
   forceAp: 4,
 }
 
+
+/**
+ * What a match teaches (`core/Progression`): marks from the service record,
+ * turned into points after the match. Set from the balance sweep's records
+ * of the winning side's survivors, not guessed.
+ */
+export const PROGRESSION = {
+  /** Multiplier on every mark, from Intelligence: the learning attribute. */
+  learning: { min: 0.8, max: 1.25 },
+  /** Rounds landed with a weapon class for a point of its proficiency. */
+  hitsPerProficiency: 4,
+  /** A critical counts as this many rounds landed. */
+  critHits: 2,
+  /** Most a class's proficiency can rise in one match. */
+  proficiencyPerMatch: 2,
+  /** Marks an attribute needs, after the learning rate, for its point. */
+  marksPerPoint: { health: 2, agility: 3, strength: 3, intelligence: 2 },
+  /** Hit points taken and lived through for one mark of Health. */
+  woundsPerMark: 20,
+  /** A door forced is worth this many marks of Strength. */
+  forcedMarks: 2,
+  /** Tiles walked in heavy kit for one mark of Strength. */
+  heavyTilesPerMark: 8,
+}
 /**
  * How much a unit can take before it stops taking orders (`core/Morale`).
  *

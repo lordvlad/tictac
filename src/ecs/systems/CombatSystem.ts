@@ -14,6 +14,8 @@ import { type Noise, shotLoudness } from '../../core/Noise'
 import { glassCrossed } from '../../core/Visibility'
 import type { Roll } from '../../core/rng'
 import { shake } from '../../core/Morale'
+import { Awareness } from '../../core/Awareness'
+import { fromBehind } from '../../core/Facing'
 import { executeMelee,
   applyHitEffects,
   canShoot,
@@ -30,6 +32,14 @@ function misses(result: ShotResult): number {
   let count = 0
   for (const landed of result.rolls) if (!landed) count++
   return count
+}
+
+/**
+ * Whether `target` did not see an attack from `by` coming: not in the fight
+ * yet, or hit from behind. Asked before the attack, which engages it.
+ */
+function unseen(by: Soldier, target: Soldier): boolean {
+  return target.awareness !== Awareness.Engaged || fromBehind(target, by.tile)
 }
 
 /**
@@ -94,6 +104,7 @@ export class CombatSystem extends System {
    * neither the planner nor the wire supplies it any more.
    */
   fireShot(shooter: Soldier, target: Soldier, mode: ShotMode, rolls?: boolean[]): ShotResult | null {
+    const quiet = unseen(shooter, target)
     const result = fireWeapon(
       this.grid,
       shooter,
@@ -106,6 +117,7 @@ export class CombatSystem extends System {
     )
     if (!result) return null
     shake(this.squads.soldiers, shooter, result.hits, target, misses(result))
+    this.record(shooter, result.hits, 'gun', target, quiet)
     this.onNoise?.({ at: { ...shooter.tile }, loudness: shotLoudness(shooter), faction: shooter.faction })
     // Every round goes somewhere: through a window, it takes the window with it.
     this.through(shooter.tile, target.tile, shooter.faction)
@@ -118,9 +130,11 @@ export class CombatSystem extends System {
    * like a shot, and reported through the same `onShotResolved`.
    */
   melee(attacker: Soldier, target: Soldier): ShotResult | null {
+    const quiet = unseen(attacker, target)
     const result = executeMelee(this.grid, attacker, target, this.fx, this.roll)
     if (!result) return null
     shake(this.squads.soldiers, attacker, result.hits)
+    this.record(attacker, result.hits, 'blow', target, quiet)
     const loudness = MELEE[attacker.sidearm].loudness
     if (loudness > 0) this.onNoise?.({ at: { ...attacker.tile }, loudness, faction: attacker.faction })
     this.onShotResolved?.(attacker, target, result)
@@ -132,6 +146,7 @@ export class CombatSystem extends System {
     const result = throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx)
     if (!result.thrown) return result
     shake(this.squads.soldiers, thrower, result.hits)
+    this.record(thrower, result.hits, 'blast')
     // A throw that meets a window breaks it on the way, then goes off — and is
     // heard — where it lands, not where it was thrown from.
     this.through(from, at, thrower.faction)
@@ -177,6 +192,7 @@ export class CombatSystem extends System {
     const fired = reactToArrival(this.grid, mover, this.squads.soldiers, this.roll, this.fx)
     for (const { watcher, result } of fired) {
       shake(this.squads.soldiers, watcher, result.hits, mover, misses(result))
+      this.record(watcher, result.hits, 'gun', mover)
       this.onNoise?.({ at: { ...watcher.tile }, loudness: shotLoudness(watcher), faction: watcher.faction })
       this.through(watcher.tile, mover.tile, watcher.faction)
       this.onShotResolved?.(watcher, mover, result)
@@ -194,8 +210,46 @@ export class CombatSystem extends System {
   burn(unit: Soldier): number {
     if (unit.isDead) return 0
     applyHitEffects(unit, FIRE.damage, 0, null, this.fx)
-    shake(this.squads.soldiers, null, [{ soldier: unit, damage: FIRE.damage, killed: unit.isDead }])
+    const hits = [{ soldier: unit, damage: FIRE.damage, killed: unit.isDead, armorShred: 0, status: null, crit: false }]
+    shake(this.squads.soldiers, null, hits)
+    this.record(null, hits, null)
     return FIRE.damage
+  }
+
+  /**
+   * Write an attack into the service records (`core/Progression`): what every
+   * victim took, and what `by` landed and killed — with a gun, by class, or
+   * with a blow. Friendly fire teaches nobody anything. `quiet` is whether
+   * `target` did not see it coming, judged before the attack engaged it.
+   */
+  private record(
+    by: Soldier | null,
+    hits: readonly ResolvedHit[],
+    how: 'gun' | 'blow' | 'blast' | null,
+    target: Soldier | null = null,
+    quiet = false,
+  ): void {
+    const killed = new Set<Soldier>()
+    let landedOnTarget = false
+    for (const hit of hits) {
+      const victim = this.squads.soldiers.find((unit) => unit === hit.soldier)
+      if (!victim) continue
+      victim.deeds.wounds += hit.damage
+      if (!by || victim.faction === by.faction) continue
+      // Every round on a body already dead reports the death again.
+      if (hit.killed) killed.add(victim)
+      if (hit.damage <= 0) continue
+      if (victim === target) landedOnTarget = true
+      if (how === 'gun') {
+        by.deeds.hits[by.weaponId] += 1
+        if (hit.crit) by.deeds.crits[by.weaponId] += 1
+      } else if (how === 'blow') {
+        by.deeds.blows += 1
+      }
+    }
+    if (!by) return
+    by.deeds.kills += killed.size
+    if (quiet && landedOnTarget) by.deeds.unseen += 1
   }
 
   /**

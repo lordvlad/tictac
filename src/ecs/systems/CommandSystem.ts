@@ -1,4 +1,5 @@
-import type { Faction } from '../../config'
+import { type Faction, RULES } from '../../config'
+import { ITEMS } from '../../core/Items'
 import { distance, facingYaw } from '../../core/math'
 import { hears, NOISE, type Noise, stepLoudness } from '../../core/Noise'
 import { WallKind } from '../../core/Walls'
@@ -195,6 +196,8 @@ export class CommandSystem extends System {
       // it may turn a watcher round; seeing it may engage one — both before
       // the reaction, which is what they are for.
       this.sound({ at: { ...mover.tile }, loudness: stepLoudness(mover.isCrouching), faction: mover.faction })
+      // Carrying what drags is what Strength learns from.
+      if (mover.gearOnlyTraits.moveCost > 0) mover.deeds.heavy += 1
       this.look()
       this.reactions += this.combat.reactTo(mover)
       // Walking into fire costs the step it took.
@@ -316,6 +319,20 @@ export class CommandSystem extends System {
         return undefined
       default:
         return this.unit(command.faction, command.squadIndex)
+    }
+  }
+
+  /**
+   * The outgoing side's service records, at the handover: a unit that spent
+   * every point of its turn and will not be winded for it has pushed as far as
+   * it can go without paying — what Agility learns from. Counted here, before
+   * the next turn resets what it spent.
+   */
+  private pushedThrough(outgoing: Faction): void {
+    for (const unit of this.squads.byFaction[outgoing] ?? []) {
+      if (unit.isDead || unit.spentThisTurn < unit.effectiveMaxAp) continue
+      if (unit.exhaustedTurns + 1 >= RULES.exhaustionTurns) continue
+      unit.deeds.pushed += 1
     }
   }
 
@@ -450,9 +467,12 @@ export class CommandSystem extends System {
         // Forced from anywhere but here: the acting side established reach and
         // need, which this side would otherwise second-guess into a refusal.
         // `use` still refuses what no legitimate sender could have done.
-        return this.items.use(user, command.itemId, target ?? user, origin !== 'local')
-          ? carried
-          : refuse('item refused by the rules')
+        if (!this.items.use(user, command.itemId, target ?? user, origin !== 'local')) {
+          return refuse('item refused by the rules')
+        }
+        // Kit that asks for Intelligence, worked: what that attribute learns from.
+        if (ITEMS[command.itemId].minIntelligence !== undefined) user.deeds.kit += 1
+        return carried
       }
       case 'endUnitTurn': {
         const soldier = this.unit(command.faction, command.squadIndex)
@@ -461,6 +481,7 @@ export class CommandSystem extends System {
         return carried
       }
       case 'endTurn': {
+        this.pushedThrough(this.turns.activeFaction)
         this.turns.startNextTurn()
         this.burnDown()
         this.rally()
@@ -480,6 +501,8 @@ export class CommandSystem extends System {
           if (this.combat.roll() >= unit.shoulder / 100) return carried
         }
         this.walls.setKind(this.world, command.edge, doorAfter(command.verb))
+        if (command.verb === 'force') unit.deeds.forced += 1
+        if (command.verb === 'unlock') unit.deeds.kit += 1
         return carried
       }
       case 'rightClickFacing': {

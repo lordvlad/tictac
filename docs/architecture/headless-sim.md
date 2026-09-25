@@ -198,6 +198,16 @@ door's price, and treats a locked one as a wall; it never opens, shuts, unlocks 
 purpose, and most of its fighting happens outside. So doors, like stealth and smoke, are a
 player's tool the sweep barely measures. The report's `doors:` line counts them.
 
+**After-match progression** (2026-09-25, block 1000, stock mirror): the rules are untouched —
+208 / 183 / 9, as before the record. The report's `progression:` line gives the winning side's
+survivors per match (2.6), the growth they come to and their mean record: 4.4 rounds landed, 0.3
+crits, 1.2 kills, 23 damage taken, 0.3 attacks on the unaware, 2.1 turns spent to the last
+point. At `PROGRESSION`'s thresholds a survivor gains 0.53 attribute points a match (Health 27%,
+Agility 26%) and 0.39 points of proficiency — a point every two matches or so. Strength and
+Intelligence barely move in the mirror because the policy carries no plate, swings no knife and
+uses no kit: with knives and two plate carriers on Blue, Strength grows for 36% of survivors
+(22 tiles in heavy kit each). Intelligence stays at 0, since the policy never repairs or unlocks.
+
 **Indoors** (`isIndoors`: a roof slab over the tile's floor; rooftops and courtyards are
 outside) is 18.7% of a map's walkable ground. The ground table reports the share of tiles
 walked indoors and the share of unit-turns *ended* indoors; the weapon table reports each

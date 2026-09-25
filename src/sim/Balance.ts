@@ -1,6 +1,7 @@
 import { Faction } from '../config'
 import type { MapOptions } from '../core/MapGenerator'
 import type { MoraleBreak } from '../core/Morale'
+import type { Attribute, Deeds } from '../core/Progression'
 import type { GroundCovered } from './Ground'
 import { WeaponId } from '../core/Arsenal'
 import type { CombatRecording } from '../game/Recording'
@@ -98,6 +99,11 @@ export interface SweepReport {
   /** Doors per match and how many stood open at the end: whether the policy goes through them. */
   doorsPerMatch: { hung: number; opened: number }
   /**
+   * The winning side's survivors: what they did, per survivor, and what it
+   * taught them. What the thresholds in `PROGRESSION` are set from.
+   */
+  progression: ProgressionReport
+  /**
    * Ground used per match, by side and by result. The win rates say who won;
    * this says whether anybody went round rather than through.
    */
@@ -119,6 +125,44 @@ function meanGround(samples: readonly GroundCovered[]): GroundCovered {
     tilesIndoors: mean((g) => g.tilesIndoors),
     turnsIndoors: mean((g) => g.turnsIndoors, 3),
     mapIndoors: mean((g) => g.mapIndoors, 3),
+  }
+}
+
+export interface ProgressionReport {
+  survivorsPerMatch: number
+  /** Mean attribute and proficiency points a surviving winner gains. */
+  attributePoints: number
+  proficiencyPoints: number
+  /** Share of surviving winners that gained each attribute. */
+  grew: Record<Attribute, number>
+  /** The mean record: rounds landed with any class, and the rest as kept. */
+  deeds: { rounds: number; crits: number } & Omit<Deeds, 'hits' | 'crits'>
+}
+
+function progressionOf(outcomes: readonly MatchOutcome[]): ProgressionReport {
+  const all = outcomes.flatMap((o) => o.debriefed)
+  const mean = (pick: (entry: (typeof all)[number]) => number, digits = 2) =>
+    all.length === 0 ? 0 : round(all.reduce((sum, entry) => sum + pick(entry), 0) / all.length, digits)
+  const sum = (table: Record<string, number>) => Object.values(table).reduce((a, b) => a + b, 0)
+  const grewOf = (attribute: Attribute) =>
+    mean((e) => (e.growth.some((g) => g.kind === 'attribute' && g.attribute === attribute) ? 1 : 0), 3)
+  return {
+    survivorsPerMatch: outcomes.length === 0 ? 0 : round(all.length / outcomes.length),
+    attributePoints: mean((e) => e.growth.filter((g) => g.kind === 'attribute').length),
+    proficiencyPoints: mean((e) => e.growth.reduce((n, g) => n + (g.kind === 'proficiency' ? g.to - g.from : 0), 0)),
+    grew: { health: grewOf('health'), agility: grewOf('agility'), strength: grewOf('strength'), intelligence: grewOf('intelligence') },
+    deeds: {
+      rounds: mean((e) => sum(e.deeds.hits), 1),
+      crits: mean((e) => sum(e.deeds.crits), 1),
+      kills: mean((e) => e.deeds.kills),
+      wounds: mean((e) => e.deeds.wounds, 0),
+      unseen: mean((e) => e.deeds.unseen),
+      pushed: mean((e) => e.deeds.pushed),
+      blows: mean((e) => e.deeds.blows),
+      forced: mean((e) => e.deeds.forced),
+      heavy: mean((e) => e.deeds.heavy, 1),
+      kit: mean((e) => e.deeds.kit),
+    },
   }
 }
 
@@ -245,6 +289,7 @@ export function sweep(options: SweepOptions): SweepReport {
       hung: round(outcomes.reduce((n, o) => n + o.doors.hung, 0) / outcomes.length),
       opened: round(outcomes.reduce((n, o) => n + o.doors.opened, 0) / outcomes.length),
     },
+    progression: progressionOf(outcomes),
     ground: {
       blue: meanGround(outcomes.map((o) => o.ground[Faction.Blue])),
       red: meanGround(outcomes.map((o) => o.ground[Faction.Red])),
@@ -312,6 +357,16 @@ export function formatReport(report: SweepReport): string {
   )
   lines.push(
     `doors: ${report.doorsPerMatch.opened} of ${report.doorsPerMatch.hung} standing open at the end of a match`,
+  )
+  const p = report.progression
+  const d = p.deeds
+  lines.push(
+    `progression: ${p.survivorsPerMatch} surviving winners a match; each gains ${p.attributePoints} attribute points (${Object.entries(p.grew)
+      .map(([attribute, share]) => `${attribute} ${pct(share)}`)
+      .join(', ')}) and ${p.proficiencyPoints} proficiency`,
+  )
+  lines.push(
+    `  record per survivor: rounds ${d.rounds}, crits ${d.crits}, kills ${d.kills}, wounds ${d.wounds}, unseen ${d.unseen}, pushed ${d.pushed}, blows ${d.blows}, forced ${d.forced}, heavy ${d.heavy}, kit ${d.kit}`,
   )
   lines.push('')
   lines.push(

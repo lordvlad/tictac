@@ -3,7 +3,7 @@ title: "GDD: Status, Trait & Worn Kit Catalogue"
 id: "GDD-CATALOG"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-24"
+lastReviewed: "2026-09-25"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Traits.ts"
@@ -249,7 +249,23 @@ Keys are not used up and have no action of their own: carrying them is the permi
 
 ---
 
-## 10. Where the numbers come from
+## 10. After the match
+
+The winning side's survivors grow from what they did (`core/Progression`), once the match is over — never during it. At most one point of an attribute a match, never past the top of a scale; Intelligence speeds all of it.
+
+| Grows | From | For a point |
+| --- | --- | --- |
+| A weapon class's proficiency | Rounds landed with it; a critical counts 2 | 4 rounds, at most 2 points a match |
+| Health | Damage taken and lived through: a mark per 20 HP | 2 marks |
+| Agility | Attacks landed on the unaware or from behind; turns spent to the last point short of Winded | 3 marks |
+| Strength | Blows landed; doors forced (2 marks each); a mark per 8 tiles walked in gear that drags | 3 marks |
+| Intelligence | Kit that asks for Intelligence, worked; a lock opened with the keys | 2 marks |
+
+Every mark is multiplied by the learning rate: 0.8 at the bottom of Intelligence to 1.25 at the top.
+
+---
+
+## 11. Where the numbers come from
 
 | Rule | Value | Source |
 | --- | --- | --- |

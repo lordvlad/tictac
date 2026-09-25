@@ -48,6 +48,7 @@ import {
   SightedComponent,
   AwarenessComponent,
   MoraleComponent,
+  DeedsComponent,
   StatusesComponent,
   WeaponComponent,
   ItemsComponent,
@@ -82,6 +83,7 @@ export class Soldier {
   private readonly sighted: SightedComponent
   private readonly awarenessComponent: AwarenessComponent
   private readonly moraleComponent: MoraleComponent
+  private readonly deedsComponent: DeedsComponent
   private readonly positionComponent: PositionComponent
 
   /**
@@ -160,6 +162,7 @@ export class Soldier {
     this.sighted = world.addComponent(this.entityId, new SightedComponent())
     this.awarenessComponent = world.addComponent(this.entityId, new AwarenessComponent())
     this.moraleComponent = world.addComponent(this.entityId, new MoraleComponent())
+    this.deedsComponent = world.addComponent(this.entityId, new DeedsComponent())
     this.traitsComponent = world.addComponent(this.entityId, new TraitsComponent())
     this.stampGrenades()
     this.refreshTraits()
@@ -673,6 +676,11 @@ export class Soldier {
   }
   set quietTurns(value: number) {
     this.awarenessComponent.quietTurns = value
+  }
+
+  /** What it has done this match that it can learn from (`core/Progression`). */
+  get deeds(): DeedsComponent {
+    return this.deedsComponent
   }
 
   /** Nerve left (`core/Morale`). */
