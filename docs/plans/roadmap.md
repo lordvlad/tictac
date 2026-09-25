@@ -44,7 +44,7 @@ graph TD
   `[ITEM-016]` attributes at work, `[ITEM-018]` melee, `[ITEM-020]`–`[ITEM-023]` full-knowledge
   lockstep, `[ITEM-032]` projectile hit model, `[ITEM-034]` tile properties, fire and smoke.
 - Done last: `[ITEM-017]` doors, locks and keys (2026-09-25).
-- In-match progression (`[ITEM-004]`) moved to M4, where its payoff (a roster that keeps it) is.
+- After-match progression (`[ITEM-004]`) moved to M4, where its payoff (a roster that keeps it) is.
 
 ---
 
@@ -61,6 +61,6 @@ graph TD
 **Status:** In Progress  
 **Focus:** High-level tactics, team composition, and long-term roster persistence.
 - Done: `[ITEM-011]` overwatch, `[ITEM-024]` transport port, `[ITEM-025]` referee.
-- Open, in the order on the [focus board](./active-focus.md): `[ITEM-004]` in-match
-  progression, `[ITEM-010]` roles, `[ITEM-028]` schema drift guard, `[ITEM-012]` roster
-  persistence.
+- Open, in the order on the [focus board](./active-focus.md): `[ITEM-004]` after-match
+  progression and the end screen (in progress), `[ITEM-028]` schema drift guard with
+  `[ITEM-012]` roster persistence, `[ITEM-010]` roles.

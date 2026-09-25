@@ -145,9 +145,21 @@ should be a trade rather than a gift is open.
 
 ---
 
-## 4. Organic Progression (Learn-by-Doing)
+## 4. Organic Progression (Learn-by-Doing), After the Match
 
 Instead of a generic XP pool spent in menus, characters organically grow their attributes and proficiencies by pushing their limits in the field.
+
+**When** (decided 2026-09-25, ITEM-004): **after the match, never during it.** Inside a match
+the part of a character that moves is morale (§3); what a unit did is written down as it happens
+— a service record — and turned into growth once the match is over. So a fight is played with
+the people who started it, and what they learned is something the player sees on the end
+screen, not a number that changed under them mid-turn.
+
+**Who**: the winning side's survivors. The dead learn nothing; the losing side's survivors are
+not grown in this pass. A drawn match does not happen in live play (there is no turn cap).
+
+**How much**: at most one point of each attribute a match, never past the top of the scale.
+Intelligence speeds all of it — it is the learning attribute (§1).
 
 ### Proficiency & Skill Growth
 - **Weapon & Item Proficiencies**: Increase directly through successful in-match usage. Landing hits, scoring criticals, and effectively deploying utility items incrementally levels the associated proficiency.
@@ -155,8 +167,18 @@ Instead of a generic XP pool spent in menus, characters organically grow their a
 ### Attribute Growth Mechanics
 - **Health**: Progresses by surviving non-lethal damage, enduring environmental hazards, and recovering from critical status effects without dying.
 - **Agility**: Progresses by optimally expending Action Points (stopping just short of the "Winded" threshold), successfully flanking or sneaking up on enemies, and consistently scoring hits with small-hitcone/precision weapons (Sniper Rifles, Assault Rifles).
-- **Strength**: Progresses by undertaking heavy lifting (moving long distances while heavily encumbered without hitting exhaustion) and successfully engaging and defeating enemies in melee combat.
+- **Strength**: Progresses by undertaking heavy lifting (moving long distances while heavily encumbered without hitting exhaustion), successfully engaging and defeating enemies in melee combat, and forcing locked doors.
 - **Intelligence**: Progresses by successfully interacting with complex environmental terminals (hacking), decoding intel, and efficiently utilizing advanced utility items in critical moments.
+
+What is recorded is what the game has today: hacking and intel do not exist yet, so Intelligence
+grows from advanced kit (the repair kit, the keys). The thresholds are set from the balance
+sweep and listed in the generated catalogue once built.
+
+### The end screen
+When one side has nobody standing the match is over. In a local match the side that lost gets a
+plain "you lost" screen first; then the winner sees each survivor with what grew, from what to
+what, and the deeds that earned it. Until roster persistence lands (ITEM-012), that is where it
+ends.
 
 ---
 

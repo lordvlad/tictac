@@ -23,48 +23,58 @@ it is done. It is not ordered and says nothing about what happens next: that is 
 
 ---
 
-### [ITEM-004] In-Match Progression & Promotion Draft
+### [ITEM-004] After-Match Progression & the End Screen
 **Type:** Feature  
 **Priority:** P1  
-**Status:** Ready  
+**Status:** In Progress  
 **Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why
-Characters vary at deployment but never change during a fight, so nothing a unit does accrues to it.
+Characters vary at deployment but never change, so nothing a unit does accrues to it. Rewritten
+with the user on 2026-09-25: **progression happens after the match, not during it**. Inside a
+match the character layer that moves is morale (ITEM-014), and it stays that way. A match that
+ends has to be *seen* to end, too — today nothing happens when a side is wiped out.
 
 #### Change
-1. Kills and assists grant XP; at a threshold the unit is promoted and the player picks one perk from three.
-2. A perk is a `TraitId` appended to `sheet.traits` followed by `refreshTraits()` (mechanism already exists).
-3. The choice travels across P2P as a new `promote` command — the intent, not its effect: both
-   peers append the trait and re-fold, exactly as they both resolve a shot (`ITEM-023`). A perk
-   that only an *enemy* has to read still belongs in `TraitsComponent`.
-4. **Organic growth (from [GDD §4](../design/gdd/progression-and-meta.md), folded in here
-   rather than filed twice)**: proficiency rises from using the thing — landing hits,
-   scoring crits, deploying utility — and the four attributes rise from being pushed:
-   Health from surviving non-lethal damage, Agility from spending AP to just short of
-   `Winded` and hitting with precision weapons, Strength from moving far while encumbered and
-   winning melee, Intelligence from using advanced kit well. The GDD is explicit that this
-   replaces "a generic XP pool spent in menus", so points 1–3 above are now the *fallback*
-   design: if learn-by-doing lands, the perk draft is the promotion moment on top of it and
-   the XP threshold is what earns the draft, not what buys the stat.
-5. Growth writes to `sheet.attributes`, which is the whole reason the sheet keeps attributes
-   rather than ceilings: a unit that trains gains a point, and every derived stat follows from
-   `derive()` with nothing to migrate.
+1. **A service record per unit**, kept by the rules while the match is played: rounds landed and
+   criticals with each weapon class, kills, damage taken, attacks landed on a target that did not
+   see them coming, turns spent to the last point without being winded, blows landed, doors
+   forced, tiles walked in heavy kit, advanced kit used. A replicated, digested component
+   (`DeedsComponent`), written by the rules on both peers from the same commands — like morale —
+   so a peer, a replay and the referee all hold the same record, and a rewind puts it back.
+2. **Growth, after the match** (`core/Progression`, pure): the winning side's survivors turn their
+   record into growth, per [GDD §4](../design/gdd/progression-and-meta.md): a weapon class's
+   proficiency from hits and crits with it; Health from damage taken and lived through; Agility
+   from hitting the unaware or from behind, and from turns spent to the last point short of
+   `Winded`; Strength from melee, doors forced and heavy kit carried; Intelligence from advanced
+   kit used well. Intelligence speeds all of it. At most one point per attribute per match, capped
+   at the scale's top. Growth writes `sheet.attributes` and `sheet.proficiency`, so every derived
+   number follows from `derive()`.
+3. **Who grows**: the winning side's survivors. The dead do not (what dying costs is
+   `ITEM-012`'s permadeath); the losing side's survivors do not in this pass. Nothing about growth
+   travels: both peers derive it from state they both hold.
+4. **The end screen**: when a side has nobody standing, the match ends. In a local match the
+   loser gets a plain "you lost" screen, then the winner sees each surviving unit's growth —
+   what changed, from what to what, and which deeds earned it. Online, each side sees its own.
+5. **Thresholds measured, not guessed**: the sweep reports the survivors' records and the growth
+   they come to, per match, before the numbers are set.
+
+Out of scope: persistence — growth is shown and then lost until `ITEM-012`, which comes next —
+and the promotion perk draft, which the GDD's learn-by-doing replaces.
 
 #### Affected Files
-- `src/core/Progression.ts` (new)
-- `src/ecs/systems/CombatSystem.ts` (`onShotResolved` hook)
-- `src/game/NetworkManager.ts`
-- `src/hud/Hud.ts` (perk selection prompt)
-- `tests/rpg.test.ts`
-
-#### Caveat
-Puts player choice into the wire protocol. Requires dedicated input sanitization against malformed traits and regression pins.
+- `src/core/Progression.ts` (new), `src/ecs/components/DeedsComponent.ts` (new)
+- `src/ecs/systems/CombatSystem.ts`, `src/ecs/systems/CommandSystem.ts`
+- `src/hud/` (end screen), `src/game/InteractionController.ts`
+- `src/sim/Balance.ts`, `src/sim/SimMatch.ts`
 
 #### Acceptance Criteria
-- [ ] Kills and assists accumulate XP; reaching threshold triggers 3-perk promotion UI.
-- [ ] Selected trait applies immediately to active stats and replicates across P2P.
-- [ ] Dedicated sanitizer guards wire against invalid traits.
+- [ ] Both peers, and a replay, hold the same service record for every unit (digested).
+- [ ] Growth is a pure function of the sheet and the record; each change names the deeds behind
+      it; nobody goes past the top of a scale or gains more than a point of an attribute a match.
+- [ ] When one side is wiped out the match ends: the loser sees "you lost", the winner each
+      survivor's growth (checked in the browser, hot seat).
+- [ ] The sweep reports records and growth per match, and the thresholds are set from it.
 
 ---
 

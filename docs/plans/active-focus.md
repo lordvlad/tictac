@@ -28,19 +28,18 @@ during a match, roles, and a roster that outlives the match.
 ---
 
 ## 🔄 In Progress
-- Nothing in flight.
+- **`[ITEM-004]`** After-match progression and the end screen (rewritten 2026-09-25: growth
+  after the match, morale stays the in-match layer). Measure the records before setting the
+  thresholds.
 
 ## 📋 Ready — pull in this order
-1. **`[ITEM-004]`** In-match progression. First because persistence needs something worth
-   persisting. **Measure before building**: the mirror's median match is 7 turns (blocks
-   1000/5000/9000, 2026-09-24), so count kills per unit per match before setting an XP
-   threshold.
-2. **`[ITEM-010]`** Roles on the loadout screen. Independent of the others; mostly UI over
-   `LOADOUT_LIMITS`.
-3. **`[ITEM-028]`** Log and store schema drift guard. Before `[ITEM-012]`: once a roster is
+1. **`[ITEM-028]`** Log and store schema drift guard, with `[ITEM-012]`: once a roster is
    derived from a stored log, the log is a schema.
-4. **`[ITEM-012]`** Permadeath, lasting wounds and roster persistence, on the referee's store
-   (`[ITEM-025]`). Depends on 1 and 3.
+2. **`[ITEM-012]`** Permadeath, lasting wounds and roster persistence, on the referee's store
+   (`[ITEM-025]`). Straight after `[ITEM-004]`, by the user's call: growth is what there is to
+   persist, and until then it is shown and lost.
+3. **`[ITEM-010]`** Roles on the loadout screen. Independent of the others; mostly UI over
+   `LOADOUT_LIMITS`.
 
 ## 🧊 Backlog — not yet queued
 - Nothing.
