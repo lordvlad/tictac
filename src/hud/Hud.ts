@@ -689,9 +689,13 @@ export class Hud {
     const side = screen.blue ? 'blue' : 'red'
     const next = Hud.intentAttr(screen.next)
     if (screen.stage === 'lost') {
+      const carried = screen.carried
+        ? `<div class="end-survivors"><div class="end-survivor"><img class="end-portrait" src="${screen.carried.portrait}" alt="" /><div><div class="end-name">${screen.carried.name}</div><div class="end-line">Carried out alive, on 1 HP. The rest of the squad is gone.</div></div></div></div>`
+        : ''
       this.endScreenEl.innerHTML = `
         <div class="turn-title ${side}">${screen.factionName} — you lost</div>
         <div class="turn-subtitle">Nobody left standing.</div>
+        ${carried}
         <button class="turn-continue-btn interactive" ${next}>CONTINUE ${icon('ui-continue')}</button>`
     } else {
       const survivors = screen.survivors

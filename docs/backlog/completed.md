@@ -1397,6 +1397,37 @@ survivors); Intelligence stays at 0 because the policy never uses kit.
       attribute gains more than a point a match.
 - [x] When one side is wiped out the match ends: in the browser (hot seat, seed 7) the loser's
       "Red — you lost", then "Blue wins" with each survivor's growth and "Nothing new this time"
+### [ITEM-035] One of the Losers Carried Out Alive
+**Completed Date:** 2026-09-25  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+With permadeath coming (ITEM-012), a lost match would wipe a squad out. The user, on 2026-09-25:
+losers learn nothing — that is the point of permadeath — but one squadmate survives with HP
+restored to 1, picked at random, preferably one without a condition that was getting worse, so
+the loser takes at least something out of the match.
+
+#### Key Changes
+- `game/MatchEnd.carriedOut(squads, loser, grid, seed)`: one of the losing side, picked from a
+  stream of the match seed (so both peers pick the same one and the match's dice are untouched),
+  from those not lying in fire; from all of them when every one is.
+- The loser's end-screen page names them: "Carried out alive, on 1 HP. The rest of the squad is
+  gone." They learn nothing.
+- Only fire counts as a worsening condition: there is no poison or bleeding in the game yet.
+  Those would join the test when they exist.
+- Nothing persists it yet: that is ITEM-012's post-match write, whose permadeath rule now names
+  the exception.
+
+#### Acceptance Criteria
+- [x] The same seed picks the same unit, every unit can be picked, a unit in fire is passed over
+      while anyone is not, and somebody is picked when all are (`tests/progression.test.ts`, red
+      against mutants).
+- [x] Shown on the loser's page (browser, hot seat, seed 7: "Garnet — carried out alive, on 1 HP").
+- [ ] Open: persisted with 1 HP once ITEM-012 lands.
+
+---
+
       for one who learned nothing. The last Red units were set to 0 HP from the console rather
       than shot: the check is the same per-tick one either way.
 - [x] The sweep reports records and growth per match.

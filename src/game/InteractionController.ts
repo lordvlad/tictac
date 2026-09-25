@@ -10,7 +10,7 @@ import type { OrbitRig } from '../camera/OrbitRig'
 import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
 import { buildHudModel, type EndScreen, endScreens, type HudIntent, tileReadout } from '../hud/HudModel'
-import { debrief, winnerOf } from './MatchEnd'
+import { carriedOut, debrief, winnerOf } from './MatchEnd'
 import { calculateHitChance } from './Combat'
 import { compareDigests, digestWorld, reportDivergence, type StateDigest } from './StateDigest'
 import { RpcMethods } from './JsonRpc'
@@ -1252,7 +1252,12 @@ export class InteractionController {
    */
   private endMatch(winner: Faction): void {
     const viewer = this.network && this.network.mode !== 'local' ? this.network.myFaction : null
-    this.endPages = endScreens(winner, viewer, debrief(this.squads, winner), this.portraits)
+    const loser = winner === Faction.Blue ? Faction.Red : Faction.Blue
+    // Picked from the match seed, so both sides carry out the same one.
+    const carried = this.recordingHeader
+      ? carriedOut(this.squads, loser, this.battlefield.grid, this.recordingHeader.seed)
+      : null
+    this.endPages = endScreens(winner, viewer, debrief(this.squads, winner), carried, this.portraits)
     this.shoot.exit()
     this.grenade.exit()
     this.planner.clear()

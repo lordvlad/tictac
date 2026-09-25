@@ -816,7 +816,14 @@ export interface EndScreenLine {
 
 /** One screen at the end of a match: the side it is for, and what it shows them. */
 export type EndScreen =
-  | { stage: 'lost'; factionName: string; blue: boolean; next: HudIntent }
+  | {
+      stage: 'lost'
+      factionName: string
+      blue: boolean
+      /** The one carried out alive, on 1 HP (`carriedOut`), when there is one. */
+      carried: { name: string; portrait: string } | null
+      next: HudIntent
+    }
   | {
       stage: 'won'
       factionName: string
@@ -836,13 +843,15 @@ const ATTRIBUTE_NAME: Record<Attribute, string> = {
  * The screens a finished match shows, in order.
  *
  * `viewer` is the side this screen belongs to online; null in a local match,
- * where both sides share it: the loser's "you lost" first, then the winner's
- * survivors and what they learned. Online each side sees only its own.
+ * where both sides share it: the loser's "you lost" first — with the one of
+ * them carried out alive, when there is one — then the winner's survivors and
+ * what they learned. Online each side sees only its own.
  */
 export function endScreens(
   winner: Faction,
   viewer: Faction | null,
   debriefs: readonly Debrief[],
+  carried: Soldier | null,
   portraits: Pick<OffscreenPortraits, 'getPortrait'>,
 ): EndScreen[] {
   const loser = winner === Faction.Blue ? Faction.Red : Faction.Blue
@@ -851,6 +860,7 @@ export function endScreens(
     stage: 'lost',
     factionName: FACTION_INFO[loser].name,
     blue: loser === Faction.Blue,
+    carried: carried ? { name: carried.name, portrait: portraits.getPortrait(carried.faction, carried.squadIndex) } : null,
     next,
   })
   const won: EndScreen = {

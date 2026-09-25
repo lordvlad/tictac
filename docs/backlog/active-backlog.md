@@ -68,8 +68,9 @@ A store of record for rosters and for **matches as event logs**, not a save file
 Also the rest of [GDD §5](../design/gdd/progression-and-meta.md), which only means anything
 once a roster outlives a match and is therefore filed here rather than as its own item:
 1. **Permadeath**: a unit that ends a match at `hp <= 0` without triage leaves the roster for
-   good. In-match death is already just `hp <= 0` in a component — this is about what the
-   post-match write does with it.
+   good — except the one of a losing side carried out alive (`carriedOut`, ITEM-035), who goes
+   back on the roster with 1 HP and nothing learned. In-match death is already just `hp <= 0` in
+   a component — this is about what the post-match write does with it.
 2. **Lasting wounds**: severe injury books medical-bay time between missions, and fatigue over
    consecutive deployments temporarily lowers baseline AP and morale. Distinct from the
    in-match wounds in `ITEM-005`, which are derived from current health and heal with it;

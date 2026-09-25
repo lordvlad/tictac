@@ -368,8 +368,11 @@ Once one side has nobody standing (`game/MatchEnd.winnerOf`), `debrief` turns th
 survivors' records into growth with `core/Progression.growthFrom` — a pure function of the sheet
 going in and the record (numbers in `PROGRESSION`, catalogue §10) — and the controller shows the
 end screen (`HudModel.endScreens`): in a local match the loser's "you lost", then the winner's
-survivors; online, each side its own. `grown` applies growth to a sheet; nothing stores it yet
-(ITEM-012). The sweep reports records and growth (`progression:` line).
+survivors; online, each side its own. The losing side learns nothing; `carriedOut` picks one of
+its fallen to leave the match alive on 1 HP, from a stream of the match seed (so both peers pick
+the same one, and the match's dice are untouched), preferring one not lying in fire. `grown`
+applies growth to a sheet; nothing stores either yet (ITEM-012). The sweep reports records and
+growth (`progression:` line).
 
 ## 3. Damage Resolution & Armor
 

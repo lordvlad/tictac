@@ -155,8 +155,10 @@ the part of a character that moves is morale (§3); what a unit did is written d
 the people who started it, and what they learned is something the player sees on the end
 screen, not a number that changed under them mid-turn.
 
-**Who**: the winning side's survivors. The dead learn nothing; the losing side's survivors are
-not grown in this pass. A drawn match does not happen in live play (there is no turn cap).
+**Who**: the winning side's survivors. The dead learn nothing, and a side that lost learns
+nothing at all: that is what permadeath is for (§5), and the one of them carried out alive
+comes away with their life, not a lesson. A drawn match does not happen in live play (there is
+no turn cap).
 
 **How much**: at most one point of each attribute a match, never past the top of the scale.
 Intelligence speeds all of it — it is the learning attribute (§1).
@@ -176,14 +178,19 @@ sweep and listed in the generated catalogue once built.
 
 ### The end screen
 When one side has nobody standing the match is over. In a local match the side that lost gets a
-plain "you lost" screen first; then the winner sees each survivor with what grew, from what to
-what, and the deeds that earned it. Until roster persistence lands (ITEM-012), that is where it
-ends.
+"you lost" screen first, naming the one carried out alive (§5); then the winner sees each
+survivor with what grew, from what to what, and the deeds that earned it. Until roster
+persistence lands (ITEM-012), that is where it ends.
 
 ---
 
 ## 5. Permadeath, Wounds & Roster Persistence
 
 - **Permadeath**: Fatal trauma without immediate triage results in permanent roster removal.
+- **Carried out** (ITEM-035): a side that loses keeps one of its people. When a match is lost,
+  one of the fallen, picked at random, is carried out alive on 1 HP — preferably one whose
+  condition was not still getting worse when they fell (lying in fire, today; poisoned or
+  bleeding once those exist). They learn nothing from the match; everyone else is gone. The pick
+  is drawn from the match seed on a stream of its own, so both sides agree on it.
 - **Lasting Wounds**: Severe injuries require medical bay downtime between missions. Fatigue accumulates over consecutive deployments, temporarily reducing baseline AP and Morale.
 - **Persistence**: Squad identities, scars, combat logs, and organic stat growths are stored in the meta-layer persistence across the campaign.

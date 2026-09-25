@@ -14,7 +14,7 @@ import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, Wal
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
 import { Squads } from '../src/game/Squads'
 import { TurnManager } from '../src/game/TurnManager'
-import { debrief, winnerOf } from '../src/game/MatchEnd'
+import { carriedOut, debrief, winnerOf } from '../src/game/MatchEnd'
 import { endScreens } from '../src/hud/HudModel'
 
 /** A sheet with every attribute and proficiency set where the test wants it. */
@@ -219,12 +219,33 @@ describe('The end of a match', () => {
 
   test('shows a local match the loser’s page and then the winner’s; online, each side only its own', () => {
     const portraits = { getPortrait: () => '' }
-    const stages = (viewer: Faction | null) => endScreens(Faction.Red, viewer, [], portraits).map((page) => [page.stage, page.next.type])
+    const stages = (viewer: Faction | null) => endScreens(Faction.Red, viewer, [], null, portraits).map((page) => [page.stage, page.next.type])
     expect(stages(null)).toEqual([
       ['lost', 'endScreenNext'],
       ['won', 'backToMenu'],
     ])
     expect(stages(Faction.Red)).toEqual([['won', 'backToMenu']])
     expect(stages(Faction.Blue)).toEqual([['lost', 'backToMenu']])
+  })
+
+  test('carries one of the losing side out alive: the same one on every peer, and not one lying in fire', () => {
+    const m = match(always(0.5))
+    const reds = m.squads.byFaction[Faction.Red]
+    reds.forEach((red, i) => {
+      red.tile = { x: 10 + i, y: 10 }
+      red.hp = 0
+    })
+    // The same seed picks the same unit; across seeds, every unit gets picked.
+    const picked = (seed: number) => carriedOut(m.squads, Faction.Red, m.grid, seed)
+    expect(picked(7)).toBe(picked(7)!)
+    const everyone = new Set(Array.from({ length: 200 }, (_, seed) => picked(seed)))
+    expect(everyone.size).toBe(reds.length)
+
+    // All but one of them burning: that one, whatever the seed.
+    for (const red of reds.slice(1)) m.grid.fire[m.grid.index(red.tile.x, red.tile.y)] = 3
+    expect(new Set(Array.from({ length: 50 }, (_, seed) => picked(seed)))).toEqual(new Set([reds[0]!]))
+    // All of them burning: still somebody.
+    m.grid.fire[m.grid.index(reds[0]!.tile.x, reds[0]!.tile.y)] = 3
+    expect(reds).toContain(picked(7)!)
   })
 })
