@@ -22,7 +22,7 @@
  * sends; a build difference means they agree on the envelope and might still
  * resolve a shot differently.
  */
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2
 
 /**
  * The commit this bundle was built from, or `dev` when it was not built.

@@ -73,32 +73,31 @@ accident.
 
 ---
 
-### [ITEM-038] Lasting Wounds & Health Between Matches
+
+### [ITEM-039] Fatigue & Medical-Bay Downtime
 **Type:** Feature  
-**Priority:** P2  
-**Status:** Ready  
+**Priority:** P3  
+**Status:** Backlog  
 **Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why
-The rest of [GDD §5](../design/gdd/progression-and-meta.md) that `[ITEM-012]` did not carry.
-A roster now outlives the match, which is the precondition; what it does not yet store is a
-body. Every match deploys at full health, and the one carried out of a lost match — who the
-GDD has leaving on 1 HP — comes back whole.
+Split out of `[ITEM-038]` at 2026-09-26: [GDD §5](../design/gdd/progression-and-meta.md) also
+wants "fatigue over consecutive deployments" that temporarily lowers baseline AP and morale, and
+"medical-bay downtime" for severe injury. Neither has a number anywhere, and both are a
+*combat-system* change (AP and morale are read every turn by systems `[ITEM-038]` never
+touches), not a persistence one — filing it separately keeps that design work from blocking the
+HP-and-healing slice that already has concrete acceptance criteria.
 
 #### Change
-1. An `hp` column in a migration 4, and the between-match healing that makes it mean something
-   rather than a permanent penalty.
-2. **Lasting wounds**: severe injury books medical-bay time between missions, and fatigue over
-   consecutive deployments temporarily lowers baseline AP and morale. Distinct from the
-   in-match wounds in `ITEM-005`, which are derived from current health and heal with it.
-3. Scars and combat logs alongside the sheet.
+Not designed yet. Needs, at minimum: what "a deployment" counts as now that a roster always
+fields a full squad (`[ITEM-037]` may change that); a concrete fatigue curve and decay rule,
+proven against the balance sweep the way every other rule change is; and where the temporary
+penalty is read (`ActionPointsComponent`, `MoraleComponent`) without becoming a second, silently
+diverging copy of the numbers `[ITEM-038]` already stores.
 
 #### Affected Files
-- `src/server/db/migrations.ts`
-- `src/server/Rosters.ts`
-- `src/game/MatchEnd.ts`
+- `src/server/Rosters.ts`, `src/server/db/migrations.ts`
+- `src/ecs/components/ActionPointsComponent.ts`, `MoraleComponent.ts`
 
 #### Acceptance Criteria
-- [ ] The unit carried out of a lost match is on the roster with the health the rules say, not
-      with full health.
-- [ ] Healing between matches is a rule with a test, not an implicit reset.
+- [ ] Not yet written: needs a design pass with numbers before this is Ready.

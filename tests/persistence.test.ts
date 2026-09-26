@@ -1,15 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import { Faction, SQUAD_SIZE } from '../src/config'
+import { Faction, HEALING, SQUAD_SIZE } from '../src/config'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
-import { characterSheet, sanitizeSheet, type CharacterSheet } from '../src/core/Characters'
+import { characterSheet, derive, maxHpOf, sanitizeSheet, type CharacterSheet } from '../src/core/Characters'
 import { NO_FOCUS } from '../src/core/Combatant'
 import { Grid } from '../src/core/Grid'
+import { noDeeds, type Deeds } from '../src/core/Progression'
+import { TraitId } from '../src/core/Traits'
 import { Rng } from '../src/core/rng'
 import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { TurnSystem } from '../src/ecs/systems'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../src/game/JsonRpc'
-import { carriedOut, settlement, winnerOf } from '../src/game/MatchEnd'
+import { carriedOut, settlement, winnerOf, type UnitFate } from '../src/game/MatchEnd'
 import type { NetworkMessage } from '../src/game/NetworkManager'
 import type { CombatRecording } from '../src/game/Recording'
 import { Squads } from '../src/game/Squads'
@@ -127,6 +129,16 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
       ...a[0]!.sheet,
       attributes: { ...a[0]!.sheet.attributes, health: a[0]!.sheet.attributes.health + 1 },
     }
+    // Severely damaged, not full: with `HEALING.perMatch` at 0.5 and
+    // `healBonus` capped at +30%, healing from 1 HP can reach at most
+    // 1 + 0.65 × maxHp — provably short of the ceiling, so the clamp and the
+    // formula are two different things being checked, not one masking the
+    // other.
+    const { healBonus } = derive(grownSheet)
+    const maxHp = maxHpOf(grownSheet)
+    const hpAtEnd = 1
+    const expectedHp = Math.min(maxHp, Math.round(hpAtEnd + HEALING.perMatch * maxHp * (1 + healBonus / 100)))
+    const thisMatch: Deeds = { ...noDeeds(), kills: 2, wounds: 40 }
 
     await persistence.rosters.settle({
       matchId: 'm1',
@@ -136,16 +148,21 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
           playerId: 'A',
           characterIds: a.map((member) => member.characterId),
           fates: [
-            { kind: 'survived', sheet: grownSheet },
-            { kind: 'survived', sheet: a[1]!.sheet },
-            { kind: 'died' },
-            { kind: 'survived', sheet: a[3]!.sheet },
+            { kind: 'survived', sheet: grownSheet, hp: hpAtEnd, deeds: thisMatch },
+            { kind: 'survived', sheet: a[1]!.sheet, hp: maxHpOf(a[1]!.sheet), deeds: noDeeds() },
+            { kind: 'died', hp: -15, deeds: noDeeds() },
+            { kind: 'survived', sheet: a[3]!.sheet, hp: maxHpOf(a[3]!.sheet), deeds: noDeeds() },
           ],
         },
         [Faction.Red]: {
           playerId: 'B',
           characterIds: b.map((member) => member.characterId),
-          fates: [{ kind: 'carried' }, { kind: 'died' }, { kind: 'died' }, { kind: 'died' }],
+          fates: [
+            { kind: 'carried', deeds: { ...noDeeds(), unseen: 3 } },
+            { kind: 'died', hp: 0, deeds: noDeeds() },
+            { kind: 'died', hp: 0, deeds: noDeeds() },
+            { kind: 'died', hp: 0, deeds: noDeeds() },
+          ],
         },
       },
     })
@@ -154,18 +171,100 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     expect(after.map((member) => member.slot)).toEqual([0, 1, 3])
     expect(after[0]!.sheet).toEqual(sanitizeSheet(grownSheet))
     expect(after.every((member) => member.matches === 1)).toBe(true)
-    // The dead are kept as history, named by the match that killed them.
-    const dead = await persistence.db.query<{ character_id: string; died_in: string }>`
-      SELECT character_id, died_in FROM roster WHERE player_id = ${'A'} AND status = ${'dead'}`
+    // Healing is the stated rule, not an implicit reset to full: it moved by
+    // exactly the formula, and stayed clamped to this sheet's own ceiling.
+    expect(after[0]!.hp).toBe(expectedHp)
+    expect(after[0]!.hp).toBeLessThan(maxHp)
+    // The combat log accumulates: an empty record plus this match's is this
+    // match's, not a reset and not doubled.
+    expect(after[0]!.deeds).toEqual(thisMatch)
+    // The dead are kept as history, named by the match that killed them, with
+    // their final HP and deeds — never negative, even from overkill.
+    const dead = await persistence.db.query<{ character_id: string; died_in: string; hp: number }>`
+      SELECT character_id, died_in, hp FROM roster WHERE player_id = ${'A'} AND status = ${'dead'}`
     expect(dead).toHaveLength(1)
     expect(dead[0]!.character_id).toBe(a[2]!.characterId)
     expect(dead[0]!.died_in).toBe('m1')
+    expect(Number(dead[0]!.hp)).toBe(0)
 
-    // Losers learn nothing: the carried unit comes back exactly as they were.
+    // Losers learn nothing: the carried unit's sheet is exactly as it was, on
+    // the HP the rules say — not full health — with this match in their log.
     const survivors = await persistence.rosters.active('B')
     expect(survivors).toHaveLength(1)
     expect(survivors[0]!.sheet).toEqual(b[0]!.sheet)
     expect(survivors[0]!.matches).toBe(1)
+    expect(survivors[0]!.hp).toBe(HEALING.carriedOutHp)
+    expect(survivors[0]!.deeds).toEqual({ ...noDeeds(), unseen: 3 })
+
+    // A second match, on the same character: the combat log accumulates
+    // rather than being replaced — a merge, not an overwrite.
+    await persistence.db
+      .query`INSERT INTO matches (id, header, created_at, seed_label) VALUES (${'m2'}, ${'{}'}, ${'2026-01-03T00:00:00Z'}, ${'m2'})`
+    const secondMatch: Deeds = { ...noDeeds(), kills: 1, blows: 2 }
+    await persistence.rosters.settle({
+      matchId: 'm2',
+      winner: Faction.Blue,
+      sides: {
+        [Faction.Blue]: {
+          playerId: 'A',
+          characterIds: [a[0]!.characterId],
+          fates: [{ kind: 'survived', sheet: grownSheet, hp: expectedHp, deeds: secondMatch }],
+        },
+        [Faction.Red]: null,
+      },
+    })
+    const afterTwo = await persistence.rosters.active('A')
+    expect(afterTwo[0]!.deeds).toEqual({
+      hits: thisMatch.hits,
+      crits: thisMatch.crits,
+      kills: thisMatch.kills + secondMatch.kills,
+      wounds: thisMatch.wounds + secondMatch.wounds,
+      unseen: thisMatch.unseen + secondMatch.unseen,
+      pushed: thisMatch.pushed + secondMatch.pushed,
+      blows: thisMatch.blows + secondMatch.blows,
+      forced: thisMatch.forced + secondMatch.forced,
+      heavy: thisMatch.heavy + secondMatch.heavy,
+      kit: thisMatch.kit + secondMatch.kit,
+    })
+    expect(afterTwo[0]!.matches).toBe(2)
+    await persistence.close()
+  })
+
+  test("a character's own trait raises the ceiling HP is stored and healed against", async () => {
+    // `derive(sheet).maxHp` is the attribute band alone — it does not know
+    // about Juggernaut's own +25, which is not gear and does not reset next
+    // match. A roster using the bare band would enlist this character
+    // already short of their real ceiling, and clamp their healing below it
+    // on every match after.
+    const persistence = await freshPersistence(url)
+    const tough: CharacterSheet = { ...characterSheet(new Rng(1)), traits: [TraitId.Juggernaut] }
+    const trueMax = maxHpOf(tough)
+    expect(trueMax).toBe(derive(tough).maxHp + 25)
+
+    await persistence.db
+      .query`INSERT INTO players (id, name, created_at) VALUES (${'J'}, ${'Jug'}, ${'2026-01-01T00:00:00Z'})`
+    await persistence.rosters.enlist(persistence.db, 'J', [tough])
+    const [enlisted] = await persistence.rosters.active('J')
+    expect(enlisted!.hp).toBe(trueMax)
+
+    await persistence.db
+      .query`INSERT INTO matches (id, header, created_at, seed_label) VALUES (${'mj'}, ${'{}'}, ${'2026-01-02T00:00:00Z'}, ${'mj'})`
+    await persistence.rosters.settle({
+      matchId: 'mj',
+      winner: Faction.Blue,
+      sides: {
+        [Faction.Blue]: {
+          playerId: 'J',
+          characterIds: [enlisted!.characterId],
+          // Undamaged: healing must not clamp a healthy survivor down to the
+          // bare band, only to their real ceiling.
+          fates: [{ kind: 'survived', sheet: tough, hp: trueMax, deeds: noDeeds() }],
+        },
+        [Faction.Red]: null,
+      },
+    })
+    const [healed] = await persistence.rosters.active('J')
+    expect(healed!.hp).toBe(trueMax)
 
     await persistence.close()
   })
@@ -175,7 +274,11 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     // anybody twice, which is what the result row is for.
     const persistence = await freshPersistence(url)
     const { a, b } = await enlisted(persistence)
-    const result = {
+    const result: {
+      matchId: string
+      winner: Faction
+      sides: Record<Faction, { playerId: string; characterIds: string[]; fates: UnitFate[] }>
+    } = {
       matchId: 'm1',
       winner: Faction.Blue,
       sides: {
@@ -183,16 +286,21 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
           playerId: 'A',
           characterIds: a.map((member) => member.characterId),
           fates: [
-            { kind: 'survived' as const, sheet: a[0]!.sheet },
-            { kind: 'died' as const },
-            { kind: 'died' as const },
-            { kind: 'died' as const },
+            { kind: 'survived', sheet: a[0]!.sheet, hp: maxHpOf(a[0]!.sheet), deeds: noDeeds() },
+            { kind: 'died', hp: 0, deeds: noDeeds() },
+            { kind: 'died', hp: 0, deeds: noDeeds() },
+            { kind: 'died', hp: 0, deeds: noDeeds() },
           ],
         },
         [Faction.Red]: {
           playerId: 'B',
           characterIds: b.map((member) => member.characterId),
-          fates: [{ kind: 'carried' as const }, { kind: 'died' as const }, { kind: 'died' as const }, { kind: 'died' as const }],
+          fates: [
+            { kind: 'carried', deeds: noDeeds() },
+            { kind: 'died', hp: 0, deeds: noDeeds() },
+            { kind: 'died', hp: 0, deeds: noDeeds() },
+            { kind: 'died', hp: 0, deeds: noDeeds() },
+          ],
         },
       },
     }
@@ -268,9 +376,16 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       recording.header.sheets[Faction.Red],
     )
 
+    // Both sides freshly enlisted, so their roster HP is full — the same
+    // maxHp an honest client's own `Account.roster()` would have reported.
+    const startingHp = {
+      [Faction.Blue]: recording.header.sheets[Faction.Blue].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+      [Faction.Red]: recording.header.sheets[Faction.Red].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+    }
+
     const blue = client(referee, 'A')
     client(referee, 'B')
-    blue.send({ type: 'matchHeader', header: recording.header })
+    blue.send({ type: 'matchHeader', header: { ...recording.header, startingHp } })
     for (const event of recording.events) blue.send(event.command)
     await referee.idle()
 
@@ -334,6 +449,55 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     expect(verdicts[0]!.reason).toMatch(/not the roster/)
     expect(verdicts[0]!.side).toBe(Faction.Blue)
     expect(await persistence.rosters.active('A')).toEqual(before)
+
+    await persistence.close()
+  })
+
+  test('a signed-in squad with no starting health stated is aborted, not deployed healthy', async () => {
+    // The same attack a sheet mismatch guards against: a client that omits
+    // its wounds would otherwise deploy a signed-in player's character
+    // healthier than the roster it belongs to says they are.
+    const recording = decisive()
+    const { persistence, referee, verdicts } = await playing(
+      ':memory:',
+      recording.header.sheets[Faction.Blue],
+      recording.header.sheets[Faction.Red],
+    )
+
+    const blue = client(referee, 'A')
+    client(referee, 'B')
+    // No `startingHp` at all — exactly what an old client, or one that
+    // simply left it out, would send.
+    blue.send({ type: 'matchHeader', header: recording.header })
+    await referee.idle()
+
+    expect(verdicts).toHaveLength(1)
+    expect(verdicts[0]!.reason).toMatch(/starting health/)
+    expect(verdicts[0]!.side).toBe(Faction.Blue)
+
+    await persistence.close()
+  })
+
+  test("a signed-in squad's stated starting health that does not match the roster is aborted", async () => {
+    const recording = decisive()
+    const { persistence, referee, verdicts } = await playing(
+      ':memory:',
+      recording.header.sheets[Faction.Blue],
+      recording.header.sheets[Faction.Red],
+    )
+    const wrongHp = {
+      [Faction.Blue]: recording.header.sheets[Faction.Blue].map(() => 1),
+      [Faction.Red]: recording.header.sheets[Faction.Red].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+    }
+
+    const blue = client(referee, 'A')
+    client(referee, 'B')
+    blue.send({ type: 'matchHeader', header: { ...recording.header, startingHp: wrongHp } })
+    await referee.idle()
+
+    expect(verdicts).toHaveLength(1)
+    expect(verdicts[0]!.reason).toMatch(/starting health/)
+    expect(verdicts[0]!.side).toBe(Faction.Blue)
 
     await persistence.close()
   })

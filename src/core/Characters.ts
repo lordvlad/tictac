@@ -3,7 +3,7 @@ import { WeaponId } from './Arsenal'
 import { clamp } from './math'
 import { Rng } from './rng'
 import { PREDISPOSITIONS, Temperament } from './Morale'
-import { TraitId, TRAITS } from './Traits'
+import { resolveTraits, TraitId, TRAITS } from './Traits'
 
 /**
  * Training a character has that is not about guns.
@@ -144,6 +144,21 @@ export function derive(sheet: CharacterSheet): DerivedStats {
     meleePower: band(strength, CHARACTER.meleePower),
     shoulder: band(strength, CHARACTER.shoulder),
   }
+}
+
+/**
+ * A sheet's true HP ceiling: the attribute band plus whatever its *own*
+ * traits add — Juggernaut and Hardy's kin, not gear.
+ *
+ * `derive(sheet).maxHp` alone is the band only: a soldier deployed with it
+ * ends the match short of {@link Soldier.maxHp} by exactly its innate bonus,
+ * which is the ceiling every other reader of a max HP — the in-match
+ * `Soldier`, and therefore a roster storing what a match left behind — has to
+ * agree with. Gear is not in here: it resets every match, so it is not part
+ * of what a roster remembers between them.
+ */
+export function maxHpOf(sheet: CharacterSheet): number {
+  return derive(sheet).maxHp + resolveTraits(sheet.traits).maxHp
 }
 
 /** Roll one character. */

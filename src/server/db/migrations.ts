@@ -148,4 +148,34 @@ export const MIGRATIONS: readonly Migration[] = [
        )`,
     ],
   },
+  {
+    id: 4,
+    name: 'lasting wounds',
+    up: [
+      // A sentinel rather than a real health value, on purpose: every existing
+      // active row predates HP tracking, and `Soldier`'s own clamp
+      // (`clamp(startingHp, 1, maxHp)`) turns any value at or above a
+      // character's ceiling into full health — so a row from before this
+      // migration backfills to exactly what it already deployed at, with no
+      // per-row computation and no JSON operator in SQL.
+      'ALTER TABLE roster ADD COLUMN hp INTEGER NOT NULL DEFAULT 9999',
+      // A frozen snapshot of `noDeeds()`'s shape, the way every migration
+      // freezes what was true when it was written: an empty service record,
+      // one count per weapon class this build had. Never edited afterwards —
+      // a WeaponId added later gets its own zero here from `Rosters` code,
+      // not from an edited migration.
+      `ALTER TABLE roster ADD COLUMN deeds TEXT NOT NULL DEFAULT '${JSON.stringify({
+        hits: { rifle: 0, shotgun: 0, sniper: 0, gatling: 0 },
+        crits: { rifle: 0, shotgun: 0, sniper: 0, gatling: 0 },
+        kills: 0,
+        wounds: 0,
+        unseen: 0,
+        pushed: 0,
+        blows: 0,
+        forced: 0,
+        heavy: 0,
+        kit: 0,
+      })}'`,
+    ],
+  },
 ]

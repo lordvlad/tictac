@@ -1,5 +1,6 @@
-import { Faction } from '../config'
-import { sanitizeSheet, type CharacterSheet } from '../core/Characters'
+import { Faction, HEALING } from '../config'
+import { derive, maxHpOf, sanitizeSheet, type CharacterSheet } from '../core/Characters'
+import { mergeDeeds, noDeeds, type Deeds } from '../core/Progression'
 import type { UnitFate } from '../game/MatchEnd'
 import type { Db } from './db/Db'
 
@@ -21,6 +22,10 @@ export interface RosterMember {
   slot: number
   sheet: CharacterSheet
   matches: number
+  /** HP as the last settled match left them, or full for one never settled. */
+  hp: number
+  /** The cumulative service record — every settled match's `Deeds`, added up. */
+  deeds: Deeds
 }
 
 /** One side of a settled match: who played it, with which characters, and how each fared. */
@@ -42,6 +47,8 @@ interface MemberRow {
   slot: number
   sheet: string
   matches: number
+  hp: number
+  deeds: string
 }
 
 export class Rosters {
@@ -56,20 +63,24 @@ export class Rosters {
    */
   async enlist(db: Db, playerId: string, sheets: readonly CharacterSheet[]): Promise<void> {
     const createdAt = new Date().toISOString()
-    for (const [slot, sheet] of sheets.entries()) {
+    const emptyDeeds = JSON.stringify(noDeeds())
+    for (const [slot, rawSheet] of sheets.entries()) {
       // Sanitised on the way in as well as on the way out: what is stored is
       // the canonical form, so comparing a deployed squad against the roster is
       // a string comparison rather than a structural one.
-      const stored = JSON.stringify(sanitizeSheet(sheet))
-      await db.query`INSERT INTO roster (character_id, player_id, slot, sheet, status, matches, created_at, died_in)
-                     VALUES (${crypto.randomUUID()}, ${playerId}, ${slot}, ${stored}, ${'active'}, ${0}, ${createdAt}, ${null})`
+      const sheet = sanitizeSheet(rawSheet)
+      const stored = JSON.stringify(sheet)
+      await db.query`INSERT INTO roster
+                       (character_id, player_id, slot, sheet, status, matches, hp, deeds, created_at, died_in)
+                     VALUES (${crypto.randomUUID()}, ${playerId}, ${slot}, ${stored}, ${'active'}, ${0},
+                             ${maxHpOf(sheet)}, ${emptyDeeds}, ${createdAt}, ${null})`
     }
   }
 
   /** The living squad, in slot order. */
   async active(playerId: string): Promise<RosterMember[]> {
     const rows = await this.db.query<MemberRow>`
-      SELECT character_id, slot, sheet, matches
+      SELECT character_id, slot, sheet, matches, hp, deeds
         FROM roster
        WHERE player_id = ${playerId} AND status = ${'active'}
        ORDER BY slot`
@@ -78,6 +89,8 @@ export class Rosters {
       slot: Number(row.slot),
       sheet: sanitizeSheet(JSON.parse(row.sheet)),
       matches: Number(row.matches),
+      hp: Number(row.hp),
+      deeds: JSON.parse(row.deeds) as Deeds,
     }))
   }
 
@@ -120,33 +133,49 @@ export class Rosters {
   /**
    * One character's match.
    *
-   * Every branch counts the match, because having played it is what a service
-   * record is. What differs is the rest: a winner's survivor comes back
-   * changed, the loser's carried-out unit comes back exactly as they were —
-   * losers learn nothing — and the dead are marked dead and named the match
-   * that killed them.
+   * Every branch counts the match and adds this match's `Deeds` onto the
+   * cumulative record — the combat log — because having played it is what a
+   * service record is, regardless of who won. What differs is the rest:
+   *
+   * - **Survived**: the sheet comes back {@link grown}, already folded into
+   *   `fate.sheet`. HP heals by {@link HEALING.perMatch}'s fraction of the
+   *   *new* sheet's ceiling, scaled by that sheet's own `healBonus` — the
+   *   stated rule, not an implicit reset to full.
+   * - **Carried**: losers learn nothing, so the sheet is untouched — but HP is
+   *   written down as {@link HEALING.carriedOutHp}, which then heals the same
+   *   way on whatever match comes after it.
+   * - **Died**: marked dead and named the match that killed them, with their
+   *   final HP and deeds kept as history rather than discarded.
    *
    * `AND status = 'active'` on every update, so a settlement arriving for a
-   * character who is already dead changes nothing.
+   * character who is already dead changes nothing — and the read that starts
+   * each branch is the same guard: nothing to update means nothing to do.
    */
-  private async record(
-    db: Db,
-    matchId: string,
-    characterId: string,
-    fate: UnitFate,
-  ): Promise<void> {
+  private async record(db: Db, matchId: string, characterId: string, fate: UnitFate): Promise<void> {
+    const rows = await db.query<{ sheet: string; deeds: string }>`
+      SELECT sheet, deeds FROM roster WHERE character_id = ${characterId} AND status = ${'active'}`
+    const existing = rows[0]
+    if (!existing) return
+    const deeds = JSON.stringify(mergeDeeds(JSON.parse(existing.deeds) as Deeds, fate.deeds))
+
     if (fate.kind === 'survived') {
-      const sheet = JSON.stringify(sanitizeSheet(fate.sheet))
-      await db.query`UPDATE roster SET sheet = ${sheet}, matches = matches + 1
+      const sheet = sanitizeSheet(fate.sheet)
+      const { healBonus } = derive(sheet)
+      const maxHp = maxHpOf(sheet)
+      const healed = fate.hp + HEALING.perMatch * maxHp * (1 + healBonus / 100)
+      const hp = Math.max(1, Math.min(maxHp, Math.round(healed)))
+      await db.query`UPDATE roster SET sheet = ${JSON.stringify(sheet)}, hp = ${hp}, deeds = ${deeds},
+                                        matches = matches + 1
                       WHERE character_id = ${characterId} AND status = ${'active'}`
       return
     }
     if (fate.kind === 'carried') {
-      await db.query`UPDATE roster SET matches = matches + 1
+      await db.query`UPDATE roster SET hp = ${HEALING.carriedOutHp}, deeds = ${deeds}, matches = matches + 1
                       WHERE character_id = ${characterId} AND status = ${'active'}`
       return
     }
-    await db.query`UPDATE roster SET status = ${'dead'}, died_in = ${matchId}, matches = matches + 1
+    await db.query`UPDATE roster SET status = ${'dead'}, died_in = ${matchId},
+                                      hp = ${Math.max(0, fate.hp)}, deeds = ${deeds}, matches = matches + 1
                     WHERE character_id = ${characterId} AND status = ${'active'}`
   }
 }

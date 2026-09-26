@@ -6,6 +6,7 @@ import { isJsonRpcFrame, type JsonRpcFrame } from '../src/game/JsonRpc'
 import { defaultLoadout } from '../src/game/Loadout'
 import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
 import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
+import { PROTOCOL_VERSION } from '../src/version'
 import type { Transport } from '../src/game/Transport'
 import { openPersistence } from '../src/server/Persistence'
 import { Referee } from '../src/server/Referee'
@@ -160,7 +161,7 @@ describe('Two clients playing through a referee', () => {
       JSON.stringify({
         jsonrpc: '2.0',
         method: 'tictac/system/session/hello',
-        params: { protocol: 1, build: 'c0ffee1' },
+        params: { protocol: PROTOCOL_VERSION, build: 'c0ffee1' },
       }),
     )
 

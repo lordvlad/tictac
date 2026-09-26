@@ -34,8 +34,12 @@ import type { NetworkMessage } from './NetworkManager'
  * 2: squads deploy anywhere along their own edge rather than centred, which
  * moves every building a seed produces — so a version-1 file replayed today
  * would refight its commands on terrain it was never fought on.
+ *
+ * 3: a header may now carry `startingHp`, so a version-2 file — which has
+ * none — is not "every unit at full health" by coincidence; it is refused,
+ * because that omission used to mean something different than it does now.
  */
-export const RECORDING_VERSION = 2
+export const RECORDING_VERSION = 3
 
 export interface RecordingHeader {
   version: number
@@ -56,6 +60,19 @@ export interface RecordingHeader {
    * replay has no sender, so it needs the numbers both sides fought with.
    */
   loadouts: Record<Faction, SquadLoadout>
+  /**
+   * HP to deploy each unit at, absent everywhere except a kept server match —
+   * and, even there, present per side rather than together: a mixed match
+   * (one signed-in player, one anonymous) tracks wounds for the side that has
+   * a roster and deploys the other at full health, same as today.
+   *
+   * A starting HP has to be something both peers and the referee agree on
+   * before the first digest, or the referee accuses an honest client of a
+   * foul — so it travels here rather than as something either side decides
+   * for itself. Local play, peer-to-peer play and every recording from
+   * before this field existed have no use for it, and deploy at full health.
+   */
+  startingHp?: Partial<Record<Faction, number[]>>
   /**
    * Layout beyond the seed. Absent for every map the game plays, which is
    * the default layout; present when a sweep asked for another one, because
@@ -158,6 +175,22 @@ export class Recorder {
 function sheetsFrom(raw: unknown): CharacterSheet[] {
   if (!Array.isArray(raw)) return []
   return raw.slice(0, SQUAD_SIZE).map(sanitizeSheet)
+}
+
+/**
+ * One squad's starting HP.
+ *
+ * All-or-nothing, unlike {@link sheetsFrom}: a starting HP is read
+ * positionally by squad index, so a single malformed entry cannot be dropped
+ * without shifting every entry after it onto the wrong soldier. The safe
+ * fallback for a malformed array is exactly what its absence already means —
+ * deploy at full health — not a squad with one wound on the wrong person.
+ */
+export function startingHpFrom(raw: unknown): number[] | undefined {
+  if (!Array.isArray(raw) || raw.length !== SQUAD_SIZE) return undefined
+  return raw.every((value) => typeof value === 'number' && Number.isFinite(value))
+    ? (raw as number[])
+    : undefined
 }
 
 /**
@@ -308,6 +341,17 @@ export function parseRecording(raw: unknown): CombatRecording {
       [Faction.Blue]: squadLoadoutFrom(rawLoadouts[Faction.Blue], 'header.loadouts.blue'),
       [Faction.Red]: squadLoadoutFrom(rawLoadouts[Faction.Red], 'header.loadouts.red'),
     },
+    ...(head.startingHp && typeof head.startingHp === 'object'
+      ? (() => {
+          const rawHp = head.startingHp as Partial<Record<Faction, unknown>>
+          const startingHp: Partial<Record<Faction, number[]>> = {}
+          const blue = startingHpFrom(rawHp[Faction.Blue])
+          const red = startingHpFrom(rawHp[Faction.Red])
+          if (blue) startingHp[Faction.Blue] = blue
+          if (red) startingHp[Faction.Red] = red
+          return Object.keys(startingHp).length > 0 ? { startingHp } : {}
+        })()
+      : {}),
     ...(head.map === undefined ? {} : { map: mapOptionsFrom(head.map) }),
   }
 

@@ -9,6 +9,8 @@ appliesTo:
   - "scripts/serve-match.ts"
   - "src/game/Account.ts"
   - "src/game/Base64Url.ts"
+  - "src/game/MatchEnd.ts"
+  - "src/core/Characters.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
   - "docs/architecture/networking.md"
@@ -97,6 +99,7 @@ Migrations are append-only and never edited once shipped:
 1. **`match log`** — `matches`, `events`, and the append-only triggers.
 2. **`accounts`** — `players`, `credentials`, `sessions`, `auth_challenges`.
 3. **`rosters`** — `roster`, `match_results`.
+4. **`lasting wounds`** — `roster.hp`, `roster.deeds` (`ITEM-038`).
 
 > This is the *database* schema. The **recorded command and component
 > shapes** are a separate guard — `bun run schema:catalog`, see
@@ -180,13 +183,29 @@ randomness.
 **Before the match.** `Referee.verifyRosters` runs once the header arrives: for
 each signed-in side, the deployed squad must *be* that player's active roster,
 character for character in slot order (`sanitizeSheet` both ways, compared as
-JSON). Anything else aborts the match — a match played with somebody else's
-people must not settle. One player on both sides is refused for the same reason.
+JSON) — **and its starting HP must be that roster's stored HP**, per slot.
+Anything else aborts the match — a match played with somebody else's people,
+or somebody else's wounds, must not settle. A signed-in side that omits
+`startingHp` entirely is refused the same way a wrong one is: absence would
+let a client always deploy at full health regardless of what the roster says.
+One player on both sides is refused for the same reason as the sheet check.
 An anonymous side is skipped, not refused: an unregistered opponent is a
 perfectly good opponent who simply has nothing to keep.
 
+A starting HP has to be something both peers and the referee agree on
+*before the first digest*, so it cannot be injected by the referee after the
+fact — it travels on the wire, the same way sheets do: a client fetches its
+own roster's HP from `GET /api/roster`, sends it in `ready.hp` (parallel to
+`ready.sheets`), and the match's host folds both sides' `hp` into
+`RecordingHeader.startingHp` before sending `matchHeader`. `Squads`/`Soldier`
+then deploy each unit at that HP instead of full — the one behaviour change
+`ITEM-038` makes to a live match, and the reason `PROTOCOL_VERSION` and
+`RECORDING_VERSION` both moved for it.
+
 **After the match.** `settlement()` in `src/game/MatchEnd.ts` is pure and reads
-the referee's own world the moment a side is wiped out:
+the referee's own world the moment a side is wiped out. Every fate carries the
+unit's HP at that moment and this match's own `Deeds` (the service record
+`ITEM-004` already computes for growth), regardless of who won:
 
 - the winner's living units are `survived`, with `grown(sheet, growth)` from
   `debrief`;
@@ -196,13 +215,30 @@ the referee's own world the moment a side is wiped out:
 
 `Rosters.settle` writes it in one transaction, keyed by `match_results.match_id`
 so a referee asked twice writes the growth once. A dead character is **marked,
-never deleted**: the row is the history of somebody who was, and
-`roster_active_slot` is a partial unique index so every previous occupant of a
-slot sits beside the living one.
+never deleted**: the row is the history of somebody who was, kept with the HP
+and the combat log they had at the end — and `roster_active_slot` is a partial
+unique index so every previous occupant of a slot sits beside the living one.
+
+**Healing, as a stated rule, not an implicit reset.** A survivor's stored HP
+moves by `HEALING.perMatch` (0.5) of missing HP, scaled by their sheet's own
+`healBonus` — the Health attribute's documented second job (GDD §1: "dictates
+the speed of natural healing... in the meta-layer"). The carried-out unit is
+written at exactly `HEALING.carriedOutHp` (1), and then heals the same way
+next time they are settled. Every ceiling this clamps against is
+`maxHpOf(sheet)` (`src/core/Characters.ts`) — the attribute band **plus a
+character's own traits**, not `derive(sheet).maxHp` alone: a Juggernaut's +25
+is not gear, it does not reset next match, and a roster using the bare band
+would enlist that character already short of their real ceiling and clamp
+their healing below it forever after. `deeds` accumulates the same way: each
+settled match's record is added onto the roster's cumulative one, field by
+field (`mergeDeeds`), never replacing it — the combat log GDD §5 calls a
+"scar."
 
 > **Not yet**: an empty slot stays empty. Refilling a roster with a fresh
-> recruit is its own mechanic (`[ITEM-037]`), not part of persistence. HP is not
-> carried between matches either; every match deploys at full health.
+> recruit is its own mechanic (`[ITEM-037]`). Fatigue from consecutive
+> deployments and medical-bay downtime that temporarily lowers baseline AP and
+> morale are `[ITEM-039]` — a live-combat-system change, not a persistence one,
+> and not designed yet.
 
 ---
 

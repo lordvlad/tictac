@@ -3,7 +3,7 @@ title: "GDD: Squads, Progression & Meta Roster"
 id: "GDD-PROGRESSION"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-24"
+lastReviewed: "2026-09-26"
 appliesTo:
   - "src/core/Characters.ts"
   - "src/config.ts"
@@ -186,11 +186,20 @@ persistence lands (ITEM-012), that is where it ends.
 
 ## 5. Permadeath, Wounds & Roster Persistence
 
-- **Permadeath**: Fatal trauma without immediate triage results in permanent roster removal.
-- **Carried out** (ITEM-035): a side that loses keeps one of its people. When a match is lost,
-  one of the fallen, picked at random, is carried out alive on 1 HP — preferably one whose
-  condition was not still getting worse when they fell (lying in fire, today; poisoned or
-  bleeding once those exist). They learn nothing from the match; everyone else is gone. The pick
-  is drawn from the match seed on a stream of its own, so both sides agree on it.
-- **Lasting Wounds**: Severe injuries require medical bay downtime between missions. Fatigue accumulates over consecutive deployments, temporarily reducing baseline AP and Morale.
-- **Persistence**: Squad identities, scars, combat logs, and organic stat growths are stored in the meta-layer persistence across the campaign.
+- **Permadeath** (`ITEM-012`): fatal trauma without triage removes a character from the
+  roster for good. Built as a marked-dead row, kept as history rather than deleted.
+- **Carried out** (`ITEM-035`, `ITEM-012`): a side that loses keeps one of its people. When a
+  match is lost, one of the fallen, picked at random, is carried out alive on 1 HP —
+  preferably one whose condition was not still getting worse when they fell (lying in fire,
+  today; poisoned or bleeding once those exist). They learn nothing from the match; everyone
+  else is gone. The pick is drawn from the match seed on a stream of its own, so both sides
+  agree on it.
+- **HP between matches** (`ITEM-038`): a survivor's HP at the end of a match is what they
+  start their next one with, not full health — healing a stated fraction of what they are
+  missing, scaled by their own Health attribute, every match they are settled. The carried-out
+  unit starts exactly on 1 HP and heals from there like anyone else.
+- **Lasting Wounds** (`ITEM-039`, not built): severe injuries book medical-bay downtime between
+  missions, and fatigue accumulates over consecutive deployments, temporarily reducing baseline
+  AP and morale. Distinct from HP itself, which is `ITEM-038`.
+- **Persistence** (`ITEM-012`, `ITEM-038`): squad identities, organic stat growth, HP and a
+  cumulative combat log ("scars") are stored in the meta-layer across the campaign.

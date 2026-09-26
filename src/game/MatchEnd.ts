@@ -2,7 +2,7 @@ import { Faction } from '../config'
 import { STATUSES } from '../core/Arsenal'
 import type { Grid } from '../core/Grid'
 import type { CharacterSheet } from '../core/Characters'
-import { grown, growthFrom, type Growth } from '../core/Progression'
+import { copyDeeds, type Deeds, grown, growthFrom, type Growth } from '../core/Progression'
 import { Rng } from '../core/rng'
 import type { Soldier } from '../entities/Soldier'
 
@@ -69,13 +69,15 @@ export function carriedOut(squads: Sides, loser: Faction, grid: Grid, seed: numb
 /**
  * What became of one unit, in the squad order the roster is kept in.
  *
- * Three outcomes, because there are three: somebody who walked away and
- * learned from it, the one the losing side carried out, and the dead.
+ * Four things worth knowing, not three: somebody who walked away and learned
+ * from it, the one the losing side carried out, the dead — and, for every one
+ * of them, this match's own service record and the hit points the match left
+ * them with, which a roster stores regardless of who won.
  */
 export type UnitFate =
-  | { kind: 'survived'; sheet: CharacterSheet }
-  | { kind: 'carried' }
-  | { kind: 'died' }
+  | { kind: 'survived'; sheet: CharacterSheet; hp: number; deeds: Deeds }
+  | { kind: 'carried'; deeds: Deeds }
+  | { kind: 'died'; hp: number; deeds: Deeds }
 
 /**
  * What the match did to both squads, as the roster has to record it.
@@ -99,9 +101,14 @@ export function settlement(
 
   const fates = (faction: Faction): UnitFate[] =>
     squads.byFaction[faction].map((unit) => {
-      if (faction !== winner) return unit === carried ? { kind: 'carried' } : { kind: 'died' }
+      const deeds = copyDeeds(unit.deeds)
+      if (faction !== winner) {
+        return unit === carried ? { kind: 'carried', deeds } : { kind: 'died', hp: unit.hp, deeds }
+      }
       const growth = growthByUnit.get(unit)
-      return growth ? { kind: 'survived', sheet: grown(unit.sheet, growth) } : { kind: 'died' }
+      return growth
+        ? { kind: 'survived', sheet: grown(unit.sheet, growth), hp: unit.hp, deeds }
+        : { kind: 'died', hp: unit.hp, deeds }
     })
 
   return { [Faction.Blue]: fates(Faction.Blue), [Faction.Red]: fates(Faction.Red) }

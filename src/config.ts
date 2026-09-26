@@ -244,6 +244,20 @@ export const PROGRESSION = {
   /** Tiles walked in heavy kit for one mark of Strength. */
   heavyTilesPerMark: 8,
 }
+
+/**
+ * Recovery between matches, on a server that keeps rosters ({@link RULES}
+ * plays every match at full health; this never runs there).
+ *
+ * Server-only and computed once per settled match, never during one: the part
+ * of a character that moves mid-match is hit points themselves, not this.
+ */
+export const HEALING = {
+  /** Fraction of missing HP recovered per settled match, before the Health bonus. */
+  perMatch: 0.5,
+  /** A character carried out of a lost match starts their next one here. */
+  carriedOutHp: 1,
+}
 /**
  * How much a unit can take before it stops taking orders (`core/Morale`).
  *

@@ -268,10 +268,13 @@ function showMenu(): void {
      * tells the referee whose roster it is. Anonymous: a fresh squad and the
      * plain url, exactly as before.
      */
-    const joining = async (url: string): Promise<{ url: string; sheets?: CharacterSheet[] }> => {
+    const joining = async (
+      url: string,
+    ): Promise<{ url: string; sheets?: CharacterSheet[]; hp?: number[] }> => {
       const it = new Account(url)
       if (!it.token) return { url }
-      return { url: await it.socketUrl(url), sheets: await it.roster() }
+      const roster = await it.roster()
+      return { url: await it.socketUrl(url), sheets: roster.sheets, hp: roster.hp }
     }
 
     button('#btn-server-host').addEventListener('click', () => {
@@ -282,7 +285,7 @@ function showMenu(): void {
       statusEl().style.color = '#38bdf8'
       statusEl().textContent = 'Waiting for an opponent to join…'
       void joining(typed)
-        .then(({ url, sheets }) => {
+        .then(({ url, sheets, hp }) => {
           const network = new NetworkManager()
           // No `onConnected` here: a socket opens as soon as the referee
           // answers, long before anybody is on the other side of it. The
@@ -292,7 +295,7 @@ function showMenu(): void {
           }
           network.hostOnServer(url, seed, label)
           container.remove()
-          equipThenStart(seed, label, network, sheets)
+          equipThenStart(seed, label, network, sheets, hp)
         })
         .catch((err: unknown) => {
           failed(err instanceof Error ? err.message : 'Could not open a match there.')
@@ -307,10 +310,10 @@ function showMenu(): void {
       statusEl().textContent = 'Connecting…'
       const network = new NetworkManager()
       try {
-        const { url, sheets } = await joining(typed)
+        const { url, sheets, hp } = await joining(typed)
         const opening = await network.joinOnServer(url)
         container.remove()
-        equipThenStart(opening.seed, opening.seedLabel, network, sheets)
+        equipThenStart(opening.seed, opening.seedLabel, network, sheets, hp)
       } catch (err) {
         failed(
           err instanceof Error && err.message.length > 0
@@ -320,6 +323,7 @@ function showMenu(): void {
       }
     })
   })
+
 
   // Join Mode
   container.querySelector('#btn-join-mode')?.addEventListener('click', () => {
@@ -387,6 +391,8 @@ function equipThenStart(
   label: string,
   network: NetworkManager,
   sheets: CharacterSheet[] = rollSquadSheets(),
+  /** This side's roster HP, present only when signed in to a match server. */
+  hp?: number[],
 ): void {
   const engine = createEngineContext(Game.instance())
   const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
@@ -408,7 +414,7 @@ function equipThenStart(
   }
 
   void screen.show().then(async (loadout) => {
-    network.send({ type: 'ready', sheets: mySheets, loadout })
+    network.send({ type: 'ready', sheets: mySheets, loadout, ...(hp ? { hp } : {}) })
     if (network.mode !== 'local') screen.markWaiting('Waiting for opponent to deploy…')
     const peer = await network.waitForPeerReady()
     screen.dispose()
@@ -426,6 +432,13 @@ function equipThenStart(
       // other squad deploys on the stock spread — which is what every match
       // did before a referee needed to know what both sides were carrying.
       peer?.loadout ?? undefined,
+      // Wounds ride the same way: present per side, never together, since a
+      // mixed match (one signed-in player, one anonymous) tracks wounds only
+      // for the side that has a roster.
+      {
+        ...(hp ? { [faction]: hp } : {}),
+        ...(peer?.hp ? { [other]: peer.hp } : {}),
+      } as Partial<Record<Faction, number[]>>,
     )
   })
 }
@@ -437,6 +450,7 @@ function start(
   loadout?: SquadLoadout,
   sheets?: Record<Faction, CharacterSheet[]>,
   peerLoadout?: SquadLoadout,
+  startingHp?: Partial<Record<Faction, number[]>>,
 ): void {
   const engine = createEngineContext(Game.instance())
 
@@ -450,7 +464,15 @@ function start(
   // Terrain first, as data; the battlefield is the view of it.
   const battlefield = new Battlefield(generateMap(seed), engine)
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
-  const squads = new Squads(world, battlefield.grid, battlefield.spawns, loadout, myFaction, sheets)
+  const squads = new Squads(
+    world,
+    battlefield.grid,
+    battlefield.spawns,
+    loadout,
+    myFaction,
+    sheets,
+    startingHp,
+  )
   // The other squad's kit, when the peer sent some. It arrives in `ready`
   // rather than only as replicated component state so that a referee — which
   // holds no components until the intents start — can refight the match.
@@ -473,6 +495,7 @@ function start(
       [Faction.Blue]: squads.loadoutOf(Faction.Blue),
       [Faction.Red]: squads.loadoutOf(Faction.Red),
     },
+    ...(startingHp && Object.keys(startingHp).length > 0 ? { startingHp } : {}),
   }
 
   // A referee is told the opening position once, by the side hosting the
@@ -623,6 +646,7 @@ function startPlayback(recording: CombatRecording): void {
     undefined,
     Faction.Blue,
     header.sheets,
+    header.startingHp,
   )
   // Both sides, from the file: the replay resolves every attack again, so it
   // needs the kit both squads actually fought with.

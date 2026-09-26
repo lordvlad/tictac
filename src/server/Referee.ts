@@ -337,6 +337,22 @@ export class Referee {
           found: [],
         })
       }
+      // A wound is as much part of the roster as the sheet is: a client that
+      // omitted it, or stated a different one, would otherwise deploy a
+      // signed-in player's character healthier than the roster says they are.
+      const claimedHp = header.startingHp?.[faction]
+      const sameHp =
+        claimedHp !== undefined &&
+        claimedHp.length === members.length &&
+        claimedHp.every((hp, index) => hp === members[index]!.hp)
+      if (!sameHp) {
+        return this.abort({
+          matchId: this.matchId ?? 'unknown',
+          side: faction,
+          reason: `the ${FACTION_INFO[faction].name} squad's starting health is not what the roster this server keeps for its player says`,
+          found: [],
+        })
+      }
       this.sides[faction] = { playerId, characterIds: members.map((member) => member.characterId) }
     }
   }

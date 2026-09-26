@@ -24,6 +24,11 @@ export class Squads {
    * arrive in the start handshake and land through {@link adoptSheets}, so
    * whatever is passed for them here is a placeholder that exists only so the
    * match can be built before the message lands.
+   *
+   * `startingHp` is absent everywhere except a kept server match, where it is
+   * the roster's own stored HP — present in `RecordingHeader.startingHp` so
+   * both peers and the referee deploy from the same numbers a digest could
+   * ever compare.
    */
   constructor(
     world: World,
@@ -32,6 +37,7 @@ export class Squads {
     loadout?: SquadLoadout,
     loadoutFaction: Faction = Faction.Blue,
     sheets?: Record<Faction, CharacterSheet[]>,
+    startingHp?: Partial<Record<Faction, number[]>>,
   ) {
     const blueNames = FACTION_INFO[Faction.Blue].squadNames
     const redNames = FACTION_INFO[Faction.Red].squadNames
@@ -50,6 +56,7 @@ export class Squads {
         tileB,
         grid,
         sheets?.[Faction.Blue][i],
+        startingHp?.[Faction.Blue]?.[i],
       )
       if (unit && loadoutFaction === Faction.Blue) applyUnitLoadout(solB, unit)
       else solB.equip(weapons[i]!, AmmoId.Standard)
@@ -65,6 +72,7 @@ export class Squads {
         tileR,
         grid,
         sheets?.[Faction.Red][i],
+        startingHp?.[Faction.Red]?.[i],
       )
       if (unit && loadoutFaction === Faction.Red) applyUnitLoadout(solR, unit)
       else solR.equip(weapons[i]!, AmmoId.Standard)

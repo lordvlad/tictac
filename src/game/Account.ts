@@ -136,10 +136,16 @@ export class Account {
     localStorage.removeItem(this.storageKey)
   }
 
-  /** The squad this server keeps for the player, in slot order. */
-  async roster(): Promise<CharacterSheet[]> {
-    const { roster } = await this.call<{ roster: { sheet: unknown }[] }>('GET', '/api/roster')
-    return roster.map((member) => sanitizeSheet(member.sheet))
+  /** The squad this server keeps for the player, in slot order — sheets and current HP. */
+  async roster(): Promise<{ sheets: CharacterSheet[]; hp: number[] }> {
+    const { roster } = await this.call<{ roster: { sheet: unknown; hp: number }[] }>(
+      'GET',
+      '/api/roster',
+    )
+    return {
+      sheets: roster.map((member) => sanitizeSheet(member.sheet)),
+      hp: roster.map((member) => member.hp),
+    }
   }
 
   /**

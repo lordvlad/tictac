@@ -1583,6 +1583,57 @@ See [ARCH-NETWORKING §7](../architecture/networking.md#7-schema-drift-guard-ite
 
 ---
 
+### [ITEM-038] Lasting Wounds: Persisted HP, Healing, and a Combat Log
+**Completed Date:** 2026-09-26  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+The rest of [GDD §5](../design/gdd/progression-and-meta.md) `[ITEM-012]` did not carry: every
+match deployed at full health, and the one carried out of a lost match — who the GDD has
+leaving on 1 HP — came back whole. Narrowed at 2026-09-26 from the original item: the
+fatigue/medical-bay AP and morale penalty had no numbers anywhere and touches live combat
+systems rather than persistence, so it was filed separately as `[ITEM-039]` (not designed).
+
+#### Key Changes
+- **Migration 4** (`roster.hp`, `roster.deeds`), `src/server/db/migrations.ts`.
+- **`RecordingHeader.startingHp?: Partial<Record<Faction, number[]>>`**
+  (`src/game/Recording.ts`), `RECORDING_VERSION` moved to 3. A starting HP has to be something
+  both peers and the referee agree on *before the first digest*, so it travels the same way
+  sheets do — never injected by the referee after the fact. `ready` gained `hp?: number[]`
+  (`src/game/NetworkManager.ts`), `PROTOCOL_VERSION` moved to 2.
+- **`Squads`/`Soldier`** deploy below full HP when a `startingHp` override is given; absent
+  everywhere except a kept server match, so local and P2P play deploy exactly as before.
+- **`settlement()`** (`src/game/MatchEnd.ts`) now carries each fate's HP at match end and this
+  match's own `Deeds`, regardless of who won — `survived`/`carried`/`died` all keep a record.
+- **Healing, as a stated rule**: `Rosters.settle` moves a survivor's stored HP by
+  `HEALING.perMatch` (0.5) of missing HP, scaled by the sheet's own `healBonus` — the Health
+  attribute's documented second job (GDD §1: "dictates the speed of natural healing... in the
+  meta-layer"). The carried-out unit is written at exactly `HEALING.carriedOutHp` (1). `deeds`
+  accumulates match by match (`mergeDeeds`), never replaced — the "scars and combat log."
+- **`Referee.verifyRosters`** now also checks a signed-in side's stated `startingHp` against
+  the roster's own HP, aborting on a mismatch *or an omission* — the same class of attack a
+  sheet mismatch already guarded against.
+- **`maxHpOf(sheet)`** (`src/core/Characters.ts`), added after a bug this item's own testing
+  caught: `derive(sheet).maxHp` is the attribute band alone and does not know about a
+  character's own maxHp-raising trait (Juggernaut's +25) — gear resets every match, but an
+  innate trait does not. Using the bare band would have enlisted such a character short of
+  their real ceiling and clamped their healing below it forever after. Every ceiling `Rosters`
+  uses is `maxHpOf`, which matches `Soldier.maxHp` exactly.
+- Client: `Account.roster()` returns `hp` alongside sheets; `main.ts` threads it through
+  `ready` and into `RecordingHeader.startingHp` when hosting or joining signed in.
+
+See [ARCH-PERSISTENCE §5](../architecture/persistence.md) for the whole shape.
+
+#### Acceptance Criteria
+- [x] The unit carried out of a lost match is on the roster with the health the rules say, not
+      with full health.
+- [x] Healing between matches is a rule with a test, not an implicit reset.
+- [x] Local and P2P play are unchanged: every soldier still deploys at full derived HP there.
+- [x] A dead roster row's final HP and deeds are readable as history.
+
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

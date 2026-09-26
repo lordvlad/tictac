@@ -88,7 +88,7 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
     await db.query`INSERT INTO schema_migrations (id, name, applied_at)
                    VALUES (${99}, ${'from the future'}, ${new Date().toISOString()})`
 
-    await expect(migrate(db)).rejects.toThrow(/at migration 99.*up to 3/s)
+    await expect(migrate(db)).rejects.toThrow(new RegExp(`at migration 99.*up to ${MIGRATIONS.length}`, 's'))
 
     await db.close()
   })

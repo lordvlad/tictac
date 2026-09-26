@@ -91,6 +91,7 @@ export class MatchHost {
       undefined,
       Faction.Blue,
       header.sheets,
+      header.startingHp,
     )
     // Both sides' kit: a host resolves attacks for everybody, so it needs the
     // weapons both squads actually fought with rather than the stock spread.

@@ -4,7 +4,12 @@ import type { GrenadeId, ShotMode } from '../core/Arsenal'
 import type { DoorVerb } from '../core/Doors'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
-import { squadLoadoutFrom, type RecordedEvent, type RecordingHeader } from './Recording'
+import {
+  squadLoadoutFrom,
+  startingHpFrom,
+  type RecordedEvent,
+  type RecordingHeader,
+} from './Recording'
 import type { SquadLoadout } from './Loadout'
 import { SocketTransport } from './SocketTransport'
 import type { StateDigest } from './StateDigest'
@@ -25,10 +30,12 @@ import type { Transport } from './Transport'
 
 export type NetworkMode = 'local' | 'host' | 'join'
 
-/** What a peer brought: its people, and its kit if this build could read it. */
+/** What a peer brought: its people, its kit if this build could read it, and its wounds if it has a roster. */
 export interface PeerSquad {
   sheets: CharacterSheet[]
   loadout: SquadLoadout | null
+  /** Absent unless the peer is signed in to a match server that keeps its HP. */
+  hp: number[] | null
 }
 
 /**
@@ -130,8 +137,13 @@ export type NetworkMessage =
    * component state, which is state its owner is authoritative for rather than
    * something anybody declared. Both sides know who they brought at exactly
    * this moment, and not before.
+   *
+   * `hp` is the same reasoning applied to wounds: absent everywhere except a
+   * kept server match, where a starting HP has to be something both peers and
+   * the referee agree on before the first digest, or the referee accuses an
+   * honest client of a foul.
    */
-  | { type: 'ready'; sheets: CharacterSheet[]; loadout: SquadLoadout }
+  | { type: 'ready'; sheets: CharacterSheet[]; loadout: SquadLoadout; hp?: number[] }
 
 export class NetworkManager {
   /** The channel this side plays over, once there is one. */
@@ -282,7 +294,8 @@ export class NetworkManager {
       } catch (err) {
         console.warn('[net] ignoring a peer loadout this build cannot read:', err)
       }
-      this.peerReady.resolve({ sheets, loadout })
+      const hp = startingHpFrom(params.hp) ?? null
+      this.peerReady.resolve({ sheets, loadout, hp })
       return
     }
 

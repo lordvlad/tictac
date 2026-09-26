@@ -45,6 +45,34 @@ export function copyDeeds(deeds: Deeds): Deeds {
   return { ...deeds, hits: { ...deeds.hits }, crits: { ...deeds.crits } }
 }
 
+/**
+ * Two records of service, added together field by field.
+ *
+ * A roster keeps a cumulative record across every match a character has
+ * played, and each settled match hands over one match's worth of it — this is
+ * how the two combine. Detached from both arguments, like {@link copyDeeds}.
+ */
+export function mergeDeeds(a: Deeds, b: Deeds): Deeds {
+  const hits = { ...a.hits }
+  const crits = { ...a.crits }
+  for (const id of Object.values(WeaponId)) {
+    hits[id] = a.hits[id] + b.hits[id]
+    crits[id] = a.crits[id] + b.crits[id]
+  }
+  return {
+    hits,
+    crits,
+    kills: a.kills + b.kills,
+    wounds: a.wounds + b.wounds,
+    unseen: a.unseen + b.unseen,
+    pushed: a.pushed + b.pushed,
+    blows: a.blows + b.blows,
+    forced: a.forced + b.forced,
+    heavy: a.heavy + b.heavy,
+    kit: a.kit + b.kit,
+  }
+}
+
 export type Attribute = keyof Attributes
 
 /** One thing that grew, from what to what, and why. */

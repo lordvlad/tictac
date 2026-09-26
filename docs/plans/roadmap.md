@@ -62,6 +62,7 @@ graph TD
 **Focus:** High-level tactics, team composition, and long-term roster persistence.
 - Done: `[ITEM-011]` overwatch, `[ITEM-024]` transport port, `[ITEM-025]` referee, `[ITEM-004]`
   after-match progression and the end screen, `[ITEM-012]` roster persistence, `[ITEM-028]`
-  schema drift guard.
+  schema drift guard, `[ITEM-038]` lasting wounds (HP, healing, combat log).
 - Open, in the order on the [focus board](./active-focus.md): `[ITEM-037]` recruit refill,
-  `[ITEM-038]` lasting wounds, `[ITEM-010]` roles.
+  `[ITEM-010]` roles. `[ITEM-039]` fatigue/medical-bay split off `ITEM-038` on 2026-09-26; needs
+  a design pass before it is Ready.

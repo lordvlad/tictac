@@ -1,6 +1,7 @@
 import type { Vector3 } from 'three'
 import type { MeleeId } from '../core/Melee'
 import type { Awareness } from '../core/Awareness'
+import { clamp } from '../core/math'
 import { type MoraleBreak, type Predisposition, predispositionOf, type Temperament } from '../core/Morale'
 import { Faction, RULES } from '../config'
 import {
@@ -120,6 +121,14 @@ export class Soldier {
     initialTile: Tile,
     grid: Grid,
     sheet: CharacterSheet = characterSheet(new Rng(squadIndex + 1)),
+    /**
+     * HP to deploy at, clamped to this sheet's derived ceiling. Absent (the
+     * default) is full health — every match today, and every match outside a
+     * server that keeps rosters. A kept match's referee and both its peers
+     * all read this off the same `RecordingHeader.startingHp`, so nobody's
+     * digest disagrees about where a wounded unit started.
+     */
+    startingHp?: number,
   ) {
     this.faction = faction
     this.squadIndex = squadIndex
@@ -140,10 +149,8 @@ export class Soldier {
     )
     // The sheet's own trait bonuses are in these ceilings from the start; gear
     // picked up later lifts them through `refreshTraits`.
-    this.health = world.addComponent(
-      this.entityId,
-      new HealthComponent(this.derived.maxHp, this.derived.maxHp),
-    )
+    const hp = startingHp === undefined ? this.derived.maxHp : clamp(startingHp, 1, this.derived.maxHp)
+    this.health = world.addComponent(this.entityId, new HealthComponent(hp, this.derived.maxHp))
     this.actionPoints = world.addComponent(
       this.entityId,
       new ActionPointsComponent(this.derived.maxAp, this.derived.maxAp),
