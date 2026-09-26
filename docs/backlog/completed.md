@@ -1538,6 +1538,51 @@ See [ARCH-PERSISTENCE](../architecture/persistence.md) for the whole shape.
 
 ---
 
+### [ITEM-028] Log and Store Schema Drift Guard
+**Completed Date:** 2026-09-26  
+**Type:** Infrastructure  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+[RFC-0001](../design/rfc/0001-referee-and-transports.md) §9: once a roster is derived from a
+stored log, the log is a schema, not a debug dump. The *database* schema was already guarded by
+forward-only migrations; nothing guarded the shape of what is *in* the rows. `PROTOCOL_VERSION`
+was documented as "bumped by hand when the shape of the wire changes" since it was written, but
+nothing made anybody actually do it — a command or a replicated component could gain, lose or
+rename a field, every test would stay green, and a stored match or a live cross-build match
+would silently stop meaning the same thing twice.
+
+#### Key Changes
+- `scripts/schemaCatalog.ts` extracts, without hand-copying either shape:
+  - every `NetworkMessage` variant's fields, read off the union's own TypeScript parse tree in
+    `src/game/NetworkManager.ts` (no type-checker needed — each variant is already an object
+    type literal), including whether a field is optional;
+  - every replicated component's shape, by instantiating one with its constructor defaults
+    (`src/ecs/components/index.ts`) and reflecting the keys `serialize()` returns, recursively.
+- The result is checked into `docs/schemas/wire-shape-catalog.json`, generated with
+  `bun run schema:catalog`.
+- `bun run schema:catalog --check` (`scripts/build-schema-catalog.ts`, thin over the pure
+  `decide()` in `schemaCatalog.ts`) fails in exactly two situations: the shape changed and
+  `PROTOCOL_VERSION` did not move (bump it), or the shape changed, the version moved, but the
+  catalog was never regenerated (regenerate it). A change that touches no shape passes
+  regardless of the version, and reordering fields is not a shape change — every comparison
+  sorts keys recursively first.
+- Wired into `bun run lint` (`schema:catalog:check`), and so into CI, with no workflow file
+  changed.
+- **Known limit**, stated in both the code and the docs rather than solved: a component whose
+  default construction leaves a field empty (`StatusesComponent.list = []`) reflects as
+  `"array<unknown>"`, not the shape of one `StatusState` — a realistic fixture for every
+  component would itself be a hand-maintained second source of truth.
+
+See [ARCH-NETWORKING §7](../architecture/networking.md#7-schema-drift-guard-item-028).
+
+#### Acceptance Criteria
+- [x] Adding, removing or renaming a field of a command or replicated component fails CI until
+      the matching version is bumped and the recorded shape regenerated.
+- [x] A change that does not touch a shape passes untouched.
+
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

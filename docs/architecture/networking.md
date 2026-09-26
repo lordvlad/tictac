@@ -3,14 +3,17 @@ title: "P2P Networking & JSON-RPC Wire Protocol"
 id: "ARCH-NETWORKING"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-18"
+lastReviewed: "2026-09-26"
 appliesTo:
   - "src/game/NetworkManager.ts"
   - "src/game/JsonRpc.ts"
+  - "scripts/schemaCatalog.ts"
+  - "scripts/build-schema-catalog.ts"
 relatedDocs:
   - "docs/design/adr/0003-p2p-jsonrpc-replication.md"
   - "docs/architecture/ecs.md"
-tags: ["networking", "peerjs", "jsonrpc", "p2p", "wire-protocol"]
+  - "docs/architecture/persistence.md"
+tags: ["networking", "peerjs", "jsonrpc", "p2p", "wire-protocol", "schema-drift"]
 ---
 
 # P2P Networking & JSON-RPC Wire Protocol
@@ -210,3 +213,46 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
 - **The ground entity** is replicated like the walls: it belongs to no faction, so the host is
   its authority. Both peers make it at the same point (after the walls), so it has the same id
   on both and on the referee, which the digest's terrain fold depends on.
+
+## 7. Schema Drift Guard (`ITEM-028`)
+
+`PROTOCOL_VERSION` (§5) is documented as "bumped by hand when the shape of the
+wire changes" — but nothing made anybody actually do it. A command gains a
+field, every test stays green (nothing sends the old shape to compare
+against), and a stored match — or a live match between two builds that
+`versionRefusal` let through because the *number* still matches — silently
+stops meaning the same thing twice. Once a roster is derived from a settled
+match (`ITEM-012`), that silent drift is a roster nobody can audit.
+
+`scripts/schemaCatalog.ts` extracts, and `scripts/build-schema-catalog.ts`
+checks, the serialised shape of both things that travel:
+
+- **Every `NetworkMessage` variant**, read off the union's own parse tree in
+  `src/game/NetworkManager.ts` — no type-checker needed, since each variant is
+  already an object type literal, and no hand-copy, since a hand-copied shape
+  is a second source of truth that itself drifts.
+- **Every replicated component**, by instantiating one with its constructor
+  defaults and reflecting the keys `serialize()` actually returns.
+
+The result is checked into `docs/schemas/wire-shape-catalog.json` and
+regenerated with `bun run schema:catalog`. `bun run schema:catalog --check` —
+wired into `bun run lint`, hence into CI — fails in exactly two situations:
+
+1. the shape differs from the checked-in catalog and `PROTOCOL_VERSION` did
+   not move — the accident this guard exists to catch, reported as *bump the
+   version*;
+2. the shape differs and the version did move, but the catalog was never
+   regenerated to match — the same staleness `docs:catalog --check` guards,
+   reported as *regenerate the catalog*.
+
+A change that touches no shape passes regardless of the version, and
+reordering fields is not a shape change: every comparison sorts keys
+recursively first.
+
+**What it does not catch.** A component whose default construction leaves a
+field empty (`StatusesComponent.list = []`) reflects as `"array<unknown>"`
+rather than the shape of one `StatusState` — a realistic fixture for every
+component would itself be a hand-maintained second source of truth. And it
+guards the *wire* shape (`PROTOCOL_VERSION`); `RECORDING_VERSION` is a separate
+concern (whether the same header replays the same map) with its own refusal in
+`parseRecording`.

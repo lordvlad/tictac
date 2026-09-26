@@ -1,0 +1,428 @@
+{
+  "commands": {
+    "abort": {
+      "reason": "string",
+      "side": "Faction | null",
+      "type": "'abort'"
+    },
+    "digest": {
+      "digest": "StateDigest",
+      "type": "'digest'"
+    },
+    "endTurn": {
+      "faction": "Faction",
+      "type": "'endTurn'"
+    },
+    "endUnitTurn": {
+      "faction": "Faction",
+      "squadIndex": "number",
+      "type": "'endUnitTurn'"
+    },
+    "fireShot": {
+      "mode": "ShotMode",
+      "shooterFaction": "Faction",
+      "shooterIndex": "number",
+      "targetFaction": "Faction",
+      "targetIndex": "number",
+      "type": "'fireShot'"
+    },
+    "hello": {
+      "build": "string",
+      "protocol": "number",
+      "type": "'hello'"
+    },
+    "init": {
+      "build": "string",
+      "protocol": "number",
+      "seed": "number",
+      "seedLabel": "string",
+      "type": "'init'"
+    },
+    "log": {
+      "events": "RecordedEvent[]",
+      "header": "RecordingHeader",
+      "matchId": "string",
+      "type": "'log'"
+    },
+    "matchHeader": {
+      "header": "RecordingHeader",
+      "type": "'matchHeader'"
+    },
+    "meleeAttack": {
+      "attackerFaction": "Faction",
+      "attackerIndex": "number",
+      "targetFaction": "Faction",
+      "targetIndex": "number",
+      "type": "'meleeAttack'"
+    },
+    "moveUnit": {
+      "faction": "Faction",
+      "path": "{ x: number; y: number }[]",
+      "squadIndex": "number",
+      "type": "'moveUnit'"
+    },
+    "operateDoor": {
+      "edge": "number",
+      "faction": "Faction",
+      "squadIndex": "number",
+      "type": "'operateDoor'",
+      "verb": "DoorVerb"
+    },
+    "overwatch": {
+      "faction": "Faction",
+      "squadIndex": "number",
+      "type": "'overwatch'"
+    },
+    "ready": {
+      "loadout": "SquadLoadout",
+      "sheets": "CharacterSheet[]",
+      "type": "'ready'"
+    },
+    "reload": {
+      "faction": "Faction",
+      "squadIndex": "number",
+      "type": "'reload'"
+    },
+    "resume": {
+      "afterSeq": "number",
+      "matchId": "string",
+      "type": "'resume'"
+    },
+    "rightClickFacing": {
+      "faction": "Faction",
+      "squadIndex": "number",
+      "type": "'rightClickFacing'",
+      "x": "number",
+      "z": "number"
+    },
+    "throwGrenade": {
+      "kind": "GrenadeId",
+      "shooterFaction": "Faction",
+      "shooterIndex": "number",
+      "targetTile": "{ x: number; y: number }",
+      "type": "'throwGrenade'"
+    },
+    "toggleCover": {
+      "faction": "Faction",
+      "squadIndex": "number",
+      "type": "'toggleCover'"
+    },
+    "useItem": {
+      "faction": "Faction",
+      "itemId": "ItemId",
+      "squadIndex": "number",
+      "targetFaction": "optional Faction",
+      "targetIndex": "optional number",
+      "type": "'useItem'"
+    }
+  },
+  "components": {
+    "actionPoints": {
+      "ap": "number",
+      "exhaustedTurns": "number",
+      "maxAp": "number",
+      "spentThisTurn": "number"
+    },
+    "aimRules": {
+      "evasionShrink": "number",
+      "max": "number",
+      "min": "number",
+      "minDamage": "number",
+      "targetSize": "number",
+      "trainingTighten": "number"
+    },
+    "ammo": {
+      "ammoId": "string",
+      "stats": {
+        "apDelta": "number",
+        "armorPenBonus": "number",
+        "armorShredBonus": "number",
+        "damageMul": "number",
+        "rangePenaltyMul": "number"
+      }
+    },
+    "armor": {
+      "armor": "number",
+      "maxArmor": "number"
+    },
+    "awareness": {
+      "quietTurns": "number",
+      "state": "number"
+    },
+    "coverRules": {
+      "lowCrouch": "number",
+      "lowStand": "number",
+      "openCrouch": "number",
+      "tallCrouch": "number",
+      "tallStand": "number"
+    },
+    "deeds": {
+      "blows": "number",
+      "crits": {
+        "gatling": "number",
+        "rifle": "number",
+        "shotgun": "number",
+        "sniper": "number"
+      },
+      "forced": "number",
+      "heavy": "number",
+      "hits": {
+        "gatling": "number",
+        "rifle": "number",
+        "shotgun": "number",
+        "sniper": "number"
+      },
+      "kills": "number",
+      "kit": "number",
+      "pushed": "number",
+      "unseen": "number",
+      "wounds": "number"
+    },
+    "grenadeSpecs": {
+      "flash": {
+        "apCost": "number",
+        "areaRadius": "number",
+        "armorShred": "number",
+        "damage": "number",
+        "friendly": "boolean",
+        "ignites": "number",
+        "issued": "number",
+        "loudness": "number",
+        "smokes": "number",
+        "throwRange": "number"
+      },
+      "frag": {
+        "apCost": "number",
+        "areaRadius": "number",
+        "armorShred": "number",
+        "damage": "number",
+        "friendly": "boolean",
+        "ignites": "number",
+        "issued": "number",
+        "loudness": "number",
+        "smokes": "number",
+        "throwRange": "number"
+      },
+      "incendiary": {
+        "apCost": "number",
+        "areaRadius": "number",
+        "armorShred": "number",
+        "damage": "number",
+        "friendly": "boolean",
+        "ignites": "number",
+        "issued": "number",
+        "loudness": "number",
+        "smokes": "number",
+        "throwRange": "number"
+      },
+      "smoke": {
+        "apCost": "number",
+        "areaRadius": "number",
+        "armorShred": "number",
+        "damage": "number",
+        "friendly": "boolean",
+        "ignites": "number",
+        "issued": "number",
+        "loudness": "number",
+        "smokes": "number",
+        "throwRange": "number"
+      },
+      "stone": {
+        "apCost": "number",
+        "areaRadius": "number",
+        "armorShred": "number",
+        "damage": "number",
+        "friendly": "boolean",
+        "ignites": "number",
+        "issued": "number",
+        "loudness": "number",
+        "smokes": "number",
+        "throwRange": "number"
+      }
+    },
+    "ground": {
+      "ash": "array<unknown>",
+      "fire": "array<unknown>",
+      "razed": "array<unknown>",
+      "smoke": "array<unknown>"
+    },
+    "health": {
+      "hp": "number",
+      "maxHp": "number"
+    },
+    "identity": {
+      "faction": "number",
+      "name": "string",
+      "squadIndex": "number"
+    },
+    "inventory": {
+      "grenades": {
+        "flash": "number",
+        "frag": "number",
+        "incendiary": "number",
+        "smoke": "number",
+        "stone": "number"
+      },
+      "sidearm": "string"
+    },
+    "items": {
+      "items": {
+        "firstAid": "number",
+        "keys": "number",
+        "nullweave": "number",
+        "plate": "number",
+        "repair": "number",
+        "stim": "number"
+      }
+    },
+    "matchRules": {
+      "coverApCost": "number",
+      "crouchMoveSpeed": "number",
+      "crouchStepCost": "number",
+      "exhaustionTurns": "number",
+      "ladderStepCost": "number",
+      "maxAp": "number",
+      "maxArmor": "number",
+      "maxHp": "number",
+      "moveSpeed": "number",
+      "reloadApCost": "number",
+      "sightRange": "number",
+      "stairStepCost": "number",
+      "stepDiagonal": "number",
+      "stepOrthogonal": "number"
+    },
+    "morale": {
+      "broken": "null",
+      "brokenTurns": "number",
+      "morale": "number"
+    },
+    "position": {
+      "heading": "number",
+      "level": "number",
+      "targetPos": {
+        "x": "number",
+        "y": "number",
+        "z": "number"
+      },
+      "targetYaw": "number",
+      "tile": {
+        "x": "number",
+        "y": "number"
+      }
+    },
+    "sighted": {
+      "known": "boolean",
+      "seen": "boolean"
+    },
+    "stance": {
+      "firedThisTurn": "boolean",
+      "isCrouching": "boolean",
+      "isMoving": "boolean",
+      "movingPath": "array<unknown>",
+      "peek": "boolean",
+      "watching": "boolean"
+    },
+    "statusSpecs": {
+      "bleeding": {
+        "accuracyPenalty": "number",
+        "ailment": "boolean",
+        "apBonus": "number",
+        "damagePerTurn": "number",
+        "damageTakenBonus": "number",
+        "defenceBonus": "number",
+        "maxStacks": "number",
+        "turns": "number"
+      },
+      "flashed": {
+        "accuracyPenalty": "number",
+        "ailment": "boolean",
+        "apBonus": "number",
+        "damagePerTurn": "number",
+        "damageTakenBonus": "number",
+        "defenceBonus": "number",
+        "maxStacks": "number",
+        "turns": "number"
+      },
+      "shredded": {
+        "accuracyPenalty": "number",
+        "ailment": "boolean",
+        "apBonus": "number",
+        "damagePerTurn": "number",
+        "damageTakenBonus": "number",
+        "defenceBonus": "number",
+        "maxStacks": "number",
+        "turns": "number"
+      },
+      "stimmed": {
+        "accuracyPenalty": "number",
+        "ailment": "boolean",
+        "apBonus": "number",
+        "damagePerTurn": "number",
+        "damageTakenBonus": "number",
+        "defenceBonus": "number",
+        "maxStacks": "number",
+        "turns": "number"
+      },
+      "suppressed": {
+        "accuracyPenalty": "number",
+        "ailment": "boolean",
+        "apBonus": "number",
+        "damagePerTurn": "number",
+        "damageTakenBonus": "number",
+        "defenceBonus": "number",
+        "maxStacks": "number",
+        "turns": "number"
+      },
+      "winded": {
+        "accuracyPenalty": "number",
+        "ailment": "boolean",
+        "apBonus": "number",
+        "damagePerTurn": "number",
+        "damageTakenBonus": "number",
+        "defenceBonus": "number",
+        "maxStacks": "number",
+        "turns": "number"
+      }
+    },
+    "statuses": {
+      "list": "array<unknown>"
+    },
+    "traits": {
+      "bleedImmune": "boolean",
+      "critImmune": "boolean",
+      "damageTaken": "number",
+      "evasion": "number",
+      "evasionCrouched": "number",
+      "moveCostMul": "number",
+      "unreadable": "boolean"
+    },
+    "wall": {
+      "edge": "number",
+      "kind": "number"
+    },
+    "weapon": {
+      "stats": {
+        "apCost": "number",
+        "areaRadius": "number",
+        "armorPen": "number",
+        "armorShred": "number",
+        "bleedChance": "number",
+        "critChance": "number",
+        "critMultiplier": "number",
+        "critRangeBias": "number",
+        "currentClip": "number",
+        "damage": "number",
+        "loudness": "number",
+        "maxClip": "number",
+        "maxRange": "number",
+        "pellets": "number",
+        "serial": "number",
+        "slots": "number",
+        "spread": "number",
+        "sway": "number"
+      },
+      "weaponId": "string"
+    }
+  },
+  "protocolVersion": 1
+}

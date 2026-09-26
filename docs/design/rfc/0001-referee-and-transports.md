@@ -192,8 +192,11 @@ what it is: the rules, in the page, with nothing in between.
      aborted match will be somebody on a stale bundle.
    - Unwatched matches cannot abort on a foul. With no referee there is no third opinion, so
      peer-to-peer play detects disagreement and can only stop; it cannot attribute.
-4. **Does the referee store the log durably, and in what?** `bun:sqlite` is built in and the
-   repo already reads SQLite. Persistence and the log are probably one store.
+4. ~~Does the referee store the log durably, and in what?~~ **Decided: one database, behind a
+   portable port.** `src/server/db/Db.ts` wraps `Bun.SQL`, which speaks SQLite and Postgres
+   through one interface, so the log, the accounts and the rosters are one store and the
+   hosting decision (Durable Objects or a central Postgres) stays open. Forward-only
+   migrations guard the schema. See [ARCH-PERSISTENCE](../../architecture/persistence.md).
 5. **Does the balance harness become a referee client?** It currently *is* the rules; driving a
    referee over a port would make the harness test the real server, at the cost of a 7-second
    sweep getting slower.
@@ -227,14 +230,19 @@ that property today, with two independent recomputations of the same log.
 
 Two consequences follow, and both are cheap now and expensive later:
 
-1. **The log is a schema, not a debug dump.** It already carries `header.version`, which was
-   foresight. From the moment a roster is written from a log, the format needs the same
-   discipline the generated catalogue gets: a guard that fails when a component's serialised
-   shape changes without a migration. See `ITEM-028`.
-2. **`localStorage` is a demo store, not the store of record.** `ITEM-012` was written against
-   it. Once there is a server, the roster lives there, and the handshake stops carrying saved
-   sheets at all — the server already has them. That is a *simplification* of the trust story,
-   not an addition: a peer can no longer send a tampered roster because it does not send one.
+1. ~~The log is a schema, not a debug dump.~~ **Done** (`ITEM-028`): a command's and a
+   replicated component's serialised shape are read straight off the source — the
+   `NetworkMessage` union's own parse tree, and a default-constructed component's
+   `serialize()` — and checked into `docs/schemas/wire-shape-catalog.json`. A change to either
+   fails `bun run lint` (and so CI) until `PROTOCOL_VERSION` moves with it and the catalog is
+   regenerated, so a shape change is a decision, never an accident. See
+   [ARCH-NETWORKING §7](../../architecture/networking.md#7-schema-drift-guard-item-028).
+2. ~~`localStorage` is a demo store, not the store of record.~~ **Done** (`ITEM-012`): a
+   signed-in player's roster lives on the match server, which deals it, checks the squad that
+   deploys against it and writes the result onto it. The handshake still carries sheets — the
+   referee uses them to refuse a squad that is not the roster — but they are no longer the
+   source of anything. A peer cannot promote itself by sending a better squad; it can only get
+   the match aborted.
 
 ## 10. What this RFC rejects
 

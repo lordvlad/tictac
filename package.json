@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "bun --hot src/index.ts",
     "preview": "NODE_ENV=production bun src/index.ts",
-    "lint": "bun run --parallel typecheck lint:docs lint:code",
+    "lint": "bun run --parallel typecheck lint:docs lint:code schema:catalog:check",
     "lint:code": "biome lint --only=suspicious/noDuplicateCase src scripts tests",
     "lint:docs": "bun scripts/lint-docs.ts",
     "docs:catalog": "bun scripts/build-catalog.ts",
+    "schema:catalog": "bun scripts/build-schema-catalog.ts",
+    "schema:catalog:check": "bun scripts/build-schema-catalog.ts --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "balance": "bun scripts/balance.ts",

@@ -115,4 +115,4 @@ Staged, in this order, and tracked in the [backlog](../../backlog/active-backlog
 | `ITEM-023` | Intent-only wire; `WireHit` deleted | **Landed** |
 | `ITEM-024` | Transport port: PeerJS behind a seam, plus socket and loopback | **Landed** with `ITEM-025`, its second caller |
 | `ITEM-025` | The referee: witness, persistence, rejoin, abort on foul | **Landed** |
-| `ITEM-028` | Log and store schema drift guard | Ready |
+| `ITEM-028` | Log and store schema drift guard | **Landed** |

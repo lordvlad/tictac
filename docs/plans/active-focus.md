@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M4 Competitive & Meta Roster"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-24"
+lastReviewed: "2026-09-26"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -28,15 +28,15 @@ during a match, roles, and a roster that outlives the match.
 ---
 
 ## 🔄 In Progress
-- Nothing in flight. `[ITEM-036]` (bleeding) finished on 2026-09-25 as one more combat item
-  before persistence; next is persistence, so the growth the end screen shows is kept.
+- Nothing in flight. `[ITEM-028]` (schema drift guard) finished on 2026-09-26: a command or
+  replicated component that changes shape now fails `bun run lint` until `PROTOCOL_VERSION`
+  moves and the catalog is regenerated.
 
 ## 📋 Ready — pull in this order
-1. **`[ITEM-028]`** Log and store schema drift guard, with `[ITEM-012]`: once a roster is
-   derived from a stored log, the log is a schema.
-2. **`[ITEM-012]`** Permadeath, lasting wounds and roster persistence, on the referee's store
-   (`[ITEM-025]`). Straight after `[ITEM-004]`, by the user's call: growth is what there is to
-   persist, and until then it is shown and lost.
+1. **`[ITEM-037]`** Recruits fill an empty roster slot. Persistence marks the dead and leaves
+   the slot empty on purpose; where new people come from is its own mechanic.
+2. **`[ITEM-038]`** Lasting wounds and health between matches — the rest of GDD §5, now that a
+   roster outlives the match.
 3. **`[ITEM-010]`** Roles on the loadout screen. Independent of the others; mostly UI over
    `LOADOUT_LIMITS`.
 
@@ -52,10 +52,13 @@ during a match, roles, and a roster that outlives the match.
   shot. The sweep barely measures fire and smoke.
 - **ITEM-017**: the policy walks through shut doors but never shuts, unlocks or forces one; keys
   open every lock (where a key comes from is a campaign question).
-- **ITEM-004**: growth is shown and lost until persistence; Strength and Intelligence barely grow
-  in the sweep because the policy carries no plate, swings no knife and uses no kit.
+- **ITEM-004**: Strength and Intelligence barely grow in the sweep because the policy carries no
+  plate, swings no knife and uses no kit. (Growth is no longer lost: `ITEM-012` keeps it.)
 - **ITEM-036**: the policy never treats a bleed, and bleeding costs a side only 3–4 HP a match
   in the sweep's short fights; it tilts the mirror ~1.7 points toward Blue and cuts draws.
+- **ITEM-012**: a dead character's slot stays empty (`ITEM-037`), and health is not carried
+  between matches (`ITEM-038`). Durable Objects would need one more `Db` adapter; none is
+  written.
 - **ITEM-004 / ITEM-014 / ITEM-017 / ITEM-024 / ITEM-034**: nobody has played peer-to-peer in two
   live browsers since the transport cutover (the online end screen included). Agreement is
   covered by the network, digest and rewind tests only.

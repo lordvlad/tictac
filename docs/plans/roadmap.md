@@ -3,7 +3,7 @@ title: "Multi-Milestone Capability Roadmap"
 id: "PLAN-ROADMAP"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-24"
+lastReviewed: "2026-09-26"
 appliesTo:
   - "docs/plans/**"
 relatedDocs:
@@ -61,6 +61,7 @@ graph TD
 **Status:** In Progress  
 **Focus:** High-level tactics, team composition, and long-term roster persistence.
 - Done: `[ITEM-011]` overwatch, `[ITEM-024]` transport port, `[ITEM-025]` referee, `[ITEM-004]`
-  after-match progression and the end screen.
-- Open, in the order on the [focus board](./active-focus.md): `[ITEM-028]` schema drift guard
-  with `[ITEM-012]` roster persistence, `[ITEM-010]` roles.
+  after-match progression and the end screen, `[ITEM-012]` roster persistence, `[ITEM-028]`
+  schema drift guard.
+- Open, in the order on the [focus board](./active-focus.md): `[ITEM-037]` recruit refill,
+  `[ITEM-038]` lasting wounds, `[ITEM-010]` roles.
