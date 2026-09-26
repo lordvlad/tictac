@@ -1,7 +1,8 @@
 import { Faction } from '../config'
 import { STATUSES } from '../core/Arsenal'
 import type { Grid } from '../core/Grid'
-import { type Growth, growthFrom } from '../core/Progression'
+import type { CharacterSheet } from '../core/Characters'
+import { grown, growthFrom, type Growth } from '../core/Progression'
 import { Rng } from '../core/rng'
 import type { Soldier } from '../entities/Soldier'
 
@@ -63,4 +64,45 @@ export function carriedOut(squads: Sides, loser: Faction, grid: Grid, seed: numb
       grid.fireAt(unit.tile.x, unit.tile.y) === 0 && !unit.statuses.some((state) => STATUSES[state.kind].ailment),
   )
   return new Rng((seed ^ SURVIVOR_STREAM) >>> 0).pick(steady.length > 0 ? steady : fallen)
+}
+
+/**
+ * What became of one unit, in the squad order the roster is kept in.
+ *
+ * Three outcomes, because there are three: somebody who walked away and
+ * learned from it, the one the losing side carried out, and the dead.
+ */
+export type UnitFate =
+  | { kind: 'survived'; sheet: CharacterSheet }
+  | { kind: 'carried' }
+  | { kind: 'died' }
+
+/**
+ * What the match did to both squads, as the roster has to record it.
+ *
+ * Pure, and derived from the same state both peers hold, so a client can show
+ * it and the server can write it down without either taking the other's word.
+ * The arrays are in squad-index order, which is roster slot order: `Squads`
+ * builds `byFaction[f][i]` from `sheets[f][i]`.
+ *
+ * The winner's survivors come back {@link grown}; their dead do not come back.
+ * The loser learns nothing, and keeps only whoever was {@link carriedOut} —
+ * which is what permadeath costs (ITEM-004, ITEM-035).
+ */
+export function settlement(
+  squads: Sides,
+  winner: Faction,
+  carried: Soldier | null,
+): Record<Faction, UnitFate[]> {
+  const growthByUnit = new Map<Soldier, Growth[]>()
+  for (const { unit, growth } of debrief(squads, winner)) growthByUnit.set(unit, growth)
+
+  const fates = (faction: Faction): UnitFate[] =>
+    squads.byFaction[faction].map((unit) => {
+      if (faction !== winner) return unit === carried ? { kind: 'carried' } : { kind: 'died' }
+      const growth = growthByUnit.get(unit)
+      return growth ? { kind: 'survived', sheet: grown(unit.sheet, growth) } : { kind: 'died' }
+    })
+
+  return { [Faction.Blue]: fates(Faction.Blue), [Faction.Red]: fates(Faction.Red) }
 }

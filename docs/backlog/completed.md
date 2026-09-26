@@ -1487,6 +1487,57 @@ sweep's fights are short and lethal, and plate halves a rifle's odds.
 
 ---
 
+### [ITEM-012] Permadeath & Campaign Roster Persistence
+**Completed Date:** 2026-09-26  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+Squads were rolled per match and forgotten on exit, so the growth `[ITEM-004]` shows at the
+end screen was shown and lost. Per [RFC-0001](../design/rfc/0001-referee-and-transports.md) §9
+persistence is the foundation the rest of the GDD stands on.
+
+#### Key Changes
+- **A portable database port** (`src/server/db/Db.ts`) on `Bun.SQL`: one tagged-template
+  interface over SQLite and Postgres, no ORM and no driver. Where the database finally lives
+  (Durable Objects or a central Postgres) is still open, so every query obeys stated
+  portability rules and the whole suite runs against both engines when
+  `TICTAC_TEST_POSTGRES_URL` is set.
+- **Forward-only migrations** (`src/server/db/migrate.ts`): no `down`, idempotent, one
+  transaction per migration together with the row recording it, and three refusals — ids not
+  `1..n`, a name that disagrees with the database's, and a database from a *newer* build.
+  `STORE_VERSION` and its `PRAGMA user_version` are gone.
+- **`MatchStore` on the port**, asynchronous, with the append-only triggers moved into
+  migration 1 and spelled for both engines (`RAISE(ABORT, …)` / plpgsql).
+- **Passkeys, and nothing else** (`src/server/Accounts.ts`, `WebAuthn.ts`, `Api.ts`): no
+  password, no email, no third party. Challenges are deleted as they are read, origin and
+  relying-party are checked, the signature counter must move, and only ES256/RS256 are
+  accepted. Sessions store a hash, never the token; a socket gets in with a single-use ticket.
+- **Rosters** (`src/server/Rosters.ts`): registration deals one server-rolled squad, the
+  referee refuses a match whose deployed squad is not that player's roster (and refuses one
+  player on both sides), and `settlement()` (`src/game/MatchEnd.ts`) reads the finished match —
+  winners grown, the losers' carried-out unit kept unchanged, everyone else dead. Settling is
+  idempotent on `match_results`.
+- **The referee writes through a queue** (`Referee.enqueue` / `idle`), so an asynchronous
+  database never delays a judgement and two writes cannot race into a log whose numbering is
+  its meaning. A failed write aborts the match.
+- **Client** (`src/game/Account.ts`, `src/main.ts`): the match-server panel signs in, and a
+  signed-in player deploys the roster the server holds. Local and P2P play are untouched — they
+  still roll a fresh squad and write nothing.
+
+See [ARCH-PERSISTENCE](../architecture/persistence.md) for the whole shape.
+
+#### Acceptance Criteria
+- [x] A signed-in player's squad survives the match, the tab and the process.
+- [x] The winner's survivors come back grown; the dead do not come back.
+- [x] The loser keeps exactly the one carried out, with nothing learned.
+- [x] A squad that is not the server's roster aborts the match instead of settling.
+- [x] Offline, local and P2P play are unchanged.
+- [ ] Split out: an empty slot is not refilled (`ITEM-037`), and health and lasting wounds are
+      not carried between matches (`ITEM-038`).
+
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

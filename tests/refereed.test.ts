@@ -7,7 +7,7 @@ import { defaultLoadout } from '../src/game/Loadout'
 import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
 import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
 import type { Transport } from '../src/game/Transport'
-import { MatchStore } from '../src/server/MatchStore'
+import { openPersistence } from '../src/server/Persistence'
 import { Referee } from '../src/server/Referee'
 import { replay } from '../src/sim/Replay'
 
@@ -21,9 +21,10 @@ import { replay } from '../src/sim/Replay'
  *
  * Port 0 so the test cannot collide with anything, including itself.
  */
-function refereeOnASocket() {
-  const store = new MatchStore()
-  const referee = new Referee({ store, log: () => {} })
+async function refereeOnASocket() {
+  const persistence = await openPersistence()
+  const store = persistence.matches
+  const referee = new Referee({ matches: store, log: () => {} })
   const sockets = new WeakMap<object, { deliver: (raw: string) => void; closed: () => void }>()
 
   const server = Bun.serve({
@@ -59,7 +60,15 @@ function refereeOnASocket() {
     },
   })
 
-  return { referee, store, url: `ws://127.0.0.1:${server.port}/`, stop: () => server.stop(true) }
+  return {
+    referee,
+    store,
+    url: `ws://127.0.0.1:${server.port}/`,
+    stop: async () => {
+      server.stop(true)
+      await persistence.close()
+    },
+  }
 }
 
 function header(seed: number, sheets: Record<Faction, ReturnType<typeof rollSquadSheets>>): RecordingHeader {
@@ -77,7 +86,7 @@ function header(seed: number, sheets: Record<Faction, ReturnType<typeof rollSqua
 
 describe('Two clients playing through a referee', () => {
   test('they reach each other over sockets, and the referee keeps the match', async () => {
-    const { referee, store, url, stop } = refereeOnASocket()
+    const { referee, store, url, stop } = await refereeOnASocket()
     const host = new NetworkManager()
     const joiner = new NetworkManager()
     const hostSaw: NetworkMessage[] = []
@@ -127,7 +136,8 @@ describe('Two clients playing through a referee', () => {
 
     // And the referee's own log refights: what it kept is a match, not a note
     // about one.
-    const stored = store.match(referee.openMatchId!)!
+    await referee.idle()
+    const stored = (await store.match(referee.openMatchId!))!
     expect(stored.events).toHaveLength(3)
     const refought = replay(stored)
     expect(refought.skipped).toEqual([])
@@ -135,13 +145,13 @@ describe('Two clients playing through a referee', () => {
 
     host.dispose()
     joiner.dispose()
-    stop()
+    await stop()
   })
 
   test('a client on another build is turned away at the socket', async () => {
     // The same gate as peer-to-peer play, over a different channel: the referee
     // refuses a build it cannot agree with rather than accusing it later.
-    const { url, stop } = refereeOnASocket()
+    const { url, stop } = await refereeOnASocket()
     // Spoken by hand rather than through a `NetworkManager`, because the point
     // is a client this build would never produce: one claiming another build.
     const socket = new WebSocket(url)
@@ -162,6 +172,6 @@ describe('Two clients playing through a referee', () => {
     expect(abort).not.toBeNull()
     expect(JSON.stringify(abort)).toContain('c0ffee1')
     socket.close()
-    stop()
+    await stop()
   })
 })

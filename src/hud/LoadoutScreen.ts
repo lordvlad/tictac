@@ -1,6 +1,6 @@
 import { AMMO, AmmoId, GRENADES, GrenadeId, SHOT_MODES, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
-import { derive, rollSquadSheets, type CharacterSheet } from '../core/Characters'
+import { derive, type CharacterSheet } from '../core/Characters'
 import { ITEMS, ItemId } from '../core/Items'
 import { MELEE, MeleeId } from '../core/Melee'
 import { TEMPERAMENTS } from '../core/Morale'
@@ -62,13 +62,6 @@ export class LoadoutScreen {
   private readonly root: HTMLDivElement
   private readonly scene: LoadoutScene
   private readonly loadout: SquadLoadout = defaultLoadout()
-  /**
-   * The squad's people, as opposed to their kit. Rolled once here and read by
-   * the caller once Deploy is pressed, so the match is fought by the squad the
-   * player was shown: every press re-renders the whole screen, and rolling per
-   * render would reshuffle them each time a stepper was touched.
-   */
-  readonly sheets: CharacterSheet[] = rollSquadSheets()
   private selected = 0
   private waitingLabel: string | null = null
   private readonly deployed = Promise.withResolvers<SquadLoadout>()
@@ -79,6 +72,13 @@ export class LoadoutScreen {
     private readonly portraits: OffscreenPortraits,
     seed: number,
     private readonly faction: Faction,
+    /**
+     * The squad's people, as opposed to their kit. Given by the caller,
+     * because where a squad comes from is not this screen's business: a local
+     * match rolls one, and a match on a server that keeps rosters deploys the
+     * one the server holds.
+     */
+    readonly sheets: CharacterSheet[],
   ) {
     this.scene = new LoadoutScene(engine, seed, faction)
 

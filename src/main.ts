@@ -7,6 +7,7 @@ import { Faction, SIM } from './config'
 import { matchDice, resolveSeed, Rng } from './core/rng'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
+import { Account, type Player } from './game/Account'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
 import { Squads } from './game/Squads'
@@ -178,7 +179,14 @@ function showMenu(): void {
     detailsEl.style.display = 'block'
     detailsEl.innerHTML = `
       <p style="font-size: 14px; color: #2dd4bf; margin-bottom: 8px;">Play on a Match Server</p>
-      <input id="server-url" value="ws://localhost:5174/" style="width: 100%; box-sizing: border-box; padding: 8px; background: #0f172a; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; font-family: monospace; font-size: 12px; margin-bottom: 12px;" />
+      <input id="server-url" value="${localStorage.getItem('tictac.server') ?? 'ws://localhost:5174/'}" style="width: 100%; box-sizing: border-box; padding: 8px; background: #0f172a; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; font-family: monospace; font-size: 12px; margin-bottom: 8px;" />
+      <p id="account-status" style="font-size: 12px; color: #94a3b8; margin-bottom: 8px;">…</p>
+      <div id="account-actions" style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <input id="account-name" maxlength="24" placeholder="Name for a new passkey" style="flex: 1; box-sizing: border-box; padding: 8px; background: #0f172a; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; font-size: 12px;" />
+        <button id="btn-passkey-create" style="padding: 8px 10px; background: #0d9488; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">Create passkey</button>
+        <button id="btn-passkey-signin" style="padding: 8px 10px; background: #334155; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer;">Sign in with passkey</button>
+        <button id="btn-passkey-signout" style="padding: 8px 10px; background: #334155; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; display: none;">Sign out</button>
+      </div>
       <div style="display: flex; gap: 8px;">
         <button id="btn-server-host" style="flex: 1; padding: 10px; background: #0d9488; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Open a Match</button>
         <button id="btn-server-join" style="flex: 1; padding: 10px; background: #14b8a6; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Join the Match</button>
@@ -189,47 +197,126 @@ function showMenu(): void {
 
     const urlOf = () => (container.querySelector('#server-url') as HTMLInputElement).value.trim()
     const statusEl = () => container.querySelector('#server-status') as HTMLElement
+    const accountEl = () => container.querySelector('#account-status') as HTMLElement
+    const button = (id: string) => container.querySelector(id) as HTMLButtonElement
+    const failed = (message: string): void => {
+      statusEl().style.color = '#ef4444'
+      statusEl().textContent = message
+    }
+
+    /**
+     * Who the player is on the server currently named in the box.
+     *
+     * Re-asked whenever that url changes, because a session belongs to one
+     * server: the same browser can be somebody on one and nobody on another.
+     */
+    const refreshAccount = async (): Promise<void> => {
+      const signedOut = ['#btn-passkey-create', '#btn-passkey-signin']
+      let player: Player | null = null
+      try {
+        player = await new Account(urlOf()).me()
+      } catch {
+        accountEl().style.color = '#ef4444'
+        accountEl().textContent = 'No match server answers at that address'
+        for (const id of signedOut) button(id).style.display = 'none'
+        button('#btn-passkey-signout').style.display = 'none'
+        ;(container.querySelector('#account-name') as HTMLInputElement).style.display = 'none'
+        return
+      }
+      accountEl().style.color = player ? '#2dd4bf' : '#94a3b8'
+      accountEl().textContent = player
+        ? `Signed in as ${player.name} — your squad is kept on this server`
+        : 'Not signed in — matches here are not kept'
+      for (const id of signedOut) button(id).style.display = player ? 'none' : 'block'
+      button('#btn-passkey-signout').style.display = player ? 'block' : 'none'
+      ;(container.querySelector('#account-name') as HTMLInputElement).style.display = player
+        ? 'none'
+        : 'block'
+    }
+    void refreshAccount()
+    container.querySelector('#server-url')?.addEventListener('change', () => void refreshAccount())
+
+    const account = async (act: (account: Account) => Promise<unknown>): Promise<void> => {
+      try {
+        await act(new Account(urlOf()))
+      } catch (err) {
+        failed(err instanceof Error ? err.message : 'That did not work.')
+      }
+      await refreshAccount()
+    }
+
+    button('#btn-passkey-create').addEventListener('click', () => {
+      const name = (container.querySelector('#account-name') as HTMLInputElement).value.trim()
+      void account((it) => it.register(name))
+    })
+    button('#btn-passkey-signin').addEventListener('click', () => {
+      void account((it) => it.signIn())
+    })
+    button('#btn-passkey-signout').addEventListener('click', () => {
+      void account((it) => it.signOut())
+    })
 
     container.querySelector('#btn-server-back')?.addEventListener('click', () => {
       detailsEl.style.display = 'none'
       actionsEl.style.display = 'flex'
     })
 
-    container.querySelector('#btn-server-host')?.addEventListener('click', () => {
-      const url = urlOf()
-      if (!url) return
+    /**
+     * What a signed-in player deploys, and where they connect.
+     *
+     * Signed in: the roster this server keeps, and a url carrying a ticket that
+     * tells the referee whose roster it is. Anonymous: a fresh squad and the
+     * plain url, exactly as before.
+     */
+    const joining = async (url: string): Promise<{ url: string; sheets?: CharacterSheet[] }> => {
+      const it = new Account(url)
+      if (!it.token) return { url }
+      return { url: await it.socketUrl(url), sheets: await it.roster() }
+    }
+
+    button('#btn-server-host').addEventListener('click', () => {
+      const typed = urlOf()
+      if (!typed) return
+      localStorage.setItem('tictac.server', typed)
       const { seed, label } = resolveSeed()
-      const network = new NetworkManager()
       statusEl().style.color = '#38bdf8'
       statusEl().textContent = 'Waiting for an opponent to join…'
-      // No `onConnected` here: a socket opens as soon as the referee answers,
-      // long before anybody is on the other side of it. The barrier that
-      // matters is `ready`, which `equipThenStart` already waits on.
-      network.onDisconnected = (reason) => {
-        statusEl().style.color = '#ef4444'
-        statusEl().textContent = reason ?? 'The match server closed the connection.'
-      }
-      network.hostOnServer(url, seed, label)
-      container.remove()
-      equipThenStart(seed, label, network)
+      void joining(typed)
+        .then(({ url, sheets }) => {
+          const network = new NetworkManager()
+          // No `onConnected` here: a socket opens as soon as the referee
+          // answers, long before anybody is on the other side of it. The
+          // barrier that matters is `ready`, which `equipThenStart` waits on.
+          network.onDisconnected = (reason) => {
+            failed(reason ?? 'The match server closed the connection.')
+          }
+          network.hostOnServer(url, seed, label)
+          container.remove()
+          equipThenStart(seed, label, network, sheets)
+        })
+        .catch((err: unknown) => {
+          failed(err instanceof Error ? err.message : 'Could not open a match there.')
+        })
     })
 
-    container.querySelector('#btn-server-join')?.addEventListener('click', async () => {
-      const url = urlOf()
-      if (!url) return
+    button('#btn-server-join').addEventListener('click', async () => {
+      const typed = urlOf()
+      if (!typed) return
+      localStorage.setItem('tictac.server', typed)
       statusEl().style.color = '#38bdf8'
       statusEl().textContent = 'Connecting…'
       const network = new NetworkManager()
       try {
+        const { url, sheets } = await joining(typed)
         const opening = await network.joinOnServer(url)
         container.remove()
-        equipThenStart(opening.seed, opening.seedLabel, network)
+        equipThenStart(opening.seed, opening.seedLabel, network, sheets)
       } catch (err) {
-        statusEl().style.color = '#ef4444'
-        statusEl().textContent =
+        failed(
           err instanceof Error && err.message.length > 0
             ? err.message
-            : 'Could not join a match there.'
+            : 'Could not join a match there.',
+        )
       }
     })
   })
@@ -290,17 +377,24 @@ function showMenu(): void {
  * The barrier matters because Blue moves first and the host is Blue: without it
  * the host could fire while the joiner is still choosing kit, and with no
  * `onMessage` attached yet those commands would be dropped outright.
+ *
+ * `sheets` is the squad that deploys. A local or peer-to-peer match rolls a
+ * fresh one; a match on a server the player is signed in to brings the roster
+ * that server keeps, which is the squad its referee will check and settle.
  */
-function equipThenStart(seed: number, label: string, network: NetworkManager): void {
+function equipThenStart(
+  seed: number,
+  label: string,
+  network: NetworkManager,
+  sheets: CharacterSheet[] = rollSquadSheets(),
+): void {
   const engine = createEngineContext(Game.instance())
   const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
-  const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine), seed, faction)
+  const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine), seed, faction, sheets)
 
-  // The squad the player was shown while equipping is the squad that deploys:
-  // the screen rolled it, so read it back rather than rolling a second one
-  // here. Rolled per peer, never from the match seed — that seed is the host's
-  // map. Local play needs an opposing squad too, and there is no peer to bring
-  // one.
+  // The squad the player was shown while equipping is the squad that deploys.
+  // Rolled per peer, never from the match seed — that seed is the host's map.
+  // Local play needs an opposing squad too, and there is no peer to bring one.
   const mySheets = screen.sheets
   const localEnemySheets = rollSquadSheets()
 

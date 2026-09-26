@@ -1,12 +1,15 @@
-import type { Faction } from '../config'
+import { Faction, FACTION_INFO } from '../config'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../game/JsonRpc'
 import type { NetworkMessage } from '../game/NetworkManager'
 import type { RecordedEvent, RecordingHeader } from '../game/Recording'
 import { compareDigests, type Divergence, type StateDigest } from '../game/StateDigest'
 import type { Transport } from '../game/Transport'
+import { sanitizeSheet } from '../core/Characters'
 import { MatchHost } from '../sim/MatchHost'
 import { MY_VERSION, versionRefusal } from '../version'
-import { MatchStore } from './MatchStore'
+import { carriedOut, settlement, winnerOf, type UnitFate } from '../game/MatchEnd'
+import type { MatchStore } from './MatchStore'
+import type { Rosters } from './Rosters'
 
 /**
  * A third recomputation of the same match.
@@ -43,7 +46,15 @@ export interface RefereeVerdict {
 }
 
 export interface RefereeOptions {
-  store?: MatchStore
+  /** Where matches are written. Already migrated: see `Persistence`. */
+  matches: MatchStore
+  /**
+   * The rosters to check squads against and write results onto.
+   *
+   * Optional: a referee without one still watches, relays and records, it
+   * simply keeps nobody's squad. That is what an anonymous match is.
+   */
+  rosters?: Rosters
   /** Called when a match is aborted, after both clients have been told. */
   onVerdict?: (verdict: RefereeVerdict) => void
   /** Called for anything worth a line in a server log. */
@@ -56,20 +67,51 @@ interface Client {
   /** The faction whose intents this client is entitled to send, once known. */
   faction: Faction | null
   build: string | null
+  /** The signed-in player behind the socket, or null for an anonymous one. */
+  playerId: string | null
 }
 
 export class Referee {
   private readonly clients = new Set<Client>()
-  private readonly store: MatchStore
+  private readonly matches: MatchStore
+  private readonly rosters?: Rosters
   private readonly onVerdict?: (verdict: RefereeVerdict) => void
   private readonly log: (message: string) => void
 
   private host: MatchHost | null = null
+  private header: RecordingHeader | null = null
   private matchId: string | null = null
   private aborted = false
+  private settled = false
 
-  constructor(options: RefereeOptions = {}) {
-    this.store = options.store ?? new MatchStore()
+  /**
+   * Who is playing which side, once their squad has been checked against the
+   * roster this server keeps. Null for a side that is anonymous, or whose
+   * squad has not been vouched for.
+   */
+  private sides: Record<Faction, { playerId: string; characterIds: string[] } | null> = {
+    [Faction.Blue]: null,
+    [Faction.Red]: null,
+  }
+
+  /**
+   * Everything this referee has to write, in the order it decided to write it.
+   *
+   * The database is asynchronous and `MatchHost` is not, which is the whole
+   * reason this exists: judging a frame must not wait on a disk, and two
+   * writes must not race each other into a log whose numbering is its meaning.
+   * So frames are judged synchronously, in arrival order, and every write is
+   * appended to one chain that drains in that same order.
+   *
+   * A write that fails ends the match. A referee that could not write down
+   * what it saw has no evidence, and a match with no evidence is one nobody
+   * can adjudicate afterwards.
+   */
+  private work: Promise<void> = Promise.resolve()
+
+  constructor(options: RefereeOptions) {
+    this.matches = options.matches
+    this.rosters = options.rosters
     this.onVerdict = options.onVerdict
     this.log = options.log ?? ((message) => console.info(`[referee] ${message}`))
   }
@@ -85,19 +127,53 @@ export class Referee {
   }
 
   /**
+   * Resolves once everything decided so far has been written.
+   *
+   * For a caller that wants to read what the referee wrote — a test, or a
+   * shutdown — rather than for the referee itself, which never waits.
+   */
+  idle(): Promise<void> {
+    return this.work
+  }
+
+  /**
    * Take a client.
    *
    * Nothing is assumed about who it is: a client states its build, and may then
    * open a match, resume one, or send intents for a match already open.
+   *
+   * `playerId` is the account the socket signed in as, and null for an
+   * anonymous one — which is legitimate: a match between two anonymous clients
+   * is watched and written down exactly as before, it is simply not kept on
+   * anybody's roster.
    */
-  attach(transport: Transport): void {
-    const client: Client = { transport, faction: null, build: null }
+  attach(transport: Transport, playerId: string | null = null): void {
+    const client: Client = { transport, faction: null, build: null, playerId }
     this.clients.add(client)
 
     transport.onFrame((frame) => this.receive(client, frame))
     transport.onClosed((reason) => {
       this.clients.delete(client)
       this.log(`a client left: ${reason}`)
+    })
+  }
+
+  /**
+   * Put a write on the chain.
+   *
+   * The result is deliberately not returned: nothing that judges a match may
+   * come to depend on a write having landed.
+   */
+  private enqueue(task: () => Promise<void>): void {
+    this.work = this.work.then(task).catch((error: unknown) => {
+      this.abort({
+        matchId: this.matchId ?? 'unknown',
+        side: null,
+        reason: `the match server could not write the match down: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        found: [],
+      })
     })
   }
 
@@ -141,7 +217,7 @@ export class Referee {
         return
       }
       case 'matchHeader': {
-        this.open(message.header)
+        this.open(message.header, client)
         this.relay(client, frame)
         return
       }
@@ -177,36 +253,156 @@ export class Referee {
     return null
   }
 
-  /** Begin watching a match, from the opening position its host states. */
-  private open(header: RecordingHeader): void {
+  /**
+   * Begin watching a match, from the opening position its host states.
+   *
+   * The id, the header and the world are set here and now, because everything
+   * that judges a frame needs them immediately; only the write is queued. The
+   * host of a match is always Blue (`NetworkManager.hostMatch`), so the client
+   * that opened it is Blue and everybody else is Red — which is how the
+   * referee knows whose roster is on which side.
+   */
+  private open(header: RecordingHeader, from: Client): void {
     if (this.host) return
-    this.matchId = this.store.create(header)
+    this.matchId = crypto.randomUUID()
+    this.header = header
     this.host = new MatchHost(header)
+    for (const client of this.clients) {
+      client.faction = client === from ? Faction.Blue : Faction.Red
+    }
     this.log(`watching match ${this.matchId}, seed ${header.seedLabel}`)
+
+    const id = this.matchId
+    this.enqueue(async () => {
+      await this.matches.create(header, id)
+      await this.verifyRosters()
+    })
+  }
+
+  /**
+   * Check both squads against the rosters this server keeps.
+   *
+   * This is what makes a kept match mean anything. A client states its squad
+   * in the header, and a client may state anything; so before a result is
+   * allowed to touch a roster, the squad deployed has to *be* that roster —
+   * character for character, in slot order. Anything else is a match played
+   * with somebody else's people, and it is aborted rather than settled
+   * wrongly.
+   *
+   * An anonymous side is skipped, not refused: an unregistered opponent is a
+   * perfectly good opponent, they simply have nothing to keep.
+   */
+  private async verifyRosters(): Promise<void> {
+    const rosters = this.rosters
+    const header = this.header
+    if (!rosters || !header) return
+
+    const playerOf = (faction: Faction): string | null => {
+      for (const client of this.clients) {
+        if (client.faction === faction && client.playerId) return client.playerId
+      }
+      return null
+    }
+    const blue = playerOf(Faction.Blue)
+    const red = playerOf(Faction.Red)
+    if (blue && red && blue === red) {
+      // Otherwise a player could farm growth off their own losses, and the
+      // dead would be theirs to choose.
+      return this.abort({
+        matchId: this.matchId ?? 'unknown',
+        side: null,
+        reason: 'one player cannot play both sides of a kept match',
+        found: [],
+      })
+    }
+
+    for (const [faction, playerId] of [
+      [Faction.Blue, blue],
+      [Faction.Red, red],
+    ] as const) {
+      if (!playerId) continue
+      const members = await rosters.active(playerId)
+      const deployed = header.sheets[faction]
+      const same =
+        members.length === deployed.length &&
+        members.every(
+          (member, index) =>
+            JSON.stringify(sanitizeSheet(deployed[index])) === JSON.stringify(member.sheet),
+        )
+      if (!same) {
+        return this.abort({
+          matchId: this.matchId ?? 'unknown',
+          side: faction,
+          reason: `the ${FACTION_INFO[faction].name} squad is not the roster this server keeps for its player`,
+          found: [],
+        })
+      }
+      this.sides[faction] = { playerId, characterIds: members.map((member) => member.characterId) }
+    }
   }
 
   private record(command: NetworkMessage): void {
     if (!this.matchId || !this.host) return
-    this.store.append(this.matchId, {
+    const event = {
       turn: this.host.turnNumber,
       faction: this.host.turnManager.activeFaction,
       command,
-    })
+    }
+    const id = this.matchId
+    this.enqueue(() => this.matches.append(id, event).then(() => undefined))
   }
 
   private apply(command: NetworkMessage): void {
     if (!this.host) return
     const result = this.host.apply(command)
-    if (result.applied) return
-    // The referee could not carry out something a client did. That is a
-    // disagreement about what was *possible*, which is larger than any
-    // disagreement about a number, so it ends the match rather than being
-    // logged and shrugged at.
-    this.abort({
-      matchId: this.matchId ?? 'unknown',
-      side: null,
-      reason: `a ${command.type} the referee could not carry out: ${result.reason}`,
-      found: [],
+    if (!result.applied) {
+      // The referee could not carry out something a client did. That is a
+      // disagreement about what was *possible*, which is larger than any
+      // disagreement about a number, so it ends the match rather than being
+      // logged and shrugged at.
+      this.abort({
+        matchId: this.matchId ?? 'unknown',
+        side: null,
+        reason: `a ${command.type} the referee could not carry out: ${result.reason}`,
+        found: [],
+      })
+      return
+    }
+    this.settle()
+  }
+
+  /**
+   * If that intent ended the match, write what it did to both rosters.
+   *
+   * The outcome is read out of the referee's *own* world, straight away and
+   * synchronously, because the world keeps moving: a later intent could kill
+   * the unit whose survival is being recorded. The write itself goes on the
+   * queue behind the verification, which is how a settlement can be sure the
+   * squads it credits were the ones checked against the roster.
+   */
+  private settle(): void {
+    const host = this.host
+    const header = this.header
+    const matchId = this.matchId
+    if (this.settled || this.aborted || !host || !header || !matchId) return
+    const winner = winnerOf(host.squads)
+    if (winner === null) return
+
+    this.settled = true
+    const loser = winner === Faction.Blue ? Faction.Red : Faction.Blue
+    const carried = carriedOut(host.squads, loser, host.grid, header.seed)
+    const fates = settlement(host.squads, winner, carried)
+
+    this.enqueue(async () => {
+      if (this.aborted || !this.rosters) return
+      const side = (faction: Faction) => {
+        const known = this.sides[faction]
+        return known ? { ...known, fates: fates[faction] as readonly UnitFate[] } : null
+      }
+      const sides = { [Faction.Blue]: side(Faction.Blue), [Faction.Red]: side(Faction.Red) }
+      if (!sides[Faction.Blue] && !sides[Faction.Red]) return
+      await this.rosters.settle({ matchId, winner, sides })
+      this.log(`settled ${matchId}: ${FACTION_INFO[winner].name} won`)
     })
   }
 
@@ -259,18 +455,24 @@ export class Referee {
    * log cannot come back.
    */
   private resume(client: Client, matchId: string, afterSeq: number): void {
-    const header = this.store.header(matchId)
-    if (!header) return this.refuse(client, `no such match: ${matchId}`)
+    this.enqueue(async () => {
+      const header = await this.matches.header(matchId)
+      if (!header) return this.refuse(client, `no such match: ${matchId}`)
 
-    const events: RecordedEvent[] = this.store.events(matchId, afterSeq)
-    this.send(client, { type: 'log', matchId, header, events })
-    this.log(`resumed a client into ${matchId} from seq ${afterSeq}: ${events.length} intents`)
+      const events: RecordedEvent[] = await this.matches.events(matchId, afterSeq)
+      this.send(client, { type: 'log', matchId, header, events })
+      this.log(`resumed a client into ${matchId} from seq ${afterSeq}: ${events.length} intents`)
+    })
   }
 
-  /** Stop watching, releasing the store. */
+  /**
+   * Stop watching.
+   *
+   * The database is not closed here: it belongs to whoever opened the
+   * `Persistence`, and a referee is one of several things reading it.
+   */
   dispose(): void {
     for (const client of this.clients) client.transport.close()
     this.clients.clear()
-    this.store.close()
   }
 }
