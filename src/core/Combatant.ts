@@ -128,6 +128,15 @@ export interface CombatFx {
   tracer(from: Vector3, to: Vector3, hit: boolean): void
   shoot(unit: UnitRef): void
   hit(unit: UnitRef): void
+  /**
+   * A blow with the sidearm. Which sidearm is not announced: the view already
+   * knows what the unit is holding, and a resolved blow carries no kit.
+   */
+  melee(unit: UnitRef): void
+  /** A grenade leaving the hand. Was `shoot`, which fired a pistol at nobody. */
+  throwing(unit: UnitRef): void
+  /** Feeding a fresh magazine in. */
+  reload(unit: UnitRef): void
 }
 
 /**
@@ -156,4 +165,7 @@ export const NO_FX: CombatFx = {
   tracer: () => {},
   shoot: () => {},
   hit: () => {},
+  melee: () => {},
+  throwing: () => {},
+  reload: () => {},
 }

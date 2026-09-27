@@ -3,7 +3,8 @@ import { CHARACTER, DOORS, Faction, RULES, SQUAD_SIZE } from '../src/config'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
 import { characterSheet } from '../src/core/Characters'
 import { NO_FOCUS, NO_FX } from '../src/core/Combatant'
-import { Grid, Side } from '../src/core/Grid'
+import { Grid, Side, type Tile } from '../src/core/Grid'
+import { facingYaw } from '../src/core/math'
 import { ItemId } from '../src/core/Items'
 import { generateMap } from '../src/core/MapGenerator'
 import type { Noise } from '../src/core/Noise'
@@ -167,6 +168,54 @@ describe('Doors are state both peers hold', () => {
       WallKind.DoorOpen,
       WallKind.None,
     ])
+  })
+})
+
+describe('Working a door is something to watch', () => {
+  test('announces the worker and turns them through the doorway, from either side', () => {
+    const worked = (from: Tile) => {
+      const m = match(always(0.99), door(WallKind.Door))
+      m.blue.tile = { ...from }
+      m.blue.targetYaw = 0
+      const announced: string[] = []
+      m.commands.onDoorWorked = (unit) => announced.push(`${unit.faction}:${unit.squadIndex}`)
+      const edge = m.grid.edgeId(10, 10, Side.North)
+      const applied = m.commands.apply({ type: 'operateDoor', faction: Faction.Blue, squadIndex: 0, edge, verb: 'open' }, 'local').applied
+      return { applied, announced, yaw: m.blue.targetYaw }
+    }
+
+    // The door is on the north side of (10, 10): whichever tile the worker is
+    // on, it ends up facing the other one.
+    const near = worked({ x: 10, y: 10 })
+    expect(near.applied).toBe(true)
+    expect(near.announced).toEqual(['0:0'])
+    expect(near.yaw).toBeCloseTo(facingYaw(0, -1), 6)
+
+    const far = worked({ x: 10, y: 9 })
+    expect(far.applied).toBe(true)
+    expect(far.announced).toEqual(['0:0'])
+    expect(far.yaw).toBeCloseTo(facingYaw(0, 1), 6)
+  })
+
+  test('says nothing when the rules refuse the attempt, and a failed shoulder is still a shove', () => {
+    const refused = match(always(0.99), door(WallKind.Door))
+    refused.blue.tile = { x: 10, y: 6 }
+    const nothing: string[] = []
+    refused.commands.onDoorWorked = (unit) => nothing.push(`${unit.faction}:${unit.squadIndex}`)
+    const edge = refused.grid.edgeId(10, 10, Side.North)
+    expect(refused.commands.apply({ type: 'operateDoor', faction: Faction.Blue, squadIndex: 0, edge, verb: 'open' }, 'local').applied).toBe(false)
+    expect(nothing).toEqual([])
+
+    // A shoulder that does not give still happened: the door is untouched and
+    // the unit is still announced.
+    const held = match(always(0.99), door(WallKind.Locked))
+    held.blue.tile = { x: 10, y: 10 }
+    held.blue.adoptSheet({ ...held.blue.sheet, attributes: { ...held.blue.sheet.attributes, strength: CHARACTER.attribute.min } })
+    const shoves: string[] = []
+    held.commands.onDoorWorked = (unit) => shoves.push(`${unit.faction}:${unit.squadIndex}`)
+    expect(held.commands.apply({ type: 'operateDoor', faction: Faction.Blue, squadIndex: 0, edge, verb: 'force' }, 'local').applied).toBe(true)
+    expect(held.grid.wallAt(10, 10, Side.North)).toBe(WallKind.Locked)
+    expect(shoves).toEqual(['0:0'])
   })
 })
 

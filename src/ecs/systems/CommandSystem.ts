@@ -20,7 +20,7 @@ import type { GroundSystem } from './GroundSystem'
 import { MoraleBreak, rollMorale } from '../../core/Morale'
 import { billow, burn, kindle } from '../../core/Fire'
 import type { GrenadeSpec } from '../../core/Arsenal'
-import { faceToward, type Tile } from '../../core/Grid'
+import { faceToward, Side, type Tile } from '../../core/Grid'
 import { cannotWorkDoor, doorAfter, doorApCost } from '../../core/Doors'
 import { brokenStep } from '../../game/Breakdown'
 
@@ -156,6 +156,13 @@ export class CommandSystem extends System {
   onBurned?: (unit: Soldier, damage: number) => void
   /** An ailment — a bleed, poison later — cost a unit this much as its turn began. */
   onSuffered?: (unit: Soldier, damage: number) => void
+  /**
+   * A unit put its hands on a door: opened, shut, unlocked or shouldered one.
+   * Announced before the attempt is resolved, so a force that does not give is
+   * still a shove — and announced on both peers, because both resolve the
+   * intent.
+   */
+  onDoorWorked?: (unit: Soldier) => void
 
   /** Reactions fired so far: a fact about the match, not about any one command. */
   reactions = 0
@@ -509,6 +516,19 @@ export class CommandSystem extends System {
         const why = cannotWorkDoor(grid, unit, command.edge, command.verb)
         if (why) return refuse(why)
         unit.ap -= doorApCost(command.verb)
+        // Face the doorway for the eye only. `targetYaw` is the view's facing;
+        // `heading` is not touched, because that one is read by the rules
+        // (attacks from behind) and a door is not a turn the rules make.
+        const { x: ex, y: ey, side: eside } = grid.edgeTile(command.edge)
+        // An edge is stored on the west or north side of a tile, so the door
+        // stands between that tile and the one across it; the worker is on one
+        // of the two.
+        const across = eside === Side.West ? { x: ex - 1, y: ey } : { x: ex, y: ey - 1 }
+        const doorway = unit.tile.x === ex && unit.tile.y === ey ? across : { x: ex, y: ey }
+        const dx = doorway.x - unit.tile.x
+        const dz = doorway.y - unit.tile.y
+        if (distance(dx, dz) > 0) unit.targetYaw = facingYaw(dx, dz)
+        this.onDoorWorked?.(unit)
         if (command.verb === 'force') {
           // Heard whether it gives or not, from the door.
           const { x, y } = grid.edgeTile(command.edge)

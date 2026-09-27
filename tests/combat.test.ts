@@ -43,6 +43,9 @@ interface CountingFx extends CombatFx {
   tracers: number
   shots: number
   hits: number
+  blows: number
+  throws: number
+  reloads: number
 }
 
 function countingFx(): CountingFx {
@@ -50,6 +53,9 @@ function countingFx(): CountingFx {
     tracers: 0,
     shots: 0,
     hits: 0,
+    blows: 0,
+    throws: 0,
+    reloads: 0,
     tracer: () => {
       fx.tracers += 1
     },
@@ -58,6 +64,15 @@ function countingFx(): CountingFx {
     },
     hit: () => {
       fx.hits += 1
+    },
+    melee: () => {
+      fx.blows += 1
+    },
+    throwing: () => {
+      fx.throws += 1
+    },
+    reload: () => {
+      fx.reloads += 1
     },
   }
   return fx

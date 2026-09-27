@@ -160,6 +160,7 @@ export class CombatSystem extends System {
     if (soldier.weapon.currentClip >= soldier.weapon.maxClip) return false
     soldier.ap = Math.max(0, soldier.ap - RULES.reloadApCost)
     soldier.weapon.currentClip = soldier.weapon.maxClip
+    this.fx.reload(soldier)
     return true
   }
 

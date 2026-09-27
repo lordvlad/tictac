@@ -253,7 +253,10 @@ export class InteractionController {
       this.groundDirty = true
     }
 
-    this.itemSystem.onItemUsed = () => {
+    this.itemSystem.onItemUsed = (soldier) => {
+      // The user, not the patient: the kit comes out of one pouch however many
+      // people the effects land on.
+      this.views.viewOf(soldier)?.playUse()
       this.recomputeVisibility()
       this.renderOverlay()
       this.refreshHud()
@@ -266,6 +269,9 @@ export class InteractionController {
     this.commands.onStep = () => {
       this.recomputeVisibility()
       this.refreshHud()
+    }
+    this.commands.onDoorWorked = (unit) => {
+      this.views.viewOf(unit)?.playUse()
     }
     this.noiseMarks = new NoiseMarks(engine, battlefield.grid)
     this.commands.onNoise = (noise, heard) => {

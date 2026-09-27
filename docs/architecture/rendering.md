@@ -3,7 +3,7 @@ title: "Rendering Engine & View Pipeline"
 id: "ARCH-RENDERING"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-15"
+lastReviewed: "2026-09-27"
 appliesTo:
   - "src/render/**"
   - "src/ecs/systems/RenderSystem.ts"
@@ -56,9 +56,40 @@ graph LR
 
 ---
 
+## 2.1 Stances, actions and overlays
+
+A body is doing at most two things: holding a **stance** and performing an **action**.
+
+The stance is a looping clip chosen from replicated component state — `idle`, `crouch`, `run`,
+`crouchWalk`, or `aim` when a standing unit is `watching`. `RenderSystem` derives a key from
+`StanceComponent` and `HealthComponent` (`idle`, `crouch`, `idle-watch`, `crouch-watch`, `move`,
+`dead`) and calls `SoldierView.playStanceClip()` when it changes, so a peer's unit poses off the
+same state a local one does.
+
+An action is a one-shot: `shoot`, `hit`, `punch`, `swing`, `throw`, `reload`, `interact`. Standing,
+it is played whole and the mixer's `finished` event hands control back to the stance. Crouched,
+playing it whole would stand the unit up for the length of the clip and drop it back afterwards —
+which is what firing from cover used to look like — because the source pack has no crouched
+variant of any of them.
+
+So crouched, an action is an **overlay**: `additiveClips()` builds, once per glTF, a copy of each
+action clip with every track below the spine removed (`root`, `pelvis`, `thigh_*`, `calf_*`,
+`foot_*`, `ball_*`) and the rest taken relative to the first frame of `idle`
+(`AnimationUtils.makeClipAdditive`). An additive action accumulates on top of whatever the stance
+is doing rather than competing with it for weight, so the crouch keeps the legs and the overlay
+moves the arms. A crouched watch is the same mechanism with `aim` looping instead of firing once,
+and it yields to an action and resumes when that action finishes. Death is never an overlay: a unit
+that dies crouched still collapses.
+
+`tests/animation.test.ts` asserts the invariant on the shipped asset without a browser: two bodies
+holding the same crouch at the same moment, one of them firing, must have their feet and pelvis in
+the same place and their gun hands in different ones.
+
+---
+
 ## 3. Visual Effects & Feedback Systems
 
 - **Tracers (`src/render/Tracers.ts`)**: Fast ballistic projectile lines with variable colors and speeds.
 - **Damage Indicators (`src/render/DamageIndicators.ts`)**: Floating 3D floating text indicators for hits, misses, crits, and armor shred.
-- **Combat FX (`src/render/SceneCombatFx.ts`)**: Concrete implementation of the `CombatFx` port for interactive matches — tracers into the scene, and the fire and flinch poses onto the unit that earned them, resolved by identity through `SquadViews`. Deaths are *not* announced here: a corpse is `hp <= 0` in a component, so `RenderSystem` plays the collapse on observing it.
+- **Combat FX (`src/render/SceneCombatFx.ts`)**: Concrete implementation of the `CombatFx` port for interactive matches — tracers into the scene, and the fire, flinch, blow, throw and reload poses onto the unit that earned them, resolved by identity through `SquadViews`. Deaths are *not* announced here: a corpse is `hp <= 0` in a component, so `RenderSystem` plays the collapse on observing it. Two verbs announce through their own system's hook instead of the port, because neither is combat: item use through `ItemSystem.onItemUsed`, and a door through `CommandSystem.onDoorWorked` (fired before the shoulder is rolled, so a force that holds is still a shove). Both play `interact`.
 - **Ground & Grid Overlay (`src/render/Ground.ts` & `src/render/PathMarker.ts`)**: One plane for the ground floor, coloured per tile by what it is made of (`uSurface`, from `core/Surfaces`), with fog and a per-tile overlay on top; raised floors take the same per-tile colour as instances in `Blocks`. Cover shield glyphs and movement range markers. The tile under the pointer is spelled out in the HUD's tile readout (`tileReadout`).

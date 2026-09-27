@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M4 Competitive & Meta Roster"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-26"
+lastReviewed: "2026-09-27"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -28,9 +28,10 @@ during a match, roles, and a roster that outlives the match.
 ---
 
 ## 🔄 In Progress
-- Nothing in flight. `[ITEM-038]` (lasting wounds: HP, healing, combat log) finished on
-  2026-09-26: a survivor's HP now carries between matches, healing by a stated rule, and the
-  carried-out unit deploys next on 1 HP rather than whole.
+- Nothing in flight. `[ITEM-040]` (the animations combat never got) finished on 2026-09-27: a
+  blow, a throw, an item and a reload are visible on the body, and a crouched unit fires,
+  reloads and watches without standing up — crouched actions are additive upper-body overlays
+  on the held stance.
 
 ## 📋 Ready — pull in this order
 1. **`[ITEM-037]`** Recruits fill an empty roster slot. Persistence marks the dead and leaves
@@ -63,6 +64,10 @@ during a match, roles, and a roster that outlives the match.
 - **ITEM-004 / ITEM-014 / ITEM-017 / ITEM-024 / ITEM-034**: nobody has played peer-to-peer in two
   live browsers since the transport cutover (the online end screen included). Agreement is
   covered by the network, digest and rewind tests only.
+- **ITEM-040**: a knife shares the punch clip with fists by decision, not by accident — the
+  source pack has no thrust. Working a door turns the unit for the eye only (`targetYaw`): the
+  rules' `heading`, which decides attacks from behind, is deliberately left where it was, so a
+  soldier who opens a door still has the back the rules gave it.
 
 ---
 

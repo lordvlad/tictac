@@ -210,12 +210,19 @@ export function installCanvasStub(): void {
   if (existing === undefined) {
     globalThis.document = {
       createElement: makeElement,
+      // three's example modules probe for a <script> tag at import time to work
+      // out whether they are running standalone; a missing method there is an
+      // unhandled error in whichever suite imports one.
+      getElementsByTagName: () => [],
       body: makeElement('body'),
       addEventListener: docAdd,
       removeEventListener: docRemove,
       dispatchEvent: docDispatch,
     } as unknown as Document
   } else {
+    if (typeof (existing as unknown as { getElementsByTagName?: unknown }).getElementsByTagName !== 'function') {
+      Object.defineProperty(existing, 'getElementsByTagName', { value: () => [], configurable: true })
+    }
     Object.defineProperty(existing, 'createElement', {
       value: (tag: string) => makeElement(tag),
       configurable: true,

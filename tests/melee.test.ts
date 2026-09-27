@@ -184,4 +184,27 @@ describe('A blow, resolved', () => {
     executeMelee(loud.grid, loud.attacker, loud.defender, NO_FX, counted(0.999).roll)
     expect(loud.attacker.firedThisTurn).toBe(true)
   })
+
+  test('the attacker swings whether or not the blow lands, and the victim flinches only when it does', () => {
+    const swings: string[] = []
+    const fx = {
+      ...NO_FX,
+      melee: (unit: { faction: Faction; squadIndex: number }) =>
+        void swings.push(`blow:${unit.faction}${unit.squadIndex}`),
+      hit: (unit: { faction: Faction; squadIndex: number }) =>
+        void swings.push(`flinch:${unit.faction}${unit.squadIndex}`),
+    }
+
+    const missed = contact(MeleeId.Knife)
+    executeMelee(missed.grid, missed.attacker, missed.defender, fx, counted(0.999).roll)
+    expect(swings).toEqual([`blow:${missed.attacker.faction}${missed.attacker.squadIndex}`])
+
+    swings.length = 0
+    const landed = contact(MeleeId.Knife)
+    executeMelee(landed.grid, landed.attacker, landed.defender, fx, counted(0.5).roll)
+    expect(swings).toEqual([
+      `blow:${landed.attacker.faction}${landed.attacker.squadIndex}`,
+      `flinch:${landed.defender.faction}${landed.defender.squadIndex}`,
+    ])
+  })
 })

@@ -32,6 +32,18 @@ export class SceneCombatFx implements CombatFx {
     this.viewOf(unit)?.playHit()
   }
 
+  melee(unit: UnitRef): void {
+    this.viewOf(unit)?.playMelee()
+  }
+
+  throwing(unit: UnitRef): void {
+    this.viewOf(unit)?.playThrow()
+  }
+
+  reload(unit: UnitRef): void {
+    this.viewOf(unit)?.playReload()
+  }
+
   private viewOf(unit: UnitRef) {
     return this.views.viewOf(unit as UnitRef & { entityId: number })
   }

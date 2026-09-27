@@ -303,6 +303,7 @@ export function executeMelee(
   const eff = meleeWeapon(attacker, behind)
 
   attacker.ap = Math.max(0, attacker.ap - spec.apCost)
+  fx.melee(attacker)
   // Contact tells both sides what they are dealing with. A quiet blow gives
   // nobody else anything; a loud one lights the attacker up like a shot.
   attacker.known = true
@@ -471,7 +472,7 @@ export function throwGrenade(
 
   thrower.ap = Math.max(0, thrower.ap - spec.apCost)
   thrower.grenades[kind] -= 1
-  fx.shoot(thrower)
+  fx.throwing(thrower)
   // A stone is only a noise where it lands: the throw gives nothing away,
   // and it catches nobody.
   if (harmless(spec)) return { thrown: true, apSpent: spec.apCost, hits: [] }

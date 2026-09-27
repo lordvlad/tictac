@@ -20,16 +20,30 @@ const here = dirname(fileURLToPath(import.meta.url))
 const SRC = resolve(here, '../assets/UAL1_Standard.glb')
 const DST = resolve(here, '../public/character.glb')
 
-/** source clip name -> key used by the game */
+/**
+ * source clip name -> key used by the game
+ *
+ * Every key here is played by something: the locomotion and stance loops by
+ * `SoldierView.playStanceClip`, the rest by a one-shot or an additive overlay
+ * (`playShoot`, `playMelee`, `playThrow`, `playReload`, `playUse`, `playHit`,
+ * `playDeath`). `Walk_Loop` was dropped when nothing turned out to play it:
+ * standing movement always runs.
+ *
+ * A knife shares the punch: a short thrust and a cross read the same at this
+ * distance, and the club is the only sidearm that wants a full swing.
+ */
 const KEEP = {
   Idle_Loop: 'idle',
-  Walk_Loop: 'walk',
   Jog_Fwd_Loop: 'run',
   Crouch_Idle_Loop: 'crouch',
   Crouch_Fwd_Loop: 'crouchWalk',
   Pistol_Idle_Loop: 'aim',
   Pistol_Shoot: 'shoot',
   Pistol_Reload: 'reload',
+  Punch_Cross: 'punch',
+  Sword_Attack: 'swing',
+  Spell_Simple_Shoot: 'throw',
+  Interact: 'interact',
   Hit_Chest: 'hit',
   Death01: 'death',
 }

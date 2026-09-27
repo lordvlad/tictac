@@ -33,7 +33,11 @@ export class RenderSystem extends System {
       const health = world.getComponent(entityId, HealthComponent)
 
       if (stance && health) {
-        const key = health.hp <= 0 ? 'dead' : stance.isMoving ? 'move' : stance.isCrouching ? 'crouch' : 'idle'
+        // A held watch is part of the stance, not an event: `watching` is
+        // replicated, so a peer's watching unit poses like a local one.
+        const posture = stance.isCrouching ? 'crouch' : 'idle'
+        const standing = stance.watching ? `${posture}-watch` : posture
+        const key = health.hp <= 0 ? 'dead' : stance.isMoving ? 'move' : standing
         if (this.lastStance.get(entityId) !== key) {
           this.lastStance.set(entityId, key)
           if (key === 'dead') view.playDeath()

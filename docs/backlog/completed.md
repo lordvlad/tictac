@@ -3,7 +3,7 @@ title: "Completed Work Archive"
 id: "BACKLOG-COMPLETED"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-24"
+lastReviewed: "2026-09-27"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -1631,6 +1631,86 @@ See [ARCH-PERSISTENCE §5](../architecture/persistence.md) for the whole shape.
 - [x] Healing between matches is a rule with a test, not an implicit reset.
 - [x] Local and P2P play are unchanged: every soldier still deploys at full derived HP there.
 - [x] A dead roster row's final HP and deeds are readable as history.
+
+---
+
+### [ITEM-040] The Animations Combat Never Got
+**Completed Date:** 2026-09-27  
+**Type:** Feature  
+**Milestone:** M2 — Tactical Depth (presentation debt)  
+
+#### Why
+Three combat verbs shipped without a body to perform them, and three clips shipped in
+`public/character.glb` that nothing ever played. The audit that opened the item:
+
+| Verb | What the body did | Where |
+| --- | --- | --- |
+| Melee | Nothing. The attacker stood still; only the victim flinched, via `applyWeaponDamage` → `fx.hit` | `executeMelee` |
+| Grenade throw | The *pistol fire* pose — `fx.shoot(thrower)` borrowed for a throw | `Combat.ts:474` |
+| Use item, operate door | Nothing | `ItemSystem` |
+| Reload | Nothing, though a `reload` clip was in the GLB | `CombatSystem.reload` |
+| Overwatch | Nothing, though an `aim` clip was in the GLB and `watching` is replicated | `CombatSystem.overwatch` |
+| Firing, flinching while crouched | The standing clip, whole: the unit stood up, fired, and dropped back to `crouch` on the mixer's `finished` event | `SoldierView.playShoot` |
+
+#### Key Changes
+- **The port widened**: `CombatFx` gained `melee`, `throwing` and `reload` beside `tracer`,
+  `shoot` and `hit`. `executeMelee` announces the blow before the damage, `throwGrenade` no
+  longer borrows `fx.shoot`, and `CombatSystem.reload` announces the magazine. Item use needed no
+  new port: `ItemSystem.onItemUsed` already existed and the controller already listened on it.
+- **Four more clips, one fewer**: `Punch_Cross` → `punch`, `Sword_Attack` → `swing`,
+  `Spell_Simple_Shoot` → `throw`, `Interact` → `interact`; `Walk_Loop` dropped, because standing
+  movement always runs. 2.05 MB → 2.43 MB. A knife shares the punch with fists at the user's
+  call — a thrust and a cross read the same from the camera's distance — so only the club swings.
+- **Crouched actions are additive overlays** (`additiveClips`, `SoldierView`): each action clip is
+  copied with every track below the spine dropped and the rest taken relative to the first frame
+  of `idle` (`AnimationUtils.makeClipAdditive`). The crouch loop keeps running and the overlay
+  accumulates on top of it, so nothing has to put the legs back. Death is exempt: a unit that dies
+  crouched still collapses.
+- **A watch is a stance**: `RenderSystem`'s stance key gained `-watch`, so `aim` loops whole while
+  standing and as an overlay while crouched, resuming after any action that interrupts it — and a
+  peer's watching unit poses off the same replicated `StanceComponent.watching` a local one does.
+- **A door is worked, not merely opened**: `CommandSystem.onDoorWorked` fires in the
+  `operateDoor` case, after the points are spent and *before* the shoulder is rolled — so a force
+  that does not give is still a shove — and on both peers, because both resolve the intent. The
+  controller plays `interact` on the worker. The same hook turns the unit through the doorway,
+  `targetYaw` only: `heading` is what decides attacks from behind, and a door is not a turn the
+  rules make. The implicit open that a step performs is left alone; the walk carries it.
+
+#### Measured
+`bun run balance` is unchanged, as a presentation-only change must be: the pinned sweep in
+`tests/balance.test.ts` passes untouched.
+
+In a local-versus match in a browser, driven through the real command path
+(`toggleCover`, `overwatch`, `reload`): hips at 0.873 m standing, 0.474 m crouched, and
+0.469–0.477 m through an entire crouched fire and reload — while the gun hand travels 0.6 m.
+Crouched watch holds `crouch` + `aim:additive`; standing watch is `aim` itself. Each sidearm
+picks its clip (`fists`/`knife` → `punch`, `club` → `swing`), and a throw, a use and a shot each
+play their own. A door: `interact` on the worker, the wall going `Door` → `DoorOpen`, yaw turned
+to the doorway; crouched, the same door is `crouch` + `interact:additive` with the hip at
+0.477 → 0.471 m.
+
+#### Found on the way
+- `docs/guides/asset-pipeline.md` claimed Draco geometry compression. No Draco pass has ever run:
+  the build only whitelists clips and prunes accessors, and the shipped GLB lists no extensions.
+  The guide now says what the script does. The runtime still points `DRACOLoader` at
+  `public/draco/`, so a compressed asset would load if one were produced.
+- `tests/support/dom.ts` needed `document.getElementsByTagName`: three's example modules probe for
+  a `<script>` tag at import time, and under the canvas stub the missing method was an unhandled
+  error in whichever suite imported `GLTFLoader` — which the new animation suite does.
+
+#### Acceptance Criteria
+- [x] A blow plays a swing or a punch on the attacker, chosen by the sidearm, on both peers: the
+      announcement is in the shared resolver (`tests/melee.test.ts`), and the view picks the clip
+      from replicated inventory.
+- [x] A thrown grenade no longer plays the pistol fire pose.
+- [x] A crouched unit that fires, reloads or is hit keeps its legs crouched throughout
+      (`tests/animation.test.ts`, and the hip measurements above in a browser).
+- [x] Reloading and going on overwatch are visible on the body, crouched or standing.
+- [x] `character.glb` ships no clip nothing plays: the asset and the played set are asserted equal
+      in `tests/animation.test.ts`.
+- [x] Working a door — opened, shut, unlocked, or shouldered and held — plays on the worker and
+      turns them through the doorway (`tests/doors.test.ts`, and the browser run above).
+- [x] No rules change: the pinned balance sweep is identical.
 
 ---
 
