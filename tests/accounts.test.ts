@@ -103,6 +103,37 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
     await persistence.close()
   })
 
+  test('recruiting fills a dead slot, and refuses once the roster is full', async () => {
+    const persistence = await freshPersistence(url)
+    const api = driver(persistence)
+    const key = await softwareAuthenticator()
+
+    const token = await register(api, key)
+    const before = await api.call('GET', '/api/roster', { token })
+    const player = (before.body.roster as RosterMember[])[0]!
+
+    // Killed outright, the way `Rosters.settle` marks a dead row — the API
+    // has no route for that, so the test reaches for the row directly.
+    await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE character_id = ${player.characterId}`
+
+    const recruited = await api.call('POST', '/api/roster/recruit', { token })
+    expect(recruited.status).toBe(200)
+    const recruit = recruited.body.member as RosterMember
+    expect(recruit.slot).toBe(player.slot)
+    expect(recruit.characterId).not.toBe(player.characterId)
+
+    const after = await api.call('GET', '/api/roster', { token })
+    const members = after.body.roster as RosterMember[]
+    expect(members).toHaveLength(SQUAD_SIZE)
+    expect(members.map((member) => member.slot)).toEqual([0, 1, 2, 3])
+
+    const full = await api.call('POST', '/api/roster/recruit', { token })
+    expect(full.status).toBe(400)
+    expect(full.body.error).toMatch(/already full/)
+
+    await persistence.close()
+  })
+
   test('the same passkey signs in again, and the new token works', async () => {
     const persistence = await freshPersistence(url)
     const api = driver(persistence)

@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M4 Competitive & Meta Roster"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-27"
+lastReviewed: "2026-09-28"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -28,13 +28,13 @@ during a match, roles, and a roster that outlives the match.
 ---
 
 ## 🔄 In Progress
-- Nothing in flight. `[ITEM-010]` (roles on the loadout screen) finished on 2026-09-27: Medic,
-  Scout and Marksman each narrow the crate and earn one trait; Rifleman, the pre-existing
-  default, is untouched.
+- Nothing in flight. `[ITEM-037]` (recruits fill an empty roster slot) finished on
+  2026-09-28: a free, server-rolled recruit fills the lowest empty slot; the dead stay dead
+  and kept as history.
 
 ## 📋 Ready — pull in this order
-1. **`[ITEM-037]`** Recruits fill an empty roster slot. Persistence marks the dead and leaves
-   the slot empty on purpose; where new people come from is its own mechanic.
+- Nothing Ready. `[ITEM-039]` is the only item left in M4 and needs a design pass — numbers
+  and acceptance criteria — before it can be pulled.
 
 ## 🧊 Backlog — not yet queued
 - **`[ITEM-039]`** Fatigue & medical-bay downtime. No numbers, no acceptance criteria yet — a
@@ -53,8 +53,9 @@ during a match, roles, and a roster that outlives the match.
   plate, swings no knife and uses no kit. (Growth is no longer lost: `ITEM-012` keeps it.)
 - **ITEM-036**: the policy never treats a bleed, and bleeding costs a side only 3–4 HP a match
   in the sweep's short fights; it tilts the mirror ~1.7 points toward Blue and cuts draws.
-- **ITEM-012**: a dead character's slot stays empty (`ITEM-037`). Durable Objects would need
-  one more `Db` adapter; none is written.
+- **ITEM-012**: a dead character's slot stayed empty until `[ITEM-037]`, which fills it with a
+  free server-rolled recruit — no cost and no pool, since no economy exists to price either
+  yet. Durable Objects would still need one more `Db` adapter; none is written.
 - **ITEM-038**: a bug caught in its own testing — `derive(sheet).maxHp` ignores a character's
   own maxHp trait (Juggernaut's +25); fixed with `maxHpOf`, which every roster ceiling now uses
   instead. Fatigue and medical-bay downtime split to `[ITEM-039]`, not designed yet.

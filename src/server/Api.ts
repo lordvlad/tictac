@@ -106,6 +106,10 @@ export function apiHandler(
           const player = await bearer(request)
           return Response.json({ roster: await rosters.active(player.id) }, { headers })
         }
+        case 'POST /api/roster/recruit': {
+          const player = await bearer(request)
+          return Response.json({ member: await rosters.recruit(player.id) }, { headers })
+        }
         case 'POST /api/ticket': {
           const player = await bearer(request)
           return Response.json({ ticket: accounts.issueTicket(player.id) }, { headers })

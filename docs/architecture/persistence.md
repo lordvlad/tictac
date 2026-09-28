@@ -3,7 +3,7 @@ title: "Persistence: Database Port, Migrations, Accounts & Rosters"
 id: "ARCH-PERSISTENCE"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-26"
+lastReviewed: "2026-09-28"
 appliesTo:
   - "src/server/**"
   - "scripts/serve-match.ts"
@@ -165,6 +165,7 @@ session token in somebody's logs.
 | `POST /api/auth/logout` | bearer | `204` |
 | `GET /api/me` | bearer | `{ player }` |
 | `GET /api/roster` | bearer | `{ roster }` |
+| `POST /api/roster/recruit` | bearer | `{ member }` — `400` if the roster is already full |
 | `POST /api/ticket` | bearer | `{ ticket }` |
 
 CORS is granted only to the configured origins — the same list the ceremony is
@@ -234,11 +235,21 @@ settled match's record is added onto the roster's cumulative one, field by
 field (`mergeDeeds`), never replacing it — the combat log GDD §5 calls a
 "scar."
 
-> **Not yet**: an empty slot stays empty. Refilling a roster with a fresh
-> recruit is its own mechanic (`[ITEM-037]`). Fatigue from consecutive
-> deployments and medical-bay downtime that temporarily lowers baseline AP and
-> morale are `[ITEM-039]` — a live-combat-system change, not a persistence one,
-> and not designed yet.
+**Refilling a slot.** `Rosters.recruit` (`POST /api/roster/recruit`) rolls one
+fresh `CharacterSheet` — `characterSheet`, seeded from system randomness the
+same way `enlist` deals the first squad — and writes it through
+`roster_active_slot` into the lowest slot `0..SQUAD_SIZE-1` this player's
+*active* roster does not already hold. Free: no economy prices one yet, and
+wiring a cost or a pool this early would settle that design question by
+accident. A dead row is never touched by it — it already stopped being the
+active occupant of its slot the moment `record` marked it — so the history a
+player is building stays exactly where it was, one row per past occupant of
+the slot. Refused with `400` if every slot is already held: there is nothing
+to fill.
+
+> **Not yet**: fatigue from consecutive deployments and medical-bay downtime
+> that temporarily lowers baseline AP and morale are `[ITEM-039]` — a
+> live-combat-system change, not a persistence one, and not designed yet.
 
 ---
 

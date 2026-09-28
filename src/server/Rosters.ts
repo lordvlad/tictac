@@ -1,8 +1,10 @@
-import { Faction, HEALING } from '../config'
-import { derive, maxHpOf, sanitizeSheet, type CharacterSheet } from '../core/Characters'
+import { Faction, HEALING, SQUAD_SIZE } from '../config'
+import { characterSheet, derive, maxHpOf, sanitizeSheet, type CharacterSheet } from '../core/Characters'
 import { mergeDeeds, noDeeds, type Deeds } from '../core/Progression'
+import { Rng } from '../core/rng'
 import type { UnitFate } from '../game/MatchEnd'
 import type { Db } from './db/Db'
+import { AuthError } from './WebAuthn'
 
 /**
  * The squad a player keeps between matches.
@@ -92,6 +94,42 @@ export class Rosters {
       hp: Number(row.hp),
       deeds: JSON.parse(row.deeds) as Deeds,
     }))
+  }
+
+  /**
+   * Fill the lowest empty slot with a freshly rolled recruit.
+   *
+   * Free, and server-rolled the same way `enlist` deals the first squad —
+   * because no economy prices one yet, and hard-wiring a cost or a pool this
+   * early would settle that design question by accident (`ITEM-037`). A dead
+   * row is never touched: it already stopped being the active occupant of its
+   * slot the moment `record` marked it, and `roster_active_slot` — the same
+   * partial index that already lets a slot's history pile up beside the
+   * living one — is what actually stops two recruits landing on it at once;
+   * this method's own scan of {@link active} is only the choice of which slot
+   * to try.
+   */
+  async recruit(playerId: string, rng: Rng = new Rng(crypto.getRandomValues(new Uint32Array(1))[0]!)): Promise<RosterMember> {
+    const held = new Set((await this.active(playerId)).map((member) => member.slot))
+    let slot = -1
+    for (let at = 0; at < SQUAD_SIZE; at++) {
+      if (!held.has(at)) {
+        slot = at
+        break
+      }
+    }
+    if (slot < 0) throw new AuthError(400, 'the roster is already full')
+
+    const sheet = characterSheet(rng)
+    const characterId = crypto.randomUUID()
+    const createdAt = new Date().toISOString()
+    const hp = maxHpOf(sheet)
+    const deeds = noDeeds()
+    await this.db.query`INSERT INTO roster
+                     (character_id, player_id, slot, sheet, status, matches, hp, deeds, created_at, died_in)
+                   VALUES (${characterId}, ${playerId}, ${slot}, ${JSON.stringify(sheet)}, ${'active'}, ${0},
+                           ${hp}, ${JSON.stringify(deeds)}, ${createdAt}, ${null})`
+    return { characterId, slot, sheet, matches: 0, hp, deeds }
   }
 
   /**

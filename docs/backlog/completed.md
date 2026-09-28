@@ -1777,6 +1777,57 @@ with no console errors.
 
 ---
 
+### [ITEM-037] Recruits Fill an Empty Roster Slot
+**Completed Date:** 2026-09-28  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+Since `ITEM-012` a character who dies is marked dead and the slot they held is simply empty: a
+player who loses two people fields two, forever. Persistence had stopped there on purpose —
+where new people come from is a mechanic in its own right, and hard-wiring "the server rolls
+you a replacement" would have settled cost, a pool, and an economy that does not exist yet by
+accident.
+
+#### Decision
+A free, server-rolled recruit — the same roll `enlist` already deals a fresh squad
+(`characterSheet`, seeded from system randomness), at no cost, because no economy prices one
+yet. A hire from a pool or a paid cost both need a design this milestone does not have; a free
+recruit needs none of it and is strictly better than the status quo (an empty slot forever) in
+every case it changes. If a cost or a pool arrives later, the free roll is the thing it prices
+— nothing here forecloses that.
+
+#### Key Changes
+- **`Rosters.recruit(playerId, rng?)`**: scans a player's `active()` roster for the lowest slot
+  `0..SQUAD_SIZE-1` not already held, rolls one `characterSheet`, and inserts it through the
+  same `roster_active_slot` partial index every settlement already writes through — the index,
+  not this method's scan, is what actually stops two recruits landing on one slot. A dead row
+  is untouched: it stopped being the active occupant the moment `record` marked it, so the
+  history a player is building stays exactly where it was, one row per past occupant of the
+  slot. Refuses (`AuthError(400, …)`, the one refusal type the whole API surface already
+  throws) when every slot is already held — there is nothing to fill.
+- **`POST /api/roster/recruit`** (`src/server/Api.ts`), bearer-authed like every other roster
+  route: `{ member }` on success, `400` on a full roster.
+- **`Referee.verifyRosters` needed no change.** It already compares a deployed squad against
+  whatever `active()` currently returns; a recruit is simply one more row that call returns the
+  next time a squad is fetched, the same way a settlement's growth already is.
+
+#### Measured
+No rules or sim code touched — `bun run balance` was not re-run, since nothing it exercises
+changed. `bun test` (`tests/persistence.test.ts`, `tests/accounts.test.ts`): a killed slot
+recruits back to a full squad with the old row left `dead` and unrelated to the new occupant's
+`character_id`; a full roster refuses recruitment with `400` and `"already full"`; the same
+path exercised through `apiHandler` end-to-end (a real registration, a real SQLite `roster`
+table, no mocks) rather than unit-only.
+
+#### Acceptance Criteria
+- [x] A player whose character died can field a full squad again — a free server-rolled
+      recruit — and the dead row stays in the table as history.
+- [x] A short-handed squad still deploys and still settles: unchanged, since
+      `Referee.verifyRosters` already compared against the active roster before this item.
+
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

@@ -269,6 +269,61 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     await persistence.close()
   })
 
+  test('recruit fills the lowest empty slot and leaves the dead row as history', async () => {
+    const persistence = await freshPersistence(url)
+    const { a } = await enlisted(persistence)
+
+    await persistence.rosters.settle({
+      matchId: 'm1',
+      winner: Faction.Blue,
+      sides: {
+        [Faction.Blue]: {
+          playerId: 'A',
+          characterIds: a.map((member) => member.characterId),
+          fates: [
+            { kind: 'died', hp: 0, deeds: noDeeds() },
+            { kind: 'survived', sheet: a[1]!.sheet, hp: maxHpOf(a[1]!.sheet), deeds: noDeeds() },
+            { kind: 'survived', sheet: a[2]!.sheet, hp: maxHpOf(a[2]!.sheet), deeds: noDeeds() },
+            { kind: 'survived', sheet: a[3]!.sheet, hp: maxHpOf(a[3]!.sheet), deeds: noDeeds() },
+          ],
+        },
+        [Faction.Red]: null,
+      },
+    })
+
+    const shortHanded = await persistence.rosters.active('A')
+    expect(shortHanded.map((member) => member.slot)).toEqual([1, 2, 3])
+
+    const recruit = await persistence.rosters.recruit('A', new Rng(999))
+    expect(recruit.slot).toBe(0)
+    expect(recruit.matches).toBe(0)
+    expect(recruit.hp).toBe(maxHpOf(recruit.sheet))
+    expect(recruit.deeds).toEqual(noDeeds())
+
+    const full = await persistence.rosters.active('A')
+    expect(full.map((member) => member.slot)).toEqual([0, 1, 2, 3])
+    expect(full[0]!.characterId).toBe(recruit.characterId)
+
+    // The dead row stays as history: a fresh recruit in the same slot is a
+    // different row, not a resurrection.
+    const dead = await persistence.db.query<{ character_id: string; slot: number }>`
+      SELECT character_id, slot FROM roster WHERE player_id = ${'A'} AND status = ${'dead'}`
+    expect(dead).toHaveLength(1)
+    expect(dead[0]!.character_id).toBe(a[0]!.characterId)
+    expect(Number(dead[0]!.slot)).toBe(0)
+
+    await persistence.close()
+  })
+
+  test('recruit refuses a full roster', async () => {
+    const persistence = await freshPersistence(url)
+    await enlisted(persistence)
+
+    await expect(persistence.rosters.recruit('A')).rejects.toThrow(/already full/)
+
+    await persistence.close()
+  })
+
   test('settling the same match twice changes nothing the second time', async () => {
     // A referee that is asked twice — a retry, a restart — must not grow
     // anybody twice, which is what the result row is for.
