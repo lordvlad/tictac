@@ -28,9 +28,9 @@ during a match, roles, and a roster that outlives the match.
 ---
 
 ## 🔄 In Progress
-- Nothing in flight. `[ITEM-037]` (recruits fill an empty roster slot) finished on
-  2026-09-28: a free, server-rolled recruit fills the lowest empty slot; the dead stay dead
-  and kept as history.
+- Nothing in flight. `[ITEM-041]` (a short-handed roster fielded a phantom unit) was found
+  and fixed on 2026-09-28 while designing `[ITEM-039]`: a roster with an empty slot now deploys
+  exactly its living, and a man down costs 21 points of win rate in the sweep.
 
 ## 📋 Ready — pull in this order
 - Nothing Ready. `[ITEM-039]` is the only item left in M4 and needs a design pass — numbers
@@ -56,6 +56,8 @@ during a match, roles, and a roster that outlives the match.
 - **ITEM-012**: a dead character's slot stayed empty until `[ITEM-037]`, which fills it with a
   free server-rolled recruit — no cost and no pool, since no economy exists to price either
   yet. Durable Objects would still need one more `Db` adapter; none is written.
+- **ITEM-037**: recruiting is an API route only (`POST /api/roster/recruit`); no client screen
+  calls it yet, so in the game a dead slot stays empty until one does.
 - **ITEM-038**: a bug caught in its own testing — `derive(sheet).maxHp` ignores a character's
   own maxHp trait (Juggernaut's +25); fixed with `maxHpOf`, which every roster ceiling now uses
   instead. Fatigue and medical-bay downtime split to `[ITEM-039]`, not designed yet.

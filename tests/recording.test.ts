@@ -8,7 +8,7 @@ import { Rng } from '../src/core/rng'
 import { World } from '../src/ecs/World'
 import { HealthComponent } from '../src/ecs/components'
 import { fireWeapon } from '../src/game/Combat'
-import { parseRecording, RECORDING_VERSION, Recorder } from '../src/game/Recording'
+import { parseRecording, RECORDING_VERSION, Recorder, startingHpFrom } from '../src/game/Recording'
 import { Squads } from '../src/game/Squads'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
@@ -307,5 +307,16 @@ describe('A world can be put back to an earlier moment', () => {
     world.syncDirty()
     expect(frames).toHaveLength(0)
     expect(world.getComponent(victim.entityId, HealthComponent)?.hp).toBe(fullHp)
+  })
+})
+
+describe('A starting HP read off the wire', () => {
+  test('a short squad keeps its wounds, and nothing or more than a squad is refused', () => {
+    // A kept roster with an empty slot states HP for only the people it has;
+    // dropping that array would deploy them all at full health on the peer's
+    // side while the referee deploys them wounded.
+    expect(startingHpFrom([40, 90, 1])).toEqual([40, 90, 1])
+    expect(startingHpFrom([])).toBeUndefined()
+    expect(startingHpFrom(Array.from({ length: SQUAD_SIZE + 1 }, () => 50))).toBeUndefined()
   })
 })

@@ -48,6 +48,11 @@ export interface SquadPlan {
   /** Every unit's role; {@link RoleId.Rifleman} — unrestricted — when absent. */
   role?: RoleId
   /**
+   * How many deploy, 1 to `SQUAD_SIZE`; a full squad when absent. Here so a
+   * sweep can price a man down — what a kept roster with an empty slot fields.
+   */
+  size?: number
+  /**
    * Whether this side's policy may go on watch. Policy, not kit — here so a
    * sweep can price the ability by taking it away from one side.
    */
@@ -64,7 +69,7 @@ export interface SquadPlan {
  * rather than a second guess at it.
  */
 export function planToLoadout(plan: SquadPlan): SquadLoadout {
-  return Array.from({ length: SQUAD_SIZE }, (_, i) => ({
+  return Array.from({ length: plan.size ?? SQUAD_SIZE }, (_, i) => ({
     weaponId: plan.weapons[i % plan.weapons.length]!,
     ammoId: plan.ammo ?? AmmoId.Standard,
     grenades: {
@@ -213,8 +218,10 @@ export class SimMatch {
     // dice are the host's (`matchDice`), so how many numbers a sheet consumed
     // can never move a roll.
     const deal = new Rng(setup.seed >>> 0)
-    const blue = rollSquadSheets(deal)
-    const red = rollSquadSheets(deal)
+    // Both full squads are dealt before either is cut short, so a smaller
+    // side never moves who the other side's people are.
+    const blue = rollSquadSheets(deal).slice(0, setup.blue.size ?? SQUAD_SIZE)
+    const red = rollSquadSheets(deal).slice(0, setup.red.size ?? SQUAD_SIZE)
     this.sheets = { [Faction.Blue]: blue, [Faction.Red]: red }
     this.loadouts = {
       [Faction.Blue]: planToLoadout(setup.blue),

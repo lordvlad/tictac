@@ -600,4 +600,71 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
     await persistence.close()
   })
+
+  test('a roster with an empty slot deploys short-handed and settles only who it sent', async () => {
+    let recording: CombatRecording | undefined
+    for (let seed = 4242; seed < 4282 && !recording; seed++) {
+      const match = new SimMatch({ seed, blue: { ...STOCK_PLAN, size: 3 }, red: STOCK_PLAN, turnCap: 60, record: true })
+      if (match.run().winner !== null) recording = match.recording ?? undefined
+    }
+    const header = recording!.header
+    const [first, second, third] = header.sheets[Faction.Blue]
+    // Nobody is invented for the empty slot: the side fields exactly three.
+    expect(new MatchHost(header).squads.byFaction[Faction.Blue]).toHaveLength(3)
+
+    // Four enlisted and the one in slot 1 killed, so the living three sit in
+    // slots 0, 2 and 3 — the squad deploys them in slot order, gap closed.
+    const fallen = characterSheet(new Rng(77))
+    const { persistence, referee, verdicts } = await playing(
+      ':memory:',
+      [first!, fallen, second!, third!],
+      header.sheets[Faction.Red],
+    )
+    const enlisted = await persistence.rosters.active('A')
+    await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE character_id = ${enlisted[1]!.characterId}`
+
+    const startingHp = {
+      [Faction.Blue]: header.sheets[Faction.Blue].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+      [Faction.Red]: header.sheets[Faction.Red].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+    }
+    const blue = client(referee, 'A')
+    client(referee, 'B')
+    blue.send({ type: 'matchHeader', header: { ...header, startingHp } })
+    for (const event of recording!.events) blue.send(event.command)
+    await referee.idle()
+
+    expect(verdicts).toEqual([])
+    const played = await persistence.db.query<{ character_id: string; matches: number }>`
+      SELECT character_id, matches FROM roster WHERE player_id = ${'A'}`
+    const matchesOf = (id: string): number => Number(played.find((row) => row.character_id === id)!.matches)
+    for (const slot of [0, 2, 3]) expect(matchesOf(enlisted[slot]!.characterId)).toBe(1)
+    // The one already dead was not in this match and is not touched by it.
+    expect(matchesOf(enlisted[1]!.characterId)).toBe(0)
+
+    await persistence.close()
+  })
+
+  test('a signed-in player with nobody left on the roster is refused', async () => {
+    const recording = decisive()
+    const { persistence, referee, verdicts } = await playing(
+      ':memory:',
+      recording.header.sheets[Faction.Blue],
+      recording.header.sheets[Faction.Red],
+    )
+    await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE player_id = ${'A'}`
+
+    const blue = client(referee, 'A')
+    client(referee, 'B')
+    blue.send({
+      type: 'matchHeader',
+      header: { ...recording.header, sheets: { ...recording.header.sheets, [Faction.Blue]: [] } },
+    })
+    await referee.idle()
+
+    expect(verdicts).toHaveLength(1)
+    expect(verdicts[0]!.reason).toMatch(/nobody left/)
+    expect(verdicts[0]!.side).toBe(Faction.Blue)
+
+    await persistence.close()
+  })
 })

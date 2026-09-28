@@ -29,6 +29,11 @@ export class Squads {
    * the roster's own stored HP — present in `RecordingHeader.startingHp` so
    * both peers and the referee deploy from the same numbers a digest could
    * ever compare.
+   *
+   * A side fields exactly as many units as it stated sheets for, up to
+   * `SQUAD_SIZE`: a kept roster with an empty slot deploys short-handed rather
+   * than being topped up with somebody nobody enlisted. No sheets stated at all
+   * (a sweep, a stock match) is the stock full squad.
    */
   constructor(
     world: World,
@@ -39,45 +44,37 @@ export class Squads {
     sheets?: Record<Faction, CharacterSheet[]>,
     startingHp?: Partial<Record<Faction, number[]>>,
   ) {
-    const blueNames = FACTION_INFO[Faction.Blue].squadNames
-    const redNames = FACTION_INFO[Faction.Red].squadNames
-
     const weapons = [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun] as const
+    const sizeOf = (faction: Faction): number => {
+      const stated = sheets?.[faction]?.length ?? 0
+      return stated > 0 ? Math.min(stated, SQUAD_SIZE) : SQUAD_SIZE
+    }
+    const sides = [
+      { faction: Faction.Blue, size: sizeOf(Faction.Blue), fallbackRow: 2 },
+      { faction: Faction.Red, size: sizeOf(Faction.Red), fallbackRow: grid.size - 3 },
+    ]
 
+    // Blue then Red at each index, as it has always been: creation order is
+    // entity-id order and `soldiers` order, which a full squad must not see move.
     for (let i = 0; i < SQUAD_SIZE; i++) {
-      const unit = loadout?.[i]
-
-      const tileB = spawns[Faction.Blue][i] ?? { x: 2 + i * 2, y: 2 }
-      const solB = new Soldier(
-        world,
-        Faction.Blue,
-        i,
-        blueNames[i]!,
-        tileB,
-        grid,
-        sheets?.[Faction.Blue][i],
-        startingHp?.[Faction.Blue]?.[i],
-      )
-      if (unit && loadoutFaction === Faction.Blue) applyUnitLoadout(solB, unit)
-      else solB.equip(weapons[i]!, AmmoId.Standard)
-      this.soldiers.push(solB)
-      this.byFaction[Faction.Blue].push(solB)
-
-      const tileR = spawns[Faction.Red][i] ?? { x: 2 + i * 2, y: grid.size - 3 }
-      const solR = new Soldier(
-        world,
-        Faction.Red,
-        i,
-        redNames[i]!,
-        tileR,
-        grid,
-        sheets?.[Faction.Red][i],
-        startingHp?.[Faction.Red]?.[i],
-      )
-      if (unit && loadoutFaction === Faction.Red) applyUnitLoadout(solR, unit)
-      else solR.equip(weapons[i]!, AmmoId.Standard)
-      this.soldiers.push(solR)
-      this.byFaction[Faction.Red].push(solR)
+      for (const { faction, size, fallbackRow } of sides) {
+        if (i >= size) continue
+        const soldier = new Soldier(
+          world,
+          faction,
+          i,
+          FACTION_INFO[faction].squadNames[i]!,
+          spawns[faction][i] ?? { x: 2 + i * 2, y: fallbackRow },
+          grid,
+          sheets?.[faction][i],
+          startingHp?.[faction]?.[i],
+        )
+        const unit = loadout?.[i]
+        if (unit && loadoutFaction === faction) applyUnitLoadout(soldier, unit)
+        else soldier.equip(weapons[i]!, AmmoId.Standard)
+        this.soldiers.push(soldier)
+        this.byFaction[faction].push(soldier)
+      }
     }
   }
 

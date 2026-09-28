@@ -15,7 +15,7 @@ import {
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { EngineContext } from '../engine'
-import { Faction, SQUAD_SIZE } from '../config'
+import type { Faction } from '../config'
 import { Rng } from '../core/rng'
 import { soldierColor } from '../entities/palette'
 
@@ -52,8 +52,8 @@ export class LoadoutScene {
   private readonly geometries: { dispose: () => void }[] = []
   private readonly materials: { dispose: () => void }[] = []
 
-  private angleTarget = -1.5 * SPOKE_STEP
-  private angleCurrent = -1.5 * SPOKE_STEP
+  private angleTarget: number
+  private angleCurrent: number
 
   private rafHandle = 0
   private lastFrameTime = 0
@@ -63,7 +63,11 @@ export class LoadoutScene {
     private readonly engine: EngineContext,
     seed: number,
     private readonly faction: Faction,
+    /** How many people are standing on the arc: the squad that deploys, not a constant. */
+    private readonly size: number,
   ) {
+    this.angleTarget = this.spokeAngle(0)
+    this.angleCurrent = this.angleTarget
     const scene = this.engine.scene
     const sky = new Color(0x05070a)
     scene.background = sky
@@ -80,7 +84,7 @@ export class LoadoutScene {
 
   /** Swing the camera round to the member on this spoke. */
   select(index: number): void {
-    this.angleTarget = LoadoutScene.spokeAngle(index)
+    this.angleTarget = this.spokeAngle(index)
   }
 
   dispose(): void {
@@ -105,8 +109,8 @@ export class LoadoutScene {
   // ---------------------------------------------------------------------------
 
   /** Where squad member `index` stands, as an angle about the arc's centre. */
-  private static spokeAngle(index: number): number {
-    return (index - (SQUAD_SIZE - 1) / 2) * SPOKE_STEP
+  private spokeAngle(index: number): number {
+    return (index - (this.size - 1) / 2) * SPOKE_STEP
   }
 
   private add(object: Object3D): void {
@@ -172,9 +176,9 @@ export class LoadoutScene {
 
     const idle = gltf.animations.find((animation) => animation.name === 'idle')
 
-    for (let index = 0; index < SQUAD_SIZE; index++) {
+    for (let index = 0; index < this.size; index++) {
       const model = clone(gltf.scene) as Group
-      const angle = LoadoutScene.spokeAngle(index)
+      const angle = this.spokeAngle(index)
       model.position.set(Math.sin(angle) * RING_RADIUS, 0, Math.cos(angle) * RING_RADIUS)
       // Yaw 0 faces +Z, so the spoke angle is exactly "facing outward".
       model.rotation.y = angle

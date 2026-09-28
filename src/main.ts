@@ -274,6 +274,11 @@ function showMenu(): void {
       const it = new Account(url)
       if (!it.token) return { url }
       const roster = await it.roster()
+      // A short roster deploys short-handed; an empty one has nobody to send,
+      // and the referee would refuse it anyway.
+      if (roster.sheets.length === 0) {
+        throw new Error('Nobody is left on your roster. Recruit before deploying.')
+      }
       return { url: await it.socketUrl(url), sheets: roster.sheets, hp: roster.hp }
     }
 

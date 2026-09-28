@@ -39,8 +39,12 @@ import type { NetworkMessage } from './NetworkManager'
  * 3: a header may now carry `startingHp`, so a version-2 file — which has
  * none — is not "every unit at full health" by coincidence; it is refused,
  * because that omission used to mean something different than it does now.
+ *
+ * 4: a side fields exactly as many units as its header states sheets for. A
+ * version-3 header with a short squad deployed a made-up unit in the empty
+ * slot, so replaying one today would refight it a unit down.
  */
-export const RECORDING_VERSION = 3
+export const RECORDING_VERSION = 4
 
 export interface RecordingHeader {
   version: number
@@ -186,9 +190,12 @@ function sheetsFrom(raw: unknown): CharacterSheet[] {
  * without shifting every entry after it onto the wrong soldier. The safe
  * fallback for a malformed array is exactly what its absence already means —
  * deploy at full health — not a squad with one wound on the wrong person.
+ *
+ * Anywhere from one entry to a full squad: a kept roster with an empty slot
+ * deploys, and states HP for, only the people it has.
  */
 export function startingHpFrom(raw: unknown): number[] | undefined {
-  if (!Array.isArray(raw) || raw.length !== SQUAD_SIZE) return undefined
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > SQUAD_SIZE) return undefined
   return raw.every((value) => typeof value === 'number' && Number.isFinite(value))
     ? (raw as number[])
     : undefined

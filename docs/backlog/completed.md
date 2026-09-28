@@ -1822,9 +1822,56 @@ table, no mocks) rather than unit-only.
 
 #### Acceptance Criteria
 - [x] A player whose character died can field a full squad again — a free server-rolled
-      recruit — and the dead row stays in the table as history.
-- [x] A short-handed squad still deploys and still settles: unchanged, since
-      `Referee.verifyRosters` already compared against the active roster before this item.
+      recruit — and the dead row stays in the table as history. Through the API only: no
+      client screen calls `POST /api/roster/recruit` yet.
+- [ ] ~~A short-handed squad still deploys and still settles~~ — ticked at the time on the
+      strength of `verifyRosters` alone, and wrong: the short squad was topped up with a
+      made-up fourth unit. Found and fixed as `[ITEM-041]`.
+
+---
+
+### [ITEM-041] A Short-Handed Roster Fielded a Phantom Unit
+**Completed Date:** 2026-09-28  
+**Type:** Bug  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+Found while designing `[ITEM-039]`. A signed-in player with three living characters sent
+three sheets and three HP values, the referee accepted them — and `Squads` built four units
+anyway, because it always looped to `SQUAD_SIZE`. The fourth got a default sheet
+(`characterSheet(new Rng(squadIndex + 1))`), fought, and was never settled, since the side
+only has three character ids. On a peer, `startingHpFrom` refused any array that was not
+exactly `SQUAD_SIZE` long, so the other side deployed the short squad at full health while the
+referee deployed it wounded. `ITEM-037` had ticked "a short-handed squad still deploys and
+still settles" without testing it.
+
+#### Key Changes
+- **`Squads`** fields exactly as many units per side as the header states sheets for, up to
+  `SQUAD_SIZE`; no sheets stated at all (a sweep, a stock match) is still the full stock
+  squad. Creation stays interleaved Blue/Red by index, so a full squad's entity ids and
+  `soldiers` order do not move.
+- **`startingHpFrom`** accepts one to `SQUAD_SIZE` entries.
+- **The loadout screen** sizes its kit (`defaultLoadout(size)`), its cards and the
+  `LoadoutScene` arc to the people deploying.
+- **Nobody left**: the referee refuses a signed-in side with an empty roster, and the
+  menu says so before connecting — a header with no sheets means the stock squad to
+  `Squads`, which would be the same phantom four times over.
+- **`RECORDING_VERSION` 3 → 4**: a version-3 header with a short squad replays differently
+  now, which is the rule for a bump.
+- **`SquadPlan.size`** and `bun run balance -- --blueSize=N`, so the sweep can price a man down.
+
+#### Measured
+`bun run balance` with full squads is identical to before (Blue 55, Red 43, 2 draws; mean 9.27
+turns). `--blueSize=3`: Blue 34, Red 66, no draws. A man down costs 21 points of win rate —
+worse than a fair fight, not a forfeit.
+
+#### Acceptance Criteria
+- [x] A refereed match with a roster whose slot 1 is dead deploys the three living, in slot
+      order, and settles exactly those three (`tests/persistence.test.ts`); the test fails on
+      the old `Squads` with four blue units.
+- [x] A short squad's starting HP survives the wire (`tests/recording.test.ts`).
+- [x] A signed-in player with nobody left is refused, not given a stock squad.
+- [x] Full squads unchanged: the balance report is identical.
 
 ---
 

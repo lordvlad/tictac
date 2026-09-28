@@ -189,9 +189,18 @@ Anything else aborts the match — a match played with somebody else's people,
 or somebody else's wounds, must not settle. A signed-in side that omits
 `startingHp` entirely is refused the same way a wrong one is: absence would
 let a client always deploy at full health regardless of what the roster says.
-One player on both sides is refused for the same reason as the sheet check.
-An anonymous side is skipped, not refused: an unregistered opponent is a
-perfectly good opponent who simply has nothing to keep.
+One player on both sides is refused for the same reason as the sheet check,
+and so is a signed-in player with nobody left on their roster. An anonymous
+side is skipped, not refused: an unregistered opponent is a perfectly good
+opponent who simply has nothing to keep.
+
+**A short roster deploys short-handed** (`ITEM-041`). The squad is the active
+roster in slot order with any empty slot closed up, and `Squads` fields exactly
+as many units as the header states sheets for — never topped up to
+`SQUAD_SIZE` with somebody nobody enlisted. `ready.hp` and
+`RecordingHeader.startingHp` carry one entry per deployed unit, one to
+`SQUAD_SIZE` of them. The sweep prices it: `bun run balance -- --blueSize=3`
+takes Blue from 55 wins in 100 to 34.
 
 A starting HP has to be something both peers and the referee agree on
 *before the first digest*, so it cannot be injected by the referee after the

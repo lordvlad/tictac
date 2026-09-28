@@ -323,6 +323,17 @@ export class Referee {
       if (!playerId) continue
       const members = await rosters.active(playerId)
       const deployed = header.sheets[faction]
+      // Nobody left is not a squad: a side of zero would lose on turn one and
+      // settle nothing, and a header stating no sheets means the stock squad
+      // to `Squads` — somebody nobody enlisted. Recruit first.
+      if (members.length === 0) {
+        return this.abort({
+          matchId: this.matchId ?? 'unknown',
+          side: faction,
+          reason: `the ${FACTION_INFO[faction].name} player has nobody left on their roster to deploy`,
+          found: [],
+        })
+      }
       const same =
         members.length === deployed.length &&
         members.every(

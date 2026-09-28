@@ -6,7 +6,7 @@ import { MELEE, MeleeId } from '../core/Melee'
 import { TEMPERAMENTS } from '../core/Morale'
 import { resolveTraits, TRAITS, type TraitId } from '../core/Traits'
 import { ROLES, RoleId } from '../core/Roles'
-import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
+import { FACTION_INFO, Faction } from '../config'
 import type { EngineContext } from '../engine'
 import {
   canAddGrenade,
@@ -64,7 +64,7 @@ type LoadoutAction =
 export class LoadoutScreen {
   private readonly root: HTMLDivElement
   private readonly scene: LoadoutScene
-  private readonly loadout: SquadLoadout = defaultLoadout()
+  private readonly loadout: SquadLoadout
   private selected = 0
   private waitingLabel: string | null = null
   private readonly deployed = Promise.withResolvers<SquadLoadout>()
@@ -83,7 +83,10 @@ export class LoadoutScreen {
      */
     readonly sheets: CharacterSheet[],
   ) {
-    this.scene = new LoadoutScene(engine, seed, faction)
+    // One kit per person who is actually deploying: a kept roster with an
+    // empty slot brings fewer than a full squad, and so does its loadout.
+    this.loadout = defaultLoadout(sheets.length)
+    this.scene = new LoadoutScene(engine, seed, faction, sheets.length)
 
     this.root = document.createElement('div')
     this.root.className = 'loadout-root'
@@ -491,7 +494,7 @@ export class LoadoutScreen {
    */
   private renderCards(): string {
     const cards: string[] = []
-    for (let index = 0; index < SQUAD_SIZE; index++) {
+    for (let index = 0; index < this.loadout.length; index++) {
       const unit = this.loadout[index]!
       const name = FACTION_INFO[this.faction].squadNames[index] ?? ''
       const carried = [

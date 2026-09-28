@@ -1,3 +1,4 @@
+import { SQUAD_SIZE } from '../config'
 import { MeleeId } from '../core/Melee'
 import { AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
@@ -124,10 +125,14 @@ export const DEMO_INVENTORY: Inventory = {
 /** Grenade cap, so one soldier cannot hoover up the whole pouch. */
 export const LOADOUT_LIMITS = { grenadesPerUnit: 3 } as const
 
-/** The spread the squad has always deployed with, as a valid starting point. */
-export function defaultLoadout(): SquadLoadout {
+/**
+ * The spread the squad has always deployed with, as a valid starting point —
+ * for the first `size` members, which is fewer than a full squad when a kept
+ * roster has an empty slot.
+ */
+export function defaultLoadout(size = SQUAD_SIZE): SquadLoadout {
   const weapons = [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun] as const
-  return weapons.map((weaponId) => ({
+  return weapons.slice(0, size).map((weaponId) => ({
     weaponId,
     ammoId: AmmoId.Standard,
     grenades: {

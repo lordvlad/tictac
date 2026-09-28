@@ -10,6 +10,7 @@
  *   bun run balance -- --blueWatch=off
  *   bun run balance -- --blueSidearm=knife --redSidearm=club
  *   bun run balance -- --blueGrenades=frag:1,incendiary:2
+ *   bun run balance -- --blueSize=3
  *   bun run balance -- --mapSize=72 --spawns=edge
  *   bun run balance -- --record=recordings
  *   bun run balance -- --json
@@ -23,6 +24,7 @@
  * arguments or reading stdout.
  */
 import { mkdir } from 'node:fs/promises'
+import { SQUAD_SIZE } from '../src/config'
 import { AmmoId, GrenadeId, WeaponId } from '../src/core/Arsenal'
 import { AttachmentId } from '../src/core/Attachments'
 import { ItemId } from '../src/core/Items'
@@ -81,6 +83,7 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   const watch = arg(`${side}Watch`)
   const sidearm = arg(`${side}Sidearm`)
   const grenades = arg(`${side}Grenades`)
+  const size = arg(`${side}Size`)
   if (
     sidearm === undefined &&
     weapons === undefined &&
@@ -88,9 +91,14 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
     items === undefined &&
     mods === undefined &&
     watch === undefined &&
-    grenades === undefined
+    grenades === undefined &&
+    size === undefined
   ) {
     return undefined
+  }
+  const squad = size === undefined ? undefined : Number(size)
+  if (squad !== undefined && !(Number.isInteger(squad) && squad >= 1 && squad <= SQUAD_SIZE)) {
+    throw new Error(`--${side}Size: "${size}" is not a squad of 1 to ${SQUAD_SIZE}`)
   }
   if (watch !== undefined && watch !== 'on' && watch !== 'off') {
     throw new Error(`--${side}Watch: "${watch}" is not one of on, off`)
@@ -111,6 +119,7 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
     watch: watch !== 'off',
     sidearm: sidearm === undefined ? undefined : pick(MeleeId, `${side}Sidearm`, sidearm),
     grenades: grenades === undefined ? undefined : grenadesFor(side, grenades),
+    size: squad,
   }
 }
 
