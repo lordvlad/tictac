@@ -257,9 +257,10 @@ the slot. Refused with `400` if every slot is already held: there is nothing
 to fill.
 
 > **Not yet**: a roster is exactly a squad, so everyone deploys every match.
-> The bench (`[ITEM-042]`, six kept, one to four deployed, stated by
-> character id) and, on top of it, fatigue and medical-bay downtime
-> (`[ITEM-039]`, two new roster columns) are designed and Ready.
+> `[ITEM-043]` first replaces the header's parallel `sheets`/`loadouts`/`startingHp` arrays
+> with one deployment record per soldier; the bench (`[ITEM-042]`, six kept, one to four
+> deployed, stated by character id on that record) and, on top of it, fatigue and medical-bay
+> downtime (`[ITEM-039]`, in the same record's `state`) are designed and Ready.
 
 ---
 

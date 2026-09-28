@@ -64,5 +64,6 @@ graph TD
   after-match progression and the end screen, `[ITEM-012]` roster persistence, `[ITEM-028]`
   schema drift guard, `[ITEM-038]` lasting wounds (HP, healing, combat log), `[ITEM-010]`
   roles, `[ITEM-037]` recruit refill, `[ITEM-041]` short-handed deployment.
-- Open, in the order on the [focus board](./active-focus.md): `[ITEM-042]` the bench (a roster
-  of six, pick who deploys), then `[ITEM-039]` fatigue and medical-bay downtime on top of it.
+- Open, in the order on the [focus board](./active-focus.md): `[ITEM-043]` one deployment
+  record per soldier (replaces the parallel sheet/loadout/HP arrays), then `[ITEM-042]` the
+  bench (a roster of six, pick who deploys), then `[ITEM-039]` fatigue and medical-bay downtime.

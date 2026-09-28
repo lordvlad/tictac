@@ -33,9 +33,12 @@ during a match, roles, and a roster that outlives the match.
   exactly its living, and a man down costs 21 points of win rate in the sweep.
 
 ## 📋 Ready — pull in this order
-1. **`[ITEM-042]`** The bench: a roster of six, pick who deploys, recruit from the roster
+1. **`[ITEM-043]`** One deployment record per soldier instead of parallel `sheets`/`loadouts`/
+   `startingHp` arrays — found while designing `[ITEM-042]`: nothing ties their lengths
+   together, which is exactly what `[ITEM-041]` broke on. Refactor only, no behaviour change.
+2. **`[ITEM-042]`** The bench: a roster of six, pick who deploys, recruit from the roster
    screen. Nothing that depends on *not* deploying someone can mean anything until this lands.
-2. **`[ITEM-039]`** Fatigue & medical-bay downtime, on top of the bench. Numbers are set and
+3. **`[ITEM-039]`** Fatigue & medical-bay downtime, on top of the bench. Numbers are set and
    calibrated against a man down (−21 wins in 100).
 
 ## 🧊 Backlog — not yet queued
