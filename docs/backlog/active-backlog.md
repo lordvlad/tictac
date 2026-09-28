@@ -23,30 +23,120 @@ it is done. It is not ordered and says nothing about what happens next: that is 
 
 ---
 
+### [ITEM-042] The Bench: a Roster Bigger Than the Squad
+**Type:** Feature  
+**Priority:** P2  
+**Status:** Ready  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+A roster is exactly a squad: four people, all of whom deploy every match. So "who fights" is
+never a decision, and nothing that depends on *not* deploying someone — resting them, keeping
+them out while they recover — can mean anything. `[ITEM-039]` is built on this item.
+
+#### Change
+1. **Roster size.** `ROSTER.size = 6` in `src/config.ts`, beside `SQUAD_SIZE = 4`. Six so that
+   a steady rotation rests two a match and each character sits out one match in three.
+   Registration deals six (`enlist`); `Rosters.recruit` fills the lowest empty slot of
+   `0..ROSTER.size-1`. Existing accounts reach six by recruiting — free since `[ITEM-037]`.
+2. **Picking the squad.** A signed-in player chooses 1 to `SQUAD_SIZE` distinct active members
+   to deploy. The default pick is the first four in slot order. The squad index is the order
+   picked; the roster slot is where the character lives, and the two stop being the same.
+3. **On the wire.** `ready.characterIds?: string[]`, parallel to `ready.sheets` and `ready.hp`,
+   and `RecordingHeader.deployed?: Partial<Record<Faction, string[]>>`, folded by the host the
+   way `startingHp` is. `PROTOCOL_VERSION` 2 → 3. `RECORDING_VERSION` stays: ids do not change
+   what a header plays.
+4. **The referee** replaces "the squad is the active roster" with "the squad is these stated
+   members of the active roster": every id belongs to this player and is active, none repeats,
+   there are 1 to `SQUAD_SIZE` of them, and the header's sheets and starting HP are exactly
+   those members', in the stated order. Settlement writes fates to the stated ids.
+5. **Rest heals.** At every settled match of a player, each active member who did *not*
+   deploy heals by the same rule a survivor does (`HEALING.perMatch` of missing HP, scaled by
+   `healBonus`) and does not count a match.
+6. **A roster screen** before the loadout screen, for signed-in players only: every active
+   member with HP, sheet summary and slot; toggle who deploys (at most four); a Recruit button
+   on each empty slot (`POST /api/roster/recruit` — which also closes `[ITEM-037]`'s missing
+   UI). Continue goes to the loadout screen with the picked sheets.
+
+#### Affected Files
+- `src/config.ts`, `src/server/Rosters.ts`, `src/server/Referee.ts`, `src/server/Accounts.ts`
+- `src/game/NetworkManager.ts`, `src/game/Recording.ts`, `src/game/Account.ts`, `src/version.ts`
+- `src/main.ts`, a new `src/hud/RosterScreen.ts`, `src/game.css`
+- `docs/schemas/wire-shape-catalog.json` (regenerated)
+
+#### Acceptance Criteria
+- [ ] Registration deals six; recruiting fills up to six and refuses a seventh.
+- [ ] A signed-in player deploys any 1–4 distinct active members, and the refereed match
+      settles exactly those — tested with a pick that is *not* the first four slots.
+- [ ] The referee aborts a stated id that is not this player's, is dead, repeats, is a fifth, or
+      whose sheet or HP differs from the header's at that position.
+- [ ] A benched member heals by the survivor rule and does not count the match; a deployed one
+      is settled exactly as today.
+- [ ] In a browser against `bun run serve:match`: pick four of six, recruit into an empty slot,
+      deploy, and the match plays with the picked four.
+- [ ] No rules change: `bun run balance` is identical (the sweep has no roster).
+
+#### Risks
+- **Callsigns are positional.** In-match names come from `FACTION_INFO.squadNames[index]`, so
+  whoever is picked first is always "Cobalt". Kept for this item — they are callsigns — but the
+  roster screen must identify people by their sheet and slot, not by callsign.
+
+---
+
 ### [ITEM-039] Fatigue & Medical-Bay Downtime
 **Type:** Feature  
-**Priority:** P3  
-**Status:** Backlog  
+**Priority:** P2  
+**Status:** Ready — pulled after `[ITEM-042]`, which it is built on  
 **Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why
 Split out of `[ITEM-038]` at 2026-09-26: [GDD §5](../design/gdd/progression-and-meta.md) also
 wants "fatigue over consecutive deployments" that temporarily lowers baseline AP and morale, and
-"medical-bay downtime" for severe injury. Neither has a number anywhere, and both are a
-*combat-system* change (AP and morale are read every turn by systems `[ITEM-038]` never
-touches), not a persistence one — filing it separately keeps that design work from blocking the
-HP-and-healing slice that already has concrete acceptance criteria.
+"medical-bay downtime" for severe injury. Both only mean something once a player can choose
+not to deploy somebody, which is `[ITEM-042]`.
 
 #### Change
-Not designed yet. Needs, at minimum: what "a deployment" counts as now that a roster always
-fields a full squad (`[ITEM-037]` may change that); a concrete fatigue curve and decay rule,
-proven against the balance sweep the way every other rule change is; and where the temporary
-penalty is read (`ActionPointsComponent`, `MoraleComponent`) without becoming a second, silently
-diverging copy of the numbers `[ITEM-038]` already stores.
+1. **Stored.** Migration 5 adds `roster.fatigue` (0–4) and `roster.downtime` (≥ 0), both
+   integers defaulting to 0. These are the only stored numbers; AP and morale are derived from
+   `fatigue` when a unit is built, never stored beside it.
+2. **Settling**, per settled match of the player:
+   - deployed: `fatigue + 1`, capped at 4;
+   - not deployed: `fatigue − 2` and `downtime − 1`, both floored at 0;
+   - carried out: `downtime = 2`; survived on HP at or below `WOUNDS.concussed` of their
+     ceiling: `downtime = 1`.
+3. **Penalty**, from the stored level at deployment: `max(0, fatigue − 1)` steps, each −1 max
+   AP and −10 starting morale. So the first back-to-back match is free, and the same four
+   fielded four matches running deploy on the fifth at −3 AP and 70 morale — still above
+   `MORALE.steady` (50), so nobody breaks on turn one, and the +5 per turn rally wins it back.
+   A six-character rotation (each resting one match in three) never passes one step.
+4. **Where it is read.** `Soldier` takes a starting fatigue the way it takes a starting HP. The
+   AP step is one more term in `refreshTraits`' `maxAp` sum — so every reader of `maxAp` sees it
+   and Strength's `gearRelief` does not touch it — and `MoraleComponent` starts at
+   `MORALE.max − 10 × steps`.
+5. **Medical bay.** A member with `downtime > 0` cannot be picked: the roster screen greys them
+   with the matches left, and the referee refuses them. They heal as a benched member meanwhile.
+6. **On the wire**, like HP: `ready.fatigue`, `RecordingHeader.startingFatigue`, checked by the
+   referee against the roster. `PROTOCOL_VERSION` and `RECORDING_VERSION` both move, since a
+   header with fatigue plays differently from the same header without.
+7. **Measured.** `SquadPlan.fatigue` and `bun run balance -- --blueFatigue=N` (every unit at
+   level N). Calibrated against a man down (`--blueSize=3`: Blue 55 → 34 wins, `[ITEM-041]`):
+   level 4 must cost between half a man down and a whole one (10–21 points), so fielding a
+   worn-out fourth against fielding three is a real choice; level 2 must cost at most 5. If the
+   numbers in 3 miss those bands, the per-step AP and morale move, not the bands.
 
 #### Affected Files
-- `src/server/Rosters.ts`, `src/server/db/migrations.ts`
-- `src/ecs/components/ActionPointsComponent.ts`, `MoraleComponent.ts`
+- `src/server/Rosters.ts`, `src/server/Referee.ts`, `src/server/db/migrations.ts`
+- `src/entities/Soldier.ts`, `src/game/Squads.ts`, `src/game/Recording.ts`,
+  `src/game/NetworkManager.ts`, `src/version.ts`, `src/config.ts`
+- `src/hud/RosterScreen.ts` (from `[ITEM-042]`), `src/sim/SimMatch.ts`, `scripts/balance.ts`
 
 #### Acceptance Criteria
-- [ ] Not yet written: needs a design pass with numbers before this is Ready.
+- [ ] Settling moves `fatigue` and `downtime` exactly as in 2, including the caps and floors.
+- [ ] A unit deployed at level N has its sheet's max AP minus `max(0, N − 1)` and starting
+      morale `100 − 10 × max(0, N − 1)`, on both peers and the referee (digest agrees).
+- [ ] A member in the medical bay cannot be picked, and the referee aborts a header that
+      deploys one.
+- [ ] The referee aborts a stated fatigue that differs from the roster's.
+- [ ] `bun run balance -- --blueFatigue=4` costs Blue 10–21 wins in 100 and `--blueFatigue=2`
+      at most 5, with the measured numbers recorded; `bun run balance` without the flag is
+      identical.

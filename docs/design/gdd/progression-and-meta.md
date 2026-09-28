@@ -3,7 +3,7 @@ title: "GDD: Squads, Progression & Meta Roster"
 id: "GDD-PROGRESSION"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-26"
+lastReviewed: "2026-09-28"
 appliesTo:
   - "src/core/Characters.ts"
   - "src/config.ts"
@@ -198,8 +198,15 @@ persistence lands (ITEM-012), that is where it ends.
   start their next one with, not full health — healing a stated fraction of what they are
   missing, scaled by their own Health attribute, every match they are settled. The carried-out
   unit starts exactly on 1 HP and heals from there like anyone else.
-- **Lasting Wounds** (`ITEM-039`, not built): severe injuries book medical-bay downtime between
-  missions, and fatigue accumulates over consecutive deployments, temporarily reducing baseline
-  AP and morale. Distinct from HP itself, which is `ITEM-038`.
+- **The bench** (`ITEM-042`, designed, not built): a player keeps six characters and deploys
+  one to four of them. Whoever sits a match out rests, and rest heals by the same rule
+  survival does.
+- **Fatigue** (`ITEM-039`, designed, not built): each deployment adds a level (cap 4), each
+  match sat out takes two off. From level 2, every level past the first costs a point of
+  maximum AP and 10 starting morale. A six-strong rotation never feels it; the same four fielded
+  match after match arrive at −3 AP and 70 morale.
+- **Medical-bay downtime** (`ITEM-039`, designed, not built): carried out of a lost match, two
+  matches out; surviving on a quarter of their health or less, one. A character in the bay
+  cannot be deployed. Distinct from HP itself, which is `ITEM-038`.
 - **Persistence** (`ITEM-012`, `ITEM-038`): squad identities, organic stat growth, HP and a
   cumulative combat log ("scars") are stored in the meta-layer across the campaign.

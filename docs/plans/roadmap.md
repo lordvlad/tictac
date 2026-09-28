@@ -3,7 +3,7 @@ title: "Multi-Milestone Capability Roadmap"
 id: "PLAN-ROADMAP"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-26"
+lastReviewed: "2026-09-28"
 appliesTo:
   - "docs/plans/**"
 relatedDocs:
@@ -62,7 +62,7 @@ graph TD
 **Focus:** High-level tactics, team composition, and long-term roster persistence.
 - Done: `[ITEM-011]` overwatch, `[ITEM-024]` transport port, `[ITEM-025]` referee, `[ITEM-004]`
   after-match progression and the end screen, `[ITEM-012]` roster persistence, `[ITEM-028]`
-  schema drift guard, `[ITEM-038]` lasting wounds (HP, healing, combat log).
-- Open, in the order on the [focus board](./active-focus.md): `[ITEM-037]` recruit refill,
-  `[ITEM-010]` roles. `[ITEM-039]` fatigue/medical-bay split off `ITEM-038` on 2026-09-26; needs
-  a design pass before it is Ready.
+  schema drift guard, `[ITEM-038]` lasting wounds (HP, healing, combat log), `[ITEM-010]`
+  roles, `[ITEM-037]` recruit refill, `[ITEM-041]` short-handed deployment.
+- Open, in the order on the [focus board](./active-focus.md): `[ITEM-042]` the bench (a roster
+  of six, pick who deploys), then `[ITEM-039]` fatigue and medical-bay downtime on top of it.

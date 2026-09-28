@@ -33,12 +33,13 @@ during a match, roles, and a roster that outlives the match.
   exactly its living, and a man down costs 21 points of win rate in the sweep.
 
 ## 📋 Ready — pull in this order
-- Nothing Ready. `[ITEM-039]` is the only item left in M4 and needs a design pass — numbers
-  and acceptance criteria — before it can be pulled.
+1. **`[ITEM-042]`** The bench: a roster of six, pick who deploys, recruit from the roster
+   screen. Nothing that depends on *not* deploying someone can mean anything until this lands.
+2. **`[ITEM-039]`** Fatigue & medical-bay downtime, on top of the bench. Numbers are set and
+   calibrated against a man down (−21 wins in 100).
 
 ## 🧊 Backlog — not yet queued
-- **`[ITEM-039]`** Fatigue & medical-bay downtime. No numbers, no acceptance criteria yet — a
-  design pass before it can be Ready.
+- Nothing.
 
 ## ⚠️ Left open by finished work
 - **ITEM-019**: the sweep's policy neither sneaks nor throws stones, so the balance sweep does
@@ -57,10 +58,12 @@ during a match, roles, and a roster that outlives the match.
   free server-rolled recruit — no cost and no pool, since no economy exists to price either
   yet. Durable Objects would still need one more `Db` adapter; none is written.
 - **ITEM-037**: recruiting is an API route only (`POST /api/roster/recruit`); no client screen
-  calls it yet, so in the game a dead slot stays empty until one does.
+  calls it yet, so in the game a dead slot stays empty until one does. `[ITEM-042]`'s roster
+  screen closes this.
 - **ITEM-038**: a bug caught in its own testing — `derive(sheet).maxHp` ignores a character's
   own maxHp trait (Juggernaut's +25); fixed with `maxHpOf`, which every roster ceiling now uses
-  instead. Fatigue and medical-bay downtime split to `[ITEM-039]`, not designed yet.
+  instead. Fatigue and medical-bay downtime split to `[ITEM-039]`, now designed on top of the
+  bench (`[ITEM-042]`).
 - **ITEM-004 / ITEM-014 / ITEM-017 / ITEM-024 / ITEM-034**: nobody has played peer-to-peer in two
   live browsers since the transport cutover (the online end screen included). Agreement is
   covered by the network, digest and rewind tests only.

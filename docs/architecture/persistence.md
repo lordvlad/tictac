@@ -256,9 +256,10 @@ player is building stays exactly where it was, one row per past occupant of
 the slot. Refused with `400` if every slot is already held: there is nothing
 to fill.
 
-> **Not yet**: fatigue from consecutive deployments and medical-bay downtime
-> that temporarily lowers baseline AP and morale are `[ITEM-039]` — a
-> live-combat-system change, not a persistence one, and not designed yet.
+> **Not yet**: a roster is exactly a squad, so everyone deploys every match.
+> The bench (`[ITEM-042]`, six kept, one to four deployed, stated by
+> character id) and, on top of it, fatigue and medical-bay downtime
+> (`[ITEM-039]`, two new roster columns) are designed and Ready.
 
 ---
 
