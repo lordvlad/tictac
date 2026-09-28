@@ -5,6 +5,7 @@ import { ITEMS, ItemId } from '../core/Items'
 import { MELEE, MeleeId } from '../core/Melee'
 import { TEMPERAMENTS } from '../core/Morale'
 import { resolveTraits, TRAITS, type TraitId } from '../core/Traits'
+import { ROLES, RoleId } from '../core/Roles'
 import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
 import type { EngineContext } from '../engine'
 import {
@@ -29,6 +30,7 @@ import {
   unfitAttachment,
   type SquadLoadout,
   type UnitLoadout,
+  setRole,
 } from '../game/Loadout'
 import { icon } from './icons'
 import { LoadoutScene } from '../render/LoadoutScene'
@@ -43,6 +45,7 @@ type LoadoutAction =
   | { kind: 'grenade'; id: GrenadeId; delta: number }
   | { kind: 'item'; id: ItemId; delta: number }
   | { kind: 'attachment'; id: AttachmentId; delta: number }
+  | { kind: 'role'; id: RoleId }
   | { kind: 'deploy' }
 
 /**
@@ -152,6 +155,9 @@ export class LoadoutScreen {
       case 'attachment':
         if (action.delta > 0) fitAttachment(this.loadout, this.selected, action.id)
         else unfitAttachment(this.loadout, this.selected, action.id)
+        break
+      case 'role':
+        setRole(this.loadout, this.selected, action.id)
         break
       case 'deploy':
         this.deployed.resolve(this.loadout)
@@ -347,6 +353,13 @@ export class LoadoutScreen {
       <div class="loadout-panel">
         <div class="loadout-panel-head">${name}</div>
 
+        <div class="loadout-section">Role</div>
+        ${Object.values(RoleId)
+          .map((id) =>
+            pick(`role-${id}`, ROLES[id].name, unit.role === id, true, { kind: 'role', id }),
+          )
+          .join('')}
+
         <div class="loadout-section">Weapon</div>
         ${Object.values(WeaponId).map(weapon).join('')}
 
@@ -499,6 +512,7 @@ export class LoadoutScreen {
              ${LoadoutScreen.actionAttr({ kind: 'select', index })}>
           <img class="squad-portrait" src="${this.portraits.getPortrait(this.faction, index)}" alt="${name}" />
           <div class="squad-name">${name}</div>
+          <div class="loadout-card-role" title="${ROLES[unit.role].description}">${icon(`role-${unit.role}`)}${ROLES[unit.role].name}</div>
           <div class="loadout-card-kit">
             ${icon(`weapon-${unit.weaponId}`, 'big')}
             ${icon(`ammo-${unit.ammoId}`, 'big')}
@@ -557,6 +571,10 @@ export class LoadoutScreen {
     for (const id of unit.attachments) {
       for (const granted of ATTACHMENTS[id].traits) traits.push({ id: granted, worn: true })
     }
+    // The role's own training, the same "worn" glyph as gear: dropped the
+    // instant a different role is picked, the same as a vest taken off.
+    const roleTrait = ROLES[unit.role].trait
+    if (roleTrait) traits.push({ id: roleTrait, worn: true })
 
     // Every number here is what the unit will deploy with, traits folded in,
     // because the card is being used to decide kit: a Nimble soldier who reads

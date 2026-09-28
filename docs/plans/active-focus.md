@@ -28,16 +28,13 @@ during a match, roles, and a roster that outlives the match.
 ---
 
 ## 🔄 In Progress
-- Nothing in flight. `[ITEM-040]` (the animations combat never got) finished on 2026-09-27: a
-  blow, a throw, an item and a reload are visible on the body, and a crouched unit fires,
-  reloads and watches without standing up — crouched actions are additive upper-body overlays
-  on the held stance.
+- Nothing in flight. `[ITEM-010]` (roles on the loadout screen) finished on 2026-09-27: Medic,
+  Scout and Marksman each narrow the crate and earn one trait; Rifleman, the pre-existing
+  default, is untouched.
 
 ## 📋 Ready — pull in this order
 1. **`[ITEM-037]`** Recruits fill an empty roster slot. Persistence marks the dead and leaves
    the slot empty on purpose; where new people come from is its own mechanic.
-2. **`[ITEM-010]`** Roles on the loadout screen. Independent of the others; mostly UI over
-   `LOADOUT_LIMITS`.
 
 ## 🧊 Backlog — not yet queued
 - **`[ITEM-039]`** Fatigue & medical-bay downtime. No numbers, no acceptance criteria yet — a
@@ -68,6 +65,8 @@ during a match, roles, and a roster that outlives the match.
   source pack has no thrust. Working a door turns the unit for the eye only (`targetYaw`): the
   rules' `heading`, which decides attacks from behind, is deliberately left where it was, so a
   soldier who opens a door still has the back the rules gave it.
+- **ITEM-010**: the balance sweep's policy never picks a role, so it plays every match as
+  Rifleman — unrestricted, no trait — and measures none of the three specialisations.
 
 ---
 

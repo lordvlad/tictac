@@ -2,6 +2,7 @@ import { Faction, RULES, SQUAD_SIZE } from '../config'
 import type { MapOptions } from '../core/MapGenerator'
 import { AmmoId, GrenadeId, GRENADES, type ShotMode, type WeaponId } from '../core/Arsenal'
 import type { AttachmentId } from '../core/Attachments'
+import { RoleId } from '../core/Roles'
 import { MELEE, MeleeId } from '../core/Melee'
 import { type CharacterSheet, rollSquadSheets } from '../core/Characters'
 import type { MoraleBreak } from '../core/Morale'
@@ -44,6 +45,8 @@ export interface SquadPlan {
   attachments?: readonly AttachmentId[]
   /** Every unit's sidearm; fists when absent. */
   sidearm?: MeleeId
+  /** Every unit's role; {@link RoleId.Rifleman} — unrestricted — when absent. */
+  role?: RoleId
   /**
    * Whether this side's policy may go on watch. Policy, not kit — here so a
    * sweep can price the ability by taking it away from one side.
@@ -78,6 +81,7 @@ export function planToLoadout(plan: SquadPlan): SquadLoadout {
     ) as Record<ItemId, number>,
     attachments: [...(plan.attachments ?? [])],
     sidearm: plan.sidearm ?? MeleeId.Fists,
+    role: plan.role ?? RoleId.Rifleman,
   }))
 }
 

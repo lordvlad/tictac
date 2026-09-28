@@ -41,6 +41,12 @@ export const TraitId = {
   Teamplayer: 'teamplayer',
   /** Innate predisposition: untouched by what happens to squadmates, for good or ill. */
   Loner: 'loner',
+  /** Role: a medic's hands, steady enough that a wound never gets away from them. */
+  RoleMedic: 'roleMedic',
+  /** Role: trained to move without being pinned down. */
+  RoleScout: 'roleScout',
+  /** Role: trained on the long gun — distance costs less, crouched costs nothing. */
+  RoleMarksman: 'roleMarksman',
 } as const
 export type TraitId = (typeof TraitId)[keyof typeof TraitId]
 
@@ -233,6 +239,27 @@ export const TRAITS: Record<TraitId, TraitSpec> = {
     description: 'Shrugs off squadmates falling or breaking, and takes nothing from their kills or their company.',
     effects: {},
   },
+  // Role: granted the moment a role is chosen on the loadout screen
+  // (`TraitSource.Role`) — training carried into the fight, not weight a
+  // soldier is wearing and not something they were born with.
+  [TraitId.RoleMedic]: {
+    id: TraitId.RoleMedic,
+    name: 'Combat Medic',
+    description: 'Trained to treat a wound before it opens: never bleeds.',
+    effects: { bleedImmune: true },
+  },
+  [TraitId.RoleScout]: {
+    id: TraitId.RoleScout,
+    name: 'Scout',
+    description: 'Trained to keep moving: +6 evasion, and every step costs a sixth less.',
+    effects: { evasion: 6, moveCost: -0.15 },
+  },
+  [TraitId.RoleMarksman]: {
+    id: TraitId.RoleMarksman,
+    name: 'Marksman',
+    description: 'Trained on the long gun: a fifth less lost to distance, +8 accuracy crouched.',
+    effects: { rangeFalloff: -0.2, accuracyCrouched: 8 },
+  },
 }
 
 /**
@@ -302,8 +329,9 @@ export const NO_TRAITS: ResolvedTraits = {
  * that genuinely must care: Strength cancels what *heavy gear* does to a
  * soldier, and cancelling a limp instead would be a different game.
  *
- * Three, not four: worn kit and a fitted attachment are both gear, and no rule
- * has ever wanted to tell a vest from a scope.
+ * Four: worn kit and a fitted attachment are both gear, and no rule has ever
+ * wanted to tell a vest from a scope — but training is not weight a soldier
+ * carries, so Strength does not get a say over what a role earns.
  */
 export const TraitSource = {
   /** Born with it. */
@@ -312,6 +340,8 @@ export const TraitSource = {
   Wound: 'wound',
   /** Carried, worn or fitted. */
   Gear: 'gear',
+  /** Trained for it, chosen on the loadout screen. */
+  Role: 'role',
 } as const
 export type TraitSource = (typeof TraitSource)[keyof typeof TraitSource]
 

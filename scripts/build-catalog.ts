@@ -21,6 +21,7 @@ import { CRATE_FIRE, SURFACES } from '../src/core/Surfaces'
 import { PREDISPOSITIONS, steadyChance, TEMPERAMENTS } from '../src/core/Morale'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
+import { ROLES, RoleId } from '../src/core/Roles'
 import {
   TRAITS,
   type TraitEffects,
@@ -115,6 +116,15 @@ function fittedTraitIds(): Map<TraitId, AttachmentId> {
   return fitted
 }
 
+function roleTraitIds(): Map<TraitId, RoleId> {
+  const trained = new Map<TraitId, RoleId>()
+  for (const id of Object.values(RoleId)) {
+    const trait = ROLES[id].trait
+    if (trait) trained.set(trait, id)
+  }
+  return trained
+}
+
 function woundTraitIds(): Set<TraitId> {
   const wounds = new Set<TraitId>()
   for (const id of woundTraits(1, 100)) wounds.add(id)
@@ -127,6 +137,7 @@ function build(): string {
   const worn = wornTraitIds()
   const fitted = fittedTraitIds()
   const wounds = woundTraitIds()
+  const trained = roleTraitIds()
 
   const source = (id: TraitId): string => {
     const from: string[] = []
@@ -136,6 +147,8 @@ function build(): string {
     if (item) from.push(`worn (${ITEMS[item].name})`)
     const mod = fitted.get(id)
     if (mod) from.push(`fitted (${ATTACHMENTS[mod].name})`)
+    const role = trained.get(id)
+    if (role) from.push(`role (${ROLES[role].name})`)
     return from.join(', ') || 'unreachable'
   }
 

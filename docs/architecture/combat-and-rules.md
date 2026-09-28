@@ -3,7 +3,7 @@ title: "Combat, Ballistics & Rule Engine"
 id: "ARCH-COMBAT-RULES"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-17"
+lastReviewed: "2026-09-27"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Characters.ts"
@@ -17,6 +17,7 @@ appliesTo:
   - "src/game/Breakdown.ts"
   - "src/core/Traits.ts"
   - "src/core/Items.ts"
+  - "src/core/Roles.ts"
 relatedDocs:
   - "docs/architecture/overview.md"
   - "docs/design/gdd/combat-mechanics.md"
@@ -170,9 +171,10 @@ The fold is **source-blind by default, with a source-aware fold beside it** rath
 place of it. Source-blindness is the property that lets a vest and a bloodline grant the same
 modifier without either knowing the other exists, and it is still what every rule reads.
 
-- `TraitSource` is `innate | wound | gear` — three, not four, because worn kit and a fitted
-  attachment are both gear and no rule has wanted to tell a vest from a scope. A `SourcedTrait`
-  is an id together with its source.
+- `TraitSource` is `innate | wound | gear | role`. Worn kit and a fitted attachment are both
+  gear, since no rule has wanted to tell a vest from a scope — but a role (`ITEM-010`) is
+  training a unit keeps whatever it is carrying, so it gets a source `gearRelief` never
+  touches. A `SourcedTrait` is an id together with its source.
 - `resolveSourcedInto(out, traits, source?)` is the same fold over tagged traits, filtered to
   one source when asked. With no source it is exactly the source-blind fold. `resolveTraits` /
   `resolveTraitsInto` are unchanged and remain the default; a unit keeps a full fold and a
@@ -197,6 +199,19 @@ this side holds only a stock copy of the other squad's kit.
 
 Current values for every trait, status, attachment and piece of kit named here live in the
 generated [status and trait catalogue](../design/gdd/status-and-trait-catalog.md).
+
+#### Roles: a slice of the crate, and one trait for training on it
+`RoleId` (`src/core/Roles.ts`) is Medic, Scout, Marksman, or the unrestricted default,
+Rifleman — chosen per member on the loadout screen (`UnitLoadout.role`, stamped by
+`applyUnitLoadout`, replicated the same way the rest of the loadout is: both peers already
+hold the full `SquadLoadout` from the `ready` handshake). A `RoleSpec` narrows which weapon,
+attachment and item ids `canEquipWeapon`/`canFitAttachment`/`canAddItem`
+(`src/game/Loadout.ts`) will approve — absent means every row in the crate, as before roles
+existed — and names the one trait the role's training earns, folded in with `TraitSource.Role`
+the moment it is picked. Changing role drops whatever the new role cannot cover: the weapon
+falls back to the role's first allowed choice (its rail trimmed like a downgrade), and
+disallowed attachments and items are cleared — `remaining` counts what is listed, so nothing
+dropped needs a refund.
 
 ---
 

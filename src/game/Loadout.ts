@@ -2,6 +2,7 @@ import { MeleeId } from '../core/Melee'
 import { AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { ItemId } from '../core/Items'
+import { ROLES, RoleId, roleAllowsAttachment, roleAllowsItem, roleAllowsWeapon } from '../core/Roles'
 import type { Soldier } from '../entities/Soldier'
 
 /**
@@ -32,6 +33,12 @@ export interface UnitLoadout {
    * {@link MeleeId.Fists} is the empty slot: nothing to carry, always there.
    */
   sidearm: MeleeId
+  /**
+   * What this member has trained for. Gates which crate rows they may draw
+   * from ({@link ROLES}) and grants the one trait that training earns them.
+   * {@link RoleId.Rifleman} is the empty slot: no gate, no trait.
+   */
+  role: RoleId
 }
 
 /** What the whole squad has to share out, by id. */
@@ -140,6 +147,7 @@ export function defaultLoadout(): SquadLoadout {
     },
     attachments: [],
     sidearm: MeleeId.Fists,
+    role: RoleId.Rifleman,
   }))
 }
 
@@ -200,7 +208,12 @@ export function railSpace(unit: UnitLoadout): { used: number; total: number } {
   return { used, total: WEAPONS[unit.weaponId].slots }
 }
 
-/** Keeping the weapon you already hold is always allowed, spare or not. */
+/**
+ * Keeping the weapon you already hold is always allowed, spare or not — even
+ * one a role change made illegal for a fresh pick, so a soldier is never left
+ * holding nothing rather than the wrong thing. A different weapon has to
+ * clear both the role's gate and the crate's stock.
+ */
 export function canEquipWeapon(
   loadout: SquadLoadout,
   index: number,
@@ -209,7 +222,28 @@ export function canEquipWeapon(
 ): boolean {
   const unit = loadout[index]
   if (!unit) return false
-  return unit.weaponId === weaponId || remaining(loadout, pool).weapons[weaponId] > 0
+  if (unit.weaponId === weaponId) return true
+  if (!roleAllowsWeapon(unit.role, weaponId)) return false
+  return remaining(loadout, pool).weapons[weaponId] > 0
+}
+
+/**
+ * Trading three slots of rifle for one of shotgun — or a role change ruling
+ * an attachment out — cannot leave two mods hanging off nothing. The overflow
+ * is dropped from the end, so the mods chosen first survive, and no refund is
+ * needed: `remaining` counts what is listed, so anything dropped is back in
+ * the crate by definition.
+ */
+function trimAttachmentsToRail(unit: UnitLoadout): void {
+  const total = WEAPONS[unit.weaponId].slots
+  let used = 0
+  for (let at = 0; at < unit.attachments.length; at++) {
+    used += ATTACHMENTS[unit.attachments[at]!].slots
+    if (used > total) {
+      unit.attachments.length = at
+      return
+    }
+  }
 }
 
 export function equipWeapon(
@@ -221,18 +255,31 @@ export function equipWeapon(
   if (!canEquipWeapon(loadout, index, weaponId, pool)) return
   const unit = loadout[index]!
   unit.weaponId = weaponId
+  trimAttachmentsToRail(unit)
+}
 
-  // Trading three slots of rifle for one of shotgun cannot leave two mods
-  // hanging off nothing. The overflow is dropped from the end, so the mods
-  // chosen first survive the swap, and no refund is needed: `remaining` counts
-  // what is listed, so anything dropped is back in the crate by definition.
-  const total = WEAPONS[weaponId].slots
-  let used = 0
-  for (let at = 0; at < unit.attachments.length; at++) {
-    used += ATTACHMENTS[unit.attachments[at]!].slots
-    if (used > total) {
-      unit.attachments.length = at
-      return
+/**
+ * Every role can be chosen freely: nothing in the crate is spent on training.
+ * What it costs is retroactive — a weapon, attachments or items the new role
+ * does not cover are dropped rather than refused, the same "overflow goes
+ * back to the crate" rule {@link trimAttachmentsToRail} already keeps for a
+ * weapon swap. A soldier is never left holding kit their new role forbids.
+ */
+export function setRole(loadout: SquadLoadout, index: number, role: RoleId): void {
+  const unit = loadout[index]
+  if (!unit) return
+  unit.role = role
+  const spec = ROLES[role]
+  if (spec.weapons && !spec.weapons.includes(unit.weaponId)) {
+    unit.weaponId = spec.weapons[0]!
+    trimAttachmentsToRail(unit)
+  }
+  if (spec.attachments) {
+    unit.attachments = unit.attachments.filter((id) => spec.attachments!.includes(id))
+  }
+  if (spec.items) {
+    for (const id of Object.values(ItemId)) {
+      if (!spec.items.includes(id)) unit.items[id] = 0
     }
   }
 }
@@ -332,6 +379,7 @@ export function canAddItem(
 ): boolean {
   const unit = loadout[index]
   if (!unit) return false
+  if (!roleAllowsItem(unit.role, id)) return false
   if (itemsCarried(unit) >= carrySlots) return false
   return remaining(loadout, pool).items[id] > 0
 }
@@ -367,6 +415,7 @@ export function canFitAttachment(
 ): boolean {
   const unit = loadout[index]
   if (!unit || unit.attachments.includes(id)) return false
+  if (!roleAllowsAttachment(unit.role, id)) return false
   const rail = railSpace(unit)
   if (ATTACHMENTS[id].slots > rail.total - rail.used) return false
   return remaining(loadout, pool).attachments[id] > 0
@@ -404,6 +453,7 @@ export function unfitAttachment(loadout: SquadLoadout, index: number, id: Attach
  */
 export function applyUnitLoadout(soldier: Soldier, unit: UnitLoadout): void {
   soldier.equip(unit.weaponId, unit.ammoId)
+  soldier.role = unit.role
   // What was packed, plus what everybody has anyway.
   for (const kind of Object.values(GrenadeId)) {
     soldier.grenades[kind] = (unit.grenades[kind] ?? 0) + GRENADES[kind].issued

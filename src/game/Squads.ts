@@ -112,6 +112,7 @@ export class Squads {
       // never handed out: the rail is live state.
       attachments: [...soldier.weapon.attachments],
       sidearm: soldier.sidearm,
+      role: soldier.role,
     }))
   }
 

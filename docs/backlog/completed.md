@@ -1714,6 +1714,69 @@ to the doorway; crouched, the same door is `crouch` + `interact:additive` with t
 
 ---
 
+### [ITEM-010] Roles on the Loadout Screen
+**Completed Date:** 2026-09-27  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+Every unit was interchangeable apart from its generated character sheet: the crate had no
+opinion about who drew from which row.
+
+#### Key Changes
+- **`src/core/Roles.ts`**: `RoleId` (Rifleman, Medic, Scout, Marksman) and `ROLES`, a
+  `RoleSpec` per id — the weapon, attachment and item ids it may draw (absent means every row,
+  which is what Rifleman is: the pre-existing default, unrestricted) and the one trait its
+  training earns. Lives in `core/` rather than `game/Loadout.ts` so `entities/Soldier.ts` can
+  read it without a reverse dependency on the game layer.
+- **A fourth `TraitSource`**: `role`, beside `innate | wound | gear`. A role's trait folds in
+  the moment it is picked (`Soldier.refreshTraits`, `TraitSource.Role`) and is deliberately
+  outside `gearRelief`'s reach — training is not weight a soldier is carrying, so Strength
+  does not cancel any of it. Three new traits: `roleMedic` (never bleeds), `roleScout` (+6
+  evasion, steps a sixth cheaper) and `roleMarksman` (a fifth less range falloff, +8 accuracy
+  crouched).
+- **`UnitLoadout.role`** travels the same path every other slot does: `defaultLoadout` seeds
+  Rifleman, `applyUnitLoadout` stamps it onto the soldier before the first trait fold,
+  `Squads.loadoutOf` reads it back, and `squadLoadoutFrom` (`game/Recording.ts`) validates a
+  file's or a peer's role the same way it validates a sidearm — refused if this build does not
+  know it, defaulted to Rifleman if the slot predates roles.
+- **The gate**: `canEquipWeapon`, `canFitAttachment` and `canAddItem` (`game/Loadout.ts`) check
+  the holder's role before the crate's stock. `setRole` is the one new mutator — free to press,
+  but a role that cannot cover what a unit is already holding drops it: the weapon falls back
+  to the role's first allowed choice (rail trimmed the same way a downgrade trims it), and
+  disallowed attachments and items are cleared. `remaining()` counts what is listed, so nothing
+  dropped needs a refund.
+- **`LoadoutScreen.ts`**: a Role section above Weapon, four buttons, always pressable. The
+  squad card shows the picked role under the name and folds its trait into the sheet the same
+  way a worn vest or a fitted scope already does. Four new icons
+  (`role-rifleman/medic/scout/marksman`, `scripts/icons.json`).
+
+#### Measured
+`bun run balance` unaffected: every `SquadPlan` in `SimMatch.ts` defaults to
+`RoleId.Rifleman` — unrestricted, no trait — so the sweep's policy plays exactly as it did
+before roles existed.
+
+In a local-versus match in a browser: assigning Marksman to a Gatling-armed unit fell back to
+Rifle and disabled Shotgun; Scope and Bipod stayed pickable, Suppressor did not. Assigning
+Medic disabled the Nullweave Vest, Plate Carrier and Keys rows and left Stim Pack, First Aid
+Kit and Repair Kit open; the card showed "COMBAT MEDIC". The match deployed and played a turn
+with no console errors.
+
+#### Found on the way
+- The generated [status and trait catalogue](../design/gdd/status-and-trait-catalog.md) reads
+  its sources from `ITEMS`/`ATTACHMENTS`/wounds/innate only; `scripts/build-catalog.ts` needed
+  a fourth lookup (`roleTraitIds`) or the three new traits would have printed as `unreachable`.
+
+#### Acceptance Criteria
+- [x] Medic, Scout and Marksman each narrow which weapon/attachment/item rows a unit may draw
+      from, and each grants one trait nothing else does.
+- [x] Rifleman (the pre-existing default) is unrestricted and grants nothing, so every squad
+      that never touches the Role row plays exactly as before.
+- [x] A role change never leaves a unit holding kit the new role forbids.
+- [x] No rules change for a role-blind squad: the pinned balance sweep is identical.
+
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

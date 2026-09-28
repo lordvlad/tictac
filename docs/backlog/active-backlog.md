@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-26"
+lastReviewed: "2026-09-27"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -20,24 +20,6 @@ tags: ["backlog", "tasks", "active"]
 it is done. It is not ordered and says nothing about what happens next: that is the
 [focus board](../plans/active-focus.md). Finished and rejected items move to the
 [archive](./completed.md).
-
----
-
-### [ITEM-010] Roles on the Loadout Screen
-**Type:** Feature  
-**Priority:** P2  
-**Status:** Ready  
-**Milestone:** M4 — Competitive & Meta Roster  
-
-#### Why
-Every unit is currently interchangeable apart from its generated character sheet.
-
-#### Change
-Medic, Scout, and Marksman roles gate which crate rows a unit may draw equipment from, each providing one unique role ability. Uses existing `LOADOUT_LIMITS` machinery.
-
-#### Affected Files
-- `src/hud/LoadoutScreen.ts`
-- `src/game/Loadout.ts`
 
 ---
 

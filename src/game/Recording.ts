@@ -5,6 +5,7 @@ import { AMMO, type AmmoId, GRENADES, type GrenadeId, WEAPONS, type WeaponId } f
 import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
 import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
 import { ITEMS, type ItemId } from '../core/Items'
+import { ROLES, RoleId } from '../core/Roles'
 import type { ResolvedHit } from './Combat'
 import { RpcMethods } from './JsonRpc'
 import type { SquadLoadout, UnitLoadout } from './Loadout'
@@ -246,6 +247,12 @@ export function squadLoadoutFrom(raw: unknown, what: string): SquadLoadout {
       throw new Error(`${what}[${i}]: unknown sidearm "${String(sidearm)}"`)
     }
     const attachments = Array.isArray(unit.attachments) ? unit.attachments : []
+    // Absent for the same reason `sidearm` is: files and peers older than the
+    // role slot never named one, and fought as plain riflemen.
+    const role = unit.role ?? RoleId.Rifleman
+    if (typeof role !== 'string' || !Object.hasOwn(ROLES, role)) {
+      throw new Error(`${what}[${i}]: unknown role "${String(role)}"`)
+    }
     return {
       weaponId: unit.weaponId as WeaponId,
       ammoId: unit.ammoId as AmmoId,
@@ -255,6 +262,7 @@ export function squadLoadoutFrom(raw: unknown, what: string): SquadLoadout {
         (id): id is AttachmentId => typeof id === 'string' && Object.hasOwn(ATTACHMENTS, id),
       ),
       sidearm: sidearm as MeleeId,
+      role: role as RoleId,
     }
   })
 }

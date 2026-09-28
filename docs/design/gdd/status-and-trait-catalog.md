@@ -3,7 +3,7 @@ title: "GDD: Status, Trait & Worn Kit Catalogue"
 id: "GDD-CATALOG"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-25"
+lastReviewed: "2026-09-27"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Traits.ts"
@@ -67,6 +67,9 @@ be born with the same property a piece of kit grants.
 | `daredevil` | Daredevil | morale (§7) | born with |
 | `teamplayer` | Teamplayer | morale (§7) | born with |
 | `loner` | Loner | morale (§7) | born with |
+| `roleMedic` | Combat Medic | cannot bleed | role (Medic) |
+| `roleScout` | Scout | +6 evasion, -15% step cost | role (Scout) |
+| `roleMarksman` | Marksman | +8 accuracy crouched, -20% range falloff | role (Marksman) |
 
 ### 2.1 Conditional effects
 

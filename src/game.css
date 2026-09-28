@@ -2116,6 +2116,23 @@ canvas {
   gap: 12px;
 }
 
+/* The role badge, between the name and the kit row: a small caption rather
+   than a coloured tag, since it reads with the icon rather than needing a
+   colour of its own the way HP/AP bars do. */
+.loadout-card-role {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--hud-dim);
+}
+
+.squad-card.selected .loadout-card-role {
+  color: var(--hud-accent);
+}
+
 .loadout-card-kit {
   display: flex;
   flex-wrap: wrap;

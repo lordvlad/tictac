@@ -9,6 +9,7 @@ import { Rng } from '../../src/core/rng'
 import { World } from '../../src/ecs/World'
 import { Soldier } from '../../src/entities/Soldier'
 import { applyUnitLoadout } from '../../src/game/Loadout'
+import { RoleId } from '../../src/core/Roles'
 
 export interface SoldierSpec {
   faction?: Faction
@@ -21,6 +22,7 @@ export interface SoldierSpec {
   items?: Partial<Record<ItemId, number>>
   attachments?: AttachmentId[]
   sidearm?: MeleeId
+  role?: RoleId
 }
 
 /**
@@ -53,6 +55,7 @@ export function headlessSoldier(spec: SoldierSpec = {}): Soldier {
     ) as Record<ItemId, number>,
     attachments: [...(spec.attachments ?? [])],
     sidearm: spec.sidearm ?? MeleeId.Fists,
+    role: spec.role ?? RoleId.Rifleman,
   })
   return soldier
 }

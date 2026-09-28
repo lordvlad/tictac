@@ -34,6 +34,7 @@ import {
 } from '../core/Traits'
 import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
 import { ITEMS, ItemId } from '../core/Items'
+import { ROLES, RoleId } from '../core/Roles'
 import type { Grid, Tile } from '../core/Grid'
 import type { World } from '../ecs/World'
 import {
@@ -105,6 +106,13 @@ export class Soldier {
    * land on top of these, and they change whenever the pouch does.
    */
   private derived: DerivedStats
+  /**
+   * Battlefield specialisation from the loadout screen. Not a component: both
+   * peers already hold the full {@link UnitLoadout} it came from, the same way
+   * `sheet` does, so there is nothing here a shooter needs replicated that its
+   * one granted trait does not already put in `resolvedTraits`.
+   */
+  private _role: RoleId = RoleId.Rifleman
 
   /** Sheet plus carried gear, refolded whenever either could have changed. */
   private readonly resolvedTraits: ResolvedTraits = { ...NO_TRAITS }
@@ -192,6 +200,8 @@ export class Soldier {
     for (const id of woundTraits(this.health.hp, this.health.maxHp)) {
       this.sourcedTraits.push({ id, source: TraitSource.Wound })
     }
+    const roleTrait = ROLES[this._role].trait
+    if (roleTrait) this.sourcedTraits.push({ id: roleTrait, source: TraitSource.Role })
     for (const id of Object.values(ItemId)) {
       if ((this.items[id] ?? 0) <= 0) continue
       const granted = ITEMS[id].traits
@@ -549,6 +559,15 @@ export class Soldier {
   }
   set sidearm(value: MeleeId) {
     this.inventory.sidearm = value
+  }
+  /** What this soldier trained for; refolds traits, since a role can grant one. */
+  get role(): RoleId {
+    return this._role
+  }
+  set role(value: RoleId) {
+    if (this._role === value) return
+    this._role = value
+    this.refreshTraits()
   }
   get meleeSkill(): number {
     return this.derived.meleeSkill

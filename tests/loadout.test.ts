@@ -4,6 +4,7 @@ import { AmmoId, GRENADES, GrenadeId, WEAPONS, type Weapon, WeaponId } from '../
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { ITEMS, ItemId } from '../src/core/Items'
 import { resolveTraits, type TraitId } from '../src/core/Traits'
+import { RoleId } from '../src/core/Roles'
 import {
   LOADOUT_LIMITS,
   addGrenade,
@@ -404,6 +405,7 @@ describe('Stamping a loadout onto a soldier', () => {
       },
       attachments: [],
       sidearm: MeleeId.Fists,
+      role: RoleId.Rifleman,
     })
 
     expect(soldier.weaponId).toBe(WeaponId.Sniper)
@@ -444,6 +446,7 @@ describe('Stamping a loadout onto a soldier', () => {
       },
       attachments: [AttachmentId.Scope, AttachmentId.Suppressor],
       sidearm: MeleeId.Fists,
+      role: RoleId.Rifleman,
     })
 
     expect(soldier.weapon.attachments).toEqual([AttachmentId.Scope, AttachmentId.Suppressor])
