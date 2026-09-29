@@ -8,11 +8,12 @@ import { Rng } from '../src/core/rng'
 import { World } from '../src/ecs/World'
 import { HealthComponent } from '../src/ecs/components'
 import { fireWeapon } from '../src/game/Combat'
-import { parseRecording, RECORDING_VERSION, Recorder, startingHpFrom } from '../src/game/Recording'
+import { deploymentStateFrom, parseRecording, RECORDING_VERSION, Recorder } from '../src/game/Recording'
 import { Squads } from '../src/game/Squads'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
 import type { CombatRecording } from '../src/game/Recording'
+import { stockSquads } from './support/squads'
 
 /**
  * No canvas stub here either — a recording is command data, and if anything in
@@ -103,9 +104,8 @@ describe('A simulated match writes down what it did', () => {
   test('both squads carry their kit, so a replay deploys the same fight', () => {
     const { recording } = recorded(7)
     for (const faction of [Faction.Blue, Faction.Red] as const) {
-      expect(recording.header.loadouts[faction]).toHaveLength(SQUAD_SIZE)
-      expect(recording.header.sheets[faction]).toHaveLength(SQUAD_SIZE)
-      expect(recording.header.loadouts[faction][0]?.weaponId).toBe(WeaponId.Rifle)
+      expect(recording.header.squads[faction]).toHaveLength(SQUAD_SIZE)
+      expect(recording.header.squads[faction][0]?.loadout?.weaponId).toBe(WeaponId.Rifle)
     }
   })
 })
@@ -117,7 +117,7 @@ describe('A recording survives the round trip to a file', () => {
     expect(parsed.events).toHaveLength(recording.events.length)
     expect(parsed.header.seed).toBe(recording.header.seed)
     expect(parsed.header.source).toBe('sim')
-    expect(parsed.header.loadouts[Faction.Red][0]?.ammoId).toBe(AmmoId.Standard)
+    expect(parsed.header.squads[Faction.Red][0]?.loadout?.ammoId).toBe(AmmoId.Standard)
   })
 
   test('a future format is refused rather than half-read', () => {
@@ -143,14 +143,14 @@ describe('A recording survives the round trip to a file', () => {
   test('a handshake command is refused: there is nobody to shake hands with', () => {
     const { recording } = recorded(7)
     const tampered = JSON.parse(JSON.stringify(recording))
-    tampered.events[0].command = { type: 'ready', sheets: [] }
+    tampered.events[0].command = { type: 'ready', squad: [] }
     expect(() => parseRecording(tampered)).toThrow(/ready/)
   })
 
   test('an unknown weapon is refused: a replay would show a different gun', () => {
     const { recording } = recorded(7)
     const tampered = JSON.parse(JSON.stringify(recording))
-    tampered.header.loadouts[Faction.Blue][0].weaponId = 'railgun'
+    tampered.header.squads[Faction.Blue][0].loadout.weaponId = 'railgun'
     expect(() => parseRecording(tampered)).toThrow(/railgun/)
   })
 })
@@ -165,14 +165,13 @@ describe('The recorder keeps the fight and drops the handshake', () => {
         source: 'live',
         createdAt: '',
         turnCap: null,
-        sheets: { [Faction.Blue]: [], [Faction.Red]: [] },
-        loadouts: { [Faction.Blue]: [], [Faction.Red]: [] },
+        squads: { [Faction.Blue]: [], [Faction.Red]: [] },
       },
       () => ({ turn: 3, faction: Faction.Red }),
     )
 
     recorder.record({ type: 'init', protocol: 1, build: 'test', seed: 1, seedLabel: '1' })
-    recorder.record({ type: 'ready', sheets: [], loadout: [] })
+    recorder.record({ type: 'ready', squad: [] })
     expect(recorder.eventCount).toBe(0)
 
     recorder.record({ type: 'endTurn', faction: Faction.Blue })
@@ -189,8 +188,7 @@ describe('The recorder keeps the fight and drops the handshake', () => {
         source: 'live',
         createdAt: '',
         turnCap: null,
-        sheets: { [Faction.Blue]: [], [Faction.Red]: [] },
-        loadouts: { [Faction.Blue]: [], [Faction.Red]: [] },
+        squads: { [Faction.Blue]: [], [Faction.Red]: [] },
       },
       () => ({ turn: 1, faction: Faction.Blue }),
     )
@@ -218,10 +216,15 @@ describe('A shot reports the dice it used', () => {
       [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: 2 + i, y: 2 })),
       [Faction.Red]: Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: 2 + i, y: 5 })),
     }
-    const squads = new Squads(world, grid, spawns, undefined, Faction.Blue, {
-      [Faction.Blue]: rollSquadSheets(new Rng(1)),
-      [Faction.Red]: rollSquadSheets(new Rng(2)),
-    })
+    const squads = new Squads(
+      world,
+      grid,
+      spawns,
+      stockSquads({
+        [Faction.Blue]: rollSquadSheets(new Rng(1)),
+        [Faction.Red]: rollSquadSheets(new Rng(2)),
+      }),
+    )
     return { world, grid, squads }
   }
 
@@ -282,10 +285,15 @@ describe('A world can be put back to an earlier moment', () => {
       [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: 2 + i, y: 2 })),
       [Faction.Red]: Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: 2 + i, y: 6 })),
     }
-    const squads = new Squads(world, grid, spawns, undefined, Faction.Blue, {
-      [Faction.Blue]: rollSquadSheets(new Rng(1)),
-      [Faction.Red]: rollSquadSheets(new Rng(2)),
-    })
+    const squads = new Squads(
+      world,
+      grid,
+      spawns,
+      stockSquads({
+        [Faction.Blue]: rollSquadSheets(new Rng(1)),
+        [Faction.Red]: rollSquadSheets(new Rng(2)),
+      }),
+    )
     const ids = squads.soldiers.map((soldier) => soldier.entityId)
     const victim = squads.byFaction[Faction.Red][0]!
 
@@ -310,13 +318,15 @@ describe('A world can be put back to an earlier moment', () => {
   })
 })
 
-describe('A starting HP read off the wire', () => {
-  test('a short squad keeps its wounds, and nothing or more than a squad is refused', () => {
-    // A kept roster with an empty slot states HP for only the people it has;
-    // dropping that array would deploy them all at full health on the peer's
-    // side while the referee deploys them wounded.
-    expect(startingHpFrom([40, 90, 1])).toEqual([40, 90, 1])
-    expect(startingHpFrom([])).toBeUndefined()
-    expect(startingHpFrom(Array.from({ length: SQUAD_SIZE + 1 }, () => 50))).toBeUndefined()
+describe('A soldier\'s session state, read off the wire', () => {
+  test('an entry with a bad or missing field is simply absent, not a reason to refuse the rest', () => {
+    // Safe now in a way a positional array never was: HP lives next to the
+    // sheet it belongs to, so a short squad cannot desynchronise it onto the
+    // wrong soldier — there is no neighbour for it to land on by mistake.
+    expect(deploymentStateFrom({ hp: 40, fatigue: 2 })).toEqual({ hp: 40, fatigue: 2 })
+    expect(deploymentStateFrom({ hp: 40 })).toEqual({ hp: 40 })
+    expect(deploymentStateFrom({ hp: 'forty' })).toBeUndefined()
+    expect(deploymentStateFrom({})).toBeUndefined()
+    expect(deploymentStateFrom(null)).toBeUndefined()
   })
 })

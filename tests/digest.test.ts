@@ -14,6 +14,7 @@ import {
 import { createGlobalRules } from '../src/ecs/globals'
 import { GLOBAL_ENTITY_ID, World } from '../src/ecs/World'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 import { compareDigests, digestWorld } from '../src/game/StateDigest'
 
 /** Two worlds dealt the same people, as two peers hold them after a handshake. */
@@ -25,12 +26,10 @@ function peer(seed = 5) {
     world,
     grid,
     { [Faction.Blue]: [{ x: 4, y: 4 }], [Faction.Red]: [{ x: 4, y: 9 }] },
-    undefined,
-    Faction.Blue,
-    {
+    stockSquads({
       [Faction.Blue]: rollSquadSheets(new Rng(seed)),
       [Faction.Red]: rollSquadSheets(new Rng(seed + 1)),
-    },
+    }),
   )
   for (const unit of squads.soldiers) unit.equip(WeaponId.Rifle, AmmoId.Standard)
   const digest = () => digestWorld(world, squads.soldiers.map((u) => u.entityId), 3)

@@ -3,13 +3,14 @@ title: "Persistence: Database Port, Migrations, Accounts & Rosters"
 id: "ARCH-PERSISTENCE"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-28"
+lastReviewed: "2026-09-29"
 appliesTo:
   - "src/server/**"
   - "scripts/serve-match.ts"
   - "src/game/Account.ts"
   - "src/game/Base64Url.ts"
   - "src/game/MatchEnd.ts"
+  - "src/game/Recording.ts"
   - "src/core/Characters.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
@@ -184,33 +185,35 @@ randomness.
 **Before the match.** `Referee.verifyRosters` runs once the header arrives: for
 each signed-in side, the deployed squad must *be* that player's active roster,
 character for character in slot order (`sanitizeSheet` both ways, compared as
-JSON) — **and its starting HP must be that roster's stored HP**, per slot.
-Anything else aborts the match — a match played with somebody else's people,
-or somebody else's wounds, must not settle. A signed-in side that omits
-`startingHp` entirely is refused the same way a wrong one is: absence would
-let a client always deploy at full health regardless of what the roster says.
-One player on both sides is refused for the same reason as the sheet check,
-and so is a signed-in player with nobody left on their roster. An anonymous
-side is skipped, not refused: an unregistered opponent is a perfectly good
-opponent who simply has nothing to keep.
+JSON) — **and each unit's `state.hp` must be that roster's stored HP**, per
+slot. Anything else aborts the match — a match played with somebody else's
+people, or somebody else's wounds, must not settle. A signed-in side whose
+deployment omits `state.hp` is refused the same way a wrong one is: absence
+would let a client always deploy at full health regardless of what the roster
+says. One player on both sides is refused for the same reason as the sheet
+check, and so is a signed-in player with nobody left on their roster. An
+anonymous side is skipped, not refused: an unregistered opponent is a
+perfectly good opponent who simply has nothing to keep.
 
 **A short roster deploys short-handed** (`ITEM-041`). The squad is the active
 roster in slot order with any empty slot closed up, and `Squads` fields exactly
-as many units as the header states sheets for — never topped up to
-`SQUAD_SIZE` with somebody nobody enlisted. `ready.hp` and
-`RecordingHeader.startingHp` carry one entry per deployed unit, one to
+as many units as the header states deployments for — never topped up to
+`SQUAD_SIZE` with somebody nobody enlisted. `ready.squad` and
+`RecordingHeader.squads` carry one `Deployment` per deployed unit, one to
 `SQUAD_SIZE` of them. The sweep prices it: `bun run balance -- --blueSize=3`
 takes Blue from 55 wins in 100 to 34.
 
 A starting HP has to be something both peers and the referee agree on
 *before the first digest*, so it cannot be injected by the referee after the
-fact — it travels on the wire, the same way sheets do: a client fetches its
-own roster's HP from `GET /api/roster`, sends it in `ready.hp` (parallel to
-`ready.sheets`), and the match's host folds both sides' `hp` into
-`RecordingHeader.startingHp` before sending `matchHeader`. `Squads`/`Soldier`
-then deploy each unit at that HP instead of full — the one behaviour change
-`ITEM-038` makes to a live match, and the reason `PROTOCOL_VERSION` and
-`RECORDING_VERSION` both moved for it.
+fact — it travels on the wire, on the same `Deployment` its sheet does
+(`[ITEM-043]`; before it, as a separate `startingHp` array matched to `sheets`
+by position only): a client fetches its own roster's HP from `GET
+/api/roster`, folds it into `state.hp` on its own `ready.squad`, and the
+match's host does the same for both sides before sending `matchHeader`.
+`Squads`/`Soldier` then deploy each unit at that HP instead of full — the one
+behaviour change `ITEM-038` makes to a live match, and the reason
+`PROTOCOL_VERSION` and `RECORDING_VERSION` both moved for it (and moved again
+for `ITEM-043` and `ITEM-041`, each for its own reshaping of the same header).
 
 **After the match.** `settlement()` in `src/game/MatchEnd.ts` is pure and reads
 the referee's own world the moment a side is wiped out. Every fate carries the
@@ -257,10 +260,11 @@ the slot. Refused with `400` if every slot is already held: there is nothing
 to fill.
 
 > **Not yet**: a roster is exactly a squad, so everyone deploys every match.
-> `[ITEM-043]` first replaces the header's parallel `sheets`/`loadouts`/`startingHp` arrays
-> with one deployment record per soldier; the bench (`[ITEM-042]`, six kept, one to four
-> deployed, stated by character id on that record) and, on top of it, fatigue and medical-bay
-> downtime (`[ITEM-039]`, in the same record's `state`) are designed and Ready.
+> The header's parallel `sheets`/`loadouts`/`startingHp` arrays are now one
+> `Deployment` record per soldier (`[ITEM-043]`, done); the bench (`[ITEM-042]`,
+> six kept, one to four deployed, stated by character id on that record) and,
+> on top of it, fatigue and medical-bay downtime (`[ITEM-039]`, in the same
+> record's `state`) are designed and Ready.
 
 ---
 

@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-28"
+lastReviewed: "2026-09-29"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -23,74 +23,10 @@ it is done. It is not ordered and says nothing about what happens next: that is 
 
 ---
 
-### [ITEM-043] One Deployment Record Per Soldier, Not Parallel Lists
-**Type:** Refactor  
-**Priority:** P2  
-**Status:** Ready — blocks `[ITEM-042]`  
-**Milestone:** M4 — Competitive & Meta Roster  
-
-#### Why
-A squad crosses the wire as several same-length arrays matched by position only: `sheets`,
-`loadouts`, `startingHp` on `RecordingHeader`; `sheets`, `loadout`, `hp` on `ready`. Nothing
-ties their lengths together. `[ITEM-041]` was exactly that failure: `startingHpFrom` enforced
-`length === SQUAD_SIZE` on its own array while `sheets` had already gone short, so a
-short-handed side's HP was silently dropped rather than read. `[ITEM-042]` wants to add a
-character id per soldier and `[ITEM-039]` wants to add fatigue; bolting each onto its own
-parallel array would make five lists that all have to agree, with the same failure mode times
-five.
-
-#### Change
-1. One shape, in `src/game/Recording.ts`:
-   ```ts
-   /** Session state for one deployed soldier: what a match starts them on top
-    *  of their sheet. A bag on purpose — hp today, fatigue next (`ITEM-039`),
-    *  room for whatever comes after without another wire shape. */
-   interface DeploymentState {
-     hp?: number
-     fatigue?: number
-   }
-   interface Deployment {
-     /** Present only for a kept roster (`ITEM-042`); absent for a rolled squad. */
-     characterId?: string
-     sheet: CharacterSheet
-     loadout: UnitLoadout
-     state?: DeploymentState
-   }
-   ```
-2. `ready.squad: Deployment[]` replaces `ready.sheets` + `ready.loadout` + `ready.hp`.
-   `RecordingHeader.squads: Record<Faction, Deployment[]>` replaces `sheets` + `loadouts` +
-   `startingHp`.
-3. One validator, `deploymentsFrom(raw, what)`, replaces `sheetsFrom`, `squadLoadoutFrom` and
-   `startingHpFrom`: one length rule (1 to `SQUAD_SIZE`) enforced once, on the one array every
-   field for a soldier actually lives in — a short squad cannot disagree with itself about how
-   short it is.
-4. Every reader moves from three positional arrays to one: `Squads`' constructor,
-   `Referee.verifyRosters`, `NetworkManager`, `main.ts`, `SimMatch`, `MatchHost`,
-   `MatchStore`, and the tests that build a header by hand.
-5. `PROTOCOL_VERSION` 2 → 3, `RECORDING_VERSION` 4 → 5 — the wire shape moved, not what it
-   means.
-
-#### Affected Files
-- `src/game/Recording.ts`, `src/game/NetworkManager.ts`, `src/game/Squads.ts`
-- `src/main.ts`, `src/sim/SimMatch.ts`, `src/sim/MatchHost.ts`, `src/server/Referee.ts`,
-  `src/server/MatchStore.ts`, `src/version.ts`
-- `docs/schemas/wire-shape-catalog.json` (regenerated)
-
-#### Acceptance Criteria
-- [ ] No behaviour change: every existing test passes against the new shape, and
-      `bun run balance` is byte-identical to before.
-- [ ] `deploymentsFrom` refuses a squad of 0 or more than `SQUAD_SIZE`, and every other refusal
-      `sheetsFrom`/`squadLoadoutFrom`/`startingHpFrom` made (unknown weapon, unknown sidearm,
-      malformed HP) still fires, now from one place.
-- [ ] A version-4 recording is refused with a stated reason, the same way a version-2 one is
-      today.
-
----
-
 ### [ITEM-042] The Bench: a Roster Bigger Than the Squad
 **Type:** Feature  
 **Priority:** P2  
-**Status:** Ready — pulled after `[ITEM-043]`, which it is built on  
+**Status:** Ready  
 **Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why

@@ -9,6 +9,7 @@ import { World } from '../src/ecs/World'
 import { HealthComponent, StanceComponent } from '../src/ecs/components'
 import { fireWeapon } from '../src/game/Combat'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 import { matchDice } from '../src/core/rng'
 
 /**
@@ -30,7 +31,7 @@ function flatWorld(): { world: World; grid: Grid; squads: Squads } {
     [Faction.Blue]: rollSquadSheets(new Rng(1)),
     [Faction.Red]: rollSquadSheets(new Rng(2)),
   }
-  return { world, grid, squads: new Squads(world, grid, spawns, undefined, Faction.Blue, sheets) }
+  return { world, grid, squads: new Squads(world, grid, spawns, stockSquads(sheets)) }
 }
 
 const dice = matchDice(1)

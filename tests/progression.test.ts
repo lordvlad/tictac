@@ -13,6 +13,7 @@ import { createGlobalRules } from '../src/ecs/globals'
 import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 import { TurnManager } from '../src/game/TurnManager'
 import { carriedOut, debrief, winnerOf } from '../src/game/MatchEnd'
 import { endScreens } from '../src/hud/HudModel'
@@ -113,10 +114,15 @@ function match(roll: Roll) {
   for (let x = 0; x < grid.size; x++) grid.setWall(x, 35, Side.North, WallKind.Solid)
   const parked = (x0: number) => Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: x0 + i * 2, y: 38 }))
   const plain = () => ({ ...characterSheet(new Rng(4)), traits: [] })
-  const squads = new Squads(world, grid, { [Faction.Blue]: parked(1), [Faction.Red]: parked(30) }, undefined, Faction.Blue, {
-    [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, plain),
-    [Faction.Red]: Array.from({ length: SQUAD_SIZE }, plain),
-  })
+  const squads = new Squads(
+    world,
+    grid,
+    { [Faction.Blue]: parked(1), [Faction.Red]: parked(30) },
+    stockSquads({
+      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, plain),
+      [Faction.Red]: Array.from({ length: SQUAD_SIZE }, plain),
+    }),
+  )
   for (const unit of squads.soldiers) unit.equip(WeaponId.Rifle, AmmoId.Standard)
   const movement = new MovementSystem(grid)
   const combat = new CombatSystem(grid, squads, NO_FX, roll)

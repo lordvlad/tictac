@@ -8,7 +8,7 @@ import { ITEMS, type ItemId } from '../core/Items'
 import { ROLES, RoleId } from '../core/Roles'
 import type { ResolvedHit } from './Combat'
 import { RpcMethods } from './JsonRpc'
-import type { SquadLoadout, UnitLoadout } from './Loadout'
+import type { UnitLoadout } from './Loadout'
 import type { NetworkMessage } from './NetworkManager'
 
 /**
@@ -43,8 +43,43 @@ import type { NetworkMessage } from './NetworkManager'
  * 4: a side fields exactly as many units as its header states sheets for. A
  * version-3 header with a short squad deployed a made-up unit in the empty
  * slot, so replaying one today would refight it a unit down.
+ *
+ * 5: `sheets`, `loadouts` and `startingHp` — three same-length arrays matched
+ * by position only, with nothing tying their lengths together — are one
+ * `squads: Record<Faction, Deployment[]>` (`[ITEM-043]`). A version-4 header
+ * has the old three arrays; reading it as the new one would zip a sheet
+ * against the wrong unit's kit the moment they disagreed, which is exactly
+ * the failure that made version 4 necessary in the first place.
  */
-export const RECORDING_VERSION = 4
+export const RECORDING_VERSION = 5
+
+/**
+ * Session state for one deployed soldier: what a match starts them on top of
+ * their sheet. A bag on purpose — HP today, fatigue next (`[ITEM-039]`),
+ * room for whatever comes after without another wire shape.
+ */
+export interface DeploymentState {
+  hp?: number
+  fatigue?: number
+}
+
+/**
+ * One soldier, fully stated: who they are, what they carry, and what state a
+ * match starts them in — sheet, kit and session state travel together rather
+ * than as three arrays a caller has to keep in step by hand.
+ */
+export interface Deployment {
+  /** Present only for a kept roster (`[ITEM-042]`); absent for a rolled squad. */
+  characterId?: string
+  sheet: CharacterSheet
+  /**
+   * Absent when this soldier's stated kit could not be read (a peer on a
+   * newer build naming a weapon this one does not know): they deploy on the
+   * stock spread, the same as a soldier nobody ever equipped.
+   */
+  loadout?: UnitLoadout
+  state?: DeploymentState
+}
 
 export interface RecordingHeader {
   version: number
@@ -55,29 +90,14 @@ export interface RecordingHeader {
   createdAt: string
   /** The simulation's turn cap, or null for a played match. */
   turnCap: number | null
-  /** The people, so playback deploys the same squads rather than rolling new ones. */
-  sheets: Record<Faction, CharacterSheet[]>
   /**
-   * Both squads' kit.
-   *
-   * A played match only ever equips one side from a loadout — the other keeps
-   * the stock spread, because a peer's attacks arrive already resolved. A
-   * replay has no sender, so it needs the numbers both sides fought with.
+   * Both squads, one entry per deploying soldier: who they are, what they
+   * carry, and what state they start in. A played match only ever equips one
+   * side from a loadout screen — the other keeps the stock spread, because a
+   * peer's attacks arrive already resolved — but a replay has no sender, so
+   * it needs both sides' kit regardless of which one a player chose.
    */
-  loadouts: Record<Faction, SquadLoadout>
-  /**
-   * HP to deploy each unit at, absent everywhere except a kept server match —
-   * and, even there, present per side rather than together: a mixed match
-   * (one signed-in player, one anonymous) tracks wounds for the side that has
-   * a roster and deploys the other at full health, same as today.
-   *
-   * A starting HP has to be something both peers and the referee agree on
-   * before the first digest, or the referee accuses an honest client of a
-   * foul — so it travels here rather than as something either side decides
-   * for itself. Local play, peer-to-peer play and every recording from
-   * before this field existed have no use for it, and deploy at full health.
-   */
-  startingHp?: Partial<Record<Faction, number[]>>
+  squads: Record<Faction, Deployment[]>
   /**
    * Layout beyond the seed. Absent for every map the game plays, which is
    * the default layout; present when a sweep asked for another one, because
@@ -169,39 +189,6 @@ export class Recorder {
 // -----------------------------------------------------------------------------
 
 /**
- * One squad's people, clamped to the squad size.
- *
- * A sheet is the one part of a recording that is substituted rather than
- * refused: {@link sanitizeSheet} plays a malformed one as an average soldier,
- * and a wrong *character* costs display accuracy where a wrong *command* would
- * cost the whole replay. Short arrays are left short, which leaves the
- * remaining units on the placeholder the squad was built with.
- */
-function sheetsFrom(raw: unknown): CharacterSheet[] {
-  if (!Array.isArray(raw)) return []
-  return raw.slice(0, SQUAD_SIZE).map(sanitizeSheet)
-}
-
-/**
- * One squad's starting HP.
- *
- * All-or-nothing, unlike {@link sheetsFrom}: a starting HP is read
- * positionally by squad index, so a single malformed entry cannot be dropped
- * without shifting every entry after it onto the wrong soldier. The safe
- * fallback for a malformed array is exactly what its absence already means —
- * deploy at full health — not a squad with one wound on the wrong person.
- *
- * Anywhere from one entry to a full squad: a kept roster with an empty slot
- * deploys, and states HP for, only the people it has.
- */
-export function startingHpFrom(raw: unknown): number[] | undefined {
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > SQUAD_SIZE) return undefined
-  return raw.every((value) => typeof value === 'number' && Number.isFinite(value))
-    ? (raw as number[])
-    : undefined
-}
-
-/**
  * A count map over a fixed id table.
  *
  * Unknown keys are dropped and missing ones read as zero, the same direction
@@ -220,56 +207,98 @@ function counts<Id extends string>(table: Record<string, unknown>, raw: unknown)
 }
 
 /**
- * One squad's kit, checked entry by entry.
+ * One soldier's kit, checked field by field.
  *
  * Weapon and ammo ids are refused rather than defaulted: a replay resolves its
- * own damage from the weapon named here, so substituting a rifle for an id this
- * build does not know would quietly show a different fight.
+ * own damage from the weapon named here, so substituting a rifle for an id
+ * this build does not know would quietly show a different fight.
  *
- * Exported because a *peer's* kit needs exactly the same check as a file's. It
- * arrives in `ready` now rather than only as replicated component state,
- * because a referee has to rebuild the match from its intents and a loadout is
- * not derivable from them.
+ * Exported so a caller can decide for itself what an unreadable *unit*
+ * costs — a header refuses the whole squad ({@link deploymentsFrom}), but a
+ * live peer's `ready` (`NetworkManager`) falls back to the stock spread
+ * instead, the same way it always has.
  */
-export function squadLoadoutFrom(raw: unknown, what: string): SquadLoadout {
-  if (!Array.isArray(raw)) throw new Error(`${what}: loadout must be an array`)
+export function unitLoadoutFrom(raw: unknown, what: string): UnitLoadout {
+  if (!raw || typeof raw !== 'object') throw new Error(`${what}: not a loadout entry`)
+  const unit = raw as Partial<UnitLoadout>
 
-  return raw.slice(0, SQUAD_SIZE).map((entry, i) => {
-    if (!entry || typeof entry !== 'object') throw new Error(`${what}[${i}]: not a loadout entry`)
-    const unit = entry as Partial<UnitLoadout>
+  // `Object.hasOwn`, never `in`: `in` walks the prototype chain, so a file
+  // naming `'toString'` would pass and then be equipped as a weapon.
+  if (typeof unit.weaponId !== 'string' || !Object.hasOwn(WEAPONS, unit.weaponId)) {
+    throw new Error(`${what}: unknown weapon "${String(unit.weaponId)}"`)
+  }
+  if (typeof unit.ammoId !== 'string' || !Object.hasOwn(AMMO, unit.ammoId)) {
+    throw new Error(`${what}: unknown ammo "${String(unit.ammoId)}"`)
+  }
 
-    // `Object.hasOwn`, never `in`: `in` walks the prototype chain, so a file
-    // naming `'toString'` would pass and then be equipped as a weapon.
-    if (typeof unit.weaponId !== 'string' || !Object.hasOwn(WEAPONS, unit.weaponId)) {
-      throw new Error(`${what}[${i}]: unknown weapon "${String(unit.weaponId)}"`)
-    }
-    if (typeof unit.ammoId !== 'string' || !Object.hasOwn(AMMO, unit.ammoId)) {
-      throw new Error(`${what}[${i}]: unknown ammo "${String(unit.ammoId)}"`)
-    }
+  // Absent in files written before the slot existed, and those units fought
+  // bare-handed; a name this build does not know is refused like a weapon.
+  const sidearm = unit.sidearm ?? MeleeId.Fists
+  if (typeof sidearm !== 'string' || !Object.hasOwn(MELEE, sidearm)) {
+    throw new Error(`${what}: unknown sidearm "${String(sidearm)}"`)
+  }
+  const attachments = Array.isArray(unit.attachments) ? unit.attachments : []
+  // Absent for the same reason `sidearm` is: files and peers older than the
+  // role slot never named one, and fought as plain riflemen.
+  const role = unit.role ?? RoleId.Rifleman
+  if (typeof role !== 'string' || !Object.hasOwn(ROLES, role)) {
+    throw new Error(`${what}: unknown role "${String(role)}"`)
+  }
+  return {
+    weaponId: unit.weaponId as WeaponId,
+    ammoId: unit.ammoId as AmmoId,
+    grenades: counts<GrenadeId>(GRENADES, unit.grenades),
+    items: counts<ItemId>(ITEMS, unit.items),
+    attachments: attachments.filter(
+      (id): id is AttachmentId => typeof id === 'string' && Object.hasOwn(ATTACHMENTS, id),
+    ),
+    sidearm: sidearm as MeleeId,
+    role: role as RoleId,
+  }
+}
 
-    // Absent in files written before the slot existed, and those units fought
-    // bare-handed; a name this build does not know is refused like a weapon.
-    const sidearm = unit.sidearm ?? MeleeId.Fists
-    if (typeof sidearm !== 'string' || !Object.hasOwn(MELEE, sidearm)) {
-      throw new Error(`${what}[${i}]: unknown sidearm "${String(sidearm)}"`)
-    }
-    const attachments = Array.isArray(unit.attachments) ? unit.attachments : []
-    // Absent for the same reason `sidearm` is: files and peers older than the
-    // role slot never named one, and fought as plain riflemen.
-    const role = unit.role ?? RoleId.Rifleman
-    if (typeof role !== 'string' || !Object.hasOwn(ROLES, role)) {
-      throw new Error(`${what}[${i}]: unknown role "${String(role)}"`)
-    }
+/**
+ * One soldier's session state, read leniently: an absent or malformed field
+ * is simply absent from the result, never a reason to refuse the soldier
+ * beside it. Safe now in a way it could not be as a positional array — HP
+ * lives next to the sheet it belongs to, so there is no neighbour for it to
+ * land on by mistake.
+ */
+export function deploymentStateFrom(raw: unknown): DeploymentState | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const source = raw as Partial<DeploymentState>
+  const state: DeploymentState = {}
+  if (typeof source.hp === 'number' && Number.isFinite(source.hp)) state.hp = source.hp
+  if (typeof source.fatigue === 'number' && Number.isFinite(source.fatigue)) {
+    state.fatigue = source.fatigue
+  }
+  return Object.keys(state).length > 0 ? state : undefined
+}
+
+/**
+ * One squad, as a header states it: every soldier's sheet and kit together,
+ * one entry per unit, 1 to `SQUAD_SIZE` of them.
+ *
+ * Throws rather than truncates or pads — a header is either the squad that
+ * fought or it is refused, the same rule a command already gets. A live
+ * peer's `ready` does not go through this: it needs to keep a squad's sheets
+ * even when its kit cannot be read, which is a per-unit judgement this
+ * function does not make (see {@link unitLoadoutFrom} instead).
+ */
+export function deploymentsFrom(raw: unknown, what: string): Deployment[] {
+  if (!Array.isArray(raw)) throw new Error(`${what}: must be an array`)
+  if (raw.length < 1 || raw.length > SQUAD_SIZE) {
+    throw new Error(`${what}: a squad of ${raw.length} is not 1 to ${SQUAD_SIZE}`)
+  }
+  return raw.map((entry, i) => {
+    if (!entry || typeof entry !== 'object') throw new Error(`${what}[${i}]: not a deployment entry`)
+    const d = entry as Partial<Deployment>
+    const state = deploymentStateFrom(d.state)
     return {
-      weaponId: unit.weaponId as WeaponId,
-      ammoId: unit.ammoId as AmmoId,
-      grenades: counts<GrenadeId>(GRENADES, unit.grenades),
-      items: counts<ItemId>(ITEMS, unit.items),
-      attachments: attachments.filter(
-        (id): id is AttachmentId => typeof id === 'string' && Object.hasOwn(ATTACHMENTS, id),
-      ),
-      sidearm: sidearm as MeleeId,
-      role: role as RoleId,
+      ...(typeof d.characterId === 'string' ? { characterId: d.characterId } : {}),
+      sheet: sanitizeSheet(d.sheet),
+      loadout: unitLoadoutFrom(d.loadout, `${what}[${i}].loadout`),
+      ...(state ? { state } : {}),
     }
   })
 }
@@ -332,13 +361,8 @@ export function parseRecording(raw: unknown): CombatRecording {
   if (head.source !== 'live' && head.source !== 'sim') {
     throw new Error(`header: unknown source "${String(head.source)}"`)
   }
-  if (!head.sheets || typeof head.sheets !== 'object') throw new Error('header: sheets missing')
-  if (!head.loadouts || typeof head.loadouts !== 'object') {
-    throw new Error('header: loadouts missing')
-  }
-
-  const rawSheets = head.sheets as Partial<Record<Faction, unknown>>
-  const rawLoadouts = head.loadouts as Partial<Record<Faction, unknown>>
+  if (!head.squads || typeof head.squads !== 'object') throw new Error('header: squads missing')
+  const rawSquads = head.squads as Partial<Record<Faction, unknown>>
 
   const header: RecordingHeader = {
     version: RECORDING_VERSION,
@@ -348,25 +372,10 @@ export function parseRecording(raw: unknown): CombatRecording {
     createdAt: typeof head.createdAt === 'string' ? head.createdAt : '',
     turnCap:
       typeof head.turnCap === 'number' && Number.isFinite(head.turnCap) ? head.turnCap : null,
-    sheets: {
-      [Faction.Blue]: sheetsFrom(rawSheets[Faction.Blue]),
-      [Faction.Red]: sheetsFrom(rawSheets[Faction.Red]),
+    squads: {
+      [Faction.Blue]: deploymentsFrom(rawSquads[Faction.Blue], 'header.squads.blue'),
+      [Faction.Red]: deploymentsFrom(rawSquads[Faction.Red], 'header.squads.red'),
     },
-    loadouts: {
-      [Faction.Blue]: squadLoadoutFrom(rawLoadouts[Faction.Blue], 'header.loadouts.blue'),
-      [Faction.Red]: squadLoadoutFrom(rawLoadouts[Faction.Red], 'header.loadouts.red'),
-    },
-    ...(head.startingHp && typeof head.startingHp === 'object'
-      ? (() => {
-          const rawHp = head.startingHp as Partial<Record<Faction, unknown>>
-          const startingHp: Partial<Record<Faction, number[]>> = {}
-          const blue = startingHpFrom(rawHp[Faction.Blue])
-          const red = startingHpFrom(rawHp[Faction.Red])
-          if (blue) startingHp[Faction.Blue] = blue
-          if (red) startingHp[Faction.Red] = red
-          return Object.keys(startingHp).length > 0 ? { startingHp } : {}
-        })()
-      : {}),
     ...(head.map === undefined ? {} : { map: mapOptionsFrom(head.map) }),
   }
 

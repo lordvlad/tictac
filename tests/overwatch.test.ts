@@ -10,6 +10,7 @@ import { createGlobalRules } from '../src/ecs/globals'
 import { World } from '../src/ecs/World'
 import { canWatch, reactToArrival, watchCost } from '../src/game/Overwatch'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 import { settleTurn } from '../src/game/Turn'
 
 /** Two squads in the open, one watcher and one walker. */
@@ -21,12 +22,10 @@ function field() {
     world,
     grid,
     { [Faction.Blue]: [{ x: 4, y: 4 }], [Faction.Red]: [{ x: 4, y: 9 }] },
-    undefined,
-    Faction.Blue,
-    {
+    stockSquads({
       [Faction.Blue]: rollSquadSheets(new Rng(3)),
       [Faction.Red]: rollSquadSheets(new Rng(4)),
-    },
+    }),
   )
   for (const [i, unit] of squads.soldiers.entries()) {
     unit.sheet.traits.length = 0

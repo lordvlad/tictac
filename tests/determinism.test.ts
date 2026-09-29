@@ -9,6 +9,7 @@ import { matchDice, Rng } from '../src/core/rng'
 import { createGlobalRules } from '../src/ecs/globals'
 import { World } from '../src/ecs/World'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 import { digestWorld } from '../src/game/StateDigest'
 
 /**
@@ -133,12 +134,10 @@ describe('Two peers dealt the same match hold the same world', () => {
       world,
       grid,
       { [Faction.Blue]: [{ x: 4, y: 4 }], [Faction.Red]: [{ x: 4, y: 9 }] },
-      undefined,
-      Faction.Blue,
-      {
+      stockSquads({
         [Faction.Blue]: rollSquadSheets(new Rng(7)),
         [Faction.Red]: rollSquadSheets(new Rng(8)),
-      },
+      }),
     )
     for (const unit of squads.soldiers) unit.equip(WeaponId.Rifle, AmmoId.Standard)
     return { world, squads }

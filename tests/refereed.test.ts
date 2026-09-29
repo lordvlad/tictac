@@ -80,8 +80,10 @@ function header(seed: number, sheets: Record<Faction, ReturnType<typeof rollSqua
     source: 'live',
     createdAt: new Date().toISOString(),
     turnCap: null,
-    sheets,
-    loadouts: { [Faction.Blue]: defaultLoadout(), [Faction.Red]: defaultLoadout() },
+    squads: {
+      [Faction.Blue]: sheets[Faction.Blue].map((sheet, i) => ({ sheet, loadout: defaultLoadout()[i]! })),
+      [Faction.Red]: sheets[Faction.Red].map((sheet, i) => ({ sheet, loadout: defaultLoadout()[i]! })),
+    },
   }
 }
 
@@ -107,16 +109,23 @@ describe('Two clients playing through a referee', () => {
       [Faction.Blue]: rollSquadSheets(new Rng(1)),
       [Faction.Red]: rollSquadSheets(new Rng(2)),
     }
-    host.send({ type: 'ready', sheets: sheets[Faction.Blue], loadout: defaultLoadout() })
-    joiner.send({ type: 'ready', sheets: sheets[Faction.Red], loadout: defaultLoadout() })
+    const kit = defaultLoadout()
+    host.send({
+      type: 'ready',
+      squad: sheets[Faction.Blue].map((sheet, i) => ({ sheet, loadout: kit[i]! })),
+    })
+    joiner.send({
+      type: 'ready',
+      squad: sheets[Faction.Red].map((sheet, i) => ({ sheet, loadout: kit[i]! })),
+    })
 
     // Both sides learn who the other brought *and* what they are carrying —
     // the kit is what a referee cannot derive from the intents.
     const seenByHost = await host.waitForPeerReady()
     const seenByJoiner = await joiner.waitForPeerReady()
-    expect(seenByHost?.sheets).toEqual(sheets[Faction.Red])
-    expect(seenByJoiner?.sheets).toEqual(sheets[Faction.Blue])
-    expect(seenByHost?.loadout).not.toBeNull()
+    expect(seenByHost?.squad.map((d) => d.sheet)).toEqual(sheets[Faction.Red])
+    expect(seenByJoiner?.squad.map((d) => d.sheet)).toEqual(sheets[Faction.Blue])
+    expect(seenByHost?.squad.every((d) => d.loadout !== undefined)).toBe(true)
 
     host.send({ type: 'matchHeader', header: header(seed, sheets) })
     host.send({

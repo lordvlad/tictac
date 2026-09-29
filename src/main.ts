@@ -18,7 +18,6 @@ import { Tracers } from './render/Tracers'
 import { LoadoutScreen } from './hud/LoadoutScreen'
 import { FullscreenPrompt } from './hud/FullscreenPrompt'
 import { FpsCounter } from './hud/FpsCounter'
-import type { SquadLoadout } from './game/Loadout'
 import './game.css'
 import { NetworkManager } from './game/NetworkManager'
 import { World } from './ecs/World'
@@ -29,6 +28,7 @@ import { captureMoment, restoreMoment, type Rewindable } from './game/Rewind'
 import { PlaybackControls } from './hud/PlaybackControls'
 import {
   type CombatRecording,
+  type Deployment,
   parseRecording,
   RECORDING_VERSION,
   type RecordingHeader,
@@ -419,32 +419,25 @@ function equipThenStart(
   }
 
   void screen.show().then(async (loadout) => {
-    network.send({ type: 'ready', sheets: mySheets, loadout, ...(hp ? { hp } : {}) })
+    const mySquad: Deployment[] = mySheets.map((sheet, i) => ({
+      sheet,
+      loadout: loadout[i]!,
+      ...(hp?.[i] !== undefined ? { state: { hp: hp[i]! } } : {}),
+    }))
+    network.send({ type: 'ready', squad: mySquad })
     if (network.mode !== 'local') screen.markWaiting('Waiting for opponent to deploy…')
     const peer = await network.waitForPeerReady()
     screen.dispose()
     const other = faction === Faction.Blue ? Faction.Red : Faction.Blue
-    start(
-      seed,
-      label,
-      network,
-      loadout,
-      {
-        [faction]: mySheets,
-        [other]: peer?.sheets ?? localEnemySheets,
-      } as Record<Faction, CharacterSheet[]>,
-      // The peer's kit, when it sent kit this build could read. Without it the
-      // other squad deploys on the stock spread — which is what every match
-      // did before a referee needed to know what both sides were carrying.
-      peer?.loadout ?? undefined,
-      // Wounds ride the same way: present per side, never together, since a
-      // mixed match (one signed-in player, one anonymous) tracks wounds only
-      // for the side that has a roster.
-      {
-        ...(hp ? { [faction]: hp } : {}),
-        ...(peer?.hp ? { [other]: peer.hp } : {}),
-      } as Partial<Record<Faction, number[]>>,
-    )
+    // The peer's squad, when it sent one this build could read. Without a
+    // peer at all (local play) the enemy is a fresh roll with no kit of its
+    // own — the stock spread, same as every match before a referee needed to
+    // know what both sides were carrying.
+    const otherSquad: Deployment[] = peer?.squad ?? localEnemySheets.map((sheet) => ({ sheet }))
+    start(seed, label, network, {
+      [faction]: mySquad,
+      [other]: otherSquad,
+    } as Record<Faction, Deployment[]>)
   })
 }
 
@@ -452,10 +445,7 @@ function start(
   seed: number,
   seedLabel: string,
   network: NetworkManager,
-  loadout?: SquadLoadout,
-  sheets?: Record<Faction, CharacterSheet[]>,
-  peerLoadout?: SquadLoadout,
-  startingHp?: Partial<Record<Faction, number[]>>,
+  deployed: Record<Faction, Deployment[]>,
 ): void {
   const engine = createEngineContext(Game.instance())
 
@@ -469,25 +459,14 @@ function start(
   // Terrain first, as data; the battlefield is the view of it.
   const battlefield = new Battlefield(generateMap(seed), engine)
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
-  const squads = new Squads(
-    world,
-    battlefield.grid,
-    battlefield.spawns,
-    loadout,
-    myFaction,
-    sheets,
-    startingHp,
-  )
-  // The other squad's kit, when the peer sent some. It arrives in `ready`
-  // rather than only as replicated component state so that a referee — which
-  // holds no components until the intents start — can refight the match.
-  if (peerLoadout) {
-    squads.equipFaction(myFaction === Faction.Blue ? Faction.Red : Faction.Blue, peerLoadout)
-  }
+  const squads = new Squads(world, battlefield.grid, battlefield.spawns, deployed)
 
   // The opening position, captured before anything can move it. A recording
   // armed later still replays from here, which is the only point a stream can
-  // start from and be replayable at all.
+  // start from and be replayable at all. Read back off the squads rather than
+  // `deployed` itself: a soldier whose kit could not be read deployed on the
+  // stock spread, and the header has to say what actually fought, not what
+  // was asked for.
   const recordingHeader: RecordingHeader = {
     version: RECORDING_VERSION,
     seed,
@@ -495,12 +474,10 @@ function start(
     source: 'live',
     createdAt: new Date().toISOString(),
     turnCap: null,
-    sheets: sheets ?? { [Faction.Blue]: [], [Faction.Red]: [] },
-    loadouts: {
-      [Faction.Blue]: squads.loadoutOf(Faction.Blue),
-      [Faction.Red]: squads.loadoutOf(Faction.Red),
+    squads: {
+      [Faction.Blue]: squads.deploymentsOf(Faction.Blue),
+      [Faction.Red]: squads.deploymentsOf(Faction.Red),
     },
-    ...(startingHp && Object.keys(startingHp).length > 0 ? { startingHp } : {}),
   }
 
   // A referee is told the opening position once, by the side hosting the
@@ -644,19 +621,7 @@ function startPlayback(recording: CombatRecording): void {
   createGlobalRules(world)
 
   const battlefield = new Battlefield(generateMap(header.seed, header.map), engine)
-  const squads = new Squads(
-    world,
-    battlefield.grid,
-    battlefield.spawns,
-    undefined,
-    Faction.Blue,
-    header.sheets,
-    header.startingHp,
-  )
-  // Both sides, from the file: the replay resolves every attack again, so it
-  // needs the kit both squads actually fought with.
-  squads.equipFaction(Faction.Blue, header.loadouts[Faction.Blue])
-  squads.equipFaction(Faction.Red, header.loadouts[Faction.Red])
+  const squads = new Squads(world, battlefield.grid, battlefield.spawns, header.squads)
 
   const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,

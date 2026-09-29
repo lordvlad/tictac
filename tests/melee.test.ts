@@ -13,6 +13,7 @@ import { createGlobalRules } from '../src/ecs/globals'
 import type { Soldier } from '../src/entities/Soldier'
 import { canMelee, executeMelee } from '../src/game/Combat'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 
 function sheet(strength = 5): CharacterSheet {
   const base = characterSheet(new Rng(4))
@@ -34,12 +35,10 @@ function contact(
     world,
     grid,
     { [Faction.Blue]: far(1), [Faction.Red]: far(22) },
-    undefined,
-    Faction.Blue,
-    {
+    stockSquads({
       [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, () => sheet(strength)),
       [Faction.Red]: Array.from({ length: SQUAD_SIZE }, () => sheet()),
-    },
+    }),
   )
   const attacker = squads.byFaction[Faction.Blue][0]!
   const defender = squads.byFaction[Faction.Red][0]!

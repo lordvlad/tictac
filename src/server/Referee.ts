@@ -322,7 +322,7 @@ export class Referee {
     ] as const) {
       if (!playerId) continue
       const members = await rosters.active(playerId)
-      const deployed = header.sheets[faction]
+      const deployed = header.squads[faction]
       // Nobody left is not a squad: a side of zero would lose on turn one and
       // settle nothing, and a header stating no sheets means the stock squad
       // to `Squads` — somebody nobody enlisted. Recruit first.
@@ -338,7 +338,7 @@ export class Referee {
         members.length === deployed.length &&
         members.every(
           (member, index) =>
-            JSON.stringify(sanitizeSheet(deployed[index])) === JSON.stringify(member.sheet),
+            JSON.stringify(sanitizeSheet(deployed[index]!.sheet)) === JSON.stringify(member.sheet),
         )
       if (!same) {
         return this.abort({
@@ -351,11 +351,7 @@ export class Referee {
       // A wound is as much part of the roster as the sheet is: a client that
       // omitted it, or stated a different one, would otherwise deploy a
       // signed-in player's character healthier than the roster says they are.
-      const claimedHp = header.startingHp?.[faction]
-      const sameHp =
-        claimedHp !== undefined &&
-        claimedHp.length === members.length &&
-        claimedHp.every((hp, index) => hp === members[index]!.hp)
+      const sameHp = members.every((member, index) => deployed[index]!.state?.hp === member.hp)
       if (!sameHp) {
         return this.abort({
           matchId: this.matchId ?? 'unknown',

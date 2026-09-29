@@ -14,6 +14,7 @@ import { createGlobalRules } from '../src/ecs/globals'
 import { MovementSystem } from '../src/ecs/systems/MovementSystem'
 import { executeMelee, shotBreakdown } from '../src/game/Combat'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 
 /** A person-shaped nobody: every modifier at zero, standard kit. */
 function body(over: Partial<CombatantStats> = {}): CombatantStats {
@@ -52,10 +53,15 @@ function pair() {
     const sheet = characterSheet(new Rng(4))
     return { ...sheet, traits: [], attributes: { ...sheet.attributes, agility } }
   }
-  const squads = new Squads(world, grid, { [Faction.Blue]: far(1), [Faction.Red]: far(22) }, undefined, Faction.Blue, {
-    [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, plain(5)),
-    [Faction.Red]: Array.from({ length: SQUAD_SIZE }, plain(10)),
-  })
+  const squads = new Squads(
+    world,
+    grid,
+    { [Faction.Blue]: far(1), [Faction.Red]: far(22) },
+    stockSquads({
+      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, plain(5)),
+      [Faction.Red]: Array.from({ length: SQUAD_SIZE }, plain(10)),
+    }),
+  )
   const attacker = squads.byFaction[Faction.Blue][0]!
   const defender = squads.byFaction[Faction.Red][0]!
   for (const unit of [attacker, defender]) unit.equip(WeaponId.Rifle, AmmoId.Standard)

@@ -21,8 +21,12 @@
  * match. A protocol difference means one side cannot even parse what the other
  * sends; a build difference means they agree on the envelope and might still
  * resolve a shot differently.
+ *
+ * 3: `ready` carries one `Deployment[]` (`ITEM-043`) instead of separate
+ * `sheets`, `loadout` and `hp` fields — a peer speaking version 2 states a
+ * shape this build no longer parses.
  */
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
 
 /**
  * The commit this bundle was built from, or `dev` when it was not built.

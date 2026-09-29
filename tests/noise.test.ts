@@ -12,6 +12,7 @@ import { createGlobalRules } from '../src/ecs/globals'
 import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 import { TurnManager } from '../src/game/TurnManager'
 import type { Soldier } from '../src/entities/Soldier'
 
@@ -75,11 +76,16 @@ function match() {
     const base = characterSheet(new Rng(4))
     return { ...base, traits: [], attributes: { ...base.attributes, intelligence } }
   }
-  const squads = new Squads(world, grid, { [Faction.Blue]: far(1), [Faction.Red]: far(22) }, undefined, Faction.Blue, {
-    [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, sheet(5)),
-    // The sharpest ears there are: if they miss a step, everybody does.
-    [Faction.Red]: Array.from({ length: SQUAD_SIZE }, sheet(10)),
-  })
+  const squads = new Squads(
+    world,
+    grid,
+    { [Faction.Blue]: far(1), [Faction.Red]: far(22) },
+    stockSquads({
+      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, sheet(5)),
+      // The sharpest ears there are: if they miss a step, everybody does.
+      [Faction.Red]: Array.from({ length: SQUAD_SIZE }, sheet(10)),
+    }),
+  )
   for (const unit of squads.soldiers) unit.equip(WeaponId.Rifle, AmmoId.Standard)
   const movement = new MovementSystem(grid)
   const combat = new CombatSystem(grid, squads, NO_FX, matchDice(7))

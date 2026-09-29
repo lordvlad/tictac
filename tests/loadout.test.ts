@@ -21,7 +21,7 @@ import {
   fitAttachment,
   remaining,
 } from '../src/game/Loadout'
-import { squadLoadoutFrom } from '../src/game/Recording'
+import { unitLoadoutFrom } from '../src/game/Recording'
 import type { Soldier } from '../src/entities/Soldier'
 
 /**
@@ -303,14 +303,16 @@ describe('Sidearms', () => {
     equipSidearm(loadout, 0, MeleeId.Knife)
     equipSidearm(loadout, 2, MeleeId.Club)
 
-    const parsed = squadLoadoutFrom(JSON.parse(JSON.stringify(loadout)), 'test')
+    const parsed = loadout.map((unit, i) =>
+      unitLoadoutFrom(JSON.parse(JSON.stringify(unit)), `test[${i}]`),
+    )
     expect(parsed.map((unit) => unit.sidearm)).toEqual(loadout.map((unit) => unit.sidearm))
   })
 
   test('an unknown sidearm is refused, not disarmed', () => {
     const tampered = JSON.parse(JSON.stringify(defaultLoadout()))
     tampered[1].sidearm = 'chainsaw'
-    expect(() => squadLoadoutFrom(tampered, 'test')).toThrow(/chainsaw/)
+    expect(() => unitLoadoutFrom(tampered[1], 'test')).toThrow(/chainsaw/)
   })
 })
 

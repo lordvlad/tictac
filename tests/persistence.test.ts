@@ -13,7 +13,7 @@ import { TurnSystem } from '../src/ecs/systems'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../src/game/JsonRpc'
 import { carriedOut, settlement, winnerOf, type UnitFate } from '../src/game/MatchEnd'
 import type { NetworkMessage } from '../src/game/NetworkManager'
-import type { CombatRecording } from '../src/game/Recording'
+import type { CombatRecording, Deployment, RecordingHeader } from '../src/game/Recording'
 import { Squads } from '../src/game/Squads'
 import { TurnManager } from '../src/game/TurnManager'
 import { loopback } from '../src/game/Transport'
@@ -24,6 +24,7 @@ import { MatchHost } from '../src/sim/MatchHost'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
 import { DATABASE_URLS, freshPersistence } from './support/db'
+import { stockSquads } from './support/squads'
 
 /**
  * What a refereed match leaves behind.
@@ -49,9 +50,7 @@ function squadsWith(deadBlue: readonly number[], deadRed: readonly number[]): Sq
     world,
     grid,
     { [Faction.Blue]: parked(1), [Faction.Red]: parked(30) },
-    undefined,
-    Faction.Blue,
-    { [Faction.Blue]: sheets(100), [Faction.Red]: sheets(200) },
+    stockSquads({ [Faction.Blue]: sheets(100), [Faction.Red]: sheets(200) }),
   )
   for (const unit of squads.soldiers) unit.equip(WeaponId.Rifle, AmmoId.Standard)
   // A turn manager exists so the squads are a legal world; nothing here takes a turn.
@@ -381,6 +380,24 @@ function decisive(from = 4242): CombatRecording {
   throw new Error('no decisive match in 40 seeds')
 }
 
+/** The people a header's squad states, for tests that only want the sheet. */
+function sheetsOf(header: RecordingHeader, faction: Faction): CharacterSheet[] {
+  return header.squads[faction].map((deployment) => deployment.sheet)
+}
+
+/**
+ * The same header, with each side's `state.hp` stamped as given — what a
+ * signed-in client's `ready` would have carried.
+ */
+function withStartingHp(header: RecordingHeader, hp: Record<Faction, readonly number[]>): RecordingHeader {
+  const stamp = (faction: Faction): Deployment[] =>
+    header.squads[faction].map((deployment, i) => ({
+      ...deployment,
+      state: { ...deployment.state, hp: hp[faction][i] },
+    }))
+  return { ...header, squads: { [Faction.Blue]: stamp(Faction.Blue), [Faction.Red]: stamp(Faction.Red) } }
+}
+
 /** A client, as the referee sees one, signed in as `playerId` or not at all. */
 function client(referee: Referee, playerId: string | null) {
   const [mine, theirs] = loopback()
@@ -427,20 +444,20 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const recording = decisive()
     const { persistence, referee, verdicts } = await playing(
       ':memory:',
-      recording.header.sheets[Faction.Blue],
-      recording.header.sheets[Faction.Red],
+      sheetsOf(recording.header, Faction.Blue),
+      sheetsOf(recording.header, Faction.Red),
     )
 
     // Both sides freshly enlisted, so their roster HP is full — the same
     // maxHp an honest client's own `Account.roster()` would have reported.
     const startingHp = {
-      [Faction.Blue]: recording.header.sheets[Faction.Blue].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
-      [Faction.Red]: recording.header.sheets[Faction.Red].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+      [Faction.Blue]: sheetsOf(recording.header, Faction.Blue).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+      [Faction.Red]: sheetsOf(recording.header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
     }
 
     const blue = client(referee, 'A')
     client(referee, 'B')
-    blue.send({ type: 'matchHeader', header: { ...recording.header, startingHp } })
+    blue.send({ type: 'matchHeader', header: withStartingHp(recording.header, startingHp) })
     for (const event of recording.events) blue.send(event.command)
     await referee.idle()
 
@@ -463,7 +480,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       fates[faction].flatMap((fate, slot) => {
         if (fate.kind === 'survived') return [sanitizeSheet(fate.sheet)]
         if (fate.kind === 'carried') {
-          return [sanitizeSheet(recording.header.sheets[faction][slot])]
+          return [sanitizeSheet(sheetsOf(recording.header, faction)[slot]!)]
         }
         return []
       })
@@ -478,7 +495,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const survivors = await persistence.rosters.active(loserPlayer)
     expect(survivors).toHaveLength(1)
     expect(survivors[0]!.slot).toBe(carriedSlot)
-    expect(survivors[0]!.sheet).toEqual(sanitizeSheet(recording.header.sheets[loser][carriedSlot]!))
+    expect(survivors[0]!.sheet).toEqual(sanitizeSheet(sheetsOf(recording.header, loser)[carriedSlot]!))
 
     await persistence.close()
   })
@@ -491,7 +508,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const { persistence, referee, verdicts } = await playing(
       ':memory:',
       others,
-      recording.header.sheets[Faction.Red],
+      sheetsOf(recording.header, Faction.Red),
     )
     const before = await persistence.rosters.active('A')
 
@@ -515,8 +532,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const recording = decisive()
     const { persistence, referee, verdicts } = await playing(
       ':memory:',
-      recording.header.sheets[Faction.Blue],
-      recording.header.sheets[Faction.Red],
+      sheetsOf(recording.header, Faction.Blue),
+      sheetsOf(recording.header, Faction.Red),
     )
 
     const blue = client(referee, 'A')
@@ -537,17 +554,17 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const recording = decisive()
     const { persistence, referee, verdicts } = await playing(
       ':memory:',
-      recording.header.sheets[Faction.Blue],
-      recording.header.sheets[Faction.Red],
+      sheetsOf(recording.header, Faction.Blue),
+      sheetsOf(recording.header, Faction.Red),
     )
     const wrongHp = {
-      [Faction.Blue]: recording.header.sheets[Faction.Blue].map(() => 1),
-      [Faction.Red]: recording.header.sheets[Faction.Red].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+      [Faction.Blue]: sheetsOf(recording.header, Faction.Blue).map(() => 1),
+      [Faction.Red]: sheetsOf(recording.header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
     }
 
     const blue = client(referee, 'A')
     client(referee, 'B')
-    blue.send({ type: 'matchHeader', header: { ...recording.header, startingHp: wrongHp } })
+    blue.send({ type: 'matchHeader', header: withStartingHp(recording.header, wrongHp) })
     await referee.idle()
 
     expect(verdicts).toHaveLength(1)
@@ -561,8 +578,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const recording = decisive()
     const { persistence, referee, verdicts } = await playing(
       ':memory:',
-      recording.header.sheets[Faction.Blue],
-      recording.header.sheets[Faction.Red],
+      sheetsOf(recording.header, Faction.Blue),
+      sheetsOf(recording.header, Faction.Red),
     )
 
     const blue = client(referee, 'A')
@@ -580,8 +597,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const recording = decisive()
     const { persistence, referee, verdicts } = await playing(
       ':memory:',
-      recording.header.sheets[Faction.Blue],
-      recording.header.sheets[Faction.Red],
+      sheetsOf(recording.header, Faction.Blue),
+      sheetsOf(recording.header, Faction.Red),
     )
     const before = await persistence.rosters.active('A')
 
@@ -608,7 +625,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       if (match.run().winner !== null) recording = match.recording ?? undefined
     }
     const header = recording!.header
-    const [first, second, third] = header.sheets[Faction.Blue]
+    const [first, second, third] = sheetsOf(header, Faction.Blue)
     // Nobody is invented for the empty slot: the side fields exactly three.
     expect(new MatchHost(header).squads.byFaction[Faction.Blue]).toHaveLength(3)
 
@@ -618,18 +635,18 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const { persistence, referee, verdicts } = await playing(
       ':memory:',
       [first!, fallen, second!, third!],
-      header.sheets[Faction.Red],
+      sheetsOf(header, Faction.Red),
     )
     const enlisted = await persistence.rosters.active('A')
     await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE character_id = ${enlisted[1]!.characterId}`
 
     const startingHp = {
-      [Faction.Blue]: header.sheets[Faction.Blue].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
-      [Faction.Red]: header.sheets[Faction.Red].map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+      [Faction.Blue]: sheetsOf(header, Faction.Blue).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+      [Faction.Red]: sheetsOf(header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
     }
     const blue = client(referee, 'A')
     client(referee, 'B')
-    blue.send({ type: 'matchHeader', header: { ...header, startingHp } })
+    blue.send({ type: 'matchHeader', header: withStartingHp(header, startingHp) })
     for (const event of recording!.events) blue.send(event.command)
     await referee.idle()
 
@@ -648,8 +665,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const recording = decisive()
     const { persistence, referee, verdicts } = await playing(
       ':memory:',
-      recording.header.sheets[Faction.Blue],
-      recording.header.sheets[Faction.Red],
+      sheetsOf(recording.header, Faction.Blue),
+      sheetsOf(recording.header, Faction.Red),
     )
     await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE player_id = ${'A'}`
 
@@ -657,7 +674,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     client(referee, 'B')
     blue.send({
       type: 'matchHeader',
-      header: { ...recording.header, sheets: { ...recording.header.sheets, [Faction.Blue]: [] } },
+      header: { ...recording.header, squads: { ...recording.header.squads, [Faction.Blue]: [] } },
     })
     await referee.idle()
 

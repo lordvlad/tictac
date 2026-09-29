@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M4 Competitive & Meta Roster"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-28"
+lastReviewed: "2026-09-29"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -28,17 +28,15 @@ during a match, roles, and a roster that outlives the match.
 ---
 
 ## 🔄 In Progress
-- Nothing in flight. `[ITEM-041]` (a short-handed roster fielded a phantom unit) was found
-  and fixed on 2026-09-28 while designing `[ITEM-039]`: a roster with an empty slot now deploys
-  exactly its living, and a man down costs 21 points of win rate in the sweep.
+- Nothing in flight. `[ITEM-043]` (one deployment record per soldier, replacing the parallel
+  `sheets`/`loadouts`/`startingHp` arrays) finished on 2026-09-29, found while designing
+  `[ITEM-042]`: `PROTOCOL_VERSION` 2 → 3, `RECORDING_VERSION` 4 → 5, `bun run balance`
+  unchanged.
 
 ## 📋 Ready — pull in this order
-1. **`[ITEM-043]`** One deployment record per soldier instead of parallel `sheets`/`loadouts`/
-   `startingHp` arrays — found while designing `[ITEM-042]`: nothing ties their lengths
-   together, which is exactly what `[ITEM-041]` broke on. Refactor only, no behaviour change.
-2. **`[ITEM-042]`** The bench: a roster of six, pick who deploys, recruit from the roster
+1. **`[ITEM-042]`** The bench: a roster of six, pick who deploys, recruit from the roster
    screen. Nothing that depends on *not* deploying someone can mean anything until this lands.
-3. **`[ITEM-039]`** Fatigue & medical-bay downtime, on top of the bench. Numbers are set and
+2. **`[ITEM-039]`** Fatigue & medical-bay downtime, on top of the bench. Numbers are set and
    calibrated against a man down (−21 wins in 100).
 
 ## 🧊 Backlog — not yet queued

@@ -317,11 +317,12 @@ describe('Component replication', () => {
 })
 
 describe('The start handshake carries each peer its own squad', () => {
-  test('a squad sent with `ready` arrives as the sheets that were rolled', async () => {
+  test('a squad sent with `ready` arrives as the sheets and kit that were sent', async () => {
     const { net, sent } = peered()
     const mine = rollSquadSheets(new Rng(7))
     const kit = defaultLoadout()
-    net.send({ type: 'ready', sheets: mine, loadout: kit })
+    const squad = mine.map((sheet, i) => ({ sheet, loadout: kit[i]! }))
+    net.send({ type: 'ready', squad })
 
     expect(sent[0]?.method).toBe(RpcMethods.ready)
 
@@ -332,30 +333,33 @@ describe('The start handshake carries each peer its own squad', () => {
     // the edge must leave them untouched — the barrier is for hostile input,
     // not a filter every honest squad has to survive.
     const peer = await receiver.net.waitForPeerReady()
-    expect(peer?.sheets).toEqual(mine)
+    expect(peer?.squad.map((d) => d.sheet)).toEqual(mine)
     // And the kit arrives with them: a referee rebuilds the match from its
     // intents, and what a squad is carrying is not one of them.
-    expect(peer?.loadout).toEqual(kit)
+    expect(peer?.squad.map((d) => d.loadout)).toEqual(kit)
   })
 
   test('kit this build cannot read is refused, and the squad still arrives', async () => {
-    // Deliberately harsher than the sheets beside it: a wrong sheet costs
+    // Deliberately harsher than the sheet beside it: a wrong sheet costs
     // display accuracy, a wrong weapon changes what every shot does. So the
-    // loadout is dropped rather than patched, and the other side deploys on the
-    // stock spread it had already assumed.
+    // whole squad's kit is dropped rather than patched, and the other side
+    // deploys on the stock spread it had already assumed.
     const { net, send } = peered('join')
+    const sheets = rollSquadSheets(new Rng(5))
     send({
       jsonrpc: '2.0',
       method: RpcMethods.ready,
       params: {
-        sheets: rollSquadSheets(new Rng(5)),
-        loadout: [{ weaponId: 'railgun', ammoId: 'standard' }],
+        squad: sheets.map((sheet, i) => ({
+          sheet,
+          ...(i === 0 ? { loadout: { weaponId: 'railgun', ammoId: 'standard' } } : {}),
+        })),
       },
     })
 
     const peer = await net.waitForPeerReady()
-    expect(peer?.sheets).toHaveLength(SQUAD_SIZE)
-    expect(peer?.loadout).toBeNull()
+    expect(peer?.squad).toHaveLength(SQUAD_SIZE)
+    expect(peer?.squad.every((d) => d.loadout === undefined)).toBe(true)
   })
 
   test('`ready` is never delivered as a command', async () => {
@@ -370,10 +374,10 @@ describe('The start handshake carries each peer its own squad', () => {
     send({
       jsonrpc: '2.0',
       method: RpcMethods.ready,
-      params: { sheets: rollSquadSheets(new Rng(11)) },
+      params: { squad: rollSquadSheets(new Rng(11)).map((sheet) => ({ sheet })) },
     })
 
-    expect((await net.waitForPeerReady())?.sheets).toHaveLength(SQUAD_SIZE)
+    expect((await net.waitForPeerReady())?.squad).toHaveLength(SQUAD_SIZE)
     expect(commands).toEqual([])
   })
 
@@ -384,14 +388,16 @@ describe('The start handshake carries each peer its own squad', () => {
       jsonrpc: '2.0',
       method: RpcMethods.ready,
       params: {
-        sheets: [
+        squad: [
           {
-            attributes: { health: 1e9, agility: 999, strength: NaN, intelligence: -5 },
-            maxHp: 1e9,
-            traits: ['toString', 'stoic'],
-            specialism: 'x',
+            sheet: {
+              attributes: { health: 1e9, agility: 999, strength: NaN, intelligence: -5 },
+              maxHp: 1e9,
+              traits: ['toString', 'stoic'],
+              specialism: 'x',
+            },
           },
-          'not a sheet',
+          'not a deployment',
           null,
         ],
       },
@@ -399,7 +405,7 @@ describe('The start handshake carries each peer its own squad', () => {
 
     const peer = await net.waitForPeerReady()
     expect(peer).not.toBeNull()
-    const first = peer!.sheets[0]!
+    const first = peer!.squad[0]!.sheet
     expect(first.attributes.health).toBe(CHARACTER.attribute.max)
     expect(first.attributes.agility).toBe(CHARACTER.attribute.max)
     expect(first.attributes.intelligence).toBe(CHARACTER.attribute.min)
@@ -419,7 +425,7 @@ describe('The start handshake carries each peer its own squad', () => {
     const { net, send } = peered('join')
     send({ jsonrpc: '2.0', method: RpcMethods.ready, params: {} })
 
-    expect((await net.waitForPeerReady())?.sheets).toEqual([])
+    expect((await net.waitForPeerReady())?.squad).toEqual([])
   })
 
   test('local play has no peer to wait for', async () => {
@@ -453,9 +459,10 @@ describe('A match over a linked pair, with no broker', () => {
     expect([host.mode, host.myFaction]).toEqual(['host', Faction.Blue])
     expect([joiner.mode, joiner.myFaction]).toEqual(['join', Faction.Red])
 
-    const squad = rollSquadSheets(new Rng(3))
-    host.send({ type: 'ready', sheets: squad, loadout: defaultLoadout() })
-    expect((await joiner.waitForPeerReady())?.sheets).toEqual(squad)
+    const sheets = rollSquadSheets(new Rng(3))
+    const kit = defaultLoadout()
+    host.send({ type: 'ready', squad: sheets.map((sheet, i) => ({ sheet, loadout: kit[i]! })) })
+    expect((await joiner.waitForPeerReady())?.squad.map((d) => d.sheet)).toEqual(sheets)
 
     host.send({ type: 'endTurn', faction: Faction.Blue })
 
@@ -487,8 +494,10 @@ describe('A match over a linked pair, with no broker', () => {
       source: 'live',
       createdAt: '2026-01-01T00:00:00.000Z',
       turnCap: null,
-      sheets: { [Faction.Blue]: rollSquadSheets(new Rng(1)), [Faction.Red]: rollSquadSheets(new Rng(2)) },
-      loadouts: { [Faction.Blue]: loadout, [Faction.Red]: defaultLoadout() },
+      squads: {
+        [Faction.Blue]: rollSquadSheets(new Rng(1)).map((sheet, i) => ({ sheet, loadout: loadout[i]! })),
+        [Faction.Red]: rollSquadSheets(new Rng(2)).map((sheet, i) => ({ sheet, loadout: defaultLoadout()[i]! })),
+      },
     }
     const ours = new MatchHost(header)
     const theirs = new MatchHost(header)

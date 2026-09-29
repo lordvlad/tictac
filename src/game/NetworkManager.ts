@@ -1,16 +1,17 @@
 import { Faction, SQUAD_SIZE } from '../config'
-import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
+import { sanitizeSheet } from '../core/Characters'
 import type { GrenadeId, ShotMode } from '../core/Arsenal'
 import type { DoorVerb } from '../core/Doors'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
 import {
-  squadLoadoutFrom,
-  startingHpFrom,
+  deploymentStateFrom,
+  unitLoadoutFrom,
+  type Deployment,
   type RecordedEvent,
   type RecordingHeader,
 } from './Recording'
-import type { SquadLoadout } from './Loadout'
+import type { UnitLoadout } from './Loadout'
 import { SocketTransport } from './SocketTransport'
 import type { StateDigest } from './StateDigest'
 import { MY_VERSION, versionRefusal } from '../version'
@@ -30,12 +31,9 @@ import type { Transport } from './Transport'
 
 export type NetworkMode = 'local' | 'host' | 'join'
 
-/** What a peer brought: its people, its kit if this build could read it, and its wounds if it has a roster. */
+/** What a peer brought: one entry per soldier, its kit absent where this build could not read it. */
 export interface PeerSquad {
-  sheets: CharacterSheet[]
-  loadout: SquadLoadout | null
-  /** Absent unless the peer is signed in to a match server that keeps its HP. */
-  hp: number[] | null
+  squad: Deployment[]
 }
 
 /**
@@ -130,7 +128,8 @@ export type NetworkMessage =
   | { type: 'operateDoor'; faction: Faction; squadIndex: number; edge: number; verb: DoorVerb }
   | { type: 'rightClickFacing'; faction: Faction; squadIndex: number; x: number; z: number }
   /**
-   * This side has finished equipping: its people, and what they are carrying.
+   * This side has finished equipping: its people, what they are carrying, and
+   * what state they start in — one entry per soldier.
    *
    * The kit rides along because a referee refights the match from its intents
    * and a loadout is not one of them — it reaches a *peer* as replicated
@@ -138,12 +137,12 @@ export type NetworkMessage =
    * something anybody declared. Both sides know who they brought at exactly
    * this moment, and not before.
    *
-   * `hp` is the same reasoning applied to wounds: absent everywhere except a
-   * kept server match, where a starting HP has to be something both peers and
-   * the referee agree on before the first digest, or the referee accuses an
-   * honest client of a foul.
+   * State's `hp` is the same reasoning applied to wounds: absent everywhere
+   * except a kept server match, where a starting HP has to be something both
+   * peers and the referee agree on before the first digest, or the referee
+   * accuses an honest client of a foul.
    */
-  | { type: 'ready'; sheets: CharacterSheet[]; loadout: SquadLoadout; hp?: number[] }
+  | { type: 'ready'; squad: Deployment[] }
 
 export class NetworkManager {
   /** The channel this side plays over, once there is one. */
@@ -278,24 +277,35 @@ export class NetworkManager {
     }
 
     // Never forwarded as a command: `ready` can land before this side has left
-    // its loadout screen, when there is no `onMessage` to receive it. The
-    // sheets are checked here, at the edge, so nothing downstream has to wonder
-    // whether a peer's numbers are numbers.
+    // its loadout screen, when there is no `onMessage` to receive it. Checked
+    // here, at the edge, so nothing downstream has to wonder whether a peer's
+    // numbers are numbers.
     if (method === RpcMethods.ready) {
-      const raw = Array.isArray(params.sheets) ? params.sheets : []
-      const sheets = raw.slice(0, SQUAD_SIZE).map(sanitizeSheet)
-      // The kit is *refused* rather than defaulted, unlike the sheets: a wrong
-      // sheet costs display accuracy, a wrong weapon changes what every shot
-      // does. A peer that cannot state its loadout deploys on the stock spread,
-      // which is what this side already assumed.
-      let loadout: SquadLoadout | null = null
+      const rawSquad = (Array.isArray(params.squad) ? params.squad : []).slice(0, SQUAD_SIZE)
+      const entries = rawSquad.map((entry) =>
+        entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {},
+      )
+      const sheets = entries.map((entry) => sanitizeSheet(entry.sheet))
+      // The kit is *refused* rather than defaulted, unlike the sheet beside
+      // it: a wrong sheet costs display accuracy, a wrong weapon changes what
+      // every shot does. One unit's kit this build cannot read costs the
+      // whole squad's — the other side then deploys on the stock spread it
+      // had already assumed, rather than a mix of real and invented gear.
+      let loadouts: UnitLoadout[] | null = null
       try {
-        loadout = squadLoadoutFrom(params.loadout, "a peer's loadout")
+        loadouts = entries.map((entry, i) => unitLoadoutFrom(entry.loadout, `a peer's loadout[${i}]`))
       } catch (err) {
         console.warn('[net] ignoring a peer loadout this build cannot read:', err)
       }
-      const hp = startingHpFrom(params.hp) ?? null
-      this.peerReady.resolve({ sheets, loadout, hp })
+      const squad: Deployment[] = sheets.map((sheet, i) => {
+        const state = deploymentStateFrom(entries[i]!.state)
+        return {
+          sheet,
+          ...(loadouts ? { loadout: loadouts[i]! } : {}),
+          ...(state ? { state } : {}),
+        }
+      })
+      this.peerReady.resolve({ squad })
       return
     }
 

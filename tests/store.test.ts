@@ -3,7 +3,6 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Faction } from '../src/config'
-import { defaultLoadout } from '../src/game/Loadout'
 import { RECORDING_VERSION } from '../src/game/Recording'
 import { openDb } from '../src/server/db/Db'
 import { MIGRATIONS } from '../src/server/db/migrations'
@@ -42,8 +41,7 @@ function header(createdAt: string, seedLabel: string): RecordingHeader {
     source: 'sim',
     createdAt,
     turnCap: null,
-    sheets: { [Faction.Blue]: [], [Faction.Red]: [] },
-    loadouts: { [Faction.Blue]: defaultLoadout(), [Faction.Red]: defaultLoadout() },
+    squads: { [Faction.Blue]: [], [Faction.Red]: [] },
   }
 }
 

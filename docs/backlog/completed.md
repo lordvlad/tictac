@@ -1873,6 +1873,69 @@ worse than a fair fight, not a forfeit.
 - [x] A signed-in player with nobody left is refused, not given a stock squad.
 - [x] Full squads unchanged: the balance report is identical.
 
+Superseded in part by `[ITEM-043]`: `startingHpFrom` and the separate `sheets`/`loadouts`
+arrays this item widened no longer exist, folded into one `Deployment[]`. Nothing here was
+wrong — the mechanism just moved.
+
+---
+
+### [ITEM-043] One Deployment Record Per Soldier, Not Parallel Lists
+**Completed Date:** 2026-09-29  
+**Type:** Refactor  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+A squad crossed the wire as several same-length arrays matched by position only: `sheets`,
+`loadouts`, `startingHp` on `RecordingHeader`; `sheets`, `loadout`, `hp` on `ready`. Nothing
+tied their lengths together. `[ITEM-041]` was exactly that failure: `startingHpFrom` enforced
+`length === SQUAD_SIZE` on its own array while `sheets` had already gone short, so a
+short-handed side's HP was silently dropped rather than read. `[ITEM-042]` wanted to add a
+character id per soldier and `[ITEM-039]` wanted to add fatigue; bolting each onto its own
+parallel array would have made five lists that all had to agree, with the same failure mode
+five times over.
+
+#### Key Changes
+- **One shape** (`src/game/Recording.ts`): `DeploymentState { hp?, fatigue? }` — a bag on
+  purpose, room for what comes after without another wire shape — and `Deployment { characterId?,
+  sheet, loadout?, state? }`. `ready.squad: Deployment[]` and
+  `RecordingHeader.squads: Record<Faction, Deployment[]>` replace the three parallel arrays.
+- **`loadout` is optional on the type**, not the required field the design sketched. A peer's
+  kit sometimes cannot be read (a newer build naming a weapon this one does not know), and
+  `Squads` already had a real, distinct fallback for that — the raw stock spread, not
+  `applyUnitLoadout` with a made-up loadout — which zeroes a starting Stim Pack and First Aid
+  Kit that the stock path leaves alone. Folding "no kit" into a required field would have
+  erased that distinction; an absent `loadout` keeps it exactly.
+- **Two validators, not one.** `unitLoadoutFrom` (per soldier) and `deploymentsFrom` (per squad,
+  strict: 1 to `SQUAD_SIZE`, throws same as `squadLoadoutFrom` did) replace `sheetsFrom`,
+  `squadLoadoutFrom` and `startingHpFrom` for a header or a file. `NetworkManager`'s `ready`
+  handler keeps its own leniency on top of `unitLoadoutFrom`: one unit's unreadable kit still
+  costs the whole squad's, the same all-or-nothing failure the old code made — sheets and state
+  arrive regardless, since HP now lives next to the sheet it belongs to rather than in a
+  neighbour's slot.
+- **`Squads`** drops `loadout`/`loadoutFaction`/`sheets`/`startingHp` for one
+  `squads?: Record<Faction, Deployment[]>`; `equipFaction` and the never-called `adoptSheets`
+  are gone, replaced by `deploymentsOf(faction)`, which reads a squad's sheets, kit and current
+  HP back in the shape a header states them — used everywhere a header or `ready` used to be
+  assembled from three separate reads.
+- **`PROTOCOL_VERSION`** 2 → 3 (`ready`'s shape moved), **`RECORDING_VERSION`** 4 → 5 (a
+  version-4 header's three arrays would zip a sheet against the wrong unit's kit the moment
+  they disagreed — the schema catalog now refuses one with a stated reason).
+
+#### Measured
+`bun run balance` is identical to the `[ITEM-041]` baseline (Blue 55, Red 43, 2 draws, mean
+9.27 turns) and to its `--blueSize=3` case (Blue 34, Red 66) — a refactor, not a rule change.
+`bun test`: all 654 tests, including every `ready`-parsing edge case (nonsense sheets, an
+unreadable kit, a missing squad) rewritten against the new shape. In a browser: a local match
+deploys both squads, plays a shot and a full turn handover with no console errors.
+
+#### Acceptance Criteria
+- [x] No behaviour change: every existing test passes against the new shape, and `bun run
+      balance` matches the pinned baseline exactly.
+- [x] `deploymentsFrom` refuses a squad of 0 or more than `SQUAD_SIZE`, and every other refusal
+      the old three parsers made (unknown weapon, unknown sidearm, unknown role) still fires,
+      now from one place (`unitLoadoutFrom`).
+- [x] A version-4 recording is refused with a stated reason, the same way a version-2 one is.
+
 ---
 
 ## Rejected — kept for the reasoning

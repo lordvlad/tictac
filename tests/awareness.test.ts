@@ -14,6 +14,7 @@ import { createGlobalRules } from '../src/ecs/globals'
 import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 import { TurnManager } from '../src/game/TurnManager'
 import type { Tile } from '../src/core/Grid'
 
@@ -36,10 +37,15 @@ function match(sharp = false, build: (grid: Grid) => void = () => {}) {
     const base = characterSheet(new Rng(4))
     return { ...base, traits: [], attributes: { ...base.attributes, intelligence } }
   }
-  const squads = new Squads(world, grid, { [Faction.Blue]: far(1), [Faction.Red]: far(20) }, undefined, Faction.Blue, {
-    [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, sheet(5)),
-    [Faction.Red]: Array.from({ length: SQUAD_SIZE }, sheet(sharp ? 10 : 5)),
-  })
+  const squads = new Squads(
+    world,
+    grid,
+    { [Faction.Blue]: far(1), [Faction.Red]: far(20) },
+    stockSquads({
+      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, sheet(5)),
+      [Faction.Red]: Array.from({ length: SQUAD_SIZE }, sheet(sharp ? 10 : 5)),
+    }),
+  )
   for (const unit of squads.soldiers) unit.equip(WeaponId.Rifle, AmmoId.Standard)
   const movement = new MovementSystem(grid)
   const combat = new CombatSystem(grid, squads, NO_FX, matchDice(7))

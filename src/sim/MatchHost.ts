@@ -84,19 +84,7 @@ export class MatchHost {
     this.maxSteps = options.maxStepsPerMove ?? 2000
 
     createGlobalRules(this.world)
-    this.squads = new Squads(
-      this.world,
-      map.grid,
-      map.spawns,
-      undefined,
-      Faction.Blue,
-      header.sheets,
-      header.startingHp,
-    )
-    // Both sides' kit: a host resolves attacks for everybody, so it needs the
-    // weapons both squads actually fought with rather than the stock spread.
-    this.squads.equipFaction(Faction.Blue, header.loadouts[Faction.Blue])
-    this.squads.equipFaction(Faction.Red, header.loadouts[Faction.Red])
+    this.squads = new Squads(this.world, map.grid, map.spawns, header.squads)
 
     this.dice = new Rng(header.seed)
     this.movement = new MovementSystem(map.grid)

@@ -16,6 +16,7 @@ import { createGlobalRules } from '../src/ecs/globals'
 import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
 import { type Command, CommandSystem } from '../src/ecs/systems/CommandSystem'
 import { Squads } from '../src/game/Squads'
+import { stockSquads } from './support/squads'
 import { TurnManager } from '../src/game/TurnManager'
 
 const always = (value: number): Roll => () => value
@@ -33,10 +34,15 @@ function match(roll: Roll, build: (grid: Grid) => void = () => {}) {
   build(grid)
   const parked = (x0: number) => Array.from({ length: SQUAD_SIZE }, (_, i) => ({ x: x0 + i * 2, y: 38 }))
   const sheet = () => ({ ...characterSheet(new Rng(4)), traits: [] })
-  const squads = new Squads(world, grid, { [Faction.Blue]: parked(1), [Faction.Red]: parked(30) }, undefined, Faction.Blue, {
-    [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, sheet),
-    [Faction.Red]: Array.from({ length: SQUAD_SIZE }, sheet),
-  })
+  const squads = new Squads(
+    world,
+    grid,
+    { [Faction.Blue]: parked(1), [Faction.Red]: parked(30) },
+    stockSquads({
+      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, sheet),
+      [Faction.Red]: Array.from({ length: SQUAD_SIZE }, sheet),
+    }),
+  )
   for (const unit of squads.soldiers) unit.equip(WeaponId.Rifle, AmmoId.Standard)
   const movement = new MovementSystem(grid)
   const combat = new CombatSystem(grid, squads, NO_FX, roll)

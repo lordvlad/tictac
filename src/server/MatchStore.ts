@@ -83,8 +83,8 @@ export class MatchStore {
    *
    * `created_at` and `seed_label` are copied out of the header rather than
    * derived from it in SQL, because a generated column is SQLite's alone. The
-   * header itself goes in whole: it is a document, and decomposing sheets and
-   * loadouts into columns would restate a shape `parseRecording` already owns.
+   * header itself goes in whole: it is a document, and decomposing its squads
+   * into columns would restate a shape `parseRecording` already owns.
    */
   async create(header: RecordingHeader, id: string = crypto.randomUUID()): Promise<string> {
     // The refusal `parseRecording` already makes, for the same reason: a log

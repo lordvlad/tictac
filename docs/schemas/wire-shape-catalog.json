@@ -74,9 +74,7 @@
       "type": "'overwatch'"
     },
     "ready": {
-      "hp": "optional number[]",
-      "loadout": "SquadLoadout",
-      "sheets": "CharacterSheet[]",
+      "squad": "Deployment[]",
       "type": "'ready'"
     },
     "reload": {
@@ -425,5 +423,5 @@
       "weaponId": "string"
     }
   },
-  "protocolVersion": 2
+  "protocolVersion": 3
 }

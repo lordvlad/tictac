@@ -27,6 +27,7 @@ import type { NetworkMessage } from '../game/NetworkManager'
 import { canWatch } from '../game/Overwatch'
 import {
   type CombatRecording,
+  type Deployment,
   RECORDING_VERSION,
   Recorder,
   type RecordingHeader,
@@ -228,6 +229,8 @@ export class SimMatch {
       [Faction.Red]: planToLoadout(setup.red),
     }
 
+    const squadOf = (faction: Faction): Deployment[] =>
+      this.sheets[faction].map((sheet, i) => ({ sheet, loadout: this.loadouts[faction][i]! }))
     const header: RecordingHeader = {
       version: RECORDING_VERSION,
       seed: setup.seed >>> 0,
@@ -235,8 +238,7 @@ export class SimMatch {
       source: 'sim',
       createdAt: new Date().toISOString(),
       turnCap: this.turnCap,
-      sheets: this.sheets,
-      loadouts: this.loadouts,
+      squads: { [Faction.Blue]: squadOf(Faction.Blue), [Faction.Red]: squadOf(Faction.Red) },
       ...(setup.map ? { map: setup.map } : {}),
     }
     this.host = new MatchHost(header)
