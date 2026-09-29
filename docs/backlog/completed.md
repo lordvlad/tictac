@@ -3,7 +3,7 @@ title: "Completed Work Archive"
 id: "BACKLOG-COMPLETED"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-27"
+lastReviewed: "2026-09-30"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -1935,6 +1935,77 @@ deploys both squads, plays a shot and a full turn handover with no console error
       the old three parsers made (unknown weapon, unknown sidearm, unknown role) still fires,
       now from one place (`unitLoadoutFrom`).
 - [x] A version-4 recording is refused with a stated reason, the same way a version-2 one is.
+
+---
+
+### [ITEM-042] The Bench: a Roster Bigger Than the Squad
+**Completed Date:** 2026-09-30  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+A roster was exactly a squad: four people, all of whom deployed every match. So "who fights"
+was never a decision, and nothing that depends on *not* deploying someone — resting them,
+keeping them out while they recover — could mean anything. `[ITEM-039]` is built on this item.
+
+#### Key Changes
+- **`ROSTER.size = 6`** (`src/config.ts`), beside `SQUAD_SIZE = 4`. Registration deals six
+  (`Accounts.register` → `rollSquadSheets(rng, ROSTER.size)`); `Rosters.recruit` fills the
+  lowest empty slot of `0..ROSTER.size-1` instead of `0..SQUAD_SIZE-1`.
+- **Picking the squad.** `src/hud/RosterScreen.ts`, a DOM-only overlay shown ahead of
+  `LoadoutScreen` for a signed-in player: every active member by slot, HP and attribute summary
+  — deliberately no callsign, since `FACTION_INFO.squadNames[index]` is assigned by *deployed*
+  position and would promise one this screen cannot keep. Toggling picks 1 to `SQUAD_SIZE`,
+  defaulting to the first four in slot order; an empty slot renders a **Recruit** button in its
+  place instead of a member row.
+- **The referee no longer compares position for position.** `verifyRosters` looks each deployed
+  unit's stated `Deployment.characterId` up in the player's active roster (a `Map`, not an
+  index), so a squad can be any 1–4 of the six, in any order — not only the first four slots.
+  Once a name resolves, the same two checks as before run against the row it names: sheet
+  (`sanitizeSheet` both ways) and `state.hp`, exactly. A missing id, an id that is not this
+  player's, one that is not active, or one repeated within the same squad all abort with one
+  message; a sheet or HP mismatch keep their own, existing ones.
+- **Nothing new on the wire.** `Deployment.characterId` already existed from `[ITEM-043]`; this
+  item is the first thing that populates it for a kept roster (still absent for a rolled one).
+  `PROTOCOL_VERSION` and `RECORDING_VERSION` do not move — `bun run schema:catalog:check` passes
+  unchanged, since the shape it is checking did not.
+- **Rest heals.** `Rosters.settle` now heals every active roster member *not* named in a side's
+  `characterIds` too, by the same survivor formula (`HEALING.perMatch` of missing HP, scaled by
+  `healBonus`, clamped to `maxHpOf`) — without touching `matches` or `deeds`. Resting is not a
+  match.
+- **The ticket is minted after the pick, not before.** `main.ts`'s `equip()` shows the roster
+  screen first and calls `account.socketUrl(url)` — which mints a single-use, 60-second ticket
+  — only once `RosterScreen.pick()` resolves, so a player who lingers choosing a squad cannot
+  burn the window before ever connecting.
+- **`Account.roster()`** returns a client-local `RosterEntry[]` (`src/game/Account.ts`), not the
+  server's `RosterMember` — `src/game`/`src/hud` do not import `src/server/`, even for a type.
+
+#### Measured
+`bun run balance` is identical to the `[ITEM-043]` baseline (Blue 55, Red 43, 2 draws, mean 9.27
+turns) — the sweep has no roster, so nothing here could move it. `bun test`: all 655 tests,
+including a dedicated bench rest-heal case and a referee test that picks a squad that is *not*
+the first four roster slots. In a browser, against a real `bun run serve:match`: a freshly
+registered player's roster screen shows six members, defaults to the first four picked; toggling
+a non-default four (deselecting slot 1, selecting slot 5) and continuing carries exactly those
+four sheets into the loadout screen (confirmed by their HP matching the picked slots, not the
+default ones); Deploy proceeds to "Waiting for opponent to deploy" — the referee accepted the
+non-default squad live. Separately, with one roster slot marked dead, the roster screen renders
+it as `Empty` with a Recruit button; clicking it calls the live endpoint and splices the new
+member into the slot in place, with no page reload.
+
+#### Acceptance Criteria
+- [x] Registration deals six; recruiting fills up to six and refuses a seventh
+      (`tests/accounts.test.ts`, `tests/persistence.test.ts`).
+- [x] A signed-in player deploys any 1–4 distinct active members, and the refereed match settles
+      exactly those — tested with a pick that is *not* the first four slots
+      (`tests/persistence.test.ts`, and live in a browser).
+- [x] The referee aborts a stated id that is not this player's, is dead, repeats, is a fifth, or
+      whose sheet or HP differs from the roster's.
+- [x] A benched member heals by the survivor rule and does not count the match; a deployed one is
+      settled exactly as today.
+- [x] In a browser against `bun run serve:match`: pick four of six, recruit into an empty slot,
+      deploy, and the match plays with the picked four.
+- [x] No rules change: `bun run balance` is identical (the sweep has no roster).
 
 ---
 

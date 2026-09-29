@@ -1,4 +1,4 @@
-import { Faction, FACTION_INFO } from '../config'
+import { Faction, FACTION_INFO, SQUAD_SIZE } from '../config'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../game/JsonRpc'
 import type { NetworkMessage } from '../game/NetworkManager'
 import type { RecordedEvent, RecordingHeader } from '../game/Recording'
@@ -334,33 +334,65 @@ export class Referee {
           found: [],
         })
       }
-      const same =
-        members.length === deployed.length &&
-        members.every(
-          (member, index) =>
-            JSON.stringify(sanitizeSheet(deployed[index]!.sheet)) === JSON.stringify(member.sheet),
-        )
-      if (!same) {
+      if (!Array.isArray(deployed) || deployed.length < 1 || deployed.length > SQUAD_SIZE) {
         return this.abort({
           matchId: this.matchId ?? 'unknown',
           side: faction,
-          reason: `the ${FACTION_INFO[faction].name} squad is not the roster this server keeps for its player`,
+          reason: `the ${FACTION_INFO[faction].name} squad is not a squad of 1 to ${SQUAD_SIZE}`,
           found: [],
         })
       }
-      // A wound is as much part of the roster as the sheet is: a client that
-      // omitted it, or stated a different one, would otherwise deploy a
-      // signed-in player's character healthier than the roster says they are.
-      const sameHp = members.every((member, index) => deployed[index]!.state?.hp === member.hp)
-      if (!sameHp) {
-        return this.abort({
-          matchId: this.matchId ?? 'unknown',
-          side: faction,
-          reason: `the ${FACTION_INFO[faction].name} squad's starting health is not what the roster this server keeps for its player says`,
-          found: [],
-        })
+      // The squad is these *stated* members of the active roster — not "the
+      // whole roster in slot order", now that a roster is bigger than a
+      // squad (`[ITEM-042]`) and a player picks who deploys. Every id has to
+      // belong to this player, be active, and appear once; its sheet and
+      // starting HP have to be exactly that member's, so a client cannot heal
+      // or misrepresent whoever it names.
+      const byId = new Map(members.map((member) => [member.characterId, member]))
+      const seen = new Set<string>()
+      const characterIds: string[] = []
+      for (const unit of deployed) {
+        const id = unit.characterId
+        if (typeof id !== 'string') {
+          return this.abort({
+            matchId: this.matchId ?? 'unknown',
+            side: faction,
+            reason: `the ${FACTION_INFO[faction].name} squad names a character that is not this player's, is not active, or repeats`,
+            found: [],
+          })
+        }
+        const member = byId.get(id)
+        if (!member || seen.has(id)) {
+          return this.abort({
+            matchId: this.matchId ?? 'unknown',
+            side: faction,
+            reason: `the ${FACTION_INFO[faction].name} squad names a character that is not this player's, is not active, or repeats`,
+            found: [],
+          })
+        }
+        if (JSON.stringify(sanitizeSheet(unit.sheet)) !== JSON.stringify(member.sheet)) {
+          return this.abort({
+            matchId: this.matchId ?? 'unknown',
+            side: faction,
+            reason: `the ${FACTION_INFO[faction].name} squad is not the roster this server keeps for its player`,
+            found: [],
+          })
+        }
+        // A wound is as much part of the roster as the sheet is: a client
+        // that omitted it, or stated a different one, would otherwise deploy
+        // a signed-in player's character healthier than the roster says.
+        if (unit.state?.hp !== member.hp) {
+          return this.abort({
+            matchId: this.matchId ?? 'unknown',
+            side: faction,
+            reason: `the ${FACTION_INFO[faction].name} squad's starting health is not what the roster this server keeps for its player says`,
+            found: [],
+          })
+        }
+        seen.add(id)
+        characterIds.push(id)
       }
-      this.sides[faction] = { playerId, characterIds: members.map((member) => member.characterId) }
+      this.sides[faction] = { playerId, characterIds }
     }
   }
 

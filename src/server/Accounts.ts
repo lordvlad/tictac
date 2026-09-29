@@ -1,4 +1,5 @@
 import { rollSquadSheets } from '../core/Characters'
+import { ROSTER } from '../config'
 import { Rng } from '../core/rng'
 import { fromBase64Url, toBase64Url } from '../game/Base64Url'
 import type { Db } from './db/Db'
@@ -168,9 +169,10 @@ export class Accounts {
                      VALUES (${answer.credentialId}, ${playerId}, ${answer.publicKey},
                              ${answer.publicKeyAlgorithm}, ${authenticator.signCount}, ${created})`
       // The squad is rolled by the server, from system randomness: a client
-      // that dealt its own would deal itself four prodigies.
+      // that dealt its own would deal itself six prodigies. A full roster,
+      // not a squad — the bench exists so resting anyone is a choice.
       const seed = crypto.getRandomValues(new Uint32Array(1))[0]!
-      await this.rosters.enlist(tx, playerId, rollSquadSheets(new Rng(seed)))
+      await this.rosters.enlist(tx, playerId, rollSquadSheets(new Rng(seed), ROSTER.size))
       return this.startSession(tx, playerId)
     })
     return { token, player: { id: playerId, name } }

@@ -568,6 +568,13 @@ export const FACTION_INFO: Record<Faction, {
 
 export const SQUAD_SIZE = 4
 
+/**
+ * A kept roster (`server/Rosters.ts`), bigger than a squad so resting anyone
+ * is a real choice (`ITEM-042`) rather than the only option. Six so a steady
+ * rotation rests two a match and each character sits out one match in three.
+ */
+export const ROSTER = { size: 6 } as const
+
 // ---------------------------------------------------------------------------
 // Grenade Visual Effects (FX)
 // ---------------------------------------------------------------------------

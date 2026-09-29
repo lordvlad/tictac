@@ -17,6 +17,18 @@ export interface Player {
   name: string
 }
 
+/**
+ * One character on a kept roster, as a client sees it: enough to show and to
+ * pick from (`[ITEM-042]`), never the combat log or growth a player cannot
+ * act on here.
+ */
+export interface RosterEntry {
+  characterId: string
+  slot: number
+  sheet: CharacterSheet
+  hp: number
+}
+
 interface Failure {
   error?: string
 }
@@ -136,16 +148,21 @@ export class Account {
     localStorage.removeItem(this.storageKey)
   }
 
-  /** The squad this server keeps for the player, in slot order — sheets and current HP. */
-  async roster(): Promise<{ sheets: CharacterSheet[]; hp: number[] }> {
-    const { roster } = await this.call<{ roster: { sheet: unknown; hp: number }[] }>(
-      'GET',
-      '/api/roster',
-    )
-    return {
-      sheets: roster.map((member) => sanitizeSheet(member.sheet)),
-      hp: roster.map((member) => member.hp),
-    }
+  /**
+   * Every active character on this server's roster for this player — the
+   * dead never come back, so only the living are worth a client knowing
+   * about (`[ITEM-042]`): slot, sheet, current HP and the id the referee
+   * checks a deployment against.
+   */
+  async roster(): Promise<RosterEntry[]> {
+    const { roster } = await this.call<{ roster: RosterEntry[] }>('GET', '/api/roster')
+    return roster.map((member) => ({ ...member, sheet: sanitizeSheet(member.sheet) }))
+  }
+
+  /** Fill the lowest empty slot with a fresh recruit (`[ITEM-037]`). */
+  async recruit(): Promise<RosterEntry> {
+    const { member } = await this.call<{ member: RosterEntry }>('POST', '/api/roster/recruit', {})
+    return { ...member, sheet: sanitizeSheet(member.sheet) }
   }
 
   /**

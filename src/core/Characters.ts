@@ -195,15 +195,17 @@ export function characterSheet(rng: Rng): CharacterSheet {
 }
 
 /**
- * Roll the squad this player commands.
+ * Roll a squad. `count` is `SQUAD_SIZE` by default — what deploys — but a
+ * kept roster deals more (`ROSTER.size`, `ITEM-042`) so resting someone is a
+ * choice, not merely absence.
  *
  * Seeded off the clock by default: two peers must *not* deal the same people,
  * and nothing about a squad needs to be reproducible from the match seed. Takes
  * an `Rng` so a test can pin it.
  */
-export function rollSquadSheets(rng: Rng = new Rng(Date.now() >>> 0)): CharacterSheet[] {
+export function rollSquadSheets(rng: Rng = new Rng(Date.now() >>> 0), count = SQUAD_SIZE): CharacterSheet[] {
   const sheets: CharacterSheet[] = []
-  for (let i = 0; i < SQUAD_SIZE; i++) sheets.push(characterSheet(rng))
+  for (let i = 0; i < count; i++) sheets.push(characterSheet(rng))
   return sheets
 }
 

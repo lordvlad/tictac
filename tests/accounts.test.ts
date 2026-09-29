@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { SQUAD_SIZE } from '../src/config'
+import { ROSTER } from '../src/config'
 import { fromBase64Url, toBase64Url } from '../src/game/Base64Url'
 import { apiHandler } from '../src/server/Api'
 import { LOCAL_RELYING_PARTY, type Persistence } from '../src/server/Persistence'
@@ -96,8 +96,8 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
     // would be a half-made account.
     const roster = await api.call('GET', '/api/roster', { token })
     const members = roster.body.roster as RosterMember[]
-    expect(members).toHaveLength(SQUAD_SIZE)
-    expect(members.map((member) => member.slot)).toEqual([0, 1, 2, 3])
+    expect(members).toHaveLength(ROSTER.size)
+    expect(members.map((member) => member.slot)).toEqual([0, 1, 2, 3, 4, 5])
     expect(members.every((member) => member.matches === 0)).toBe(true)
 
     await persistence.close()
@@ -124,8 +124,8 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
 
     const after = await api.call('GET', '/api/roster', { token })
     const members = after.body.roster as RosterMember[]
-    expect(members).toHaveLength(SQUAD_SIZE)
-    expect(members.map((member) => member.slot)).toEqual([0, 1, 2, 3])
+    expect(members).toHaveLength(ROSTER.size)
+    expect(members.map((member) => member.slot)).toEqual([0, 1, 2, 3, 4, 5])
 
     const full = await api.call('POST', '/api/roster/recruit', { token })
     expect(full.status).toBe(400)

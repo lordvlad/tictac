@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-29"
+lastReviewed: "2026-09-30"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -23,77 +23,17 @@ it is done. It is not ordered and says nothing about what happens next: that is 
 
 ---
 
-### [ITEM-042] The Bench: a Roster Bigger Than the Squad
-**Type:** Feature  
-**Priority:** P2  
-**Status:** Ready  
-**Milestone:** M4 — Competitive & Meta Roster  
-
-#### Why
-A roster is exactly a squad: four people, all of whom deploy every match. So "who fights" is
-never a decision, and nothing that depends on *not* deploying someone — resting them, keeping
-them out while they recover — can mean anything. `[ITEM-039]` is built on this item.
-
-#### Change
-1. **Roster size.** `ROSTER.size = 6` in `src/config.ts`, beside `SQUAD_SIZE = 4`. Six so that
-   a steady rotation rests two a match and each character sits out one match in three.
-   Registration deals six (`enlist`); `Rosters.recruit` fills the lowest empty slot of
-   `0..ROSTER.size-1`. Existing accounts reach six by recruiting — free since `[ITEM-037]`.
-2. **Picking the squad.** A signed-in player chooses 1 to `SQUAD_SIZE` distinct active members
-   to deploy. The default pick is the first four in slot order. The squad index is the order
-   picked; the roster slot is where the character lives, and the two stop being the same.
-3. **On the wire.** `Deployment.characterId` (`[ITEM-043]`) is populated for a kept roster and
-   absent for a rolled one. No new array, and nothing else to keep in step with it: the id sits
-   next to the sheet and loadout it names. `PROTOCOL_VERSION` and `RECORDING_VERSION` already
-   moved for `[ITEM-043]`; this item does not move them again.
-4. **The referee** replaces "the squad is the active roster" with "the squad is these stated
-   members of the active roster": every id belongs to this player and is active, none repeats,
-   there are 1 to `SQUAD_SIZE` of them, and the header's sheets and starting HP are exactly
-   those members', in the stated order. Settlement writes fates to the stated ids.
-5. **Rest heals.** At every settled match of a player, each active member who did *not*
-   deploy heals by the same rule a survivor does (`HEALING.perMatch` of missing HP, scaled by
-   `healBonus`) and does not count a match.
-6. **A roster screen** before the loadout screen, for signed-in players only: every active
-   member with HP, sheet summary and slot; toggle who deploys (at most four); a Recruit button
-   on each empty slot (`POST /api/roster/recruit` — which also closes `[ITEM-037]`'s missing
-   UI). Continue goes to the loadout screen with the picked sheets.
-
-#### Affected Files
-- `src/config.ts`, `src/server/Rosters.ts`, `src/server/Referee.ts`, `src/server/Accounts.ts`
-- `src/game/NetworkManager.ts`, `src/game/Recording.ts`, `src/game/Account.ts`
-- `src/main.ts`, a new `src/hud/RosterScreen.ts`, `src/game.css`
-- `docs/schemas/wire-shape-catalog.json` (regenerated)
-
-#### Acceptance Criteria
-- [ ] Registration deals six; recruiting fills up to six and refuses a seventh.
-- [ ] A signed-in player deploys any 1–4 distinct active members, and the refereed match
-      settles exactly those — tested with a pick that is *not* the first four slots.
-- [ ] The referee aborts a stated id that is not this player's, is dead, repeats, is a fifth, or
-      whose sheet or HP differs from the header's at that position.
-- [ ] A benched member heals by the survivor rule and does not count the match; a deployed one
-      is settled exactly as today.
-- [ ] In a browser against `bun run serve:match`: pick four of six, recruit into an empty slot,
-      deploy, and the match plays with the picked four.
-- [ ] No rules change: `bun run balance` is identical (the sweep has no roster).
-
-#### Risks
-- **Callsigns are positional.** In-match names come from `FACTION_INFO.squadNames[index]`, so
-  whoever is picked first is always "Cobalt". Kept for this item — they are callsigns — but the
-  roster screen must identify people by their sheet and slot, not by callsign.
-
----
-
 ### [ITEM-039] Fatigue & Medical-Bay Downtime
 **Type:** Feature  
 **Priority:** P2  
-**Status:** Ready — pulled after `[ITEM-042]`, which it is built on  
+**Status:** Ready — pulled next, now that `[ITEM-042]` (the bench) it is built on has shipped  
 **Milestone:** M4 — Competitive & Meta Roster  
 
 #### Why
 Split out of `[ITEM-038]` at 2026-09-26: [GDD §5](../design/gdd/progression-and-meta.md) also
 wants "fatigue over consecutive deployments" that temporarily lowers baseline AP and morale, and
 "medical-bay downtime" for severe injury. Both only mean something once a player can choose
-not to deploy somebody, which is `[ITEM-042]`.
+not to deploy somebody, which the bench (`[ITEM-042]`, done) now lets one do.
 
 #### Change
 1. **Stored.** Migration 5 adds `roster.fatigue` (0–4) and `roster.downtime` (≥ 0), both

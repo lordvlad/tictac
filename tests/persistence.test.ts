@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { Faction, HEALING, SQUAD_SIZE } from '../src/config'
+import { Faction, HEALING, ROSTER, SQUAD_SIZE } from '../src/config'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
 import { characterSheet, derive, maxHpOf, sanitizeSheet, type CharacterSheet } from '../src/core/Characters'
 import { NO_FOCUS } from '../src/core/Combatant'
@@ -314,9 +314,52 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     await persistence.close()
   })
 
+  test('a benched member heals by the survivor rule and does not count the match', async () => {
+    // The bench (`[ITEM-042]`) is what makes resting somebody mean anything:
+    // a settled match now has to say what it did to the roster members it
+    // did *not* deploy, not only the ones it did.
+    const persistence = await freshPersistence(url)
+    const { a } = await enlisted(persistence)
+    const benched = a[3]!
+    const damagedHp = 1
+    await persistence.db.query`UPDATE roster SET hp = ${damagedHp} WHERE character_id = ${benched.characterId}`
+
+    await persistence.rosters.settle({
+      matchId: 'm1',
+      winner: Faction.Blue,
+      sides: {
+        [Faction.Blue]: {
+          playerId: 'A',
+          characterIds: a.slice(0, 3).map((member) => member.characterId),
+          fates: [
+            { kind: 'survived', sheet: a[0]!.sheet, hp: maxHpOf(a[0]!.sheet), deeds: noDeeds() },
+            { kind: 'survived', sheet: a[1]!.sheet, hp: maxHpOf(a[1]!.sheet), deeds: noDeeds() },
+            { kind: 'survived', sheet: a[2]!.sheet, hp: maxHpOf(a[2]!.sheet), deeds: noDeeds() },
+          ],
+        },
+        [Faction.Red]: null,
+      },
+    })
+
+    const after = await persistence.rosters.active('A')
+    const rested = after.find((member) => member.characterId === benched.characterId)!
+    const { healBonus } = derive(benched.sheet)
+    const maxHp = maxHpOf(benched.sheet)
+    const expectedHp = Math.min(maxHp, Math.round(damagedHp + HEALING.perMatch * maxHp * (1 + healBonus / 100)))
+    expect(rested.hp).toBe(expectedHp)
+    // Rest is not a match: the count and the combat log are exactly as they were.
+    expect(rested.matches).toBe(0)
+    expect(rested.deeds).toEqual(noDeeds())
+
+    await persistence.close()
+  })
+
   test('recruit refuses a full roster', async () => {
     const persistence = await freshPersistence(url)
     await enlisted(persistence)
+    // `enlisted` deals a squad (SQUAD_SIZE); recruiting tops the roster up to
+    // ROSTER.size before the slot really is full.
+    for (let at = SQUAD_SIZE; at < ROSTER.size; at++) await persistence.rosters.recruit('A')
 
     await expect(persistence.rosters.recruit('A')).rejects.toThrow(/already full/)
 
@@ -398,6 +441,20 @@ function withStartingHp(header: RecordingHeader, hp: Record<Faction, readonly nu
   return { ...header, squads: { [Faction.Blue]: stamp(Faction.Blue), [Faction.Red]: stamp(Faction.Red) } }
 }
 
+/**
+ * The same header, with each side's `characterId` stamped as given — the
+ * referee now checks the *stated id* against the roster (`[ITEM-042]`), not
+ * a bare positional sheet compare, so a signed-in test has to name real ones.
+ */
+function withCharacterIds(
+  header: RecordingHeader,
+  ids: Record<Faction, readonly string[]>,
+): RecordingHeader {
+  const stamp = (faction: Faction): Deployment[] =>
+    header.squads[faction].map((deployment, i) => ({ ...deployment, characterId: ids[faction][i] }))
+  return { ...header, squads: { [Faction.Blue]: stamp(Faction.Blue), [Faction.Red]: stamp(Faction.Red) } }
+}
+
 /** A client, as the referee sees one, signed in as `playerId` or not at all. */
 function client(referee: Referee, playerId: string | null) {
   const [mine, theirs] = loopback()
@@ -454,10 +511,17 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: sheetsOf(recording.header, Faction.Blue).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
       [Faction.Red]: sheetsOf(recording.header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
     }
+    const characterIds = {
+      [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+    }
 
     const blue = client(referee, 'A')
     client(referee, 'B')
-    blue.send({ type: 'matchHeader', header: withStartingHp(recording.header, startingHp) })
+    blue.send({
+      type: 'matchHeader',
+      header: withStartingHp(withCharacterIds(recording.header, characterIds), startingHp),
+    })
     for (const event of recording.events) blue.send(event.command)
     await referee.idle()
 
@@ -501,8 +565,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
   })
 
   test('a squad that is not the roster this server keeps ends the match', async () => {
-    // The check that makes a kept match mean anything: a client states its
-    // squad, and a client may state anything.
+    // The check that makes a kept match mean anything: a client can name a
+    // real character it holds and still lie about who that character is.
     const recording = decisive()
     const others = Array.from({ length: SQUAD_SIZE }, (_, i) => characterSheet(new Rng(900 + i)))
     const { persistence, referee, verdicts } = await playing(
@@ -514,7 +578,14 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
     const blue = client(referee, 'A')
     client(referee, 'B')
-    blue.send({ type: 'matchHeader', header: recording.header })
+    // A real id of A's, a sheet that is not that character's.
+    blue.send({
+      type: 'matchHeader',
+      header: withCharacterIds(recording.header, {
+        [Faction.Blue]: before.map((member) => member.characterId),
+        [Faction.Red]: [],
+      }),
+    })
     await referee.idle()
 
     expect(verdicts).toHaveLength(1)
@@ -536,11 +607,15 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       sheetsOf(recording.header, Faction.Red),
     )
 
+    const characterIds = {
+      [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+    }
     const blue = client(referee, 'A')
     client(referee, 'B')
     // No `startingHp` at all — exactly what an old client, or one that
     // simply left it out, would send.
-    blue.send({ type: 'matchHeader', header: recording.header })
+    blue.send({ type: 'matchHeader', header: withCharacterIds(recording.header, characterIds) })
     await referee.idle()
 
     expect(verdicts).toHaveLength(1)
@@ -562,9 +637,16 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Red]: sheetsOf(recording.header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
     }
 
+    const characterIds = {
+      [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+    }
     const blue = client(referee, 'A')
     client(referee, 'B')
-    blue.send({ type: 'matchHeader', header: withStartingHp(recording.header, wrongHp) })
+    blue.send({
+      type: 'matchHeader',
+      header: withStartingHp(withCharacterIds(recording.header, characterIds), wrongHp),
+    })
     await referee.idle()
 
     expect(verdicts).toHaveLength(1)
@@ -640,13 +722,22 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const enlisted = await persistence.rosters.active('A')
     await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE character_id = ${enlisted[1]!.characterId}`
 
+    // The three living, in slot order — exactly who a client would state.
+    const living = await persistence.rosters.active('A')
     const startingHp = {
       [Faction.Blue]: sheetsOf(header, Faction.Blue).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
       [Faction.Red]: sheetsOf(header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
     }
+    const characterIds = {
+      [Faction.Blue]: living.map((member) => member.characterId),
+      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+    }
     const blue = client(referee, 'A')
     client(referee, 'B')
-    blue.send({ type: 'matchHeader', header: withStartingHp(header, startingHp) })
+    blue.send({
+      type: 'matchHeader',
+      header: withStartingHp(withCharacterIds(header, characterIds), startingHp),
+    })
     for (const event of recording!.events) blue.send(event.command)
     await referee.idle()
 

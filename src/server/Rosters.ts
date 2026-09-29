@@ -1,4 +1,4 @@
-import { Faction, HEALING, SQUAD_SIZE } from '../config'
+import { Faction, HEALING, ROSTER } from '../config'
 import { characterSheet, derive, maxHpOf, sanitizeSheet, type CharacterSheet } from '../core/Characters'
 import { mergeDeeds, noDeeds, type Deeds } from '../core/Progression'
 import { Rng } from '../core/rng'
@@ -112,7 +112,7 @@ export class Rosters {
   async recruit(playerId: string, rng: Rng = new Rng(crypto.getRandomValues(new Uint32Array(1))[0]!)): Promise<RosterMember> {
     const held = new Set((await this.active(playerId)).map((member) => member.slot))
     let slot = -1
-    for (let at = 0; at < SQUAD_SIZE; at++) {
+    for (let at = 0; at < ROSTER.size; at++) {
       if (!held.has(at)) {
         slot = at
         break
@@ -164,8 +164,31 @@ export class Rosters {
           if (!characterId) continue
           await this.record(tx, result.matchId, characterId, fate)
         }
+        await this.rest(tx, side.playerId, new Set(side.characterIds))
       }
     })
+  }
+
+  /**
+   * Every active member of this player's roster who did *not* deploy heals by
+   * the same rule a survivor does — {@link HEALING.perMatch} of missing HP,
+   * scaled by their own `healBonus` — and does not count a match: they were
+   * not in it. The bench (`[ITEM-042]`) is what makes resting somebody mean
+   * anything, and this is the reward for using it.
+   */
+  private async rest(db: Db, playerId: string, deployed: ReadonlySet<string>): Promise<void> {
+    const rows = await db.query<{ character_id: string; sheet: string; hp: number }>`
+      SELECT character_id, sheet, hp FROM roster WHERE player_id = ${playerId} AND status = ${'active'}`
+    for (const row of rows) {
+      if (deployed.has(row.character_id)) continue
+      const sheet = sanitizeSheet(JSON.parse(row.sheet))
+      const { healBonus } = derive(sheet)
+      const maxHp = maxHpOf(sheet)
+      const healed = Number(row.hp) + HEALING.perMatch * maxHp * (1 + healBonus / 100)
+      const hp = Math.max(1, Math.min(maxHp, Math.round(healed)))
+      await db.query`UPDATE roster SET hp = ${hp}
+                      WHERE character_id = ${row.character_id} AND status = ${'active'}`
+    }
   }
 
   /**

@@ -3,7 +3,7 @@ title: "Multi-Milestone Capability Roadmap"
 id: "PLAN-ROADMAP"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-29"
+lastReviewed: "2026-09-30"
 appliesTo:
   - "docs/plans/**"
 relatedDocs:
@@ -64,6 +64,6 @@ graph TD
   after-match progression and the end screen, `[ITEM-012]` roster persistence, `[ITEM-028]`
   schema drift guard, `[ITEM-038]` lasting wounds (HP, healing, combat log), `[ITEM-010]`
   roles, `[ITEM-037]` recruit refill, `[ITEM-041]` short-handed deployment, `[ITEM-043]` one
-  deployment record per soldier.
-- Open, in the order on the [focus board](./active-focus.md): `[ITEM-042]` the bench (a roster
-  of six, pick who deploys), then `[ITEM-039]` fatigue and medical-bay downtime on top of it.
+  deployment record per soldier, `[ITEM-042]` the bench (a roster of six, pick who deploys).
+- Open, in the order on the [focus board](./active-focus.md): `[ITEM-039]` fatigue and
+  medical-bay downtime, built on the bench.

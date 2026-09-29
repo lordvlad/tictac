@@ -7,7 +7,7 @@ import { Faction, SIM } from './config'
 import { matchDice, resolveSeed, Rng } from './core/rng'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
-import { Account, type Player } from './game/Account'
+import { Account, type Player, type RosterEntry } from './game/Account'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
 import { Squads } from './game/Squads'
@@ -16,6 +16,7 @@ import { Hud } from './hud/Hud'
 import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
 import { LoadoutScreen } from './hud/LoadoutScreen'
+import { RosterScreen } from './hud/RosterScreen'
 import { FullscreenPrompt } from './hud/FullscreenPrompt'
 import { FpsCounter } from './hud/FpsCounter'
 import './game.css'
@@ -264,22 +265,43 @@ function showMenu(): void {
     /**
      * What a signed-in player deploys, and where they connect.
      *
-     * Signed in: the roster this server keeps, and a url carrying a ticket that
-     * tells the referee whose roster it is. Anonymous: a fresh squad and the
-     * plain url, exactly as before.
+     * Signed in: the whole roster this server keeps. Anonymous: neither —
+     * the plain url and a fresh squad, exactly as before.
      */
     const joining = async (
       url: string,
-    ): Promise<{ url: string; sheets?: CharacterSheet[]; hp?: number[] }> => {
+    ): Promise<{ account: Account | null; roster: RosterEntry[] | null }> => {
       const it = new Account(url)
-      if (!it.token) return { url }
+      if (!it.token) return { account: null, roster: null }
       const roster = await it.roster()
-      // A short roster deploys short-handed; an empty one has nobody to send,
-      // and the referee would refuse it anyway.
-      if (roster.sheets.length === 0) {
+      // An empty roster has nobody to send, and the referee would refuse it
+      // anyway; recruit first.
+      if (roster.length === 0) {
         throw new Error('Nobody is left on your roster. Recruit before deploying.')
       }
-      return { url: await it.socketUrl(url), sheets: roster.sheets, hp: roster.hp }
+      return { account: it, roster }
+    }
+
+    /**
+     * Let a signed-in player choose who deploys (`[ITEM-042]`), then mint the
+     * ticketed url only once they have — a ticket is worth one connection and
+     * expires in a minute, so it must not be spent sitting on a screen the
+     * player might linger on. Anonymous: the plain url and nothing chosen.
+     */
+    const equip = async (
+      url: string,
+      account: Account | null,
+      roster: RosterEntry[] | null,
+    ): Promise<{ url: string; sheets?: CharacterSheet[]; hp?: number[]; characterIds?: string[] }> => {
+      if (!account || !roster) return { url }
+      const screen = new RosterScreen(roster, () => account.recruit())
+      const picked = await screen.pick()
+      return {
+        url: await account.socketUrl(url),
+        sheets: picked.map((entry) => entry.sheet),
+        hp: picked.map((entry) => entry.hp),
+        characterIds: picked.map((entry) => entry.characterId),
+      }
     }
 
     button('#btn-server-host').addEventListener('click', () => {
@@ -290,7 +312,8 @@ function showMenu(): void {
       statusEl().style.color = '#38bdf8'
       statusEl().textContent = 'Waiting for an opponent to join…'
       void joining(typed)
-        .then(({ url, sheets, hp }) => {
+        .then(async ({ account, roster }) => {
+          const { url, sheets, hp, characterIds } = await equip(typed, account, roster)
           const network = new NetworkManager()
           // No `onConnected` here: a socket opens as soon as the referee
           // answers, long before anybody is on the other side of it. The
@@ -300,7 +323,7 @@ function showMenu(): void {
           }
           network.hostOnServer(url, seed, label)
           container.remove()
-          equipThenStart(seed, label, network, sheets, hp)
+          equipThenStart(seed, label, network, sheets, hp, characterIds)
         })
         .catch((err: unknown) => {
           failed(err instanceof Error ? err.message : 'Could not open a match there.')
@@ -311,14 +334,15 @@ function showMenu(): void {
       const typed = urlOf()
       if (!typed) return
       localStorage.setItem('tictac.server', typed)
-      statusEl().style.color = '#38bdf8'
-      statusEl().textContent = 'Connecting…'
       const network = new NetworkManager()
       try {
-        const { url, sheets, hp } = await joining(typed)
+        const { account, roster } = await joining(typed)
+        const { url, sheets, hp, characterIds } = await equip(typed, account, roster)
+        statusEl().style.color = '#38bdf8'
+        statusEl().textContent = 'Connecting…'
         const opening = await network.joinOnServer(url)
         container.remove()
-        equipThenStart(opening.seed, opening.seedLabel, network, sheets, hp)
+        equipThenStart(opening.seed, opening.seedLabel, network, sheets, hp, characterIds)
       } catch (err) {
         failed(
           err instanceof Error && err.message.length > 0
@@ -398,6 +422,8 @@ function equipThenStart(
   sheets: CharacterSheet[] = rollSquadSheets(),
   /** This side's roster HP, present only when signed in to a match server. */
   hp?: number[],
+  /** This side's roster character ids, present only when signed in (`[ITEM-042]`). */
+  characterIds?: string[],
 ): void {
   const engine = createEngineContext(Game.instance())
   const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
@@ -422,6 +448,7 @@ function equipThenStart(
     const mySquad: Deployment[] = mySheets.map((sheet, i) => ({
       sheet,
       loadout: loadout[i]!,
+      ...(characterIds?.[i] !== undefined ? { characterId: characterIds[i]! } : {}),
       ...(hp?.[i] !== undefined ? { state: { hp: hp[i]! } } : {}),
     }))
     network.send({ type: 'ready', squad: mySquad })

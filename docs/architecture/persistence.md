@@ -3,7 +3,7 @@ title: "Persistence: Database Port, Migrations, Accounts & Rosters"
 id: "ARCH-PERSISTENCE"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-29"
+lastReviewed: "2026-09-30"
 appliesTo:
   - "src/server/**"
   - "scripts/serve-match.ts"
@@ -12,6 +12,8 @@ appliesTo:
   - "src/game/MatchEnd.ts"
   - "src/game/Recording.ts"
   - "src/core/Characters.ts"
+  - "src/hud/RosterScreen.ts"
+  - "src/config.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
   - "docs/architecture/networking.md"
@@ -179,21 +181,30 @@ says only `the server failed`.
 ## 5. Rosters, and What a Match Does to Them
 
 A roster lives on the server because a squad a client could rewrite is a squad
-that never dies. Registration deals one squad, server-rolled from system
-randomness.
+that never dies. Registration deals `ROSTER.size` (6) characters, server-rolled
+from system randomness — a bench, not a squad: `SQUAD_SIZE` (4) of them deploy
+to any one match, and a signed-in player picks which (`[ITEM-042]`).
 
-**Before the match.** `Referee.verifyRosters` runs once the header arrives: for
-each signed-in side, the deployed squad must *be* that player's active roster,
-character for character in slot order (`sanitizeSheet` both ways, compared as
-JSON) — **and each unit's `state.hp` must be that roster's stored HP**, per
-slot. Anything else aborts the match — a match played with somebody else's
-people, or somebody else's wounds, must not settle. A signed-in side whose
-deployment omits `state.hp` is refused the same way a wrong one is: absence
-would let a client always deploy at full health regardless of what the roster
-says. One player on both sides is refused for the same reason as the sheet
-check, and so is a signed-in player with nobody left on their roster. An
-anonymous side is skipped, not refused: an unregistered opponent is a
-perfectly good opponent who simply has nothing to keep.
+**Before the match.** `Referee.verifyRosters` runs once the header arrives.
+For each signed-in side: the deployed squad must be **1 to `SQUAD_SIZE`**
+units, and every one of them must *name* a character — `Deployment.characterId`
+— that is this player's, is presently active (not dead, not a duplicate within
+the same squad) and repeats none of that player's other deployed characters.
+Naming is what makes picking a subset possible at all: the referee looks each
+stated id up in the active roster rather than comparing position for position,
+so a squad can be any 1–4 of the six, in any order, not only the first four
+slots. Once a name resolves, the two things a client cannot be trusted to
+state honestly are checked against the roster row it names: the deployed
+sheet (`sanitizeSheet` both ways, compared as JSON) and `state.hp`, exactly.
+Anything else aborts the match — a match played with somebody else's people,
+somebody else's wounds, a dead character, a repeated one, or a fifth, must not
+settle. A signed-in side whose deployment omits `state.hp` is refused the same
+way a wrong one is: absence would let a client always deploy at full health
+regardless of what the roster says. One player on both sides is refused for
+the same reason as the sheet check, and so is a signed-in player with nobody
+left on their roster. An anonymous side is skipped, not refused: an
+unregistered opponent is a perfectly good opponent who simply has nothing to
+keep.
 
 **A short roster deploys short-handed** (`ITEM-041`). The squad is the active
 roster in slot order with any empty slot closed up, and `Squads` fields exactly
@@ -259,12 +270,32 @@ player is building stays exactly where it was, one row per past occupant of
 the slot. Refused with `400` if every slot is already held: there is nothing
 to fill.
 
-> **Not yet**: a roster is exactly a squad, so everyone deploys every match.
-> The header's parallel `sheets`/`loadouts`/`startingHp` arrays are now one
-> `Deployment` record per soldier (`[ITEM-043]`, done); the bench (`[ITEM-042]`,
-> six kept, one to four deployed, stated by character id on that record) and,
-> on top of it, fatigue and medical-bay downtime (`[ITEM-039]`, in the same
-> record's `state`) are designed and Ready.
+**The bench rests.** `Rosters.settle` heals every *other* active roster
+member too — everyone not named in `characterIds` for that side — by the same
+survivor formula (`HEALING.perMatch` of missing HP, scaled by `healBonus`,
+clamped to `maxHpOf`), without touching `matches` or `deeds`. Resting is not a
+match: nobody sits banked at whatever HP their last deployment left them at
+while their squadmates keep fighting, and nobody stuck at full stays clamped
+there by anything but the same ceiling a deployed survivor is.
+
+**Picking who deploys.** `src/hud/RosterScreen.ts` is a DOM-only overlay shown
+ahead of `LoadoutScreen` to a signed-in player: every active roster member,
+identified by slot number rather than callsign (`FACTION_INFO.squadNames[index]`
+is assigned by *deployed* position, so a name here would promise a character a
+callsign it may not keep once picked alongside others), toggled up to
+`SQUAD_SIZE`, defaulting to the first four in slot order. An empty slot renders
+a **Recruit** button in its place, calling `POST /api/roster/recruit` and
+splicing the answer straight into the list. The pick becomes the
+`characterId` the client states on each `Deployment` it sends; `main.ts` mints
+the connection ticket only *after* the pick, not before it, so lingering on
+the roster screen cannot burn the ticket's 60-second window before ever
+connecting. `Account.roster()` mirrors `RosterMember` client-side as
+`RosterEntry` (`src/game/Account.ts`) rather than importing the server's type
+— `src/game`/`src/hud` never import `src/server/`, even for a type.
+
+> **Not yet**: fatigue and medical-bay downtime (`[ITEM-039]`, in the same
+> `Deployment.state` the bench's `characterId` now lives on) is designed and
+> Ready, pulled after the bench (`[ITEM-042]`, done) it is built on.
 
 ---
 
