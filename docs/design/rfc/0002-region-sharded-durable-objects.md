@@ -3,7 +3,7 @@ title: "RFC 0002: Region-Sharded Durable Objects"
 id: "RFC-0002"
 type: "rfc"
 status: "proposed"
-lastReviewed: "2026-10-01"
+lastReviewed: "2026-10-02"
 appliesTo:
   - "workers/**"
   - "src/server/Persistence.ts"
@@ -51,41 +51,60 @@ its real-time state, and the players currently present in it — addressed by a 
 than the fixed `'singleton'` name `workers/index.ts` uses today. A player's socket connects to
 whichever Durable Object owns the region their character currently stands in.
 
-**Players move between regions; their connection moves with them.** When a player crosses a
-region boundary in the shared world, their session is hollowed out of the region they are
-leaving and rebuilt on the Durable Object that owns the region they are entering — a live
-hand-off, not a reconnect a player has to notice. §4 sizes what "session" means here, because it
-is deliberately smaller than "everything about the player."
+**The world starts whole, and fractures over time — deliberately, and in the story.** Rather
+than a map pre-divided into many small zones from the day the shared world ships, it begins as
+one zone: one Durable Object owns the entire world, which is exactly `[ITEM-045]`'s single
+instance already (§5). As the player base and its load grow, zones are split off the whole —
+first one seam, then more — each split handed to a fresh Durable Object. This is worldbuilding
+as much as it is infrastructure: the fracturing is written into the game's meta-story rather
+than being an invisible technical migration, which is also what buys the next paragraph its
+answer for free.
 
-**A region splits under load rather than being sized up front.** When a region's Durable Object
-approaches capacity, a second Durable Object is started to own half of it — the region is
-subdivided along the world's own geometry — and players already in the region are moved to
-whichever half now owns their location, gradually, as they naturally move around or as a
-background process walks the roster, rather than as one cutover that drops every connection in
-the region at once. The same subdivision can recurse: a half that is itself too busy splits
-again. Nothing here ever merges two regions back down; a region that empties out is simply an
-idle Durable Object, which costs nothing extra to leave running.
+**Crossing a zone boundary is a deliberate act, not a continuous position that happens to cross
+a line.** A border is not open terrain a character can wander back and forth over without
+meaning to; it is a designed transition (a gate, a checkpoint, whatever the meta-story names it
+once it exists) that a player chooses to go through. This removes the oscillation problem
+structurally rather than needing a tuned hysteresis margin (§6.2): there is nothing to debounce
+when the crossing itself is one discrete, intentional action instead of a coordinate that can
+drift across a boundary and back.
+
+**The hand-off is the source's responsibility.** The Durable Object currently holding a player
+initiates their hand-off to the destination when a crossing happens — not an external
+orchestrator, and not the destination reaching in to pull the player over. §4 is the shape of
+what it hands off.
+
+**A zone splits under load rather than being sized up front.** When a zone's Durable Object
+approaches capacity, a new Durable Object is started to own a piece freshly cut from it. A
+player already standing in the piece that just changed hands is not crossing anything — the
+ground under them changed owner, not their position — so there is no intent to read, only a
+static location to reassign against the new boundary. Reassigning them while they are offline is
+strictly preferable to doing it while connected, and costs nothing extra to wait for: a player
+who never logs off simply keeps talking to their zone's original instance until they do. Nothing
+here ever merges two zones back down; a zone that empties out is simply an idle Durable Object,
+which costs nothing extra to leave running (§6.5 is still open on whether that holds once real
+billing is on the line).
 
 This gives horizontal scaling with the overhead concentrated exactly where the game already has
-a natural seam — a region boundary — instead of an artificial shard key (player id, connection
-order) that would turn every cross-region interaction between two players into a cross-shard
-one regardless of whether they are standing next to each other.
+a natural seam — a zone boundary, made deliberate rather than ambient — instead of an artificial
+shard key (player id, connection order) that would turn every cross-region interaction between
+two players into a cross-shard one regardless of whether they are standing next to each other.
 
 ## 3. What has to exist before this can be built
 
 None of it exists yet:
 
-- **The shared world itself.** Regions, a coordinate space bigger than one battlefield, and
-  something for a player to be "present" in between matches. Today's game has neither; a match
-  is the entire unit of play and ends in a debrief screen, not a place a character keeps
-  standing in.
+- **The shared world itself**, as one whole zone to start: a coordinate space bigger than one
+  battlefield, and something for a player to be "present" in between matches. Today's game has
+  neither; a match is the entire unit of play and ends in a debrief screen, not a place a
+  character keeps standing in. The *many* zones this RFC eventually needs do not have to exist
+  up front — see §2 — but the single whole-world zone, and a reason within the story for it to
+  someday fracture, do.
 - **A directory: region id → owning Durable Object.** `env.MATCH.idFromName('singleton')` is a
-  constant today; a region's owner is not, once a region can split. Something has to answer
-  "which Durable Object currently owns region R" and be updated the moment a split changes the
-  answer, consistently enough that two different Workers routing two different players' requests
-  agree. The candidates — a dedicated small "directory" Durable Object that every routing
-  decision reads through, or Workers KV accepting its eventual-consistency window — are an open
-  question (§6.1), not a decision this RFC makes.
+  constant today; a region's owner is not, once a region can split. **Decided (§6.3):** Workers
+  KV, read by every routing decision. Its eventual consistency is an accepted trade for not
+  adding a directory Durable Object as one more hop in front of every request; a brief window
+  where two Workers disagree about who owns a freshly-split zone is judged cheaper than that hop
+  paid on every request forever.
 - **A hand-off protocol between two Durable Object instances.** Cloudflare Durable Objects can
   call each other directly (RPC, or a Worker-mediated fetch); nothing today exercises that path.
   §4 is the shape of what needs to cross it.
@@ -106,11 +125,20 @@ reach, sharded (if it ever needs to be) by whatever a database shards well by �
 **What transfers is presence: a player's live session.** The open socket's transport, which
 faction/side (if any) they are attached to, their position and heading in the region, and
 whatever the region simulation was holding about them in memory — the equivalent of `Referee`'s
-`this.clients`/`this.sides` today, scoped to one region instead of one match. The source
-instance closes out cleanly (the same shape as a match ending unwatched, RFC-0001 §8.6); the
-destination instance opens a session the way `MatchDurableObject.fetch` opens one today, reading
-whatever durable state it needs from the one shared `Persistence`, not from the instance it is
-succeeding.
+`this.clients`/`this.sides` today, scoped to one region instead of one match. **Decided:** the
+Durable Object currently holding the player is responsible for the hand-off — it initiates it
+the moment a deliberate crossing happens, rather than a directory or the destination instance
+reaching in to pull the player over. The source instance closes out cleanly (the same shape as
+a match ending unwatched, RFC-0001 §8.6); the destination instance opens a session the way
+`MatchDurableObject.fetch` opens one today, reading whatever durable state it needs from the
+one shared `Persistence`, not from the instance it is succeeding.
+
+**Decided: a match never spans two Durable Objects (§6.4).** A match belongs entirely to
+whichever region's instance was hosting it when it started, the same way it belongs to one
+`Referee` today. What prevents two players from starting a fight exactly on a zone boundary is
+left to the world and the story — the fracturing itself is meta-story territory (§2), and the
+same design pass that decides where a border runs and why is responsible for there being a
+reason combat does not break out standing on top of one.
 
 This is the same reason a match rejoin (`resume`/`log`, RFC-0001 §5) is a **replay from the
 durable log**, not a live memory copy from one process to another: a hand-off that depends on
@@ -121,8 +149,10 @@ irreplaceable the way a match's command log is.
 
 ## 5. What this means for `[ITEM-045]` now
 
-Two things, so the single instance built there is not accidentally load-bearing for an
-assumption this RFC removes:
+Not "replaced later" so much as "already region zero." §2's whole-world-first zone is exactly
+the single `MatchDurableObject` instance that exists today — this RFC does not ask for a second
+deployment model to migrate to, only for that instance to keep two things true so it is not
+accidentally load-bearing for an assumption this RFC removes:
 
 1. **`env.MATCH.idFromName('singleton')` is a placeholder for a lookup, not a constant to build
    more routing logic on top of.** Anything that starts depending on there being exactly one
@@ -134,28 +164,36 @@ assumption this RFC removes:
 
 ## 6. Open questions
 
-1. **How is "at capacity" measured, and who decides a region splits?** Concurrent sockets is the
-   cheapest signal and the one closest to what actually costs a Durable Object, but a region
-   whose players are all fighting in one spot may need to split on CPU rather than headcount.
-   Unresolved.
-2. **What stops a player oscillating near a boundary from being handed off repeatedly?** A
-   region border needs hysteresis — a margin a player has to cross past, not touch, before a
-   hand-off starts — or a busy border becomes a stream of hand-offs instead of an occasional
-   one. Unresolved; the margin's width is a balance question as much as an engineering one.
-3. **Directory consistency**, named in §3: a dedicated directory Durable Object serializes every
-   routing lookup through one more hop; Workers KV removes the hop but accepts a window where
-   two Workers can disagree about who owns a region mid-split. Which is worse depends on how
-   often a split actually happens, which is unknown until there is a player base large enough to
-   need one.
-4. **Can a match ever span two regions?** If two players fight where their characters happen to
-   stand and that spot is near a border, does the match belong to one region's Durable Object
-   (and which one), or does combat need its own placement independent of the world region a
-   player is standing in? Unresolved, and not answerable before combat and the shared world
-   exist in the same build.
+1. ~~How is "at capacity" measured, and who decides a region splits?~~ **Decided: CPU time, plus
+   client latency measured against what a player's real-world physical distance would predict.**
+   Concurrent sockets alone was the cheapest signal but too blind to a region whose few players
+   are all fighting in one spot; CPU time reads what actually costs a Durable Object directly.
+   Latency-versus-distance is the second signal: a player whose measured latency is
+   *worse* than their real-world distance to the instance would predict is evidence of an
+   overloaded instance, not a far-away player, which a raw latency number alone cannot tell
+   apart. What remains open, genuinely: the actual thresholds. Both signals need real metrics
+   from a real deployment before a split trigger can be tuned, and that tuning is left for when
+   there is traffic to tune it against.
+2. ~~What stops a player oscillating near a boundary from being handed off repeatedly?~~
+   **Decided, structurally rather than algorithmically: it cannot oscillate, because crossing a
+   boundary is a deliberate act** (§2), not a coordinate that can drift back and forth over an
+   invisible line. There is nothing to debounce once the crossing itself is a discrete,
+   intentional action rather than continuous position tracking. See §7 for the alternative this
+   replaced.
+3. ~~Directory consistency~~ **Decided: Workers KV**, accepting its eventual-consistency window
+   rather than paying a directory Durable Object's extra hop on every routing decision forever.
+   A brief window where two Workers disagree about who owns a freshly-split zone is the
+   accepted cost (§3).
+4. ~~Can a match ever span two regions?~~ **Decided: no** (§4). A match belongs entirely to
+   whichever instance was hosting it when it started. What is still open is not the rule but its
+   enforcement: the world and its story need to make sure combat does not start standing exactly
+   on a boundary in the first place, which is a level-design and narrative question, not an
+   engineering one, and cannot be answered before the shared world exists to design a border
+   into.
 5. **Does a region ever get reassigned back to a merged, larger Durable Object once load drops?**
-   §2 states it does not, for simplicity; whether an idle half-region Durable Object is cheap
-   enough to leave running forever is a real cost question once Cloudflare's pricing is being
-   paid for real rather than dry-run.
+   Still open. §2 states it does not, for simplicity; whether an idle half-region Durable Object
+   is cheap enough to leave running forever is a real cost question once Cloudflare's pricing is
+   being paid for real rather than dry-run.
 
 ## 7. What this RFC rejects
 
@@ -169,6 +207,18 @@ assumption this RFC removes:
   standing next to each other, fighting each other, would as likely as not land on two different
   shards, turning the one interaction regional sharding is built to keep cheap (nearby players
   talking to the same Durable Object) into the one it was meant to avoid.
+- **A map pre-divided into many small zones from day one.** Considered directly, alongside the
+  organic alternative this RFC chose (§2): building the shared world already cut into zones
+  small enough to be sharded from the start. Rejected in favour of starting whole and fracturing
+  the world over time, folded into the game's own meta-story, rather than shipping the scaling
+  concern as a piece of invisible level geometry nobody in the fiction ever notices.
+- **Inferring a border-wandering player's crossing intent, to move them only while offline.**
+  The instinct is reasonable — moving a connected player is disruptive, and an offline one is
+  free to move — but telling "wandering along one side of a border" from "mid-crossing when they
+  logged off" from position history alone is exactly the kind of ambiguity that produces the
+  oscillation this RFC is trying to avoid. Replaced by making the crossing itself deliberate
+  (§2): there is no intent left to infer, because the player already stated it by choosing to
+  cross.
 - **Scaling the single Durable Object up rather than out.** Not a choice available to reject so
   much as one that does not exist: a Durable Object instance is one thread, and Cloudflare does
   not offer a bigger one to move to.

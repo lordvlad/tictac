@@ -196,36 +196,48 @@ Ready, so the dependency is visible rather than the plan being reinvented later 
 #### Change
 See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; summarised:
 1. A region id replaces `workers/index.ts`'s fixed `env.MATCH.idFromName('singleton')`; a
-   directory (mechanism unresolved, RFC-0002 §6.3) maps region id to the Durable Object that
-   currently owns it.
-2. A player's socket connects to whichever Durable Object owns the region their character is
-   in; crossing a region boundary hands the live session off from the source instance to the
-   destination one.
-3. What transfers at a hand-off is presence — the open socket, faction/side, position, whatever
+   Workers KV directory maps region id to the Durable Object that currently owns it
+   (RFC-0002 §6.3 — decided in favour of KV's eventual consistency over a directory Durable
+   Object's extra hop on every request).
+2. The shared world starts as one whole zone — exactly `[ITEM-045]`'s single instance, already —
+   and fractures into more zones over time as load grows, woven into the game's own meta-story
+   rather than shipped as invisible level geometry (RFC-0002 §2, §7). Crossing a zone boundary is
+   a deliberate, designed act (a gate, a checkpoint), not a coordinate that can drift across an
+   invisible line — which is also what rules out a player oscillating near a border and being
+   handed off repeatedly (RFC-0002 §6.2).
+3. The Durable Object currently holding a player is responsible for handing them off to the
+   destination the moment a crossing happens (RFC-0002 §4) — not a directory, and not the
+   destination reaching in to pull them over.
+4. What transfers at a hand-off is presence — the open socket, faction/side, position, whatever
    the region simulation held about the player in memory — not the roster. `Persistence`
    (accounts, rosters, the match log) stays one logical store every region-owning instance can
    reach, per RFC-0001 §8.4's "one database, behind a portable port"; splitting *that* by region
    is explicitly rejected in RFC-0002 §4.
-4. A region facing too much load spins up a second Durable Object owning half of it (split along
-   the world's own geometry) and gradually moves players to whichever half now owns their
-   location, rather than cutting the whole region over at once.
+5. A zone facing too much load — measured by CPU time and by client latency read against what a
+   player's real-world physical distance would predict, thresholds still to be tuned against
+   real traffic (RFC-0002 §6.1) — spins up a second Durable Object owning a piece freshly cut
+   from it, and moves players already there to whichever side now owns their location, preferably
+   while they are offline rather than disrupting a connected session.
+6. A match never spans two Durable Objects (RFC-0002 §4, §6.4); keeping combat from starting
+   exactly on a zone boundary is left to world/narrative design, not engineering.
 
 #### Affected Files
 - `workers/index.ts` (routing, once there is a directory to route through)
-- A new region directory (Durable Object or Workers KV — RFC-0002 §6.3, unresolved)
+- A new Workers KV namespace for the region directory (RFC-0002 §6.3)
 - Whatever the shared world's own persistent-presence/position system turns out to be, once it
   exists — not yet a file in this repository
 
 #### Acceptance Criteria
-- [ ] The shared world exists (regions, a coordinate space, persistent player presence) —
-      tracked by whatever items eventually build it, not this one.
-- [ ] A player's socket routes to the Durable Object currently owning their region, through a
-      directory that two different Workers agree on.
-- [ ] Crossing a region boundary hands a live session off without the player having to
-      reconnect, verified by an automated test that plays a session across a scripted boundary.
-- [ ] A region under simulated load splits into two Durable Objects and players are gradually
-      moved to the half owning their location, without every connection in the region dropping
-      at once.
+- [ ] The shared world exists as at least one zone with persistent player presence — tracked by
+      whatever items eventually build it, not this one.
+- [ ] A player's socket routes to the Durable Object currently owning their zone, through the
+      Workers KV directory.
+- [ ] Crossing a zone boundary (a deliberate, designed act, not continuous position tracking)
+      hands a live session off without the player having to reconnect, verified by an automated
+      test that plays a session across a scripted boundary.
+- [ ] A zone under simulated load splits into two Durable Objects and players are moved to the
+      half owning their location, preferably while offline, without disrupting a connected
+      session or dropping every connection in the zone at once.
 - [ ] `Persistence` remains reachable by every region-owning instance without being partitioned
       by region (RFC-0002 §4) — or, if that changes, the change is a deliberate edit to this
       item and RFC-0002, not a quiet divergence.
