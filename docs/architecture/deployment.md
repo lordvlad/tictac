@@ -16,6 +16,7 @@ appliesTo:
   - "src/sim/WireMatch.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
+  - "docs/design/rfc/0002-region-sharded-durable-objects.md"
   - "docs/architecture/persistence.md"
   - "docs/architecture/networking.md"
   - "docs/backlog/active-backlog.md"
@@ -66,6 +67,14 @@ A match server is one referee, the same reason `startGameServer` (`src/server/Ga
 binds one port to one `Referee` today. Sharding by match would mean the Durable Objects
 namespace stops being "the referee" and starts being "a match," which is a bigger, different
 design than what is planted here.
+
+This is a deliberate first stage, not a ceiling this deployment is meant to live under forever:
+a single Durable Object is one thread, and cannot be scaled up, only replaced.
+[RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) is the plan for what replaces
+it — sharding by *region* of the game's shared world rather than by match — once that world
+exists and the player base needs more than one instance. Nothing about that plan is built; it
+is written down so the single instance here stays easy to retire rather than becoming an
+assumption other code quietly depends on.
 
 ### 2.2 The single instance serves both websocket and static assets
 

@@ -75,9 +75,13 @@ graph TD
 ### Unscheduled: Infrastructure
 Cross-cutting work that is not a milestone deliverable — nothing in the mermaid dependency
 chain above depends on it, and no milestone's Definition of Done names it.
-- In Progress: `[ITEM-045]` Cloudflare Durable Object deployment — a single DO planted (static
-  assets, a WebSocket, a relay between sockets on the same instance) alongside the existing Bun
-  process, as an additional hosting option for a match server. GitHub Pages remains the default
-  way the client itself deploys either way. See
-  [ARCH-DEPLOYMENT](../architecture/deployment.md).
+- In Progress: `[ITEM-045]` Cloudflare Durable Object deployment — a single DO runs the real
+  referee (`Referee`, `Persistence`, `apiHandler`) over its own `Db` adapter, alongside the
+  existing Bun process, as an additional hosting option for a match server. GitHub Pages remains
+  the default way the client itself deploys either way. A real `wrangler deploy` against an
+  actual account has not happened. See [ARCH-DEPLOYMENT](../architecture/deployment.md).
+- Backlog, not yet startable: `[ITEM-046]` Region-sharded Durable Objects — the plan
+  ([RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md)) for replacing `[ITEM-045]`'s
+  single instance once the shared world exists and needs more than one Durable Object to hold
+  it. Gated on the shared world itself, which no milestone above has built yet.
 

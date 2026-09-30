@@ -14,6 +14,7 @@ relatedDocs:
   - "docs/plans/active-focus.md"
   - "docs/plans/roadmap.md"
   - "docs/architecture/deployment.md"
+  - "docs/design/rfc/0002-region-sharded-durable-objects.md"
 tags: ["backlog", "tasks", "active"]
 ---
 
@@ -168,3 +169,63 @@ does not replace or compete with it.
       (`tests/cloudflare.test.ts`), not a *registered* match whose roster is checked afterward
       against a real `wrangler deploy` — that still wants the deploy above, and real accounts
       recruited on it.
+
+---
+
+### [ITEM-046] Region-Sharded Durable Objects
+**Type:** Infrastructure
+**Priority:** P3
+**Status:** Backlog — a design only ([RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md)); not started, and not startable yet (see Why)
+**Milestone:** Unscheduled — gated on the shared world existing, which is not a milestone deliverable today
+
+#### Why
+`[ITEM-045]`'s single Durable Object is correct for the game that exists today and wrong for
+the one the [GDD](../design/gdd/overview.md) describes: a persistent shared world with base
+building, an economy and regional chat, where players are present continuously rather than for
+the few minutes one match takes. A single Durable Object instance is one thread and cannot be
+scaled up, only replaced, so that replacement is worth planning before load forces it.
+RFC-0002 is that plan: shard by region of the shared world, not by match, with a region
+splitting into two Durable Objects under load and players handed off between them as they
+cross a boundary or as a split moves the boundary through them.
+
+**This item cannot be started today.** It depends on the shared world itself — regions, a
+coordinate space bigger than one battlefield, a reason a character keeps existing somewhere
+between matches — none of which the current game has. It is filed now, at Backlog rather than
+Ready, so the dependency is visible rather than the plan being reinvented later under pressure.
+
+#### Change
+See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; summarised:
+1. A region id replaces `workers/index.ts`'s fixed `env.MATCH.idFromName('singleton')`; a
+   directory (mechanism unresolved, RFC-0002 §6.3) maps region id to the Durable Object that
+   currently owns it.
+2. A player's socket connects to whichever Durable Object owns the region their character is
+   in; crossing a region boundary hands the live session off from the source instance to the
+   destination one.
+3. What transfers at a hand-off is presence — the open socket, faction/side, position, whatever
+   the region simulation held about the player in memory — not the roster. `Persistence`
+   (accounts, rosters, the match log) stays one logical store every region-owning instance can
+   reach, per RFC-0001 §8.4's "one database, behind a portable port"; splitting *that* by region
+   is explicitly rejected in RFC-0002 §4.
+4. A region facing too much load spins up a second Durable Object owning half of it (split along
+   the world's own geometry) and gradually moves players to whichever half now owns their
+   location, rather than cutting the whole region over at once.
+
+#### Affected Files
+- `workers/index.ts` (routing, once there is a directory to route through)
+- A new region directory (Durable Object or Workers KV — RFC-0002 §6.3, unresolved)
+- Whatever the shared world's own persistent-presence/position system turns out to be, once it
+  exists — not yet a file in this repository
+
+#### Acceptance Criteria
+- [ ] The shared world exists (regions, a coordinate space, persistent player presence) —
+      tracked by whatever items eventually build it, not this one.
+- [ ] A player's socket routes to the Durable Object currently owning their region, through a
+      directory that two different Workers agree on.
+- [ ] Crossing a region boundary hands a live session off without the player having to
+      reconnect, verified by an automated test that plays a session across a scripted boundary.
+- [ ] A region under simulated load splits into two Durable Objects and players are gradually
+      moved to the half owning their location, without every connection in the region dropping
+      at once.
+- [ ] `Persistence` remains reachable by every region-owning instance without being partitioned
+      by region (RFC-0002 §4) — or, if that changes, the change is a deliberate edit to this
+      item and RFC-0002, not a quiet divergence.

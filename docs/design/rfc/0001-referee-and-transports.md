@@ -178,7 +178,9 @@ what it is: the rules, in the page, with nothing in between.
   not do — roll back a failed multi-statement transaction — because `ctx.storage.sql`'s
   transaction primitive cannot run the async code every caller of `Db.transaction` is written in.
   GitHub Pages remains the default way the client itself is served either way — this is a
-  hosting option for the referee, not a replacement for it.
+  hosting option for the referee, not a replacement for it. The single instance is deliberate
+  and deliberately temporary: [RFC-0002](./0002-region-sharded-durable-objects.md) is the plan
+  for replacing it once the game's shared world (§9) exists and needs more than one.
 
 ## 8. Open questions, including two holes this design opens
 
