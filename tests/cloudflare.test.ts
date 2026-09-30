@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { STOCK_PLAN } from '../src/sim/Balance'
+import { simulateOverWire } from '../src/sim/WireMatch'
 import { softwareAuthenticator } from './support/authenticator'
 
 /**
@@ -24,6 +26,10 @@ import { softwareAuthenticator } from './support/authenticator'
  * ticket are each treated the way `tests/server.test.ts` proves the
  * `Bun.serve` referee treats them — the same `Referee`, `Persistence` and
  * `apiHandler`, now behind a Cloudflare `WebSocket` and `ctx.storage.sql`.
+ * And, past a single relayed frame: a whole decisive match, driven by
+ * `src/sim/WireMatch.ts`, settles through this object's own independent
+ * recomputation exactly as it does headless — the part that needed two real
+ * browsers before, now proved without either.
  */
 
 const PORT = 18917
@@ -166,4 +172,33 @@ describe('The planted Cloudflare deployment', () => {
     expect(socket.readyState).toBe(WebSocket.OPEN)
     socket.close()
   })
+
+  test('a whole simulated match reaches settlement through the Durable Object, not just a few moves', async () => {
+    // Every other test here proves a socket, a ticket, a passkey — pieces of
+    // the wire. This proves the referee itself: driven by `src/sim/WireMatch.ts`,
+    // a real `SimMatch` plays a decisive match against its own rules, then the
+    // exact same commands travel to this deployment's `MatchDurableObject`
+    // over a real WebSocket. Its `Referee` recomputes every one of them
+    // independently, on `workers/DoSqliteDb.ts` over `ctx.storage.sql`, inside
+    // an actual `workerd` process — not the Bun-hosted referee every other
+    // wire test in this repository uses. A referee that disagreed at any
+    // point would send `abort` and this would throw; it does not, all the
+    // way to a decisive win, which is what "the referee runs for real" here
+    // means concretely (`[ITEM-045]`).
+    const url = BASE.replace('http', 'ws')
+    let seed = 6000
+    let winner: unknown = null
+    while (winner === null && seed < 6040) {
+      const result = await simulateOverWire({
+        seed,
+        blue: { ...STOCK_PLAN, size: 3 },
+        red: { ...STOCK_PLAN, size: 3 },
+        turnCap: 60,
+        url,
+      })
+      winner = result.outcome.winner
+      seed++
+    }
+    expect(winner).not.toBeNull()
+  }, 30000)
 })

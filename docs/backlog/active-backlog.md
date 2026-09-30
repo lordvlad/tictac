@@ -29,7 +29,7 @@ it is done. It is not ordered and says nothing about what happens next: that is 
 ### [ITEM-045] Cloudflare Durable Object Deployment
 **Type:** Infrastructure  
 **Priority:** P3  
-**Status:** In Progress — the referee runs for real; a real `wrangler deploy` has not happened  
+**Status:** In Progress — the referee runs for real and a whole match settles through it; a real `wrangler deploy` has not happened  
 **Milestone:** Unscheduled — infrastructure, not a milestone deliverable  
 
 #### Why
@@ -104,6 +104,20 @@ does not replace or compete with it.
    own that killing the spawned process alone does not reliably reach, discovered as several
    orphaned `workerd` processes accumulating across test runs and eventually starving the
    machine mid-session.
+8. **A whole match, live, not a handful of moves.** `src/sim/WireMatch.ts` elevates `SimMatch` —
+   already able to play a decisive match deterministically in milliseconds, both sides, headless
+   — to optionally send that same command stream through two real `NetworkManager`s connected to
+   a referee, instead of only applying it in memory. It is the reusable answer to "prove a whole
+   match reaches settlement" without scripting one by hand or driving two browsers:
+   `tests/refereed.test.ts` uses it against the in-process `Bun.serve` referee (and checks the
+   referee's digest and stored log agree with the local sim bit for bit);
+   `tests/cloudflare.test.ts` uses the identical function against the real `MatchDurableObject`
+   through `wrangler dev`, proving its independent recomputation over `ctx.storage.sql` reaches
+   the same decisive winner. One subtlety it exists to get right: two independent sockets give
+   no ordering guarantee against each other the way one connection gives against itself, so
+   commands are sent one at a time, each awaited until the other side's socket has received the
+   referee's relay of it — over real network latency (`wrangler dev`, unlike in-process
+   `Bun.serve`) firing them all at once raced the referee's own client registration and hung.
 
 #### Affected Files
 - `wrangler.jsonc`, `workers/index.ts`, `workers/MatchDurableObject.ts`, `workers/DoSqliteDb.ts`,
@@ -111,13 +125,15 @@ does not replace or compete with it.
 - `src/server/db/Db.ts` (reduced to the port), `src/server/db/BunSqlDb.ts` (new, the `Bun.SQL`
   adapter split out), `src/server/SocketTransport.ts` (new, split out of `GameServer.ts`),
   `src/server/Persistence.ts` (`persistenceOverDb` split out of `openPersistence`)
+- `src/sim/WireMatch.ts` (new — a real referee, over the wire, driven by `SimMatch`'s own policy)
 - `src/core/rng.ts`/`src/main.ts` (`resolveSeed` moved to `main.ts` — an unrelated fix this
   item's typecheck isolation surfaced: `rng.ts`'s only use of `window` was in a function `Db.ts`
   never needed, but every file `workers/` reaches gets typechecked under its own lib, and
   `window` does not exist there)
 - `package.json` (`typecheck:cf`, `lint:code`, `cf:dev`, `cf:deploy`), `.gitignore` (`.wrangler`)
-- `tests/cloudflare.test.ts`, `tests/determinism.test.ts` (updated for `resolveSeed`'s move),
-  and the handful of files that imported `openDb`/`openPersistence` from `db/Db.ts`/
+- `tests/cloudflare.test.ts`, `tests/refereed.test.ts` (both gained a whole-match-to-settlement
+  test via `src/sim/WireMatch.ts`, new), `tests/determinism.test.ts` (updated for `resolveSeed`'s
+  move), and the handful of files that imported `openDb`/`openPersistence` from `db/Db.ts`/
   `Persistence.ts` directly (now `db/BunSqlDb.ts`) — no behaviour change, only which file the
   same functions are imported from
 - `docs/architecture/deployment.md`, `docs/design/rfc/0001-referee-and-transports.md` §7
@@ -145,7 +161,10 @@ does not replace or compete with it.
       passkey relying-party configuration to match (`RelyingParty.origins` via
       `RELYING_PARTY_ID`/`RELYING_PARTY_ORIGINS`, already read by `MatchDurableObject` but unset
       by anything real).
-- [ ] A full match, played by two real clients through this deployment to settlement, with the
-      roster it was played with checked afterward — the referee is wired and unit/e2e-tested,
-      but nothing has driven an entire match through it end to end the way the Bun-hosted
-      referee has been (`tests/refereed.test.ts`, and live in a browser during earlier items).
+- [x] A whole decisive match reaches settlement through this deployment end to end — via
+      `src/sim/WireMatch.ts` rather than two real browsers (see Change point 8 below). What
+      remains open, deliberately narrower than the earlier phrasing: this drives the match
+      anonymously and checks the referee's own recomputation agreed all the way to a winner
+      (`tests/cloudflare.test.ts`), not a *registered* match whose roster is checked afterward
+      against a real `wrangler deploy` — that still wants the deploy above, and real accounts
+      recruited on it.

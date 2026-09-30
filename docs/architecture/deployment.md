@@ -13,6 +13,7 @@ appliesTo:
   - "src/server/db/Db.ts"
   - "src/server/db/BunSqlDb.ts"
   - "src/server/Persistence.ts"
+  - "src/sim/WireMatch.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
   - "docs/architecture/persistence.md"
@@ -21,14 +22,14 @@ relatedDocs:
 tags: ["deployment", "cloudflare", "durable-objects", "github-pages", "wrangler"]
 ---
 
-# Deployment: GitHub Pages and the Planted Cloudflare Durable Object
+# Deployment: GitHub Pages and the Cloudflare Durable Object
 
 There are two deployment paths in this repository, and they answer two different questions.
 **Where does the game live** is answered by GitHub Pages, unconditionally, on every push. **Where
-does a match server live**, if anyone wants one, is still open — `bun run serve:match` on a
-developer's own machine is the only answer that exists today, and it is not reachable by anyone
-else's browser. This document covers both, and the second one only as far as it has been
-planted (`[ITEM-045]`).
+does a match server live**, if anyone wants one, has two answers now — `bun run serve:match` on a
+developer's own machine, not reachable by anyone else's browser; or a single Cloudflare Durable
+Object running the same real referee, reachable locally today (`bun run cf:dev`) but not yet
+deployed against an actual account (`[ITEM-045]`). This document covers both.
 
 ---
 
@@ -210,6 +211,11 @@ signed-in player trades a session for a socket; a socket with an unissued ticket
 with the same 401 and message; an anonymous socket is still welcome; and a frame that is not
 JSON-RPC is silently dropped rather than crashing the connection or being relayed — the specific
 behaviour that distinguishes the current, real referee from this deployment's first-pass bare
-relay. It does not yet drive a whole match to settlement through this deployment, or exercise a
-real `wrangler deploy` — see the open acceptance criteria on
+relay. Past a single relayed frame, `src/sim/WireMatch.ts` elevates `SimMatch` — already able to
+play a whole decisive match deterministically, both sides, in milliseconds — to send that exact
+command stream through two real `NetworkManager`s connected to this deployment instead of only
+applying it in memory: a `tests/cloudflare.test.ts` scenario drives a full match this way and
+confirms the Durable Object's own independent recomputation, over `ctx.storage.sql`, reaches the
+same decisive winner — the proof that needed two real browsers before, now had without either.
+What remains open is a real `wrangler deploy` — see the open acceptance criteria on
 [`ITEM-045`](../backlog/active-backlog.md).

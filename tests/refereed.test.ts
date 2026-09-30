@@ -10,7 +10,9 @@ import { PROTOCOL_VERSION } from '../src/version'
 import type { Transport } from '../src/game/Transport'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import { Referee } from '../src/server/Referee'
+import { STOCK_PLAN } from '../src/sim/Balance'
 import { replay } from '../src/sim/Replay'
+import { simulateOverWire } from '../src/sim/WireMatch'
 
 /**
  * A referee on a real socket, in-process.
@@ -182,6 +184,45 @@ describe('Two clients playing through a referee', () => {
     expect(abort).not.toBeNull()
     expect(JSON.stringify(abort)).toContain('c0ffee1')
     socket.close()
+    await stop()
+  })
+
+  test('a whole simulated match reaches settlement live, the same as it does headless', async () => {
+    // `SimMatch` already plays a decisive match in milliseconds; this is the
+    // one that reuses that instead of scripting a handful of moves by hand,
+    // to reach the part the other test in this file does not: a real winner,
+    // over a real socket, refereed by a *second*, independent recomputation
+    // of the same match (`src/sim/WireMatch.ts`).
+    const { referee, store, url, stop } = await refereeOnASocket()
+
+    let seed = 5000
+    let result: Awaited<ReturnType<typeof simulateOverWire>> | undefined
+    while (!result && seed < 5040) {
+      const attempt = await simulateOverWire({
+        seed,
+        blue: { ...STOCK_PLAN, size: 3 },
+        red: { ...STOCK_PLAN, size: 3 },
+        turnCap: 60,
+        url,
+      })
+      if (attempt.outcome.winner !== null) result = attempt
+      else seed++
+    }
+    if (!result) throw new Error('no decisive seed found in range')
+
+    // Independently recomputed twice — once by this side's own `SimMatch`,
+    // once by the referee watching the wire — and they agree bit for bit.
+    await referee.idle()
+    expect(referee.digest()).toEqual(result.digest)
+
+    // What the referee kept is the whole match, not a sample of it, and
+    // refighting the log it wrote reaches the exact same state a third time.
+    const stored = (await store.match(referee.openMatchId!))!
+    expect(stored.events).toHaveLength(result.recording.events.length)
+    const refought = replay(stored)
+    expect(refought.skipped).toEqual([])
+    expect(refought.digest.total).toBe(result.digest.total)
+
     await stop()
   })
 })
