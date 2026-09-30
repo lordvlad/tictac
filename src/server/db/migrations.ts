@@ -178,4 +178,16 @@ export const MIGRATIONS: readonly Migration[] = [
       })}'`,
     ],
   },
+  {
+    id: 5,
+    name: 'fatigue and medical bay',
+    up: [
+      // Zero for every existing row, the same reasoning as `hp`'s backfill in
+      // migration 4: a row from before fatigue was tracked never deployed
+      // back-to-back under this rule, so it owes nothing and sits idle,
+      // which is exactly what `fatigue = 0, downtime = 0` means.
+      'ALTER TABLE roster ADD COLUMN fatigue INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE roster ADD COLUMN downtime INTEGER NOT NULL DEFAULT 0',
+    ],
+  },
 ]

@@ -3,7 +3,7 @@ import type { MeleeId } from '../core/Melee'
 import type { Awareness } from '../core/Awareness'
 import { clamp } from '../core/math'
 import { type MoraleBreak, type Predisposition, predispositionOf, type Temperament } from '../core/Morale'
-import { Faction, RULES } from '../config'
+import { Faction, FATIGUE, MORALE, RULES } from '../config'
 import {
   type AmmoSpec,
   AmmoId,
@@ -71,6 +71,16 @@ export class Soldier {
   readonly squadIndex: number // 0..3
   readonly name: string
   readonly entityId: number
+  /** Present only for a kept roster (`[ITEM-042]`); absent for a rolled squad. */
+  readonly characterId?: string
+  /**
+   * Consecutive deployments without rest, as stored on the roster this match
+   * started (`[ITEM-039]`) — 0 for every match outside a server that keeps
+   * one. Fixed for the match, the same as `sheet` and `startingHp`: it is
+   * read back by {@link Squads.deploymentsOf} onto `state.fatigue`, never
+   * mutated mid-match.
+   */
+  readonly fatigue: number
 
   private readonly health: HealthComponent
   private readonly actionPoints: ActionPointsComponent
@@ -137,12 +147,22 @@ export class Soldier {
      * digest disagrees about where a wounded unit started.
      */
     startingHp?: number,
+    /** Present only for a kept roster (`[ITEM-042]`); absent for a rolled squad. */
+    characterId?: string,
+    /**
+     * Consecutive deployments without rest, as the roster stored it
+     * (`[ITEM-039]`). Absent (the default) is zero — every match outside a
+     * server that keeps one.
+     */
+    startingFatigue?: number,
   ) {
     this.faction = faction
     this.squadIndex = squadIndex
     this.name = name
     this.sheet = sheet
     this.derived = derive(sheet)
+    this.characterId = characterId
+    this.fatigue = startingFatigue ?? 0
 
     // Blue team faces North (+Z), Red team faces South (-Z): the same facing as
     // a yaw for the view and as a heading for the rules.
@@ -176,7 +196,13 @@ export class Soldier {
     this.statusesComponent = world.addComponent(this.entityId, new StatusesComponent())
     this.sighted = world.addComponent(this.entityId, new SightedComponent())
     this.awarenessComponent = world.addComponent(this.entityId, new AwarenessComponent())
-    this.moraleComponent = world.addComponent(this.entityId, new MoraleComponent())
+    // The first back-to-back deployment is free; only the level past it costs
+    // starting morale, the same step `refreshTraits` prices in AP.
+    const fatigueSteps = Math.max(0, this.fatigue - 1)
+    this.moraleComponent = world.addComponent(
+      this.entityId,
+      new MoraleComponent(MORALE.max - FATIGUE.moralePerStep * fatigueSteps),
+    )
     this.deedsComponent = world.addComponent(this.entityId, new DeedsComponent())
     this.traitsComponent = world.addComponent(this.entityId, new TraitsComponent())
     this.stampGrenades()
@@ -259,7 +285,8 @@ export class Soldier {
         : Math.min(this.armorComponent.armor, maxArmor)
     }
 
-    const maxAp = this.derived.maxAp + this.resolvedTraits.maxAp + this.gearApRelief
+    const fatigueApPenalty = FATIGUE.apPerStep * Math.max(0, this.fatigue - 1)
+    const maxAp = this.derived.maxAp + this.resolvedTraits.maxAp + this.gearApRelief - fatigueApPenalty
     if (this.actionPoints.maxAp !== maxAp) {
       const wasFull = this.actionPoints.ap >= this.actionPoints.maxAp
       this.actionPoints.maxAp = maxAp

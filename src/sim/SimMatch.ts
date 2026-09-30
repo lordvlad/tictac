@@ -58,6 +58,12 @@ export interface SquadPlan {
    * sweep can price the ability by taking it away from one side.
    */
   watch?: boolean
+  /**
+   * Every unit's stored fatigue level, `0..FATIGUE.max` — what a sweep prices
+   * a worn-out roster at (`[ITEM-039]`). A full squad at level N, not a mix:
+   * a sweep asking about a mix runs two plans and compares them.
+   */
+  fatigue?: number
 }
 
 /**
@@ -229,8 +235,12 @@ export class SimMatch {
       [Faction.Red]: planToLoadout(setup.red),
     }
 
-    const squadOf = (faction: Faction): Deployment[] =>
-      this.sheets[faction].map((sheet, i) => ({ sheet, loadout: this.loadouts[faction][i]! }))
+    const squadOf = (faction: Faction, plan: SquadPlan): Deployment[] =>
+      this.sheets[faction].map((sheet, i) => ({
+        sheet,
+        loadout: this.loadouts[faction][i]!,
+        ...(plan.fatigue !== undefined ? { state: { fatigue: plan.fatigue } } : {}),
+      }))
     const header: RecordingHeader = {
       version: RECORDING_VERSION,
       seed: setup.seed >>> 0,
@@ -238,7 +248,7 @@ export class SimMatch {
       source: 'sim',
       createdAt: new Date().toISOString(),
       turnCap: this.turnCap,
-      squads: { [Faction.Blue]: squadOf(Faction.Blue), [Faction.Red]: squadOf(Faction.Red) },
+      squads: { [Faction.Blue]: squadOf(Faction.Blue, setup.blue), [Faction.Red]: squadOf(Faction.Red, setup.red) },
       ...(setup.map ? { map: setup.map } : {}),
     }
     this.host = new MatchHost(header)

@@ -1,4 +1,4 @@
-import { Faction, HEALING, ROSTER } from '../config'
+import { Faction, FATIGUE, HEALING, MEDICAL_BAY, ROSTER, WOUNDS } from '../config'
 import { characterSheet, derive, maxHpOf, sanitizeSheet, type CharacterSheet } from '../core/Characters'
 import { mergeDeeds, noDeeds, type Deeds } from '../core/Progression'
 import { Rng } from '../core/rng'
@@ -28,6 +28,10 @@ export interface RosterMember {
   hp: number
   /** The cumulative service record — every settled match's `Deeds`, added up. */
   deeds: Deeds
+  /** Consecutive deployments without rest, `0..FATIGUE.max` (`[ITEM-039]`). */
+  fatigue: number
+  /** Matches of medical bay left before this member can be picked again. */
+  downtime: number
 }
 
 /** One side of a settled match: who played it, with which characters, and how each fared. */
@@ -51,6 +55,8 @@ interface MemberRow {
   matches: number
   hp: number
   deeds: string
+  fatigue: number
+  downtime: number
 }
 
 export class Rosters {
@@ -82,7 +88,7 @@ export class Rosters {
   /** The living squad, in slot order. */
   async active(playerId: string): Promise<RosterMember[]> {
     const rows = await this.db.query<MemberRow>`
-      SELECT character_id, slot, sheet, matches, hp, deeds
+      SELECT character_id, slot, sheet, matches, hp, deeds, fatigue, downtime
         FROM roster
        WHERE player_id = ${playerId} AND status = ${'active'}
        ORDER BY slot`
@@ -93,6 +99,8 @@ export class Rosters {
       matches: Number(row.matches),
       hp: Number(row.hp),
       deeds: JSON.parse(row.deeds) as Deeds,
+      fatigue: Number(row.fatigue),
+      downtime: Number(row.downtime),
     }))
   }
 
@@ -129,7 +137,7 @@ export class Rosters {
                      (character_id, player_id, slot, sheet, status, matches, hp, deeds, created_at, died_in)
                    VALUES (${characterId}, ${playerId}, ${slot}, ${JSON.stringify(sheet)}, ${'active'}, ${0},
                            ${hp}, ${JSON.stringify(deeds)}, ${createdAt}, ${null})`
-    return { characterId, slot, sheet, matches: 0, hp, deeds }
+    return { characterId, slot, sheet, matches: 0, hp, deeds, fatigue: 0, downtime: 0 }
   }
 
   /**
@@ -174,11 +182,14 @@ export class Rosters {
    * the same rule a survivor does — {@link HEALING.perMatch} of missing HP,
    * scaled by their own `healBonus` — and does not count a match: they were
    * not in it. The bench (`[ITEM-042]`) is what makes resting somebody mean
-   * anything, and this is the reward for using it.
+   * anything, and this is the reward for using it: fatigue falls twice as
+   * fast as it rises and medical-bay downtime ticks down, both floored at
+   * zero (`[ITEM-039]`).
    */
   private async rest(db: Db, playerId: string, deployed: ReadonlySet<string>): Promise<void> {
-    const rows = await db.query<{ character_id: string; sheet: string; hp: number }>`
-      SELECT character_id, sheet, hp FROM roster WHERE player_id = ${playerId} AND status = ${'active'}`
+    const rows = await db.query<{ character_id: string; sheet: string; hp: number; fatigue: number; downtime: number }>`
+      SELECT character_id, sheet, hp, fatigue, downtime FROM roster
+       WHERE player_id = ${playerId} AND status = ${'active'}`
     for (const row of rows) {
       if (deployed.has(row.character_id)) continue
       const sheet = sanitizeSheet(JSON.parse(row.sheet))
@@ -186,7 +197,9 @@ export class Rosters {
       const maxHp = maxHpOf(sheet)
       const healed = Number(row.hp) + HEALING.perMatch * maxHp * (1 + healBonus / 100)
       const hp = Math.max(1, Math.min(maxHp, Math.round(healed)))
-      await db.query`UPDATE roster SET hp = ${hp}
+      const fatigue = Math.max(0, Number(row.fatigue) - 2)
+      const downtime = Math.max(0, Number(row.downtime) - 1)
+      await db.query`UPDATE roster SET hp = ${hp}, fatigue = ${fatigue}, downtime = ${downtime}
                       WHERE character_id = ${row.character_id} AND status = ${'active'}`
     }
   }
@@ -194,17 +207,23 @@ export class Rosters {
   /**
    * One character's match.
    *
-   * Every branch counts the match and adds this match's `Deeds` onto the
-   * cumulative record — the combat log — because having played it is what a
-   * service record is, regardless of who won. What differs is the rest:
+   * Every branch counts the match, adds this match's `Deeds` onto the
+   * cumulative record — the combat log — and raises fatigue by one, capped at
+   * {@link FATIGUE.max} (`[ITEM-039]`): having played it is what a service
+   * record and a tired body both are, regardless of who won. What differs is
+   * the rest:
    *
    * - **Survived**: the sheet comes back {@link grown}, already folded into
    *   `fate.sheet`. HP heals by {@link HEALING.perMatch}'s fraction of the
    *   *new* sheet's ceiling, scaled by that sheet's own `healBonus` — the
-   *   stated rule, not an implicit reset to full.
+   *   stated rule, not an implicit reset to full. Ending at or below
+   *   {@link WOUNDS.concussed} of that ceiling sends them to the medical bay
+   *   for {@link MEDICAL_BAY.concussed} match; otherwise downtime is zero,
+   *   which it already was — deploying at all required it.
    * - **Carried**: losers learn nothing, so the sheet is untouched — but HP is
    *   written down as {@link HEALING.carriedOutHp}, which then heals the same
-   *   way on whatever match comes after it.
+   *   way on whatever match comes after it, and downtime is set to
+   *   {@link MEDICAL_BAY.carriedOut} matches.
    * - **Died**: marked dead and named the match that killed them, with their
    *   final HP and deeds kept as history rather than discarded.
    *
@@ -213,11 +232,12 @@ export class Rosters {
    * each branch is the same guard: nothing to update means nothing to do.
    */
   private async record(db: Db, matchId: string, characterId: string, fate: UnitFate): Promise<void> {
-    const rows = await db.query<{ sheet: string; deeds: string }>`
-      SELECT sheet, deeds FROM roster WHERE character_id = ${characterId} AND status = ${'active'}`
+    const rows = await db.query<{ sheet: string; deeds: string; fatigue: number }>`
+      SELECT sheet, deeds, fatigue FROM roster WHERE character_id = ${characterId} AND status = ${'active'}`
     const existing = rows[0]
     if (!existing) return
     const deeds = JSON.stringify(mergeDeeds(JSON.parse(existing.deeds) as Deeds, fate.deeds))
+    const fatigue = Math.min(FATIGUE.max, Number(existing.fatigue) + 1)
 
     if (fate.kind === 'survived') {
       const sheet = sanitizeSheet(fate.sheet)
@@ -225,18 +245,21 @@ export class Rosters {
       const maxHp = maxHpOf(sheet)
       const healed = fate.hp + HEALING.perMatch * maxHp * (1 + healBonus / 100)
       const hp = Math.max(1, Math.min(maxHp, Math.round(healed)))
+      const downtime = fate.hp <= WOUNDS.concussed * maxHp ? MEDICAL_BAY.concussed : 0
       await db.query`UPDATE roster SET sheet = ${JSON.stringify(sheet)}, hp = ${hp}, deeds = ${deeds},
-                                        matches = matches + 1
+                                        matches = matches + 1, fatigue = ${fatigue}, downtime = ${downtime}
                       WHERE character_id = ${characterId} AND status = ${'active'}`
       return
     }
     if (fate.kind === 'carried') {
-      await db.query`UPDATE roster SET hp = ${HEALING.carriedOutHp}, deeds = ${deeds}, matches = matches + 1
+      await db.query`UPDATE roster SET hp = ${HEALING.carriedOutHp}, deeds = ${deeds}, matches = matches + 1,
+                                        fatigue = ${fatigue}, downtime = ${MEDICAL_BAY.carriedOut}
                       WHERE character_id = ${characterId} AND status = ${'active'}`
       return
     }
     await db.query`UPDATE roster SET status = ${'dead'}, died_in = ${matchId},
-                                      hp = ${Math.max(0, fate.hp)}, deeds = ${deeds}, matches = matches + 1
+                                      hp = ${Math.max(0, fate.hp)}, deeds = ${deeds}, matches = matches + 1,
+                                      fatigue = ${fatigue}
                     WHERE character_id = ${characterId} AND status = ${'active'}`
   }
 }

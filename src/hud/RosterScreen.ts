@@ -35,10 +35,13 @@ export class RosterScreen {
     private readonly recruitMember: () => Promise<RosterEntry>,
   ) {
     this.roster = [...roster].sort((a, b) => a.slot - b.slot)
-    // Default pick: the first SQUAD_SIZE in slot order, the same spread every
-    // match has always deployed — a signed-in player who never opens this
-    // screen's toggles gets exactly what an unsigned-in one always has.
-    for (const entry of this.roster.slice(0, SQUAD_SIZE)) this.selected.add(entry.characterId)
+    // Default pick: the first SQUAD_SIZE fit to fight, in slot order — the
+    // same spread every match has always deployed, skipping anyone still in
+    // the medical bay the way the referee would refuse them anyway
+    // (`[ITEM-039]`).
+    for (const entry of this.roster.filter((entry) => entry.downtime === 0).slice(0, SQUAD_SIZE)) {
+      this.selected.add(entry.characterId)
+    }
 
     this.root = document.createElement('div')
     this.root.className = 'roster-root'
@@ -68,10 +71,13 @@ export class RosterScreen {
     if (!action) return
 
     switch (action.kind) {
-      case 'toggle':
+      case 'toggle': {
+        const entry = this.roster.find((member) => member.characterId === action.id)
+        if (entry?.downtime) break
         if (this.selected.has(action.id)) this.selected.delete(action.id)
         else if (this.selected.size < SQUAD_SIZE) this.selected.add(action.id)
         break
+      }
       case 'recruit':
         this.recruiting = true
         this.error = null
@@ -131,15 +137,21 @@ export class RosterScreen {
    */
   private memberRow(entry: RosterEntry): string {
     const maxHp = maxHpOf(entry.sheet)
+    const benched = entry.downtime > 0
     const picked = this.selected.has(entry.characterId)
-    const disabled = !picked && this.selected.size >= SQUAD_SIZE
+    const disabled = benched || (!picked && this.selected.size >= SQUAD_SIZE)
     const { health, agility, strength, intelligence } = entry.sheet.attributes
     return `
-      <button class="roster-row interactive ${picked ? 'picked' : ''}" ${disabled ? 'disabled' : ''}
+      <button class="roster-row interactive ${picked ? 'picked' : ''} ${benched ? 'roster-medical' : ''}"
+              ${disabled ? 'disabled' : ''}
               ${RosterScreen.actionAttr({ kind: 'toggle', id: entry.characterId })}>
         <span class="roster-slot">#${entry.slot + 1}</span>
         <span class="roster-hp">HP ${entry.hp}/${maxHp}</span>
-        <span class="roster-attrs">HEA ${health} · AGI ${agility} · STR ${strength} · INT ${intelligence}</span>
+        ${
+          benched
+            ? `<span class="roster-attrs">Medical bay — ${entry.downtime} match${entry.downtime === 1 ? '' : 'es'} left</span>`
+            : `<span class="roster-attrs">HEA ${health} · AGI ${agility} · STR ${strength} · INT ${intelligence}</span>`
+        }
         <span class="roster-check">${picked ? icon('ui-deploy') : ''}</span>
       </button>`
   }

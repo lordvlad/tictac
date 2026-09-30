@@ -103,6 +103,7 @@ Migrations are append-only and never edited once shipped:
 2. **`accounts`** — `players`, `credentials`, `sessions`, `auth_challenges`.
 3. **`rosters`** — `roster`, `match_results`.
 4. **`lasting wounds`** — `roster.hp`, `roster.deeds` (`ITEM-038`).
+5. **`fatigue and medical bay`** — `roster.fatigue`, `roster.downtime` (`ITEM-039`).
 
 > This is the *database* schema. The **recorded command and component
 > shapes** are a separate guard — `bun run schema:catalog`, see
@@ -193,13 +194,18 @@ the same squad) and repeats none of that player's other deployed characters.
 Naming is what makes picking a subset possible at all: the referee looks each
 stated id up in the active roster rather than comparing position for position,
 so a squad can be any 1–4 of the six, in any order, not only the first four
-slots. Once a name resolves, the two things a client cannot be trusted to
-state honestly are checked against the roster row it names: the deployed
-sheet (`sanitizeSheet` both ways, compared as JSON) and `state.hp`, exactly.
-Anything else aborts the match — a match played with somebody else's people,
-somebody else's wounds, a dead character, a repeated one, or a fifth, must not
-settle. A signed-in side whose deployment omits `state.hp` is refused the same
-way a wrong one is: absence would let a client always deploy at full health
+slots. A name that resolves to a member still in the medical bay
+(`downtime > 0`) is refused outright (`[ITEM-039]`) — the roster screen is not
+trusted to have kept them off the list any more than a client is trusted with
+anything else. Once a name clears both checks, the things a client cannot be
+trusted to state honestly are checked against the roster row it names: the
+deployed sheet (`sanitizeSheet` both ways, compared as JSON), `state.hp` and
+`state.fatigue`, exactly — fatigue the same strict way HP is, present and
+matching, never defaulted when absent. Anything else aborts the match — a
+match played with somebody else's people, somebody else's wounds, somebody
+else's rest, a dead character, a repeated one, or a fifth, must not settle. A
+signed-in side whose deployment omits `state.hp` is refused the same way a
+wrong one is: absence would let a client always deploy at full health
 regardless of what the roster says. One player on both sides is refused for
 the same reason as the sheet check, and so is a signed-in player with nobody
 left on their roster. An anonymous side is skipped, not refused: an
@@ -278,24 +284,58 @@ match: nobody sits banked at whatever HP their last deployment left them at
 while their squadmates keep fighting, and nobody stuck at full stays clamped
 there by anything but the same ceiling a deployed survivor is.
 
+**Fatigue and the medical bay** (`[ITEM-039]`). Every settled match moves both
+numbers on `roster`: a deployed member's `fatigue` rises by one, capped at
+`FATIGUE.max` (4); a benched one's falls by two and `downtime` by one, both
+floored at zero — fatigue recovers twice as fast as it accrues, so a
+six-character rotation resting one match in three never carries a step
+forward. A carried-out survivor's `downtime` is set to `MEDICAL_BAY.carriedOut`
+(2) and one who ended at or below `WOUNDS.concussed` of their ceiling to
+`MEDICAL_BAY.concussed` (1) — both in `Rosters.record`, alongside the healing
+and growth it already writes. The stored level only costs something at
+deployment: `Soldier` takes a starting fatigue the way it takes a starting HP,
+and `max(0, fatigue − 1)` steps — the first back-to-back match is free — each
+cost `FATIGUE.apPerStep` off max AP (one more term in `refreshTraits`' `maxAp`
+sum) and `FATIGUE.moralePerStep` off starting morale. The per-step numbers are
+calibrated against `bun run balance -- --blueSize=3` (a man down, `[ITEM-041]`:
+Blue 55 → 34), not copied from the design sketch: a flat `-1` AP a step
+measured level 2 at a 14-point cost against a target of "at most 5", because
+`effectiveMaxAp`'s `Math.round` erases anything under half a point from a
+whole-number ceiling. `FATIGUE.apPerStep = 0.5` measures level 2 at 0 (one
+step is invisible on its own) and level 4 at 20 (two steps land as a whole
+point) — both inside their bands, and a live demonstration that this clamp
+applies to a stored ceiling exactly as it already did to a status effect's.
+
 **Picking who deploys.** `src/hud/RosterScreen.ts` is a DOM-only overlay shown
 ahead of `LoadoutScreen` to a signed-in player: every active roster member,
 identified by slot number rather than callsign (`FACTION_INFO.squadNames[index]`
 is assigned by *deployed* position, so a name here would promise a character a
 callsign it may not keep once picked alongside others), toggled up to
-`SQUAD_SIZE`, defaulting to the first four in slot order. An empty slot renders
-a **Recruit** button in its place, calling `POST /api/roster/recruit` and
-splicing the answer straight into the list. The pick becomes the
-`characterId` the client states on each `Deployment` it sends; `main.ts` mints
-the connection ticket only *after* the pick, not before it, so lingering on
-the roster screen cannot burn the ticket's 60-second window before ever
-connecting. `Account.roster()` mirrors `RosterMember` client-side as
-`RosterEntry` (`src/game/Account.ts`) rather than importing the server's type
-— `src/game`/`src/hud` never import `src/server/`, even for a type.
+`SQUAD_SIZE`, defaulting to the first four *deployable* in slot order. A
+member with `downtime > 0` is greyed with the matches left instead of their
+attributes and cannot be toggled — the client-side mirror of the referee's own
+refusal, not a substitute for it. An empty slot renders a **Recruit** button
+in its place, calling `POST /api/roster/recruit` and splicing the answer
+straight into the list. The pick becomes the `characterId` the client states
+on each `Deployment` it sends; `main.ts` mints the connection ticket only
+*after* the pick, not before it, so lingering on the roster screen cannot burn
+the ticket's 60-second window before ever connecting. `Account.roster()`
+mirrors `RosterMember` client-side as `RosterEntry` (`src/game/Account.ts`)
+rather than importing the server's type — `src/game`/`src/hud` never import
+`src/server/`, even for a type.
 
-> **Not yet**: fatigue and medical-bay downtime (`[ITEM-039]`, in the same
-> `Deployment.state` the bench's `characterId` now lives on) is designed and
-> Ready, pulled after the bench (`[ITEM-042]`, done) it is built on.
+> **A live match's header is not what was handed to `Squads`.** `main.ts`
+> builds the `matchHeader` a referee judges from `Squads.deploymentsOf`,
+> reading back the `Soldier`s a match already deployed — not from the
+> `Deployment[]` array a client passed to `Squads`'s constructor. Anything a
+> kept roster needs stated has to survive that round trip on the `Soldier`
+> itself (`characterId`, `fatigue`) or it is silently absent from every real
+> match, however correct the code that built the original `Deployment[]` was.
+> `[ITEM-044]` is exactly this: `deploymentsOf` carried sheet, kit and HP back
+> but not `characterId` or `state.fatigue`, so every live signed-in match
+> since `[ITEM-042]` shipped would have named nobody and been aborted by a
+> real referee — caught only once `[ITEM-039]`'s own regression test built a
+> `Squads` and read `deploymentsOf` back, which no earlier test had done.
 
 ---
 

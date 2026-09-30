@@ -2585,6 +2585,11 @@ canvas {
   opacity: 0.7;
 }
 
+.roster-row.roster-medical {
+  border-color: rgba(230, 126, 34, 0.5);
+  background: rgba(230, 126, 34, 0.08);
+}
+
 .roster-slot {
   font-size: 11px;
   font-weight: 700;

@@ -370,6 +370,18 @@ export class Referee {
             found: [],
           })
         }
+        // A member in the medical bay cannot be picked: `[ITEM-039]` refuses
+        // it here rather than trusting the roster screen to have kept them
+        // off the list, the same way every other roster rule refuses rather
+        // than assumes.
+        if (member.downtime > 0) {
+          return this.abort({
+            matchId: this.matchId ?? 'unknown',
+            side: faction,
+            reason: `the ${FACTION_INFO[faction].name} squad deploys a character still in the medical bay`,
+            found: [],
+          })
+        }
         if (JSON.stringify(sanitizeSheet(unit.sheet)) !== JSON.stringify(member.sheet)) {
           return this.abort({
             matchId: this.matchId ?? 'unknown',
@@ -386,6 +398,17 @@ export class Referee {
             matchId: this.matchId ?? 'unknown',
             side: faction,
             reason: `the ${FACTION_INFO[faction].name} squad's starting health is not what the roster this server keeps for its player says`,
+            found: [],
+          })
+        }
+        // Fatigue is read off the same roster, the same way `state.hp` is: a
+        // client cannot deploy rested, or hide how tired it already is, any
+        // more than it can deploy healed (`[ITEM-039]`).
+        if (unit.state?.fatigue !== member.fatigue) {
+          return this.abort({
+            matchId: this.matchId ?? 'unknown',
+            side: faction,
+            reason: `the ${FACTION_INFO[faction].name} squad's stated fatigue is not what the roster this server keeps for its player says`,
             found: [],
           })
         }

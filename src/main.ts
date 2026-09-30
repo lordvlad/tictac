@@ -292,7 +292,13 @@ function showMenu(): void {
       url: string,
       account: Account | null,
       roster: RosterEntry[] | null,
-    ): Promise<{ url: string; sheets?: CharacterSheet[]; hp?: number[]; characterIds?: string[] }> => {
+    ): Promise<{
+      url: string
+      sheets?: CharacterSheet[]
+      hp?: number[]
+      fatigue?: number[]
+      characterIds?: string[]
+    }> => {
       if (!account || !roster) return { url }
       const screen = new RosterScreen(roster, () => account.recruit())
       const picked = await screen.pick()
@@ -300,6 +306,7 @@ function showMenu(): void {
         url: await account.socketUrl(url),
         sheets: picked.map((entry) => entry.sheet),
         hp: picked.map((entry) => entry.hp),
+        fatigue: picked.map((entry) => entry.fatigue),
         characterIds: picked.map((entry) => entry.characterId),
       }
     }
@@ -313,7 +320,7 @@ function showMenu(): void {
       statusEl().textContent = 'Waiting for an opponent to join…'
       void joining(typed)
         .then(async ({ account, roster }) => {
-          const { url, sheets, hp, characterIds } = await equip(typed, account, roster)
+          const { url, sheets, hp, fatigue, characterIds } = await equip(typed, account, roster)
           const network = new NetworkManager()
           // No `onConnected` here: a socket opens as soon as the referee
           // answers, long before anybody is on the other side of it. The
@@ -323,7 +330,7 @@ function showMenu(): void {
           }
           network.hostOnServer(url, seed, label)
           container.remove()
-          equipThenStart(seed, label, network, sheets, hp, characterIds)
+          equipThenStart(seed, label, network, sheets, hp, characterIds, fatigue)
         })
         .catch((err: unknown) => {
           failed(err instanceof Error ? err.message : 'Could not open a match there.')
@@ -337,12 +344,12 @@ function showMenu(): void {
       const network = new NetworkManager()
       try {
         const { account, roster } = await joining(typed)
-        const { url, sheets, hp, characterIds } = await equip(typed, account, roster)
+        const { url, sheets, hp, fatigue, characterIds } = await equip(typed, account, roster)
         statusEl().style.color = '#38bdf8'
         statusEl().textContent = 'Connecting…'
         const opening = await network.joinOnServer(url)
         container.remove()
-        equipThenStart(opening.seed, opening.seedLabel, network, sheets, hp, characterIds)
+        equipThenStart(opening.seed, opening.seedLabel, network, sheets, hp, characterIds, fatigue)
       } catch (err) {
         failed(
           err instanceof Error && err.message.length > 0
@@ -424,6 +431,8 @@ function equipThenStart(
   hp?: number[],
   /** This side's roster character ids, present only when signed in (`[ITEM-042]`). */
   characterIds?: string[],
+  /** This side's roster fatigue, present only when signed in (`[ITEM-039]`). */
+  fatigue?: number[],
 ): void {
   const engine = createEngineContext(Game.instance())
   const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
@@ -449,7 +458,9 @@ function equipThenStart(
       sheet,
       loadout: loadout[i]!,
       ...(characterIds?.[i] !== undefined ? { characterId: characterIds[i]! } : {}),
-      ...(hp?.[i] !== undefined ? { state: { hp: hp[i]! } } : {}),
+      ...(hp?.[i] !== undefined
+        ? { state: { hp: hp[i]!, ...(fatigue?.[i] !== undefined ? { fatigue: fatigue[i]! } : {}) } }
+        : {}),
     }))
     network.send({ type: 'ready', squad: mySquad })
     if (network.mode !== 'local') screen.markWaiting('Waiting for opponent to deploy…')

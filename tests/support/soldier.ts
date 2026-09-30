@@ -23,6 +23,9 @@ export interface SoldierSpec {
   attachments?: AttachmentId[]
   sidearm?: MeleeId
   role?: RoleId
+  characterId?: string
+  /** Consecutive deployments without rest, `0..FATIGUE.max` (`[ITEM-039]`). */
+  fatigue?: number
 }
 
 /**
@@ -43,6 +46,9 @@ export function headlessSoldier(spec: SoldierSpec = {}): Soldier {
     spec.tile ?? { x: 1, y: 1 },
     grid,
     spec.sheet ?? characterSheet(new Rng(21)),
+    undefined,
+    spec.characterId,
+    spec.fatigue,
   )
   applyUnitLoadout(soldier, {
     weaponId: spec.weapon ?? WeaponId.Rifle,

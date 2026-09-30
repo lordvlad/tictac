@@ -2009,6 +2009,116 @@ member into the slot in place, with no page reload.
 
 ---
 
+### [ITEM-039] Fatigue & Medical-Bay Downtime
+**Completed Date:** 2026-09-30  
+**Type:** Feature  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+Split out of `[ITEM-038]` at 2026-09-26: [GDD §5](../design/gdd/progression-and-meta.md) also
+wants "fatigue over consecutive deployments" that temporarily lowers baseline AP and morale, and
+"medical-bay downtime" for severe injury. Both only meant something once a player could choose
+not to deploy somebody, which the bench (`[ITEM-042]`) made possible.
+
+#### Key Changes
+- **Stored.** Migration 5 adds `roster.fatigue` (0–`FATIGUE.max`, 4) and `roster.downtime`
+  (≥ 0), both integers defaulting to 0 — the only stored numbers; AP and morale are derived from
+  `fatigue` when a unit is built, never stored beside it.
+- **Settling** (`Rosters.record`/`Rosters.rest`), per settled match of the player: deployed
+  raises `fatigue` by one, capped at `FATIGUE.max`; benched lowers it by two and `downtime` by
+  one, both floored at zero; a carried-out survivor's `downtime` is set to
+  `MEDICAL_BAY.carriedOut` (2), one who ended at or below `WOUNDS.concussed` of their ceiling to
+  `MEDICAL_BAY.concussed` (1).
+- **The penalty**, from the stored level at deployment: `max(0, fatigue − 1)` steps, each
+  `FATIGUE.apPerStep` off max AP and `FATIGUE.moralePerStep` off starting morale — so the first
+  back-to-back match is free. `Soldier` takes a starting fatigue the way it already takes a
+  starting HP; the AP step is one more term in `refreshTraits`' `maxAp` sum, and
+  `MoraleComponent` starts at `MORALE.max − FATIGUE.moralePerStep × steps`.
+- **Calibrated, not guessed.** `-1` AP a step, the design sketch's own number, cost 14 wins in
+  100 at level 2 against a target of "at most 5" — `effectiveMaxAp`'s `Math.round` turns out to
+  erase anything under half a point from a whole-number ceiling, so a half point a step
+  (`FATIGUE.apPerStep = 0.5`) is invisible at one step and lands as a whole point at two: level 2
+  measures 0 and level 4 measures 20, both inside their bands. `FATIGUE.moralePerStep` stayed at
+  10 — morale's own threshold (`MORALE.steady`, 50) is far enough from `MORALE.max` that it
+  contributes nothing at these levels either way, and is here for when a match's own morale
+  losses stack on top of it.
+- **Medical bay.** A member with `downtime > 0` cannot be picked: `RosterScreen` greys their row
+  with the matches left instead of their attributes and refuses the toggle, and the default pick
+  skips them; `Referee.verifyRosters` refuses a header that deploys one regardless, the same way
+  it refuses a dead or foreign id.
+- **On the wire**, in `Deployment.state.fatigue` — already part of the shape since `[ITEM-043]`,
+  so no array and no version move. The referee checks a deployed unit's stated fatigue against
+  the roster's own the same strict way it already checks `state.hp`: present and exact, not
+  defaulted when absent.
+- **Measured**, `SquadPlan.fatigue` and `bun run balance -- --blueFatigue=N` (every unit at level
+  N), calibrated against a man down (`--blueSize=3`: Blue 55 → 34, `[ITEM-041]`).
+
+#### Measured
+`bun run balance`: unchanged (Blue 55, Red 43, 2 draws, mean 9.27 turns) — the sweep has no
+roster and level 1 is free by design, so nothing here could move the baseline.
+`--blueFatigue=2`: Blue 55 (cost 0, inside "at most 5"). `--blueFatigue=4`: Blue 35 (cost 20,
+inside "10 to 21"). `--blueSize=3` reconfirmed at Blue 34 (cost 21), unmoved by this item.
+`bun test`: all 665 tests, including settlement's fatigue/downtime transitions and the referee's
+medical-bay and fatigue-mismatch refusals. In a browser against a real `bun run serve:match`: a
+roster with one member's `downtime` set to 2 shows that row as "Medical bay — 2 matches left",
+unpickable, skipped by the default pick; the match played to a live first turn on both sides.
+
+#### Acceptance Criteria
+- [x] Settling moves `fatigue` and `downtime` exactly as specified, including the caps and
+      floors (`tests/persistence.test.ts`).
+- [x] A unit deployed at level N has its sheet's max AP minus `FATIGUE.apPerStep × max(0, N − 1)`
+      and starting morale `MORALE.max − FATIGUE.moralePerStep × max(0, N − 1)`
+      (`tests/fatigue.test.ts`) — the per-step numbers moved from the design sketch's `-1`/`-10`
+      during calibration, as the item's own escape hatch allowed.
+- [x] A member in the medical bay cannot be picked, and the referee aborts a header that
+      deploys one (`tests/persistence.test.ts`).
+- [x] The referee aborts a stated fatigue that differs from the roster's.
+- [x] `bun run balance -- --blueFatigue=4` costs Blue 20 wins in 100 (inside 10–21) and
+      `--blueFatigue=2` costs 0 (inside "at most 5"); `bun run balance` without the flag is
+      identical.
+
+---
+
+### [ITEM-044] A Live Match Never Actually Stated Its Own Squad's Id or Fatigue
+**Completed Date:** 2026-09-30  
+**Type:** Bug  
+**Milestone:** M4 — Competitive & Meta Roster  
+
+#### Why
+Found while wiring `[ITEM-039]`'s fatigue onto the wire. The host's `matchHeader` — what a
+referee actually judges — is built from `Squads.deploymentsOf`, reading back the live `Soldier`s
+a match already deployed, not from the `Deployment[]` a client handed `Squads` at construction.
+`deploymentsOf` read a soldier's sheet, kit and HP, but never carried `characterId` or
+`state.fatigue` at all — both existed on the `Deployment` going *in*, and neither survived
+coming back *out*. Every real, live, signed-in match since `[ITEM-042]` shipped would therefore
+have stated no `characterId` for anyone on either side, and `Referee.verifyRosters` would have
+aborted every one of them the moment a real referee saw one — a client's own live gameplay had
+simply never gone through `Squads` to notice, since `[ITEM-042]`'s own tests built headers by
+hand and its one browser session only confirmed the client reached "waiting for opponent", never
+that the referee actually accepted what was sent.
+
+#### Key Changes
+- `Soldier` takes `characterId` and `startingFatigue` the way it already takes `startingHp`:
+  stored as `readonly characterId?: string` and `readonly fatigue: number`, fixed for the match.
+- `Squads`' constructor passes `deployment?.characterId` and `deployment?.state?.fatigue`
+  through to each `Soldier`; `deploymentsOf` reads both back onto the `Deployment` it returns,
+  alongside the sheet, kit and HP it already read.
+
+#### Measured
+A direct regression test (`tests/recording.test.ts`) builds a `Squads` from a `Deployment`
+naming a `characterId` and a `state.fatigue`, and asserts `deploymentsOf` states both back —
+failing against the code as it stood before this fix, by inspection. Confirmed live: a real
+signed-in match, played end to end through the actual match-server UI in a browser against
+`bun run serve:match`, reached a first turn on both sides with the referee logging
+`watching match …` and no abort verdict — the same header-building path this bug lived in.
+
+#### Acceptance Criteria
+- [x] `Squads.deploymentsOf` states the `characterId` and `state.fatigue` a `Deployment` named it
+      with; a rolled squad (no `characterId` given) states none.
+- [x] A live signed-in match, built through the real `Squads`/`deploymentsOf` path rather than a
+      hand-built header, is accepted by a real referee.
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

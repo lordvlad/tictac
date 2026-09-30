@@ -21,21 +21,23 @@ criteria are in the [active backlog](../backlog/active-backlog.md), and finished
 the [archive](../backlog/completed.md).
 
 ## Focus & Theme
-M1 (headless foundation), M2 (tactical depth) and M3 (reconnaissance & morale) are complete;
-doors (`[ITEM-017]`) closed M2 on 2026-09-25. What is left is the meta layer: a unit that grows
-during a match, roles, and a roster that outlives the match.
+M1 (headless foundation), M2 (tactical depth), M3 (reconnaissance & morale) and M4 (competitive
+meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]`) closed M4 on
+2026-09-30. The active backlog is empty — nothing is Ready or queued. The next item is whatever
+is filed next.
 
 ---
 
 ## 🔄 In Progress
-- Nothing in flight. `[ITEM-042]` (the bench: a roster of six, pick who deploys, recruit from
-  the roster screen) finished on 2026-09-30. No wire-shape or version move — `characterId`
-  already existed on `Deployment` from `[ITEM-043]`; this item is the first thing that
-  populates it. `bun run balance` unchanged (the sweep has no roster).
+- Nothing in flight. `[ITEM-039]` (fatigue and medical-bay downtime, on the bench) finished on
+  2026-09-30, the last item M4 named. Along the way it found and fixed `[ITEM-044]`:
+  `Squads.deploymentsOf` — what a live host's `matchHeader` is actually built from — dropped
+  `characterId` and `state.fatigue` entirely, so every kept-roster match since `[ITEM-042]`
+  shipped would have been aborted by a real referee the moment it reached one; no test had gone
+  through `Squads` to notice. `bun run balance` unchanged by either (the sweep has no roster).
 
 ## 📋 Ready — pull in this order
-1. **`[ITEM-039]`** Fatigue & medical-bay downtime, on top of the bench. Numbers are set and
-   calibrated against a man down (−21 wins in 100).
+- Nothing. File the next item.
 
 ## 🧊 Backlog — not yet queued
 - Nothing.
@@ -58,8 +60,7 @@ during a match, roles, and a roster that outlives the match.
   yet. Durable Objects would still need one more `Db` adapter; none is written.
 - **ITEM-038**: a bug caught in its own testing — `derive(sheet).maxHp` ignores a character's
   own maxHp trait (Juggernaut's +25); fixed with `maxHpOf`, which every roster ceiling now uses
-  instead. Fatigue and medical-bay downtime split to `[ITEM-039]`, ready now that the bench
-  (`[ITEM-042]`, done) it is built on has shipped.
+  instead. Fatigue and medical-bay downtime split to `[ITEM-039]`, which shipped on 2026-09-30.
 - **ITEM-004 / ITEM-014 / ITEM-017 / ITEM-024 / ITEM-034**: nobody has played peer-to-peer in two
   live browsers since the transport cutover (the online end screen included). Agreement is
   covered by the network, digest and rewind tests only.
@@ -72,10 +73,14 @@ during a match, roles, and a roster that outlives the match.
 
 ---
 
-## Definition of Done for M4
+## Definition of Done for M4 — met
 1. A squad's composition is a decision with consequences beyond its kit (`ITEM-010`).
 2. A unit that survives a match is worth more than one that did not (`ITEM-004`, `ITEM-012`,
    `ITEM-038`).
 3. ~~Holding fire is a tactic (`ITEM-011`).~~ Done.
 4. Every rule change is measured with `bun run balance` before and after, and every change
    that should *not* move the rules proves it with an identical report.
+
+All four held before `[ITEM-039]` too — it was accepted into the milestone's scope after this
+list was written (split out of `[ITEM-038]` on 2026-09-26), not because the definition demanded
+it, and it is the last thing M4 named.

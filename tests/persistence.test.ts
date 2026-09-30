@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { Faction, HEALING, ROSTER, SQUAD_SIZE } from '../src/config'
+import { Faction, FATIGUE, HEALING, MEDICAL_BAY, ROSTER, SQUAD_SIZE, WOUNDS } from '../src/config'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
 import { characterSheet, derive, maxHpOf, sanitizeSheet, type CharacterSheet } from '../src/core/Characters'
 import { NO_FOCUS } from '../src/core/Combatant'
@@ -354,6 +354,78 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     await persistence.close()
   })
 
+  test('fatigue rises by one when deployed, capped at FATIGUE.max, and falls twice as fast when benched', async () => {
+    const persistence = await freshPersistence(url)
+    const { a } = await enlisted(persistence)
+    // a[0] deploys already at the cap; a[3] is benched, mid-recovery.
+    await persistence.db.query`UPDATE roster SET fatigue = ${FATIGUE.max} WHERE character_id = ${a[0]!.characterId}`
+    await persistence.db
+      .query`UPDATE roster SET fatigue = ${3}, downtime = ${2} WHERE character_id = ${a[3]!.characterId}`
+
+    await persistence.rosters.settle({
+      matchId: 'm1',
+      winner: Faction.Blue,
+      sides: {
+        [Faction.Blue]: {
+          playerId: 'A',
+          characterIds: [a[0]!.characterId, a[1]!.characterId],
+          fates: [
+            { kind: 'survived', sheet: a[0]!.sheet, hp: maxHpOf(a[0]!.sheet), deeds: noDeeds() },
+            { kind: 'survived', sheet: a[1]!.sheet, hp: maxHpOf(a[1]!.sheet), deeds: noDeeds() },
+          ],
+        },
+        [Faction.Red]: null,
+      },
+    })
+
+    const after = await persistence.rosters.active('A')
+    const byId = new Map(after.map((member) => [member.characterId, member]))
+    // Deployed at the cap stays at the cap, one step past it.
+    expect(byId.get(a[0]!.characterId)!.fatigue).toBe(FATIGUE.max)
+    // Deployed from fresh rises by exactly one.
+    expect(byId.get(a[1]!.characterId)!.fatigue).toBe(1)
+    // Benched and already rested: floored at zero, not negative.
+    expect(byId.get(a[2]!.characterId)!.fatigue).toBe(0)
+    expect(byId.get(a[2]!.characterId)!.downtime).toBe(0)
+    // Benched, mid-recovery: fatigue falls by two, downtime by one.
+    expect(byId.get(a[3]!.characterId)!.fatigue).toBe(1)
+    expect(byId.get(a[3]!.characterId)!.downtime).toBe(1)
+
+    await persistence.close()
+  })
+
+  test('a carried-out or concussed survivor enters the medical bay; a healthy one does not', async () => {
+    const persistence = await freshPersistence(url)
+    const { a } = await enlisted(persistence)
+    const maxHp = maxHpOf(a[1]!.sheet)
+    const concussedHp = Math.floor(WOUNDS.concussed * maxHp)
+
+    await persistence.rosters.settle({
+      matchId: 'm1',
+      winner: Faction.Blue,
+      sides: {
+        [Faction.Blue]: {
+          playerId: 'A',
+          characterIds: [a[0]!.characterId, a[1]!.characterId, a[2]!.characterId],
+          fates: [
+            { kind: 'survived', sheet: a[0]!.sheet, hp: maxHpOf(a[0]!.sheet), deeds: noDeeds() },
+            { kind: 'survived', sheet: a[1]!.sheet, hp: concussedHp, deeds: noDeeds() },
+            { kind: 'carried', deeds: noDeeds() },
+          ],
+        },
+        [Faction.Red]: null,
+      },
+    })
+
+    const after = await persistence.rosters.active('A')
+    const byId = new Map(after.map((member) => [member.characterId, member]))
+    expect(byId.get(a[0]!.characterId)!.downtime).toBe(0)
+    expect(byId.get(a[1]!.characterId)!.downtime).toBe(MEDICAL_BAY.concussed)
+    expect(byId.get(a[2]!.characterId)!.downtime).toBe(MEDICAL_BAY.carriedOut)
+
+    await persistence.close()
+  })
+
   test('recruit refuses a full roster', async () => {
     const persistence = await freshPersistence(url)
     await enlisted(persistence)
@@ -429,14 +501,21 @@ function sheetsOf(header: RecordingHeader, faction: Faction): CharacterSheet[] {
 }
 
 /**
- * The same header, with each side's `state.hp` stamped as given — what a
- * signed-in client's `ready` would have carried.
+ * The same header, with each side's `state.hp` and `state.fatigue` stamped —
+ * what a signed-in client's `ready` actually carries (`[ITEM-039]`: the
+ * referee checks fatigue the same strict way it checks hp, so a test cannot
+ * leave it implicit). `fatigue` defaults to 0, every fixture roster's own
+ * starting level.
  */
-function withStartingHp(header: RecordingHeader, hp: Record<Faction, readonly number[]>): RecordingHeader {
+function withStartingHp(
+  header: RecordingHeader,
+  hp: Record<Faction, readonly number[]>,
+  fatigue?: Record<Faction, readonly number[]>,
+): RecordingHeader {
   const stamp = (faction: Faction): Deployment[] =>
     header.squads[faction].map((deployment, i) => ({
       ...deployment,
-      state: { ...deployment.state, hp: hp[faction][i] },
+      state: { ...deployment.state, hp: hp[faction][i], fatigue: fatigue?.[faction]?.[i] ?? 0 },
     }))
   return { ...header, squads: { [Faction.Blue]: stamp(Faction.Blue), [Faction.Red]: stamp(Faction.Red) } }
 }
@@ -651,6 +730,77 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toMatch(/starting health/)
+    expect(verdicts[0]!.side).toBe(Faction.Blue)
+
+    await persistence.close()
+  })
+
+  test("a signed-in squad's stated fatigue that does not match the roster is aborted", async () => {
+    const recording = decisive()
+    const { persistence, referee, verdicts } = await playing(
+      ':memory:',
+      sheetsOf(recording.header, Faction.Blue),
+      sheetsOf(recording.header, Faction.Red),
+    )
+    const startingHp = {
+      [Faction.Blue]: sheetsOf(recording.header, Faction.Blue).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+      [Faction.Red]: sheetsOf(recording.header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+    }
+    const wrongFatigue = {
+      // Every fresh roster row is fatigue 0; stating anything else is a lie.
+      [Faction.Blue]: sheetsOf(recording.header, Faction.Blue).map(() => 1),
+      [Faction.Red]: sheetsOf(recording.header, Faction.Red).map(() => 0),
+    }
+    const characterIds = {
+      [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+    }
+    const blue = client(referee, 'A')
+    client(referee, 'B')
+    blue.send({
+      type: 'matchHeader',
+      header: withStartingHp(withCharacterIds(recording.header, characterIds), startingHp, wrongFatigue),
+    })
+    await referee.idle()
+
+    expect(verdicts).toHaveLength(1)
+    expect(verdicts[0]!.reason).toMatch(/fatigue/)
+    expect(verdicts[0]!.side).toBe(Faction.Blue)
+
+    await persistence.close()
+  })
+
+  test('a squad that deploys a member still in the medical bay is aborted', async () => {
+    const recording = decisive()
+    const { persistence, referee, verdicts } = await playing(
+      ':memory:',
+      sheetsOf(recording.header, Faction.Blue),
+      sheetsOf(recording.header, Faction.Red),
+    )
+    const enlisted = await persistence.rosters.active('A')
+    // A wound the last match left them with, not yet healed off — the exact
+    // state the referee refuses to send back out.
+    await persistence.db
+      .query`UPDATE roster SET downtime = ${1} WHERE character_id = ${enlisted[0]!.characterId}`
+
+    const startingHp = {
+      [Faction.Blue]: sheetsOf(recording.header, Faction.Blue).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+      [Faction.Red]: sheetsOf(recording.header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
+    }
+    const characterIds = {
+      [Faction.Blue]: enlisted.map((member) => member.characterId),
+      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+    }
+    const blue = client(referee, 'A')
+    client(referee, 'B')
+    blue.send({
+      type: 'matchHeader',
+      header: withStartingHp(withCharacterIds(recording.header, characterIds), startingHp),
+    })
+    await referee.idle()
+
+    expect(verdicts).toHaveLength(1)
+    expect(verdicts[0]!.reason).toMatch(/medical bay/)
     expect(verdicts[0]!.side).toBe(Faction.Blue)
 
     await persistence.close()

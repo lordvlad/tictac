@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { Faction, SQUAD_SIZE } from '../src/config'
 import { AmmoId, ShotMode, WeaponId } from '../src/core/Arsenal'
 import { NO_FX } from '../src/core/Combatant'
-import { rollSquadSheets } from '../src/core/Characters'
+import { characterSheet, rollSquadSheets } from '../src/core/Characters'
 import { Grid } from '../src/core/Grid'
 import { Rng } from '../src/core/rng'
 import { World } from '../src/ecs/World'
@@ -328,5 +328,46 @@ describe('A soldier\'s session state, read off the wire', () => {
     expect(deploymentStateFrom({ hp: 'forty' })).toBeUndefined()
     expect(deploymentStateFrom({})).toBeUndefined()
     expect(deploymentStateFrom(null)).toBeUndefined()
+  })
+})
+
+describe('A squad reads back what it was told to deploy', () => {
+  test('characterId and fatigue survive the round trip through Squads, not only sheet and hp', () => {
+    // Regression: `Squads` used to build every `Soldier` from a `Deployment`
+    // but hand back a plain `{ sheet, loadout, state: { hp } }` from
+    // `deploymentsOf`, forgetting `characterId` and `state.fatigue` entirely
+    // — so the header a host actually sends a referee (`main.ts` builds it
+    // from `deploymentsOf`, not from the `Deployment[]` handed to `Squads`)
+    // never carried either, and every kept-roster match would have been
+    // aborted by `Referee.verifyRosters` the moment it reached a real
+    // referee, `[ITEM-042]`'s and `[ITEM-039]`'s own tests never having gone
+    // through `Squads` to notice.
+    const world = new World()
+    const grid = new Grid(16)
+    const sheet = characterSheet(new Rng(1))
+    const squads = new Squads(
+      world,
+      grid,
+      { [Faction.Blue]: [{ x: 1, y: 1 }], [Faction.Red]: [{ x: 10, y: 10 }] },
+      { [Faction.Blue]: [{ characterId: 'kept-abc', sheet, state: { hp: 40, fatigue: 3 } }] },
+    )
+
+    const [deployment] = squads.deploymentsOf(Faction.Blue)
+    expect(deployment!.characterId).toBe('kept-abc')
+    expect(deployment!.state?.hp).toBe(40)
+    expect(deployment!.state?.fatigue).toBe(3)
+  })
+
+  test('a rolled squad states no characterId at all', () => {
+    const world = new World()
+    const grid = new Grid(16)
+    const sheet = characterSheet(new Rng(1))
+    const squads = new Squads(
+      world,
+      grid,
+      { [Faction.Blue]: [{ x: 1, y: 1 }], [Faction.Red]: [{ x: 10, y: 10 }] },
+      { [Faction.Blue]: [{ sheet }] },
+    )
+    expect(squads.deploymentsOf(Faction.Blue)[0]!.characterId).toBeUndefined()
   })
 })

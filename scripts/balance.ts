@@ -24,7 +24,7 @@
  * arguments or reading stdout.
  */
 import { mkdir } from 'node:fs/promises'
-import { SQUAD_SIZE } from '../src/config'
+import { FATIGUE, SQUAD_SIZE } from '../src/config'
 import { AmmoId, GrenadeId, WeaponId } from '../src/core/Arsenal'
 import { AttachmentId } from '../src/core/Attachments'
 import { ItemId } from '../src/core/Items'
@@ -84,6 +84,7 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   const sidearm = arg(`${side}Sidearm`)
   const grenades = arg(`${side}Grenades`)
   const size = arg(`${side}Size`)
+  const fatigueArg = arg(`${side}Fatigue`)
   if (
     sidearm === undefined &&
     weapons === undefined &&
@@ -92,13 +93,18 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
     mods === undefined &&
     watch === undefined &&
     grenades === undefined &&
-    size === undefined
+    size === undefined &&
+    fatigueArg === undefined
   ) {
     return undefined
   }
   const squad = size === undefined ? undefined : Number(size)
   if (squad !== undefined && !(Number.isInteger(squad) && squad >= 1 && squad <= SQUAD_SIZE)) {
     throw new Error(`--${side}Size: "${size}" is not a squad of 1 to ${SQUAD_SIZE}`)
+  }
+  const fatigue = fatigueArg === undefined ? undefined : Number(fatigueArg)
+  if (fatigue !== undefined && !(Number.isInteger(fatigue) && fatigue >= 0 && fatigue <= FATIGUE.max)) {
+    throw new Error(`--${side}Fatigue: "${fatigueArg}" is not a level of 0 to ${FATIGUE.max}`)
   }
   if (watch !== undefined && watch !== 'on' && watch !== 'off') {
     throw new Error(`--${side}Watch: "${watch}" is not one of on, off`)
@@ -120,6 +126,7 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
     sidearm: sidearm === undefined ? undefined : pick(MeleeId, `${side}Sidearm`, sidearm),
     grenades: grenades === undefined ? undefined : grenadesFor(side, grenades),
     size: squad,
+    fatigue,
   }
 }
 

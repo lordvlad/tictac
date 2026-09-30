@@ -258,6 +258,40 @@ export const HEALING = {
   /** A character carried out of a lost match starts their next one here. */
   carriedOutHp: 1,
 }
+
+/**
+ * Consecutive deployments without rest, and what that costs a unit
+ * (`core/Progression`, `server/Rosters.ts`). Stored on the roster, applied at
+ * deployment.
+ *
+ * The first back-to-back match is free — only the level *past* the first
+ * costs anything — so a steady rotation that rests one match in three never
+ * pays a step (`ROSTER.size` is six for exactly this). Calibrated against
+ * `bun run balance -- --blueSize=3` (a man down: -21 wins in 100): a half
+ * point of AP compounds with `Math.round` in `effectiveMaxAp`, so one step
+ * is invisible on its own and two steps land as a whole point — measured at
+ * 0 wins lost for a squad at level 2 and 20 for level 4.
+ */
+export const FATIGUE = {
+  /** Highest level a roster row stores. */
+  max: 4,
+  /** Max AP lost per step beyond the first free one. */
+  apPerStep: 0.5,
+  /** Starting morale lost per step beyond the first free one. */
+  moralePerStep: 10,
+}
+
+/**
+ * Matches a roster row cannot be picked for after a severe result
+ * (`server/Rosters.ts`). Ticks down by one at every settled match the player
+ * plays without them, the same clock fatigue itself recovers on.
+ */
+export const MEDICAL_BAY = {
+  /** Matches of downtime after being carried out of a lost match. */
+  carriedOut: 2,
+  /** Matches of downtime after surviving at or below `WOUNDS.concussed`. */
+  concussed: 1,
+}
 /**
  * How much a unit can take before it stops taking orders (`core/Morale`).
  *

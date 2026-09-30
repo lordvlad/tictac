@@ -27,6 +27,10 @@ export interface RosterEntry {
   slot: number
   sheet: CharacterSheet
   hp: number
+  /** Consecutive deployments without rest, `0..FATIGUE.max` (`[ITEM-039]`). */
+  fatigue: number
+  /** Matches of medical bay left before this member can be picked again. */
+  downtime: number
 }
 
 interface Failure {

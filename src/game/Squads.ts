@@ -60,6 +60,8 @@ export class Squads {
           grid,
           deployment?.sheet,
           deployment?.state?.hp,
+          deployment?.characterId,
+          deployment?.state?.fatigue,
         )
         if (deployment?.loadout) applyUnitLoadout(soldier, deployment.loadout)
         else soldier.equip(weapons[i]!, AmmoId.Standard)
@@ -101,9 +103,10 @@ export class Squads {
   deploymentsOf(faction: Faction): Deployment[] {
     const kits = this.loadoutOf(faction)
     return this.byFaction[faction].map((soldier, i) => ({
+      ...(soldier.characterId !== undefined ? { characterId: soldier.characterId } : {}),
       sheet: soldier.sheet,
       loadout: kits[i]!,
-      state: { hp: soldier.hp },
+      state: { hp: soldier.hp, fatigue: soldier.fatigue },
     }))
   }
 
