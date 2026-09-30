@@ -164,11 +164,19 @@ what it is: the rules, in the page, with nothing in between.
 
 ## 7. Deployment
 
-- **Bun process** — the only host. `wss://` needs a host and a certificate, because the game is
-  served from Pages over `https`. Chromium treats `ws://localhost` as potentially trustworthy,
-  so a referee on the player's own machine works from the deployed site in Chrome; Firefox and
-  Safari are stricter. A public referee is where this project starts paying for
-  infrastructure — the same moment persistence does, which is why they are one item.
+- **Bun process** — the only host that runs a real referee today. `wss://` needs a host and a
+  certificate, because the game is served from Pages over `https`. Chromium treats
+  `ws://localhost` as potentially trustworthy, so a referee on the player's own machine works
+  from the deployed site in Chrome; Firefox and Safari are stricter. A public referee is where
+  this project starts paying for infrastructure — the same moment persistence does, which is
+  why they are one item.
+- **Cloudflare Worker + one Durable Object** — planted, not finished (`[ITEM-045]`, see
+  [ARCH-DEPLOYMENT](../../architecture/deployment.md)). A single `MatchDurableObject` serves
+  both static assets and a WebSocket upgrade, and can relay a frame between two sockets it
+  holds, but does not run `Referee` yet: `Db`'s async `transaction` contract does not fit
+  `ctx.storage.sql`'s synchronous one, and that adapter is unwritten. GitHub Pages remains the
+  default way the client itself is served either way — this is a hosting option for the
+  referee, not a replacement for it.
 
 ## 8. Open questions, including two holes this design opens
 
@@ -194,9 +202,11 @@ what it is: the rules, in the page, with nothing in between.
      peer-to-peer play detects disagreement and can only stop; it cannot attribute.
 4. ~~Does the referee store the log durably, and in what?~~ **Decided: one database, behind a
    portable port.** `src/server/db/Db.ts` wraps `Bun.SQL`, which speaks SQLite and Postgres
-   through one interface, so the log, the accounts and the rosters are one store and the
-   hosting decision (Durable Objects or a central Postgres) stays open. Forward-only
-   migrations guard the schema. See [ARCH-PERSISTENCE](../../architecture/persistence.md).
+   through one interface, so the log, the accounts and the rosters are one store. The hosting
+   decision started moving (`[ITEM-045]`, §7): a Durable Object is planted, but does not yet
+   have a `Db` adapter of its own — see [ARCH-DEPLOYMENT §3](../../architecture/deployment.md).
+   Forward-only migrations guard the schema. See
+   [ARCH-PERSISTENCE](../../architecture/persistence.md).
 5. **Does the balance harness become a referee client?** It currently *is* the rules; driving a
    referee over a port would make the harness test the real server, at the cost of a 7-second
    sweep getting slower.

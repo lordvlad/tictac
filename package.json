@@ -5,13 +5,14 @@
   "scripts": {
     "dev": "bun --hot src/index.ts",
     "preview": "NODE_ENV=production bun src/index.ts",
-    "lint": "bun run --parallel typecheck lint:docs lint:code schema:catalog:check",
-    "lint:code": "biome lint --only=suspicious/noDuplicateCase src scripts tests",
+    "lint": "bun run --parallel typecheck typecheck:cf lint:docs lint:code schema:catalog:check",
+    "lint:code": "biome lint --only=suspicious/noDuplicateCase src scripts tests workers",
     "lint:docs": "bun scripts/lint-docs.ts",
     "docs:catalog": "bun scripts/build-catalog.ts",
     "schema:catalog": "bun scripts/build-schema-catalog.ts",
     "schema:catalog:check": "bun scripts/build-schema-catalog.ts --check",
     "typecheck": "tsc --noEmit",
+    "typecheck:cf": "tsc --noEmit -p workers/tsconfig.json",
     "test": "bun test",
     "balance": "bun scripts/balance.ts",
     "build": "bun run typecheck && bun run build:bundle && bun run build:public",
@@ -21,7 +22,9 @@
     "build:icons": "bun scripts/build-icons.mjs",
     "icons": "bun run build:icons",
     "replay": "bun scripts/replay.ts",
-    "serve:match": "bun scripts/serve-match.ts"
+    "serve:match": "bun scripts/serve-match.ts",
+    "cf:dev": "bun run build && wrangler dev",
+    "cf:deploy": "bun run build && wrangler deploy"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.18.2",
@@ -35,10 +38,12 @@
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
+    "@cloudflare/workers-types": "^5.20260930.2",
     "@gltf-transform/core": "^4.4.2",
     "@gltf-transform/functions": "^4.4.2",
     "@types/bun": "latest",
     "@types/three": "~0.184.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "wrangler": "^4.145.0"
   }
 }

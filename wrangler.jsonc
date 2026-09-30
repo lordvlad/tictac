@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // See workers/MatchDurableObject.ts and docs/architecture/deployment.md for
+  // what this deployment does and does not do yet (`[ITEM-045]`). This is an
+  // *additional*, optional hosting path for a match server: the static
+  // client still deploys to GitHub Pages (`.github/workflows/deploy.yml`) by
+  // default, untouched by this file.
+  "name": "tictac-match-server",
+  "main": "workers/index.ts",
+  "compatibility_date": "2026-09-30",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // Every request reaches the Worker (and so the one Durable Object)
+    // rather than being served by the assets layer directly: the deployment
+    // asked for a single DO that serves both websocket and static assets.
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "MATCH", "class_name": "MatchDurableObject" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MatchDurableObject"] }
+  ]
+}

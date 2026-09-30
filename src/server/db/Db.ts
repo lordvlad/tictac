@@ -31,8 +31,12 @@ import { SQL, type TransactionSQL } from 'bun'
  *   fair game: both engines have them.
  *
  * A Durable Objects deployment means one more implementation of {@link Db}, and
- * nothing above it changes. None is written here, because writing an adapter
- * for a host nobody has chosen is writing a guess.
+ * nothing above it changes. A host has now been chosen and planted
+ * (`[ITEM-045]`, `workers/MatchDurableObject.ts`), but the adapter is still not
+ * written: `ctx.storage.sql` is synchronous and its transaction primitive
+ * cannot run an `async` callback, which every caller of {@link Db.transaction}
+ * is. See [ARCH-DEPLOYMENT §3](../../../docs/architecture/deployment.md) for
+ * why that is a real mismatch and not just unstarted work.
  */
 
 /** The engines this build knows how to speak to. */

@@ -9,6 +9,7 @@ appliesTo:
 relatedDocs:
   - "docs/backlog/active-backlog.md"
   - "docs/plans/active-focus.md"
+  - "docs/architecture/deployment.md"
 tags: ["roadmap", "milestones", "capabilities"]
 ---
 
@@ -68,3 +69,15 @@ graph TD
   `[ITEM-044]` a live match sending its own squad's id and fatigue (`Squads.deploymentsOf`
   had dropped both), `[ITEM-039]` fatigue and medical-bay downtime.
 - Done last: `[ITEM-039]` (2026-09-30), the last item this milestone named.
+
+---
+
+### Unscheduled: Infrastructure
+Cross-cutting work that is not a milestone deliverable — nothing in the mermaid dependency
+chain above depends on it, and no milestone's Definition of Done names it.
+- In Progress: `[ITEM-045]` Cloudflare Durable Object deployment — a single DO planted (static
+  assets, a WebSocket, a relay between sockets on the same instance) alongside the existing Bun
+  process, as an additional hosting option for a match server. GitHub Pages remains the default
+  way the client itself deploys either way. See
+  [ARCH-DEPLOYMENT](../architecture/deployment.md).
+

@@ -10,6 +10,7 @@ relatedDocs:
   - "docs/backlog/active-backlog.md"
   - "docs/backlog/completed.md"
   - "docs/plans/roadmap.md"
+  - "docs/architecture/deployment.md"
 tags: ["kanban", "active", "focus", "m4"]
 ---
 
@@ -23,18 +24,15 @@ the [archive](../backlog/completed.md).
 ## Focus & Theme
 M1 (headless foundation), M2 (tactical depth), M3 (reconnaissance & morale) and M4 (competitive
 meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]`) closed M4 on
-2026-09-30. The active backlog is empty — nothing is Ready or queued. The next item is whatever
-is filed next.
+2026-09-30. The active backlog otherwise holds one unscheduled infrastructure item
+(`[ITEM-045]`) — nothing gameplay is Ready or queued.
 
 ---
 
 ## 🔄 In Progress
-- Nothing in flight. `[ITEM-039]` (fatigue and medical-bay downtime, on the bench) finished on
-  2026-09-30, the last item M4 named. Along the way it found and fixed `[ITEM-044]`:
-  `Squads.deploymentsOf` — what a live host's `matchHeader` is actually built from — dropped
-  `characterId` and `state.fatigue` entirely, so every kept-roster match since `[ITEM-042]`
-  shipped would have been aborted by a real referee the moment it reached one; no test had gone
-  through `Squads` to notice. `bun run balance` unchanged by either (the sweep has no roster).
+- `[ITEM-045]` Cloudflare Durable Object deployment — a single DO planted (static assets, a
+  WebSocket, a relay between sockets on the same instance); the referee has not moved in. See
+  [ARCH-DEPLOYMENT](../architecture/deployment.md) for why not yet.
 
 ## 📋 Ready — pull in this order
 - Nothing. File the next item.
