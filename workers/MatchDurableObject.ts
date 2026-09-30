@@ -1,4 +1,14 @@
 import { DurableObject } from 'cloudflare:workers'
+import { apiHandler } from '../src/server/Api'
+import {
+  LOCAL_RELYING_PARTY,
+  persistenceOverDb,
+  type Persistence,
+  type RelyingParty,
+} from '../src/server/Persistence'
+import { Referee } from '../src/server/Referee'
+import { socketTransport } from '../src/server/SocketTransport'
+import { dbOverSqlStorage } from './DoSqliteDb'
 import type { Env } from './index'
 
 /**
@@ -7,90 +17,114 @@ import type { Env } from './index'
  * A match server is one referee, so there is exactly one instance: the Worker
  * always addresses it by the same fixed name (see `index.ts`), never by a
  * name derived from the request. Everything the Worker receives — a page
- * load, an asset, a WebSocket upgrade — arrives here, because a durable
- * object is the only piece of this deployment with a place to keep state
- * between requests; the Worker itself has none.
+ * load, an asset, an `/api/…` call, a WebSocket upgrade — arrives here.
  *
- * **This is the planted shape, not the finished one.** It proves the parts
- * that have to be true before anything else can be built on top: a static
- * asset serves through the object rather than around it, a socket opens and
- * stays open, and two sockets held by the same instance can reach each
- * other. What it does with a message is a bare relay, not the referee.
+ * `Referee`, `Persistence` and `apiHandler` are the same classes
+ * `startGameServer` (`src/server/GameServer.ts`) runs behind a Bun process —
+ * nothing about them is Bun-specific once they are handed a `Db`
+ * (`DoSqliteDb.ts` is that `Db`, over `ctx.storage.sql`) and a transport with
+ * `send`/`close` (`socketTransport`, already exported for exactly this).
  *
- * The referee does not move in yet because of a real, specific gap: `Db`
- * (`src/server/db/Db.ts`) is an async port — `transaction<T>(fn: (tx: Db) =>
- * Promise<T>)` — built around `Bun.SQL`'s genuinely asynchronous wire
- * protocol. A Durable Object's SQLite storage (`ctx.storage.sql`) is
- * synchronous, and its own transaction primitive, `transactionSync`,
- * requires a callback that is not `async` and contains no `await` at all —
- * which `Db.transaction`'s callers (`migrate.ts`, `Rosters.settle`, …)
- * are not. Wrapping the sync engine in `async` functions to satisfy `Db`'s
- * shape only hides the mismatch: everything after the first `await` inside
- * a multi-statement transaction would run *after* `transactionSync`'s
- * callback had already returned, outside the transaction it was meant to be
- * in. Writing a `Db` adapter over `ctx.storage.sql` that is honest about
- * this — rather than one that merely typechecks — is the next step, not
- * this one.
+ * **A match socket does not hibernate.** `Referee` keeps a match's open
+ * state — `this.clients`, `this.host`, `this.sides` — in memory, with no
+ * durable backing; hibernation evicts the whole object, and there is
+ * nothing this class could deserialize a live `MatchHost` back out of. So a
+ * WebSocket here is accepted with plain `server.accept()`, not
+ * `ctx.acceptWebSocket()`: as long as a match socket is open, the runtime
+ * keeps this instance resident rather than evicting it between messages,
+ * the ordinary cost of a stateful connection rather than the hibernatable
+ * one this class first shipped with. Once every socket closes, nothing
+ * pins the instance and it can be evicted like any other idle Durable
+ * Object; static-asset and `/api/…` traffic never needed to be exempt from
+ * that, since both are stateless replies against durable storage.
  */
 export class MatchDurableObject extends DurableObject<Env> {
+  private readonly log = (message: string): void => console.info(`[referee] ${message}`)
+
   /**
-   * Every socket this instance is currently holding, so a frame can be
-   * relayed to the others. Rebuilt from the runtime's own record on
-   * construction, not assumed empty: hibernatable sockets
-   * (`ctx.acceptWebSocket`) survive this object being evicted between
-   * messages, and a fresh instance may already have some open.
+   * Set inside `blockConcurrencyWhile`, which is also what makes every
+   * `fetch` wait for it: the runtime does not dispatch a request to this
+   * object until the block's promise has settled.
    */
-  private readonly sockets = new Set<WebSocket>()
+  private persistence!: Persistence
+  private referee!: Referee
+  private api!: (request: Request) => Promise<Response | null>
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-    for (const ws of ctx.getWebSockets()) this.sockets.add(ws)
+    ctx.blockConcurrencyWhile(async () => {
+      const party = relyingPartyOf(env)
+      this.persistence = await persistenceOverDb(dbOverSqlStorage(ctx.storage.sql), party)
+      this.referee = new Referee({
+        matches: this.persistence.matches,
+        rosters: this.persistence.rosters,
+        log: this.log,
+        onVerdict: (verdict) => {
+          this.log(`verdict on ${verdict.matchId}: ${verdict.reason}`)
+          for (const found of verdict.found) {
+            this.log(`  ${found.unit ?? ''} ${found.what}: referee ${found.mine}, client ${found.theirs}`)
+          }
+        },
+      })
+      this.api = apiHandler(this.persistence, party, this.log)
+    })
   }
 
   override async fetch(request: Request): Promise<Response> {
     if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+      // A ticket is how an account reaches a socket: a browser cannot put an
+      // `Authorization` header on a WebSocket, and a session token in a url
+      // is a session token in somebody's logs.
+      const ticket = new URL(request.url).searchParams.get('ticket')
+      const playerId = ticket ? this.persistence.accounts.redeemTicket(ticket) : null
+      if (ticket && !playerId) {
+        return Response.json(
+          { error: 'that sign-in ticket is not valid; sign in again' },
+          { status: 401 },
+        )
+      }
+
       const pair = new WebSocketPair()
       const client = pair[0]
       const server = pair[1]
-      // Hibernatable, not `server.accept()`: the runtime may evict this
-      // object between messages and wake it again on the next one, calling
-      // `webSocketMessage` below exactly as if nothing had happened. A
-      // referee that stopped charging for idle connections is the whole
-      // point of a Durable Object over a Bun process that must stay resident.
-      this.ctx.acceptWebSocket(server)
-      this.sockets.add(server)
+      server.accept()
+      const transport = socketTransport(server, this.log)
+      server.addEventListener('message', (event) => {
+        const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data)
+        transport.deliver(raw)
+      })
+      server.addEventListener('close', (event) => {
+        transport.closed(event.reason || `the socket closed (code ${event.code})`)
+      })
+      server.addEventListener('error', () => {
+        transport.closed('the socket errored')
+      })
+      this.referee.attach(transport, playerId)
+      this.log(`a client connected${playerId ? ' signed in' : ''}`)
       return new Response(null, { status: 101, webSocket: client })
     }
-    // Not a socket: an asset request, served by this object rather than
-    // around it, because the deployment asked for one Durable Object that
-    // serves both.
+
+    const answered = await this.api(request)
+    if (answered) return answered
+
+    // Not a socket and not `/api/…`: the built client, served through this
+    // object rather than around it, because the deployment asked for one
+    // Durable Object that serves both.
     return this.env.ASSETS.fetch(request)
   }
+}
 
-  /**
-   * Relay, not a referee. Every text frame this instance receives is
-   * broadcast to every *other* open socket, unexamined — enough to prove two
-   * clients on this instance can reach each other, nothing more. A real
-   * match wires `Referee`/`GameServer`'s existing `socketTransport` in here
-   * once a `Db` adapter exists (see the class doc); `socketTransport` itself
-   * needs nothing beyond `send`/`close`, which a Cloudflare `WebSocket`
-   * already has.
-   */
-  override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
-    for (const other of this.sockets) {
-      if (other === ws) continue
-      other.send(message)
-    }
-  }
-
-  override webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): void {
-    this.sockets.delete(ws)
-    // Completes the closing handshake regardless of `wasClean`: the
-    // hibernation API expects this call, it does not perform it implicitly.
-    ws.close(code, reason)
-  }
-
-  override webSocketError(ws: WebSocket): void {
-    this.sockets.delete(ws)
+/**
+ * The relying party a deploy's passkeys are bound to, from the Worker's own
+ * vars when a real domain has been chosen (`wrangler.jsonc`'s `vars`, or
+ * `wrangler secret`), falling back to the same local default `bun run dev`
+ * uses. Nothing sets these vars yet — a real `wrangler deploy` still needs a
+ * chosen domain to configure them with.
+ */
+function relyingPartyOf(env: Env): RelyingParty {
+  if (!env.RELYING_PARTY_ID) return LOCAL_RELYING_PARTY
+  return {
+    id: env.RELYING_PARTY_ID,
+    origins: (env.RELYING_PARTY_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean),
   }
 }

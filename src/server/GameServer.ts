@@ -1,9 +1,8 @@
-import { isJsonRpcFrame, type JsonRpcFrame } from '../game/JsonRpc'
-import type { Transport } from '../game/Transport'
 import { BUILD_ID, PROTOCOL_VERSION } from '../version'
 import { apiHandler } from './Api'
 import type { Persistence, RelyingParty } from './Persistence'
 import { Referee } from './Referee'
+import { socketTransport } from './SocketTransport'
 
 /**
  * The match server: one referee, one database, one port.
@@ -32,42 +31,6 @@ export interface GameServerOptions {
   port: number
   party: RelyingParty
   log?: (message: string) => void
-}
-
-/**
- * One socket, behind the transport port.
- *
- * Frames are JSON text on every transport, so what crosses this socket is
- * byte-identical to what crosses a data channel between two peers.
- */
-function socketTransport(
-  ws: { send: (data: string) => void; close: () => void },
-  log: (message: string) => void,
-): Transport & { deliver: (raw: string) => void; closed: (reason: string) => void } {
-  const frames: ((frame: JsonRpcFrame) => void)[] = []
-  const closers: ((reason: string) => void)[] = []
-  return {
-    send: (frame) => ws.send(JSON.stringify(frame)),
-    onFrame: (handler) => frames.push(handler),
-    onClosed: (handler) => closers.push(handler),
-    close: () => ws.close(),
-    deliver: (raw) => {
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(raw)
-      } catch {
-        // Dropped rather than fatal: closing on junk would let anything that
-        // can reach the socket end somebody's match.
-        log('dropping a frame that is not JSON')
-        return
-      }
-      if (!isJsonRpcFrame(parsed)) return
-      for (const handler of frames) handler(parsed)
-    },
-    closed: (reason) => {
-      for (const handler of closers) handler(reason)
-    },
-  }
 }
 
 type Socket = ReturnType<typeof socketTransport>

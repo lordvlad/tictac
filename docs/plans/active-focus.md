@@ -30,9 +30,10 @@ meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]
 ---
 
 ## 🔄 In Progress
-- `[ITEM-045]` Cloudflare Durable Object deployment — a single DO planted (static assets, a
-  WebSocket, a relay between sockets on the same instance); the referee has not moved in. See
-  [ARCH-DEPLOYMENT](../architecture/deployment.md) for why not yet.
+- `[ITEM-045]` Cloudflare Durable Object deployment — the real `Referee`/`Persistence`/
+  `apiHandler` now run inside a single planted DO, over a `Db` adapter for `ctx.storage.sql`;
+  what remains is a real `wrangler deploy` against an actual account. See
+  [ARCH-DEPLOYMENT](../architecture/deployment.md).
 
 ## 📋 Ready — pull in this order
 - Nothing. File the next item.

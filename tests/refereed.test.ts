@@ -8,7 +8,7 @@ import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
 import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
 import { PROTOCOL_VERSION } from '../src/version'
 import type { Transport } from '../src/game/Transport'
-import { openPersistence } from '../src/server/Persistence'
+import { openPersistence } from '../src/server/db/BunSqlDb'
 import { Referee } from '../src/server/Referee'
 import { replay } from '../src/sim/Replay'
 

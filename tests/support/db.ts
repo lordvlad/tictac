@@ -1,5 +1,6 @@
-import { openDb, type Db } from '../../src/server/db/Db'
-import { openPersistence, type Persistence } from '../../src/server/Persistence'
+import type { Db } from '../../src/server/db/Db'
+import { openDb, openPersistence } from '../../src/server/db/BunSqlDb'
+import type { Persistence } from '../../src/server/Persistence'
 
 /**
  * Which databases the persistence tests run against.

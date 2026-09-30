@@ -17,7 +17,8 @@
  * from, and `--origins` must list it.
  */
 import { startGameServer } from '../src/server/GameServer'
-import { openPersistence, type RelyingParty } from '../src/server/Persistence'
+import { openPersistence } from '../src/server/db/BunSqlDb'
+import type { RelyingParty } from '../src/server/Persistence'
 import { BUILD_ID, PROTOCOL_VERSION } from '../src/version'
 
 const arg = (name: string): string | undefined =>

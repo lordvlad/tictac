@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { startGameServer } from '../src/server/GameServer'
-import { LOCAL_RELYING_PARTY, openPersistence } from '../src/server/Persistence'
+import { openPersistence } from '../src/server/db/BunSqlDb'
+import { LOCAL_RELYING_PARTY } from '../src/server/Persistence'
 import { softwareAuthenticator } from './support/authenticator'
 
 /**

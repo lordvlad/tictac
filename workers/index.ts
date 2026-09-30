@@ -3,6 +3,10 @@ import type { MatchDurableObject } from './MatchDurableObject'
 export interface Env {
   MATCH: DurableObjectNamespace<MatchDurableObject>
   ASSETS: Fetcher
+  /** The domain a real deploy's passkeys are bound to. Unset until one is chosen. */
+  RELYING_PARTY_ID?: string
+  /** Comma-separated origins CORS and the passkey ceremony both check against. */
+  RELYING_PARTY_ORIGINS?: string
 }
 
 /**

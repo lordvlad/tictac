@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { softwareAuthenticator } from './support/authenticator'
 
 /**
  * The planted Cloudflare deployment (`[ITEM-045]`), against a real local
@@ -17,14 +18,17 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
  * rather than assuming CI or a developer already ran a build first.
  *
  * What this proves: a request reaches the single `MatchDurableObject`
- * through the Worker's routing, static assets serve through it rather than
- * around it, and a WebSocket accepted by one instance relays a frame to
- * another socket on that same instance. It does not exercise a referee — see
- * `workers/MatchDurableObject.ts` for why not yet.
+ * through the Worker's routing; static assets serve through it rather than
+ * around it; a passkey ceremony, a roster fetch and a ticket all work over
+ * real HTTP; a signed-in socket, an anonymous one, and one with an invalid
+ * ticket are each treated the way `tests/server.test.ts` proves the
+ * `Bun.serve` referee treats them — the same `Referee`, `Persistence` and
+ * `apiHandler`, now behind a Cloudflare `WebSocket` and `ctx.storage.sql`.
  */
 
 const PORT = 18917
 const BASE = `http://127.0.0.1:${PORT}`
+const ORIGIN = 'http://localhost:5173'
 
 let dev: ReturnType<typeof Bun.spawn>
 
@@ -62,6 +66,26 @@ async function waitForReady(timeoutMs: number): Promise<void> {
   throw new Error(`wrangler dev did not answer on ${BASE} within ${timeoutMs}ms`)
 }
 
+/** Registers a fresh passkey over real HTTP, the way a browser would. */
+async function registered(): Promise<string> {
+  const key = await softwareAuthenticator()
+  const post = async (path: string, body: unknown): Promise<Record<string, unknown>> => {
+    const response = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN },
+      body: JSON.stringify(body),
+    })
+    return (await response.json()) as Record<string, unknown>
+  }
+  const options = await post('/api/auth/register/options', { name: 'Tester' })
+  const created = await key.create({
+    challengeId: options.challengeId as string,
+    challenge: (options.publicKey as { challenge: string }).challenge,
+  })
+  const verified = await post('/api/auth/register/verify', created)
+  return verified.token as string
+}
+
 describe('The planted Cloudflare deployment', () => {
   beforeAll(async () => {
     // Self-contained rather than relying on run order: CI runs `bun test`
@@ -80,6 +104,11 @@ describe('The planted Cloudflare deployment', () => {
 
   afterAll(() => {
     dev.kill()
+    // `bunx wrangler dev` spawns `wrangler`, which spawns a `workerd` child
+    // of its own; killing the process this test started does not reliably
+    // reach either descendant. Best-effort net, by the port rather than a
+    // command-line pattern: nothing else on this machine binds it on purpose.
+    Bun.spawnSync(['fuser', '-k', `${PORT}/tcp`])
   })
 
   test('a plain request serves the built client through the Durable Object', async () => {
@@ -90,24 +119,51 @@ describe('The planted Cloudflare deployment', () => {
     expect(body.toLowerCase()).toContain('tictac')
   })
 
-  test('two sockets on the single instance relay a frame to each other', async () => {
-    const a = new WebSocket(BASE.replace('http://', 'ws://'))
-    const b = new WebSocket(BASE.replace('http://', 'ws://'))
-    await Promise.all([once(a, 'open'), once(b, 'open')])
+  test('a signed-in player trades a session for a socket', async () => {
+    const token = await registered()
+    const ticketed = await fetch(`${BASE}/api/ticket`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, origin: ORIGIN },
+    })
+    const { ticket } = (await ticketed.json()) as { ticket: string }
 
-    const received = once(b, 'message').then((event) => String((event as MessageEvent).data))
-    a.send('hello from a')
-
-    expect(await received).toBe('hello from a')
-
-    a.close()
-    b.close()
+    const socket = new WebSocket(`${BASE.replace('http', 'ws')}/?ticket=${ticket}`)
+    await once(socket, 'open')
+    socket.close()
   })
 
-  test('a lone socket has nobody to relay to, and nothing throws', async () => {
-    const ws = new WebSocket(BASE.replace('http://', 'ws://'))
-    await once(ws, 'open')
-    ws.send('nobody is listening')
-    ws.close()
+  test('a socket with a ticket nobody issued is turned away', async () => {
+    // Spoken by hand rather than with `new WebSocket`, because what is being
+    // checked is the HTTP answer to an upgrade the object refuses.
+    const response = await fetch(`${BASE}/?ticket=nope`, {
+      headers: {
+        upgrade: 'websocket',
+        connection: 'Upgrade',
+        'sec-websocket-version': '13',
+        'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      },
+    })
+    expect(response.status).toBe(401)
+    expect(((await response.json()) as { error: string }).error).toMatch(/not valid/)
+  })
+
+  test('an anonymous socket is still welcome', async () => {
+    const socket = new WebSocket(BASE.replace('http', 'ws'))
+    await once(socket, 'open')
+    socket.close()
+  })
+
+  test('a frame that is not JSON-RPC is dropped, not relayed, and the socket stays open', async () => {
+    // Proves the switch from the earlier bare relay to the real
+    // `Referee`/`socketTransport`: junk text is silently discarded
+    // (`isJsonRpcFrame`) rather than broadcast to whoever else is
+    // connected, and discarding it does not close the sender's own socket.
+    const socket = new WebSocket(BASE.replace('http', 'ws'))
+    await once(socket, 'open')
+    socket.send('not json at all')
+    socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'tictac/system/session/hello', params: {} }))
+    // Still open after both: neither send tore the connection down.
+    expect(socket.readyState).toBe(WebSocket.OPEN)
+    socket.close()
   })
 })

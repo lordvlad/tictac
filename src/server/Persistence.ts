@@ -1,5 +1,5 @@
 import { Accounts } from './Accounts'
-import { openDb, type Db } from './db/Db'
+import type { Db } from './db/Db'
 import { migrate } from './db/migrate'
 import { MatchStore } from './MatchStore'
 import { Rosters } from './Rosters'
@@ -41,11 +41,19 @@ export interface Persistence {
   close(): Promise<void>
 }
 
-export async function openPersistence(
-  url = ':memory:',
+/**
+ * Every store, wired onto an already-open `Db` — migrated on the way in.
+ * Engine-agnostic on purpose: this file stays free of `bun`'s own types (see
+ * `db/Db.ts`'s note), so `openPersistence` — the `Bun.SQL`-specific
+ * convenience that opens a `Db` from a url before calling this — lives in
+ * `db/BunSqlDb.ts` instead. A `Db` opened some other way (a Durable Object's
+ * own SQLite storage — `workers/DoSqliteDb.ts`, `[ITEM-045]`) calls this
+ * directly, and gets the same wiring rather than a second copy of it.
+ */
+export async function persistenceOverDb(
+  db: Db,
   party: RelyingParty = LOCAL_RELYING_PARTY,
 ): Promise<Persistence> {
-  const db = await openDb(url)
   // Every process that opens the database migrates it on the way in. That is
   // safe because `migrate` is idempotent and refuses a database from a newer
   // build, and it means there is no separate deploy step to forget.

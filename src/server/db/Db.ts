@@ -1,13 +1,21 @@
-import { SQL, type TransactionSQL } from 'bun'
-
 /**
  * The one way this server talks to a database.
  *
  * Where the database will live is still open — a Durable Object per match, or
  * one central Postgres — so nothing above this file may know which engine it is
- * speaking to. `Bun.SQL` already speaks both SQLite and Postgres through one
- * tagged-template interface, which is why there is no driver and no ORM here:
- * the port is thin because the runtime already carries the hard part.
+ * speaking to. This file is the port only: `Dialect`, `SqlValue`, the `Db`
+ * interface itself, and `dialectOf`. Deliberately free of any engine's own
+ * import — `BunSqlDb.ts` (`Bun.SQL`, both SQLite and Postgres through one
+ * tagged-template interface) and `workers/DoSqliteDb.ts` (a Durable Object's
+ * own SQLite storage, `[ITEM-045]`) are adapters *of* this port, not part of
+ * it, and each is free to import whatever its own engine needs without
+ * dragging that engine's ambient globals into every file that only needs the
+ * port's types. `Db.ts` importing `bun` for `SQL`'s type used to do exactly
+ * that: `@types/bun` pulls in `@types/node`'s ambient `NodeJS` namespace,
+ * which redeclares `crypto`/`BufferSource` in a way that conflicts with
+ * `@cloudflare/workers-types`' own — invisible until something in the *same*
+ * TypeScript project imports both, which `workers/MatchDurableObject.ts`
+ * (via `Api.ts` → `Rosters.ts`/`Accounts.ts` → this file) now does.
  *
  * SQLite is what runs today, in a file or in memory, and it is what the tests
  * run against by default. Postgres is run against the same suite whenever
@@ -30,13 +38,13 @@ import { SQL, type TransactionSQL } from 'bun'
  * - `RETURNING`, partial indexes and `INSERT … VALUES (…, (subselect))` are
  *   fair game: both engines have them.
  *
- * A Durable Objects deployment means one more implementation of {@link Db}, and
- * nothing above it changes. A host has now been chosen and planted
- * (`[ITEM-045]`, `workers/MatchDurableObject.ts`), but the adapter is still not
- * written: `ctx.storage.sql` is synchronous and its transaction primitive
- * cannot run an `async` callback, which every caller of {@link Db.transaction}
- * is. See [ARCH-DEPLOYMENT §3](../../../docs/architecture/deployment.md) for
- * why that is a real mismatch and not just unstarted work.
+ * A Durable Objects deployment means one more implementation of {@link Db},
+ * and nothing above it changes: `workers/DoSqliteDb.ts` is that
+ * implementation. Its `transaction` does not roll back on throw the way
+ * `BunSqlDb.ts`'s does — `ctx.storage.sql`'s own transaction primitive cannot
+ * run an `async` callback, which every caller of {@link Db.transaction} is.
+ * See [ARCH-DEPLOYMENT §3](../../../docs/architecture/deployment.md) for why
+ * that is a real mismatch and not just an unwritten adapter.
  */
 
 /** The engines this build knows how to speak to. */
@@ -75,41 +83,4 @@ export function dialectOf(url: string): Dialect {
   if (url === ':memory:' || url.startsWith('sqlite:') || url.startsWith('file:')) return 'sqlite'
   if (url.startsWith('postgres://') || url.startsWith('postgresql://')) return 'postgres'
   throw new Error(`unsupported database url "${url}": use :memory:, sqlite://… or postgres://…`)
-}
-
-/** Open a database. It is not migrated here — see `migrate`. */
-export async function openDb(url: string): Promise<Db> {
-  const dialect = dialectOf(url)
-  const sql = new SQL(url)
-  const db = wrap(sql, dialect)
-  if (dialect === 'sqlite') {
-    // A row may not name a parent that is not there. SQLite has to be told;
-    // Postgres enforces it natively.
-    await db.exec('PRAGMA foreign_keys = ON')
-    // Readers never block the append path, which is what lets an audit read a
-    // match that is still being played.
-    await db.exec('PRAGMA journal_mode = WAL')
-  }
-  return db
-}
-
-function wrap(sql: SQL | TransactionSQL, dialect: Dialect): Db {
-  return {
-    dialect,
-    async query<T>(strings: TemplateStringsArray, ...values: SqlValue[]): Promise<T[]> {
-      const rows = await sql<T[]>(strings, ...values)
-      // Copied out of Bun's result array, which carries `count` and `command`
-      // as own properties — enough to break any `toEqual` against a plain array.
-      return [...rows]
-    },
-    async exec(statement: string): Promise<void> {
-      await sql.unsafe(statement)
-    },
-    transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
-      return sql.begin((tx) => fn(wrap(tx, dialect))) as Promise<T>
-    },
-    async close(): Promise<void> {
-      await sql.close()
-    },
-  }
 }

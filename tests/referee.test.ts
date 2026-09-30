@@ -5,7 +5,7 @@ import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../src/
 import type { NetworkMessage } from '../src/game/NetworkManager'
 import type { CombatRecording } from '../src/game/Recording'
 import { loopback, type Transport } from '../src/game/Transport'
-import { openPersistence } from '../src/server/Persistence'
+import { openPersistence } from '../src/server/db/BunSqlDb'
 import { Referee, type RefereeVerdict } from '../src/server/Referee'
 import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'

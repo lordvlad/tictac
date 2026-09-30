@@ -29,7 +29,7 @@ it is done. It is not ordered and says nothing about what happens next: that is 
 ### [ITEM-045] Cloudflare Durable Object Deployment
 **Type:** Infrastructure  
 **Priority:** P3  
-**Status:** In Progress — a single DO is planted (assets, a socket, a relay); the referee has not moved in  
+**Status:** In Progress — the referee runs for real; a real `wrangler deploy` has not happened  
 **Milestone:** Unscheduled — infrastructure, not a milestone deliverable  
 
 #### Why
@@ -50,49 +50,81 @@ does not replace or compete with it.
    the same reason `startGameServer` binds one port to one `Referee` today. A DO per match was
    the RFC's other phrasing of the idea; this deployment does not shard by match.
 2. **The one DO serves both** a WebSocket upgrade and every other request (static assets, via
-   `env.ASSETS.fetch(request)`), because that is what was asked for. `run_worker_first: true`
-   in `wrangler.jsonc` makes sure every request reaches the Worker — and so the DO — rather than
-   the assets layer answering some of them directly.
-3. **Hibernatable sockets** (`ctx.acceptWebSocket`), not `server.accept()`: the runtime may
-   evict the object between messages, which is the cost model a Durable Object is for for.
-4. **What it does with a message today is a bare relay** — broadcast to every other socket this
-   instance holds, unexamined — not the referee. `wrangler`'s dev/deploy tooling installed and
-   working is the deliverable of *this* pass; the referee moving in is the next one, blocked on
-   5.
-5. **Not done: a `Db` adapter over `ctx.storage.sql`.** `Db.transaction<T>(fn: (tx: Db) =>
-   Promise<T>)` is async, built around `Bun.SQL`'s genuinely asynchronous wire protocol.
-   `ctx.storage.sql` is synchronous, and its transaction primitive, `transactionSync`, requires
-   a callback that is not `async` and contains no `await` — which `Db.transaction`'s callers
-   (`migrate.ts`, `Rosters.settle`, …) are not. Wrapping the sync engine in `async` functions to
-   satisfy `Db`'s shape would typecheck and silently misbehave: everything after the first
-   `await` inside a multi-statement transaction would run *after* `transactionSync`'s callback
-   had already returned, outside the transaction it was meant to be in. `Referee`,
-   `GameServer.socketTransport` and `apiHandler` are otherwise portable as they stand —
-   `socketTransport` needs nothing beyond `send`/`close`, which a Cloudflare `WebSocket`
-   already has — so this one adapter is the entire remaining gap between the relay planted here
-   and a real refereed match running inside it.
+   `env.ASSETS.fetch(request)`, and `/api/…` via `apiHandler`), because that is what was asked
+   for. `run_worker_first: true` in `wrangler.jsonc` makes sure every request reaches the
+   Worker — and so the DO — rather than the assets layer answering some of them directly.
+3. **A `Db` adapter over `ctx.storage.sql`** (`workers/DoSqliteDb.ts`). `Db.transaction<T>(fn:
+   (tx: Db) => Promise<T>)` is async, built around `Bun.SQL`'s genuinely asynchronous wire
+   protocol; `ctx.storage.sql` is synchronous, and its transaction primitive,
+   `transactionSync`, requires a callback that is not `async` and contains no `await` at
+   all — which `Db.transaction`'s callers (`migrate.ts`, `Rosters.settle`, …) are not. There is
+   no way to satisfy both. This adapter keeps what a Durable Object's own request serialization
+   (its input gates) already gives for free — two overlapping callers of `transaction` never
+   interleave — and is honest about what it does not add on top: rollback on throw, the way the
+   `Bun.SQL` adapter's genuine `sql.begin()` does. `migrate.ts`'s `apply()` is the one caller
+   this matters for in practice; see `docs/architecture/deployment.md` §3 for the full
+   reasoning and `Db.ts`'s own updated note.
+4. **The real `Referee`, not a relay.** `MatchDurableObject` now runs the same `Referee`,
+   `Persistence` (via a new `persistenceOverDb`, split out of `openPersistence`) and
+   `apiHandler` that `startGameServer` runs behind `Bun.serve` — nothing about any of the three
+   was Bun-specific once handed a `Db` and a transport. **A match socket does not hibernate**:
+   `Referee` keeps a match's open state in memory with no durable backing, and hibernation
+   evicts the whole object, so sockets are accepted with plain `server.accept()` rather than
+   `ctx.acceptWebSocket()` — a deliberate reversal of this item's first pass, which hibernated
+   every socket including a match's. The trade-off: an instance with an open match socket stays
+   resident (the ordinary cost of any stateful connection) rather than being evicted between
+   messages; static-asset and `/api/…` traffic never needed the exemption, since both are
+   stateless replies against durable storage.
+5. **Two files split for the sake of the isolated typecheck** (6, below): `src/server/db/Db.ts`
+   used to import `SQL`'s type from `bun` for its one `Bun.SQL`-specific implementation, and
+   `GameServer.ts` defined `socketTransport` beside `startGameServer`'s `Bun.serve` call.
+   Importing `bun`'s types pulls in `@types/node`'s ambient `NodeJS` namespace, which conflicts
+   with `@cloudflare/workers-types`' own the moment both are reachable from one TypeScript
+   project — which wiring the real `Referee`/`apiHandler` into `workers/` now makes true
+   transitively. `db/BunSqlDb.ts` (`openDb`, `openPersistence`) and `SocketTransport.ts`
+   (`socketTransport`) are the `Bun`-specific halves, split out so `Db.ts` and the part of
+   `GameServer.ts` that stays are free of them.
 6. **Isolated typecheck**, `workers/tsconfig.json` (`@cloudflare/workers-types`, no DOM lib),
    excluded from the root `tsconfig.json`'s `include` and checked separately
    (`bun run typecheck:cf`, wired into `bun run lint`) — the same reasoning `src/game`/
    `src/hud` never importing `src/server/` already follows: two runtimes' global types
    (`Request`, `Response`, `WebSocket`, …) conflict if declared in one project.
-7. **e2e test** (`tests/cloudflare.test.ts`) against a real local Workers runtime. Wrangler's
-   newer programmatic harness, `createTestHarness`, was tried first and abandoned: its
-   `dispatchFetch` never returns in this sandbox, even for a one-line worker with no Durable
-   Object at all — a sandbox-specific tooling gap, not anything about this deployment. Spawning
-   `wrangler dev` directly and talking to it over real HTTP/WebSocket sidesteps it, and is
-   still wrangler's own local test facility, just the CLI rather than the library entry point.
+7. **e2e test** (`tests/cloudflare.test.ts`) against a real local Workers runtime, mirroring
+   `tests/server.test.ts`'s scenarios against the `Bun.serve` referee: a signed-in player trades
+   a session for a socket, an unissued ticket is turned away, an anonymous socket is still
+   welcome, and a non-JSON-RPC frame is dropped rather than crashing the connection (the
+   `[ITEM-045]`-specific proof that the earlier relay is gone). Wrangler's newer programmatic
+   harness, `createTestHarness`, was tried first and abandoned: its `dispatchFetch` never
+   returns in this sandbox, even for a one-line worker with no Durable Object at all — a
+   sandbox-specific tooling gap, not anything about this deployment. Spawning `wrangler dev`
+   (via `bunx`, not a direct binary path — the latter reproducibly hung requests in this sandbox
+   for reasons not fully understood) and talking to it over real HTTP/WebSocket sidesteps it,
+   and is still wrangler's own local test facility, just the CLI rather than the library entry
+   point. `afterAll` also `fuser -k`s the port: `wrangler dev` spawns a `workerd` child of its
+   own that killing the spawned process alone does not reliably reach, discovered as several
+   orphaned `workerd` processes accumulating across test runs and eventually starving the
+   machine mid-session.
 
 #### Affected Files
-- `wrangler.jsonc`, `workers/index.ts`, `workers/MatchDurableObject.ts`, `workers/tsconfig.json`
+- `wrangler.jsonc`, `workers/index.ts`, `workers/MatchDurableObject.ts`, `workers/DoSqliteDb.ts`,
+  `workers/tsconfig.json`
+- `src/server/db/Db.ts` (reduced to the port), `src/server/db/BunSqlDb.ts` (new, the `Bun.SQL`
+  adapter split out), `src/server/SocketTransport.ts` (new, split out of `GameServer.ts`),
+  `src/server/Persistence.ts` (`persistenceOverDb` split out of `openPersistence`)
+- `src/core/rng.ts`/`src/main.ts` (`resolveSeed` moved to `main.ts` — an unrelated fix this
+  item's typecheck isolation surfaced: `rng.ts`'s only use of `window` was in a function `Db.ts`
+  never needed, but every file `workers/` reaches gets typechecked under its own lib, and
+  `window` does not exist there)
 - `package.json` (`typecheck:cf`, `lint:code`, `cf:dev`, `cf:deploy`), `.gitignore` (`.wrangler`)
-- `tests/cloudflare.test.ts`
-- `docs/architecture/deployment.md` (new), `docs/design/rfc/0001-referee-and-transports.md` §7
+- `tests/cloudflare.test.ts`, `tests/determinism.test.ts` (updated for `resolveSeed`'s move),
+  and the handful of files that imported `openDb`/`openPersistence` from `db/Db.ts`/
+  `Persistence.ts` directly (now `db/BunSqlDb.ts`) — no behaviour change, only which file the
+  same functions are imported from
+- `docs/architecture/deployment.md`, `docs/design/rfc/0001-referee-and-transports.md` §7
 
 #### Acceptance Criteria
 - [x] `bun run cf:dev` serves the built client and accepts a WebSocket connection, through one
       Durable Object.
-- [x] Two WebSocket clients connected to that one instance can relay a frame to each other.
 - [x] `workers/` typechecks in isolation (`bun run typecheck:cf`) without pulling DOM types into
       the main `tsconfig.json`, and without the main `tsconfig.json` pulling in
       `@cloudflare/workers-types`.
@@ -100,9 +132,20 @@ does not replace or compete with it.
       self-contained (builds `dist` itself rather than assuming a prior build step).
 - [x] `.github/workflows/deploy.yml` (GitHub Pages) is untouched and remains the default
       deployment path.
-- [ ] A `Db` adapter over `ctx.storage.sql` that honours `Db.transaction`'s async contract
-      correctly (not merely typechecks against it).
-- [ ] `Referee`/`GameServer`'s `socketTransport` wired into `MatchDurableObject`, replacing the
-      bare relay, once the adapter above exists.
+- [x] A `Db` adapter over `ctx.storage.sql` (`workers/DoSqliteDb.ts`) — correct for `query`/
+      `exec`, and for `transaction` in every case that does not throw partway through; does not
+      roll back a partial failure the way the `Bun.SQL` adapter's `sql.begin()` does, stated
+      plainly rather than pretended otherwise (see the deployment doc §3).
+- [x] `Referee`/`Persistence`/`apiHandler` wired into `MatchDurableObject`, replacing the bare
+      relay: migrations run against `ctx.storage.sql` on first boot, a passkey ceremony and a
+      roster fetch work over real HTTP, and a signed-in socket, an anonymous one, and one with
+      an invalid ticket are each treated the same way the `Bun.serve` referee treats them
+      (`tests/cloudflare.test.ts`, mirroring `tests/server.test.ts`).
 - [ ] A real `wrangler deploy` against an actual Cloudflare account, with a chosen domain and
-      passkey relying-party configuration to match (`RelyingParty.origins`).
+      passkey relying-party configuration to match (`RelyingParty.origins` via
+      `RELYING_PARTY_ID`/`RELYING_PARTY_ORIGINS`, already read by `MatchDurableObject` but unset
+      by anything real).
+- [ ] A full match, played by two real clients through this deployment to settlement, with the
+      roster it was played with checked afterward — the referee is wired and unit/e2e-tested,
+      but nothing has driven an entire match through it end to end the way the Bun-hosted
+      referee has been (`tests/refereed.test.ts`, and live in a browser during earlier items).

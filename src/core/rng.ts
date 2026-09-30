@@ -68,21 +68,12 @@ export function hashSeed(value: string): number {
 }
 
 /**
- * Resolve the map seed: `?seed=` from the URL if present, otherwise random.
- * Numeric seeds are used directly so `?seed=1234` is readable.
+ * `resolveSeed` (`?seed=` from the URL, or a random one) lives in `main.ts`,
+ * not here: it is the one place in the game that draws from `Math.random`
+ * rather than the match stream, because it is what *creates* a match's seed,
+ * and `main.ts` is not part of the rules this file's own determinism guard
+ * (`tests/determinism.test.ts`) sweeps.
  */
-export function resolveSeed(): { seed: number; label: string } {
-  const param = new URLSearchParams(window.location.search).get('seed')
-  if (param !== null && param.length > 0) {
-    const numeric = Number(param)
-    if (Number.isFinite(numeric)) {
-      return { seed: numeric >>> 0, label: String(numeric >>> 0) }
-    }
-    return { seed: hashSeed(param), label: param }
-  }
-  const seed = (Math.random() * 0xffffffff) >>> 0
-  return { seed, label: String(seed) }
-}
 
 /**
  * A source of uniform floats in [0, 1).

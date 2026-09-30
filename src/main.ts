@@ -4,7 +4,7 @@ import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
 import { createEngineContext } from './engine'
 import { Faction, SIM } from './config'
-import { matchDice, resolveSeed, Rng } from './core/rng'
+import { hashSeed, matchDice, Rng } from './core/rng'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
 import { Account, type Player, type RosterEntry } from './game/Account'
@@ -36,6 +36,28 @@ import {
 } from './game/Recording'
 
 const baseUrl = new URL('./', document.baseURI).href
+
+/**
+ * Resolve the map seed: `?seed=` from the URL if present, otherwise random.
+ * Numeric seeds are used directly so `?seed=1234` is readable.
+ *
+ * The one place in the game that draws from `Math.random` rather than the
+ * match stream, because it is what *creates* a match's seed rather than
+ * something the rules resolve — `tests/determinism.test.ts` checks this file
+ * for exactly one such draw, the same way it once checked `core/rng.ts`.
+ */
+function resolveSeed(): { seed: number; label: string } {
+  const param = new URLSearchParams(window.location.search).get('seed')
+  if (param !== null && param.length > 0) {
+    const numeric = Number(param)
+    if (Number.isFinite(numeric)) {
+      return { seed: numeric >>> 0, label: String(numeric >>> 0) }
+    }
+    return { seed: hashSeed(param), label: param }
+  }
+  const seed = (Math.random() * 0xffffffff) >>> 0
+  return { seed, label: String(seed) }
+}
 
 const ASSETS: Asset[] = [
   { name: 'character', type: 'gltfModel', path: `${baseUrl}character.glb` },

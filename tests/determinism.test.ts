@@ -75,12 +75,16 @@ describe('Nothing in the rules reaches for its own randomness', () => {
 
   test('the seed picker is the one allowed exception, and says why', async () => {
     // `resolveSeed` chooses a *seed* when the URL names none. That is the one
-    // draw that cannot come from the stream, because it is what creates it.
-    const rng = await Bun.file('src/core/rng.ts').text()
-    const uses = code(rng).split('Math.random').length - 1
+    // draw that cannot come from the stream, because it is what creates it —
+    // and it lives in `main.ts`, not `core/rng.ts`, so `core/rng.ts` itself
+    // needs no exception at all.
+    const rngText = await Bun.file('src/core/rng.ts').text()
+    expect(code(rngText).includes('Math.random')).toBe(false)
 
+    const mainText = await Bun.file('src/main.ts').text()
+    const uses = code(mainText).split('Math.random').length - 1
     expect(uses).toBe(1)
-    expect(rng).toContain('resolveSeed')
+    expect(mainText).toContain('resolveSeed')
   })
 
   test('the same seed is the same dice, and a different seed is not', () => {
