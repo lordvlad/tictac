@@ -199,45 +199,61 @@ See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; su
    Workers KV directory maps region id to the Durable Object that currently owns it
    (RFC-0002 §6.3 — decided in favour of KV's eventual consistency over a directory Durable
    Object's extra hop on every request).
-2. The shared world starts as one whole zone — exactly `[ITEM-045]`'s single instance, already —
-   and fractures into more zones over time as load grows, woven into the game's own meta-story
-   rather than shipped as invisible level geometry (RFC-0002 §2, §7). Crossing a zone boundary is
-   a deliberate, designed act (a gate, a checkpoint), not a coordinate that can drift across an
-   invisible line — which is also what rules out a player oscillating near a border and being
-   handed off repeatedly (RFC-0002 §6.2).
-3. The Durable Object currently holding a player is responsible for handing them off to the
+2. A zone has no identity of its own — it is shorthand for whatever partition of the world's
+   content one Durable Object currently owns (RFC-0002 §2). The world starts as one whole
+   partition — exactly `[ITEM-045]`'s single instance, already — and is redrawn over time as
+   load grows, dressed in whichever piece of the fiction fits (a fence, a faction, a base, a
+   political border), not shipped as invisible level geometry. Crossing a boundary is a
+   deliberate, designed act, not a coordinate that can drift across an invisible line — which is
+   also what rules out a player oscillating near a border and being handed off repeatedly
+   (RFC-0002 §6.2).
+3. The Durable Object currently holding a connection is responsible for handing it off to the
    destination the moment a crossing happens (RFC-0002 §4) — not a directory, and not the
-   destination reaching in to pull them over.
-4. What transfers at a hand-off is presence — the open socket, faction/side, position, whatever
-   the region simulation held about the player in memory — not the roster. `Persistence`
-   (accounts, rosters, the match log) stays one logical store every region-owning instance can
-   reach, per RFC-0001 §8.4's "one database, behind a portable port"; splitting *that* by region
-   is explicitly rejected in RFC-0002 §4.
-5. A zone facing too much load — measured by CPU time and by client latency read against what a
-   player's real-world physical distance would predict, thresholds still to be tuned against
-   real traffic (RFC-0002 §6.1) — spins up a second Durable Object owning a piece freshly cut
-   from it, and moves players already there to whichever side now owns their location, preferably
-   while they are offline rather than disrupting a connected session.
-6. A match never spans two Durable Objects (RFC-0002 §4, §6.4); keeping combat from starting
-   exactly on a zone boundary is left to world/narrative design, not engineering.
+   destination reaching in to pull it over.
+4. A squad's position on the world map is its own durable property, not the connection's
+   transient state (RFC-0002 §4 — a correction from this item's first draft). This is what
+   answers cold-start routing (look up a squad's last known position, route through the
+   directory) without a separate system, and is why a presence connection may end up able to use
+   Cloudflare's Hibernation API where a match's referee socket today cannot. What still is not
+   the roster: accounts, sheet, deeds, growth and the match log stay one logical `Persistence`
+   store every region-owning instance can reach, per RFC-0001 §8.4's "one database, behind a
+   portable port"; splitting *that* by region is explicitly rejected in RFC-0002 §4.
+5. A partition facing too much load — measured by CPU time and by client latency read against
+   what a player's real-world physical distance would predict, thresholds still to be tuned
+   against real traffic (RFC-0002 §6.1) — spins up a second Durable Object *proactively*, at
+   roughly 80% of that measure rather than waiting for it to be hit. New arrivals route straight
+   to whichever half now owns their location from that moment; a connection already standing in
+   the carved-off piece is reassigned at the next disconnect the deployment was already going to
+   force (typically a schema-migrating deploy — `[ITEM-045]`'s `migrate.ts` migrations already
+   run at Durable Object startup), not a bespoke idle-detection system (RFC-0002 §2).
+6. The same trigger runs in reverse: a partition whose load falls back below a lower mark is
+   merged back into a neighbour at the same disconnect windows. Decided, not left open — per
+   Cloudflare's own pricing, an instance's compute-duration cost is driven by how long it stays
+   non-hibernating multiplied by how many instances exist, not by how many connections are on
+   each one, so a thinned-out unmerged partition keeps paying full-partition rates for as long as
+   anything keeps its connections from hibernating (RFC-0002 §6.5).
+7. A match never spans two Durable Objects (RFC-0002 §4, §6.4); keeping combat from starting
+   exactly on a boundary is left to world/narrative design, not engineering.
 
 #### Affected Files
 - `workers/index.ts` (routing, once there is a directory to route through)
 - A new Workers KV namespace for the region directory (RFC-0002 §6.3)
-- Whatever the shared world's own persistent-presence/position system turns out to be, once it
-  exists — not yet a file in this repository
+- Whatever the shared world's own persistent squad-position and presence system turns out to be,
+  once it exists — not yet a file in this repository
 
 #### Acceptance Criteria
-- [ ] The shared world exists as at least one zone with persistent player presence — tracked by
-      whatever items eventually build it, not this one.
-- [ ] A player's socket routes to the Durable Object currently owning their zone, through the
+- [ ] The shared world exists as at least one partition with a squad's position tracked as its
+      own durable property — tracked by whatever items eventually build it, not this one.
+- [ ] A connection routes to the Durable Object currently owning a squad's position, through the
       Workers KV directory.
-- [ ] Crossing a zone boundary (a deliberate, designed act, not continuous position tracking)
-      hands a live session off without the player having to reconnect, verified by an automated
-      test that plays a session across a scripted boundary.
-- [ ] A zone under simulated load splits into two Durable Objects and players are moved to the
-      half owning their location, preferably while offline, without disrupting a connected
-      session or dropping every connection in the zone at once.
+- [ ] Crossing a boundary (a deliberate, designed act, not continuous position tracking) hands a
+      live session off without the player having to reconnect, verified by an automated test
+      that plays a session across a scripted boundary.
+- [ ] A partition under simulated load splits proactively (before, not after, the measured
+      trigger), new arrivals route to whichever half owns their location immediately, and an
+      already-connected player is reassigned at the next disconnect rather than mid-session.
+- [ ] A partition whose load drops is merged back at the same disconnect windows, verified by an
+      automated test or a documented cost model, not left permanently fragmented.
 - [ ] `Persistence` remains reachable by every region-owning instance without being partitioned
       by region (RFC-0002 §4) — or, if that changes, the change is a deliberate edit to this
       item and RFC-0002, not a quiet divergence.
