@@ -16,7 +16,7 @@ import type { Applied, Carried } from '../ecs/systems/CommandSystem'
 import { isIndoors } from './Ground'
 import { Intel } from './Intel'
 import type { MatchHost } from './MatchHost'
-import { chooseDestination } from './Tactics'
+import { chooseDestination, type Spacing } from './Tactics'
 
 /**
  * The hit chance a unit will settle for rather than keep closing.
@@ -67,6 +67,13 @@ export interface PolicyOptions {
   /** Whether each side's units may go on watch. Both may, when absent. */
   watching?: Record<Faction, boolean>
   observer?: PolicyObserver
+  /**
+   * Expected hit points a unit charges itself for each squadmate within a
+   * frag's blast of the tile it considers. Zero when absent: the sweep
+   * measures guns, and a preference about company would be a statement about
+   * the AI instead.
+   */
+  spacing?: number
 }
 
 /**
@@ -91,6 +98,7 @@ export class Policy {
   private readonly intel: Record<Faction, Intel>
   private readonly watching: Record<Faction, boolean>
   private readonly observer: PolicyObserver
+  private readonly spacing: number
 
   /**
    * @param apply Carries one intent out against `host` and answers for it. A
@@ -105,6 +113,7 @@ export class Policy {
   ) {
     this.watching = options.watching ?? { [Faction.Blue]: true, [Faction.Red]: true }
     this.observer = options.observer ?? {}
+    this.spacing = options.spacing ?? 0
     const { byFaction } = host.squads
     this.intel = {
       [Faction.Blue]: new Intel(host.grid, byFaction[Faction.Blue], byFaction[Faction.Red]),
@@ -383,6 +392,15 @@ export class Policy {
     this.observer.threw?.(unit)
   }
 
+  /** What `unit` pays for company, or null when it pays nothing. */
+  private spacingFor(unit: Soldier): Spacing | null {
+    if (this.spacing <= 0) return null
+    const allies = this.host.squads.byFaction[unit.faction]
+      .filter((other) => other !== unit && !other.isDead)
+      .map((other) => other.tile)
+    return { allies, radius: unit.grenadeSpecs.frag.areaRadius, cost: this.spacing }
+  }
+
   /**
    * Go where {@link chooseDestination} says, one tile per intent.
    *
@@ -404,7 +422,7 @@ export class Policy {
     const intel = this.intel[unit.faction]
     const contacts = intel.contacts
     const search = contacts.length === 0 ? intel.searchFrom(unit, this.host.turnNumber) : null
-    const destination = chooseDestination(this.grid, unit, contacts, occupied, this.quiet, search)
+    const destination = chooseDestination(this.grid, unit, contacts, occupied, this.quiet, search, this.spacingFor(unit))
     if (!destination) return null
     const known = new Set(contacts.map((contact) => contact.unit))
 

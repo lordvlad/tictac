@@ -54,6 +54,23 @@ const MARGIN = 1
  */
 const NEXT_TURN = 0.5
 
+/**
+ * A penalty for standing in a cluster, in the same currency as everything else.
+ *
+ * A squad that bunches up gives one frag or one fire the whole of it, and a
+ * player spreads out for exactly that reason. The radius is a blast's, so the
+ * penalty is a price on being catchable together rather than on distance as
+ * such.
+ */
+export interface Spacing {
+  /** Where the unit's living squadmates stand. */
+  allies: readonly Tile[]
+  /** Squadmates this close to a tile count as sharing it with them. */
+  radius: number
+  /** Expected hit points charged for each one. */
+  cost: number
+}
+
 export interface Destination {
   /** Start first: the shape a `moveUnit` intent carries. */
   route: Tile[]
@@ -189,6 +206,8 @@ export function chooseDestination(
    * match. Null to stay put.
    */
   search: Float32Array | null = null,
+  /** Null for no preference about company, which is how the sweep measures. */
+  spacing: Spacing | null = null,
 ): Destination | null {
   const searching = contacts.length === 0
   if (searching && !search) return null
@@ -234,7 +253,13 @@ export function chooseDestination(
     // Standing in fire at the next handover costs its damage as surely as a
     // shot that cannot miss. Only the start can burn: the reach goes round fire.
     if (grid.fireAt(at.x, at.y) > 0) exposure += FIRE.damage
-    return { offense, exposure, nearest, danger: routeDanger }
+    let crowding = 0
+    if (spacing) {
+      for (const ally of spacing.allies) {
+        if (grid.distance(at, ally) <= spacing.radius) crowding += spacing.cost
+      }
+    }
+    return { offense, exposure, nearest, danger: routeDanger, crowding }
   }
 
   const here = judge(unit.tile, unit.ap, 0)
@@ -245,7 +270,7 @@ export function chooseDestination(
   // nothing is does closing the distance count.
   const advance = ADVANCE_PER_METRE * (1 + quiet)
   const scoreOf = (j: typeof here, shooting: boolean) =>
-    (shooting ? j.offense : -advance * j.nearest) - j.danger - j.exposure
+    (shooting ? j.offense : -advance * j.nearest) - j.danger - j.exposure - j.crowding
 
   const judged: Array<{ index: number } & typeof here> = []
   let anyOffense = here.offense > 0

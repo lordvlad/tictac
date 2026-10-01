@@ -10,6 +10,13 @@ import { compareDigests, reportDivergence } from './StateDigest'
 import { loopback, type Transport } from './Transport'
 
 /**
+ * How much the AI minds standing near its own squad, in expected hit points per
+ * squadmate inside a frag's blast. One metre of closing is worth 2 to it, so
+ * this is a nudge — it still advances as a group, just not as a clump.
+ */
+const SPACING = 2
+
+/**
  * A match against the machine: an opponent that is a *peer*.
  *
  * Nothing in the played game knows an AI exists. The opponent is the joining
@@ -84,6 +91,7 @@ export class AiOpponent {
         },
         {
           watching: { [Faction.Blue]: true, [Faction.Red]: true },
+          spacing: SPACING,
           // The fingerprint is of the world as this side hands it over.
           observer: { ending: () => this.network.send({ type: 'digest', digest: host.digest() }) },
         },
