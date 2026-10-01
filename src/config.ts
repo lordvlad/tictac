@@ -172,10 +172,11 @@ export const RULES = {
    */
   crouchStepCost: 1.5,
   /**
-   * Metres per second while moving. Tuned to sit close to the natural pace of
-   * the `run` (Jog_Fwd_Loop) clip so the feet do not visibly slide.
+   * Metres per second while moving. The `run` (Jog_Fwd_Loop) clip's playback
+   * rate is scaled to this, so the stride stays matched to travel. Raised from
+   * 3.4, where the clip played at 63% speed and read as slow motion.
    */
-  moveSpeed: 3.4,
+  moveSpeed: 3.74,
   /** Metres per second while moving crouched; twice the crouch-walk clip's own pace. */
   crouchMoveSpeed: 1.5,
 }
