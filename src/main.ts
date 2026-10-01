@@ -20,6 +20,7 @@ import { RosterScreen } from './hud/RosterScreen'
 import { FullscreenPrompt } from './hud/FullscreenPrompt'
 import { FpsCounter } from './hud/FpsCounter'
 import './game.css'
+import { AiOpponent } from './game/AiOpponent'
 import { NetworkManager } from './game/NetworkManager'
 import { World } from './ecs/World'
 import { createGlobalRules } from './ecs/globals'
@@ -57,6 +58,39 @@ function resolveSeed(): { seed: number; label: string } {
   }
   const seed = (Math.random() * 0xffffffff) >>> 0
   return { seed, label: String(seed) }
+}
+
+/**
+ * Whether a match server answers a WebSocket upgrade at this page's own
+ * origin, and what url that is.
+ *
+ * GitHub Pages serves no backend at all, so this resolves `null` there; the
+ * Cloudflare Durable Object deployment (`[ITEM-045]`) serves its referee
+ * from the exact origin the page itself loaded from, so this resolves that
+ * origin's own `wss://` url there. Nothing about either host is named here
+ * — the same probe answers correctly wherever the client is served from,
+ * including a developer's own machine if `bun run cf:dev` happens to be
+ * what served this page.
+ */
+function probeOwnOriginServer(): Promise<string | null> {
+  const guess = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/`
+  return new Promise((resolve) => {
+    let settled = false
+    const settle = (value: string | null): void => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    const probe = new WebSocket(guess)
+    probe.addEventListener('open', () => {
+      probe.close()
+      settle(guess)
+    })
+    probe.addEventListener('error', () => settle(null))
+    // A probe that neither opens nor errors within a couple of seconds is
+    // not one worth waiting on further; the menu does not block on this.
+    setTimeout(() => settle(null), 2000)
+  })
 }
 
 const ASSETS: Asset[] = [
@@ -111,6 +145,7 @@ function showMenu(): void {
       
       <div id="menu-actions" style="display: flex; flex-direction: column; gap: 12px;">
         <button id="btn-local" style="padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Local Versus (Same Screen)</button>
+        <button id="btn-ai" style="padding: 12px; background: #8b5cf6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Play Against the AI</button>
         <button id="btn-host-mode" style="padding: 12px; background: #0ea5e9; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Host P2P Match</button>
         <button id="btn-join-mode" style="padding: 12px; background: #6366f1; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Join P2P Match</button>
         <button id="btn-server-mode" style="padding: 12px; background: #14b8a6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Play on a Match Server</button>
@@ -133,6 +168,18 @@ function showMenu(): void {
     container.remove()
     const { seed, label } = resolveSeed()
     equipThenStart(seed, label, new NetworkManager())
+  })
+
+  // The machine is a peer like any other, reached over an in-process channel:
+  // seated before the match is announced, since the announcement is delivered
+  // at once. From here the match is an ordinary hosted one.
+  container.querySelector('#btn-ai')?.addEventListener('click', () => {
+    container.remove()
+    const { seed, label } = resolveSeed()
+    const network = new NetworkManager()
+    AiOpponent.join(network)
+    network.hostMatch(seed, label)
+    equipThenStart(seed, label, network)
   })
 
   // Spectating a file, not playing a match: no loadout screen, no peer, no
@@ -202,7 +249,7 @@ function showMenu(): void {
     detailsEl.style.display = 'block'
     detailsEl.innerHTML = `
       <p style="font-size: 14px; color: #2dd4bf; margin-bottom: 8px;">Play on a Match Server</p>
-      <input id="server-url" value="${localStorage.getItem('tictac.server') ?? 'ws://localhost:5174/'}" style="width: 100%; box-sizing: border-box; padding: 8px; background: #0f172a; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; font-family: monospace; font-size: 12px; margin-bottom: 8px;" />
+      <input id="server-url" value="${localStorage.getItem('tictac.server') ?? ''}" placeholder="wss://your-match-server/ — leave blank to look for one at this address" style="width: 100%; box-sizing: border-box; padding: 8px; background: #0f172a; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; font-family: monospace; font-size: 12px; margin-bottom: 8px;" />
       <p id="account-status" style="font-size: 12px; color: #94a3b8; margin-bottom: 8px;">…</p>
       <div id="account-actions" style="display: flex; gap: 8px; margin-bottom: 12px;">
         <input id="account-name" maxlength="24" placeholder="Name for a new passkey" style="flex: 1; box-sizing: border-box; padding: 8px; background: #0f172a; border: 1px solid #475569; color: #f8fafc; border-radius: 4px; font-size: 12px;" />
@@ -258,6 +305,18 @@ function showMenu(): void {
     }
     void refreshAccount()
     container.querySelector('#server-url')?.addEventListener('change', () => void refreshAccount())
+
+    // Nothing saved from a previous visit: look for a match server at this
+    // page's own origin rather than assuming one. Filled in only if the box
+    // is still empty by the time the probe answers — a player who started
+    // typing in the meantime is not overwritten.
+    if (!localStorage.getItem('tictac.server')) {
+      void probeOwnOriginServer().then((found) => {
+        if (!found || urlOf()) return
+        ;(container.querySelector('#server-url') as HTMLInputElement).value = found
+        void refreshAccount()
+      })
+    }
 
     const account = async (act: (account: Account) => Promise<unknown>): Promise<void> => {
       try {

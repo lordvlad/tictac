@@ -17,6 +17,15 @@
     "run_worker_first": true,
     "not_found_handling": "single-page-application"
   },
+  // The real deploy's domain (`[ITEM-045]`) — a `*.workers.dev` subdomain is
+  // on the public suffix list, so the relying party id has to be this exact
+  // host, not just `workers.dev`; see `workers/MatchDurableObject.ts`'s
+  // `relyingPartyOf` and `LOCAL_RELYING_PARTY` in `src/server/Persistence.ts`
+  // for what this falls back to when unset.
+  "vars": {
+    "RELYING_PARTY_ID": "tictac-match-server.waldemar-reusch.workers.dev",
+    "RELYING_PARTY_ORIGINS": "https://tictac-match-server.waldemar-reusch.workers.dev"
+  },
   "durable_objects": {
     "bindings": [
       { "name": "MATCH", "class_name": "MatchDurableObject" }

@@ -29,8 +29,9 @@ There are two deployment paths in this repository, and they answer two different
 **Where does the game live** is answered by GitHub Pages, unconditionally, on every push. **Where
 does a match server live**, if anyone wants one, has two answers now — `bun run serve:match` on a
 developer's own machine, not reachable by anyone else's browser; or a single Cloudflare Durable
-Object running the same real referee, reachable locally today (`bun run cf:dev`) but not yet
-deployed against an actual account (`[ITEM-045]`). This document covers both.
+Object running the same real referee, deployed for real at
+`https://tictac-match-server.waldemar-reusch.workers.dev` (`[ITEM-045]`). This document covers
+both.
 
 ---
 
@@ -179,12 +180,17 @@ file the same functions are imported from.
 ## 4. Tooling
 
 - **`bun run cf:dev`** — builds the client and runs `wrangler dev` locally.
-- **`bun run cf:deploy`** — builds the client and runs `wrangler deploy`. Requires a Cloudflare
-  account and `wrangler login` (or `CLOUDFLARE_API_TOKEN`); nothing here configures one, and no
-  deploy has been run against a real account yet. A real deploy also needs
-  `RELYING_PARTY_ID`/`RELYING_PARTY_ORIGINS` set (`wrangler.jsonc`'s `vars`, or `wrangler
-  secret`) to whatever domain is chosen — `MatchDurableObject` reads them, falling back to
-  `LOCAL_RELYING_PARTY` when unset, which is only correct for local development.
+- **`bun run cf:deploy`** — builds the client and runs `wrangler deploy`. Deployed for real
+  (`[ITEM-045]`): `https://tictac-match-server.waldemar-reusch.workers.dev`, on the account's
+  default `*.workers.dev` subdomain rather than a custom domain — nothing in this item asked
+  for one, and `wrangler deploy` assigns `*.workers.dev` for free the moment a Worker exists.
+  `wrangler.jsonc`'s `vars` sets `RELYING_PARTY_ID`/`RELYING_PARTY_ORIGINS` to that exact host
+  (a `*.workers.dev` subdomain is on the public suffix list, so the relying party id has to be
+  the full host, not just `workers.dev`); `MatchDurableObject` falls back to
+  `LOCAL_RELYING_PARTY` only when they are unset, which is correct for local development and
+  nothing else. Credentials (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`) live in a
+  git-ignored `.env`, sourced into the shell before running this command — never committed, and
+  not read by anything else in the repo.
 - **`bun run typecheck:cf`** (wired into `bun run lint`) — `workers/tsconfig.json` typechecks
   `workers/` in isolation, with `@cloudflare/workers-types` and no DOM lib. It is excluded from
   the root `tsconfig.json`'s `include` for the same reason `src/game`/`src/hud` never import
@@ -226,5 +232,13 @@ command stream through two real `NetworkManager`s connected to this deployment i
 applying it in memory: a `tests/cloudflare.test.ts` scenario drives a full match this way and
 confirms the Durable Object's own independent recomputation, over `ctx.storage.sql`, reaches the
 same decisive winner — the proof that needed two real browsers before, now had without either.
-What remains open is a real `wrangler deploy` — see the open acceptance criteria on
-[`ITEM-045`](../backlog/active-backlog.md).
+
+All of the above was repeated against the real deploy, not only `wrangler dev` — a real passkey
+registration, ticket and socket against
+`https://tictac-match-server.waldemar-reusch.workers.dev`, and a whole decisive match driven
+through it anonymously by `src/sim/WireMatch.ts` with no abort. What remains open: the match
+above is anonymous; a *registered* match, whose roster is checked afterward via `GET
+/api/roster`, needs `SimMatch` or its wire harness to deploy a squad sourced from a real
+roster's exact rows rather than its own freshly-rolled sheets (`Referee.verifyRosters` checks
+for an exact match) — not built, and a different piece of work than making the deploy itself
+real. See the open acceptance criteria on [`ITEM-045`](../backlog/active-backlog.md).
