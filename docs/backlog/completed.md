@@ -2119,6 +2119,118 @@ signed-in match, played end to end through the actual match-server UI in a brows
       hand-built header, is accepted by a real referee.
 ---
 
+### [ITEM-045] Cloudflare Durable Object Deployment
+**Completed Date:** 2026-10-01  
+**Type:** Infrastructure  
+**Milestone:** Unscheduled — infrastructure, not a milestone deliverable  
+
+#### Why
+[RFC-0001 §7](../design/rfc/0001-referee-and-transports.md#7-deployment) named two hosting
+options for a public referee and built neither: "a Durable Object per match, or one central
+Postgres." A referee on a developer's own machine (`bun run serve:match`) is fine for
+development but is not a *deployment* — nobody else's browser can reach it, and there is
+nothing running when the developer's machine is off. GitHub Pages stays the default deployment
+path throughout — this is an *additional*, optional path for hosting a match server, not a
+replacement for it.
+
+#### Key Changes
+- **One Durable Object, not one per match.** `workers/MatchDurableObject.ts`, addressed by
+  `env.MATCH.idFromName('singleton')` from `workers/index.ts` — a match server is one referee,
+  the same reason `startGameServer` binds one port to one `Referee`. The RFC's other phrasing,
+  a Durable Object per match, is not what this deployment does.
+- **The one DO serves both** a WebSocket upgrade and every other request (static assets via
+  `env.ASSETS.fetch(request)`, `/api/…` via `apiHandler`) — `run_worker_first: true` in
+  `wrangler.jsonc` routes every request through the Worker rather than letting the assets layer
+  answer some of them directly.
+- **A `Db` adapter over `ctx.storage.sql`** (`workers/DoSqliteDb.ts`). `Db.transaction` is async,
+  built around `Bun.SQL`'s genuinely asynchronous protocol; `ctx.storage.sql`'s own transaction
+  primitive, `transactionSync`, requires a callback with no `await` at all, which every caller
+  (`migrate.ts`, `Rosters.settle`) is written without. The adapter keeps what a Durable Object's
+  own request serialization already gives for free — overlapping `transaction` callers never
+  interleave — and is honest about what it does not add: rollback on throw, the way the
+  `Bun.SQL` adapter's `sql.begin()` does (`docs/architecture/deployment.md` §3).
+- **The real `Referee`, not a relay.** `MatchDurableObject` runs the same `Referee`,
+  `Persistence` (via a new `persistenceOverDb`) and `apiHandler` that `startGameServer` runs
+  behind `Bun.serve`. **A match socket does not hibernate**: `Referee`'s open-match state has no
+  durable backing, and hibernation evicts the whole object, so sockets use plain
+  `server.accept()` rather than `ctx.acceptWebSocket()` — a reversal of this item's first,
+  "planted" pass, which hibernated every socket including a match's.
+- **Two files split for the isolated typecheck**: `src/server/db/Db.ts` used to import `bun`'s
+  `SQL` type for its one `Bun.SQL`-specific implementation, which pulls in `@types/node`'s
+  ambient `NodeJS` namespace — conflicting with `@cloudflare/workers-types`' own the moment both
+  are reachable from one TypeScript project, which wiring the real `Referee`/`apiHandler` into
+  `workers/` made true transitively. The Bun-specific halves moved to `src/server/db/BunSqlDb.ts`
+  and `src/server/SocketTransport.ts`. `workers/tsconfig.json` typechecks `workers/` in isolation
+  (`bun run typecheck:cf`, wired into `bun run lint`), excluded from the root `tsconfig.json`.
+- **`src/sim/WireMatch.ts`**: elevates `SimMatch` — already able to play a decisive match
+  deterministically, both sides, in milliseconds — to send that same command stream through two
+  real `NetworkManager`s connected to a referee instead of only applying it in memory. The
+  reusable answer to "prove a whole match reaches settlement" without scripting one by hand or
+  driving two browsers. Commands are sent one at a time, each awaited until the other side's
+  socket has received the referee's relay of it, because two independent sockets give no
+  ordering guarantee against each other the way one connection gives against itself — firing
+  them all at once raced a real referee's client registration and hung, over real network
+  latency (not in-process `Bun.serve`).
+- **Deployed for real**: `https://tictac-match-server.waldemar-reusch.workers.dev`, the
+  account's default `*.workers.dev` subdomain. `wrangler.jsonc`'s `vars` set
+  `RELYING_PARTY_ID`/`RELYING_PARTY_ORIGINS` to that exact host — a `*.workers.dev` subdomain is
+  on the public suffix list, so the relying party id has to be the full host, not just
+  `workers.dev`.
+- **`src/main.ts`'s match-server field auto-detects its own origin**: `probeOwnOriginServer`
+  tries a WebSocket at `location.host` and prefills the box only if one answers, rather than
+  hardcoding a local-dev default. True at this deployment (one Durable Object serves both the
+  client and the referee from the same origin) and false on GitHub Pages (no backend at all) —
+  nothing about either host is named in the code.
+
+#### Measured
+`tests/cloudflare.test.ts` runs a real local Workers runtime (`wrangler dev`, spawned via
+`bunx`) and drives it over real HTTP and WebSocket: a passkey ceremony, a ticket, a signed-in
+socket, an anonymous one, an invalid ticket turned away with 401, a non-JSON-RPC frame dropped
+without crashing the connection, and a whole decisive match reaching settlement
+(`src/sim/WireMatch.ts`) with the Durable Object's own independent recomputation over
+`ctx.storage.sql` agreeing on the winner. `tests/refereed.test.ts` runs the identical wire
+function against the in-process `Bun.serve` referee and checks its digest and stored log agree
+with the local sim bit for bit. `bun run typecheck:cf` keeps `workers/` typechecking in
+isolation. `wrangler deploy --dry-run` was run repeatedly during development; a real
+`wrangler deploy` against an actual Cloudflare account was run once credentials became
+available, and the live deployment was independently verified by hand: a real passkey
+registration, ticket and signed-in socket against
+`https://tictac-match-server.waldemar-reusch.workers.dev`, an anonymous socket, an invalid
+ticket rejected the same way, and a whole decisive match driven through it end to end with no
+abort. The match-server auto-detect was verified in a real headless browser against both
+`wrangler dev` (auto-fills, immediately shows a real account status) and a plain static file
+server with no backend — the shape GitHub Pages serves — which leaves the field empty with a
+placeholder hint.
+
+#### Acceptance Criteria
+- [x] `bun run cf:dev` serves the built client and accepts a WebSocket connection, through one
+      Durable Object.
+- [x] `workers/` typechecks in isolation (`bun run typecheck:cf`) without pulling DOM types into
+      the main `tsconfig.json`, and without the main `tsconfig.json` pulling in
+      `@cloudflare/workers-types`.
+- [x] `tests/cloudflare.test.ts` runs a real local Workers runtime and passes in `bun test`,
+      self-contained (builds `dist` itself rather than assuming a prior build step).
+- [x] `.github/workflows/deploy.yml` (GitHub Pages) is untouched and remains the default
+      deployment path.
+- [x] A `Db` adapter over `ctx.storage.sql` — correct for `query`/`exec`, and for `transaction`
+      in every case that does not throw partway through; does not roll back a partial failure
+      the way the `Bun.SQL` adapter's `sql.begin()` does, stated plainly rather than pretended
+      otherwise.
+- [x] `Referee`/`Persistence`/`apiHandler` wired into `MatchDurableObject`, replacing the bare
+      relay a first pass planted.
+- [x] A real `wrangler deploy` against an actual Cloudflare account, verified with a real passkey
+      registration, ticket and signed-in socket against the live deployment.
+- [x] A whole decisive match reaches settlement through this deployment end to end, proven
+      against both `wrangler dev` and the real live deployment. Left deliberately narrower than
+      an earlier phrasing: this is an anonymous match, not a *registered* one whose roster is
+      checked afterward — that needs the wire harness to deploy a squad sourced from a real
+      roster's exact rows rather than its own freshly-rolled sheets (`Referee.verifyRosters`
+      checks for an exact match), a different piece of work left open for whoever picks it up
+      next.
+- [x] The match-server field prefills its own address when one answers at the page's own origin,
+      and leaves it empty otherwise, with nothing about either host named in the code.
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

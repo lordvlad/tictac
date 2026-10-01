@@ -164,23 +164,23 @@ what it is: the rules, in the page, with nothing in between.
 
 ## 7. Deployment
 
-- **Bun process** — the only host actually reachable by a real deploy today. `wss://` needs a
-  host and a certificate, because the game is served from Pages over `https`. Chromium treats
-  `ws://localhost` as potentially trustworthy, so a referee on the player's own machine works
-  from the deployed site in Chrome; Firefox and Safari are stricter. A public referee is where
-  this project starts paying for infrastructure — the same moment persistence does, which is
-  why they are one item.
+- **Bun process** — the host a developer runs on their own machine (`bun run serve:match`).
+  `wss://` needs a host and a certificate, because the game is served from Pages over `https`.
+  Chromium treats `ws://localhost` as potentially trustworthy, so a referee on the player's own
+  machine works from the deployed site in Chrome; Firefox and Safari are stricter.
 - **Cloudflare Worker + one Durable Object** — the referee runs for real (`[ITEM-045]`, see
-  [ARCH-DEPLOYMENT](../../architecture/deployment.md)); a real `wrangler deploy` against an
-  actual account has not happened. A single `MatchDurableObject` serves static assets, `/api/…`,
-  and a WebSocket upgrade, and runs the same `Referee`/`Persistence`/`apiHandler` the Bun process
-  does, over a `Db` adapter (`workers/DoSqliteDb.ts`) that is honest about the one thing it does
-  not do — roll back a failed multi-statement transaction — because `ctx.storage.sql`'s
-  transaction primitive cannot run the async code every caller of `Db.transaction` is written in.
-  GitHub Pages remains the default way the client itself is served either way — this is a
-  hosting option for the referee, not a replacement for it. The single instance is deliberate
-  and deliberately temporary: [RFC-0002](./0002-region-sharded-durable-objects.md) is the plan
-  for replacing it once the game's shared world (§9) exists and needs more than one.
+  [ARCH-DEPLOYMENT](../../architecture/deployment.md)), and a real `wrangler deploy` has
+  happened against an actual account:
+  `https://tictac-match-server.waldemar-reusch.workers.dev`. A single `MatchDurableObject`
+  serves static assets, `/api/…`, and a WebSocket upgrade, and runs the same
+  `Referee`/`Persistence`/`apiHandler` the Bun process does, over a `Db` adapter
+  (`workers/DoSqliteDb.ts`) that is honest about the one thing it does not do — roll back a
+  failed multi-statement transaction — because `ctx.storage.sql`'s transaction primitive cannot
+  run the async code every caller of `Db.transaction` is written in. GitHub Pages remains the
+  default way the client itself is served either way — this is a hosting option for the
+  referee, not a replacement for it. The single instance is deliberate and deliberately
+  temporary: [RFC-0002](./0002-region-sharded-durable-objects.md) is the plan for replacing it
+  once the game's shared world (§9) exists and needs more than one.
 
 ## 8. Open questions, including two holes this design opens
 

@@ -24,17 +24,11 @@ the [archive](../backlog/completed.md).
 ## Focus & Theme
 M1 (headless foundation), M2 (tactical depth), M3 (reconnaissance & morale) and M4 (competitive
 meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]`) closed M4 on
-2026-09-30. The active backlog otherwise holds `[ITEM-045]` (in progress below) and four
-unscheduled items in Backlog. Only `[ITEM-048]`, wild alien encounters, is startable today;
-nothing is Ready.
+2026-09-30. `[ITEM-045]` (Cloudflare Durable Object deployment) closed on 2026-10-01 — see the
+[archive](../backlog/completed.md). The active backlog otherwise holds four unscheduled items in
+Backlog. Only `[ITEM-048]`, wild alien encounters, is startable today; nothing is Ready.
 
 ---
-
-## 🔄 In Progress
-- `[ITEM-045]` Cloudflare Durable Object deployment — the real `Referee`/`Persistence`/
-  `apiHandler` now run inside a single planted DO, over a `Db` adapter for `ctx.storage.sql`;
-  what remains is a real `wrangler deploy` against an actual account. See
-  [ARCH-DEPLOYMENT](../architecture/deployment.md).
 
 ## 📋 Ready — pull in this order
 - Nothing. File the next item.
