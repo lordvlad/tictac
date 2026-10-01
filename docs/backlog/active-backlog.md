@@ -358,3 +358,115 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
 - **Mitigation:** sequence the base/vehicle economy's capacity number ahead of removing
   `ROSTER.size`'s constant, not after — §Why already states this as a hard dependency, not a
   nice-to-have ordering.
+
+---
+
+### [ITEM-048] Wild Alien Encounters: a Fresh AI Squad per Fight
+**Type:** Feature
+**Priority:** P2
+**Status:** Backlog — designed ([GDD-OVERVIEW](../design/gdd/overview.md) §2, §4); not started
+**Milestone:** Unscheduled
+
+#### Why
+Humans are the only playable faction at the start; the aliens are run by the game and have no
+persistent identity (GDD-OVERVIEW §2). Meeting them is a wild encounter: a random alien squad,
+rolled fresh for the fight, at a random place, gone once the fight is settled. Today there is
+no way to fight the game at all — the live client never imports `src/sim/`, and the only AI,
+`SimMatch`'s policy, plays both sides of a headless sweep. Every live match needs two humans.
+
+Most of this is startable before the shared world exists: "a random place" is today's
+`generateMap(seed)`; what the world map adds later is *where* the encounter happens, not what it
+is.
+
+#### Change
+1. **The AI plays one side of a live, refereed match.** The referee hosts the alien side and
+   issues its commands as intents, the same commands a human sends. Not the human's client: a
+   client that drives its own opponent can make it play badly. `SimMatch`'s policy is the
+   starting point; whether it is reused as-is or split into a policy usable outside the sweep is
+   this item's to decide.
+2. **The alien squad is rolled, not stored.** Sheets and kit are dealt from system randomness
+   at encounter start (setup, like `enlist`), stated in the header like any squad, and never
+   written to `roster`. Settlement treats the alien side the way `Referee.verifyRosters` already
+   treats an anonymous one: nothing to keep.
+3. **The human side settles normally**: growth, HP, fatigue, permadeath, carried-out.
+4. **The encounter sizes the alien squad.** Within today's `1..SQUAD_SIZE` (short-handed squads
+   already deploy and settle, `ITEM-041`), so this does not wait for `ITEM-047`. Once
+   `ITEM-047` lands, the encounter is the caller that states a per-combat cap — the one its
+   Risks section says must exist before the cap is worth building.
+
+#### Affected Files
+- `src/server/Referee.ts` (hosting an AI side; settling a side with no roster)
+- `src/sim/SimMatch.ts`, `src/sim/Tactics.ts` (policy usable for one side of a live match)
+- `src/game/Recording.ts` (header records the AI side as rolled, not rostered)
+- `src/hud/` (a way to start an encounter)
+- `docs/architecture/networking.md`, `docs/architecture/persistence.md`
+
+#### P2P / Simulation Impact
+- **The AI's own choices are intent, not rules.** It may take its own randomness to decide, but
+  it must never draw from the match stream (`matchDice(seed)`): only the rules draw there, the
+  same order on every side (ADR-0004, `tests/determinism.test.ts`).
+- A recording replays from commands, so an AI match replays without the AI.
+- The balance sweep is unchanged; it already plays AI against AI.
+
+#### Acceptance Criteria
+- [ ] A signed-in player starts an encounter and plays a whole match against an AI-run squad
+      through the referee, to settlement.
+- [ ] The human side's roster settles exactly as in a match against a human; nothing about the
+      alien squad is written to `roster`.
+- [ ] Two encounters roll different alien squads; the same recording replays identically.
+- [ ] `tests/determinism.test.ts` still passes: the AI draws nothing from the match stream.
+- [ ] Living documentation updated.
+
+#### Risks & Mitigations
+- **Risk:** the aliens are a faction in the lore only. There is no alien kit (no plasma weapon
+  exists in `src/`) and `Faction` is Blue/Red, so the first encounters are an AI squad dressed
+  as aliens with human kit.
+- **Mitigation:** ship the encounter with existing kit and file alien kit separately; the
+  encounter does not depend on what the squad carries.
+- **Risk:** the sweep policy was written to measure balance, not to be fun to fight; it never
+  sneaks, throws smoke or uses doors (focus board, "Left open").
+- **Mitigation:** accept it for the first encounters; make the policy better as its own item.
+
+---
+
+### [ITEM-049] Start Location From the Player's Real-World Area
+**Type:** Feature
+**Priority:** P3
+**Status:** Backlog — designed ([GDD-OVERVIEW](../design/gdd/overview.md) §3); not startable yet
+**Milestone:** Unscheduled — gated on the shared world existing
+
+#### Why
+A player starts near where they are (GDD-OVERVIEW §3): at a random point within 50 km of the
+latitude and longitude Cloudflare reports for their connection. There is no world map to place
+them on today, so this waits for the shared world, as `ITEM-046` does.
+
+#### Change
+1. On registration, read `request.cf.latitude`/`longitude` (strings in
+   `@cloudflare/workers-types`; absent off Cloudflare, e.g. `bun run serve:match`).
+2. Draw a point uniformly over the 50 km disc: radius `R·√u`, not `R·u`, which would crowd starts
+   toward the centre. System randomness — setup, not rules.
+3. Redraw while the point is within a minimum distance of an existing start.
+4. Store only the drawn point as the squad's position (RFC-0002 §4); never the reported one.
+5. A fallback when Cloudflare reports nothing.
+
+#### Affected Files
+- `src/server/Accounts.ts` (`register`)
+- `workers/MatchDurableObject.ts` (passing `request.cf` through)
+- The shared world's position store, once it exists
+
+#### P2P / Simulation Impact
+- None: the start point is set once, on the server, outside any match.
+
+#### Acceptance Criteria
+- [ ] A player registering through Cloudflare starts within 50 km of the reported point; the
+      reported point is stored nowhere.
+- [ ] Starts drawn from one anchor are spread uniformly over the disc (statistical test over many
+      draws) and none is closer to another than the minimum distance.
+- [ ] Registration off Cloudflare still works, through the fallback.
+
+#### Risks & Mitigations
+- **Risk:** the disc is drawn on the real map, so a coastal city's start can land in the sea.
+- **Mitigation:** redraw off land as well as too close to another start; needs land data the
+  world map will have to carry anyway.
+- **Risk:** IP geolocation can be far off (mobile carriers, VPNs).
+- **Mitigation:** accepted. The start is meant to be roughly local, not exact.

@@ -16,13 +16,13 @@ tags: ["gdd", "design", "gameplay"]
 # Game Design Document (GDD) — No Way Home / TicTac
 
 ## Executive Summary
-"No Way Home" is a post-apocalyptic PvPvE turn-based tactics game with dynamic grid-based squad combat, base building, resource management, and meta progression. Players command squads of human survivors or stranded aliens navigating a hazardous shared world.
+"No Way Home" is a post-apocalyptic PvPvE turn-based tactics game with dynamic grid-based squad combat, base building, resource management, and meta progression. Players command squads of human survivors in a hazardous shared world laid over the real one; the stranded aliens are run by the game, and become playable much later.
 
 ## GDD Modules
 
 | Document | Topic | Description |
 | --- | --- | --- |
-| [Overview & Setting](./overview.md) | Lore, World, Factions, Opening | Ship broken up over many crash sites, post-EMP earth, human vs alien dynamics, and how a player arrives: one crash site, two characters. |
+| [Overview & Setting](./overview.md) | Lore, World, Factions, Opening | Ship broken up over many crash sites, post-EMP earth, humans playable and aliens AI-run (playable later), and how a player arrives: the crash site nearest them, two characters. |
 | [Combat Mechanics](./combat-mechanics.md) | Turn-based Tactics | Action Points, LOS DDA, cover rules, ballistic equations, weapons, traits. |
 | [Status, Trait & Worn Kit Catalogue](./status-and-trait-catalog.md) | Reference (generated) | Every status, trait and passive item with its current numbers, and where each trait can be got from. |
 | [Melee Combat](./melee-combat.md) | Contact Fighting (draft) | Fists, blades and bludgeons; contests instead of hit rolls, and the quiet kill. |
