@@ -3,7 +3,7 @@ title: "Game Design Document (GDD) Index"
 id: "GDD-INDEX"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-17"
+lastReviewed: "2026-10-01"
 appliesTo:
   - "src/game/**"
   - "src/core/**"
@@ -22,7 +22,7 @@ tags: ["gdd", "design", "gameplay"]
 
 | Document | Topic | Description |
 | --- | --- | --- |
-| [Overview & Setting](./overview.md) | Lore, World, Factions | Crash backstory, post-EMP earth, human vs alien dynamics. |
+| [Overview & Setting](./overview.md) | Lore, World, Factions, Opening | Ship broken up over many crash sites, post-EMP earth, human vs alien dynamics, and how a player arrives: one crash site, two characters. |
 | [Combat Mechanics](./combat-mechanics.md) | Turn-based Tactics | Action Points, LOS DDA, cover rules, ballistic equations, weapons, traits. |
 | [Status, Trait & Worn Kit Catalogue](./status-and-trait-catalog.md) | Reference (generated) | Every status, trait and passive item with its current numbers, and where each trait can be got from. |
 | [Melee Combat](./melee-combat.md) | Contact Fighting (draft) | Fists, blades and bludgeons; contests instead of hit rolls, and the quiet kill. |

@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M4 Competitive & Meta Roster"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-30"
+lastReviewed: "2026-10-01"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -24,8 +24,9 @@ the [archive](../backlog/completed.md).
 ## Focus & Theme
 M1 (headless foundation), M2 (tactical depth), M3 (reconnaissance & morale) and M4 (competitive
 meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]`) closed M4 on
-2026-09-30. The active backlog otherwise holds one unscheduled infrastructure item
-(`[ITEM-045]`) — nothing gameplay is Ready or queued.
+2026-09-30. The active backlog otherwise holds two unscheduled infrastructure/design items
+(`[ITEM-045]`, in progress below; `[ITEM-046]`, `[ITEM-047]`, neither startable yet — see
+Backlog) — nothing gameplay is Ready or queued.
 
 ---
 
@@ -39,7 +40,11 @@ meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]
 - Nothing. File the next item.
 
 ## 🧊 Backlog — not yet queued
-- Nothing.
+- `[ITEM-046]` Region-sharded Durable Objects — depends on the shared world existing; not
+  startable today.
+- `[ITEM-047]` Uncap the roster (bench grows with bases/vehicles, squad cap set per combat) —
+  depends on the base/vehicle economy and a scenario/mission system, neither built; not
+  startable today.
 
 ## ⚠️ Left open by finished work
 - **ITEM-019**: the sweep's policy neither sneaks nor throws stones, so the balance sweep does

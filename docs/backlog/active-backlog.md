@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-30"
+lastReviewed: "2026-10-01"
 appliesTo:
   - "src/**"
   - "workers/**"
@@ -195,10 +195,15 @@ Ready, so the dependency is visible rather than the plan being reinvented later 
 
 #### Change
 See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; summarised:
-1. A region id replaces `workers/index.ts`'s fixed `env.MATCH.idFromName('singleton')`; a
-   Workers KV directory maps region id to the Durable Object that currently owns it
-   (RFC-0002 §6.3 — decided in favour of KV's eventual consistency over a directory Durable
-   Object's extra hop on every request).
+1. A region id replaces `workers/index.ts`'s fixed `env.MATCH.idFromName('singleton')`. The
+   region id → Durable Object lookup is **staged by Durable Object count, not fixed on one
+   mechanism**: baked straight into the Worker's own deployed code while the count is low (no
+   extra store at all — it is redeployed at the same disconnect-window deploy every split or
+   merge already needs), graduating to a Workers KV directory only once redeploying for every
+   reassignment stops being the convenient option (RFC-0002 §6.3). Workers KV's own free tier
+   caps writes at 1,000/day; a cadence of occasional, deliberate splits and merges stays nowhere
+   near it, but it is the first free-tier wall this item would hit if reassignments ever became
+   frequent.
 2. A zone has no identity of its own — it is shorthand for whatever partition of the world's
    content one Durable Object currently owns (RFC-0002 §2). The world starts as one whole
    partition — exactly `[ITEM-045]`'s single instance, already — and is redrawn over time as
@@ -236,16 +241,17 @@ See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; su
    exactly on a boundary is left to world/narrative design, not engineering.
 
 #### Affected Files
-- `workers/index.ts` (routing, once there is a directory to route through)
-- A new Workers KV namespace for the region directory (RFC-0002 §6.3)
+- `workers/index.ts` (routing; a baked-in table at first, a Workers KV namespace later once DO
+  count outgrows it — RFC-0002 §6.3)
 - Whatever the shared world's own persistent squad-position and presence system turns out to be,
   once it exists — not yet a file in this repository
 
 #### Acceptance Criteria
 - [ ] The shared world exists as at least one partition with a squad's position tracked as its
       own durable property — tracked by whatever items eventually build it, not this one.
-- [ ] A connection routes to the Durable Object currently owning a squad's position, through the
-      Workers KV directory.
+- [ ] A connection routes to the Durable Object currently owning a squad's position, through
+      whichever directory mechanism is in force (baked-in table, or Workers KV once DO count
+      outgrows it).
 - [ ] Crossing a boundary (a deliberate, designed act, not continuous position tracking) hands a
       live session off without the player having to reconnect, verified by an automated test
       that plays a session across a scripted boundary.
@@ -257,3 +263,98 @@ See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; su
 - [ ] `Persistence` remains reachable by every region-owning instance without being partitioned
       by region (RFC-0002 §4) — or, if that changes, the change is a deliberate edit to this
       item and RFC-0002, not a quiet divergence.
+
+---
+
+### [ITEM-047] Uncap the Roster: Bench Grows With Bases and Vehicles, Squad Cap Is Per-Combat
+**Type:** Feature
+**Priority:** P3
+**Status:** Backlog — a design only ([GDD-OVERVIEW](../design/gdd/overview.md) §3,
+[GDD-ECONOMY](../design/gdd/economy-and-bases.md),
+[GDD-PROGRESSION](../design/gdd/progression-and-meta.md) §5); not started, and not startable yet
+(see Why)
+**Milestone:** Unscheduled — gated on base/vehicle economy existing, which is not a milestone
+deliverable today
+
+#### Why
+`ITEM-042`'s `ROSTER.size = 6` and `SQUAD_SIZE = 4` were scoped to get a playable demo, not
+declared as the game's ceiling — the design direction has moved past them. A player starts with
+two characters, not six (the opening, GDD-OVERVIEW §3), and the bench grows from there as large
+as whatever bases and vehicles they hold can house, with no constant capping it. How many of the
+bench deploy to any one combat should be set by that combat (a narrow interior, a scripted story
+ambush, an open-field assault each stating their own cap), not a flat four every time.
+
+**This item cannot be started today.** Capacity and cap depend on systems that do not exist in
+code: bench capacity depends on the base/vehicle economy (`GDD-ECONOMY`, currently prose only — no
+`Base`/`Vehicle` exists anywhere under `src/`), and a per-combat squad cap depends on a
+scenario/mission system that states one (nothing today hands `Referee`/`Squads` a cap other than
+the flat constant). Dealing two at registration needs neither, but on its own it changes nothing:
+recruiting is free (`ITEM-037`), so a player would recruit straight back to six. It ships with
+capacity, not before. Filed at Backlog rather than Ready so the dependency is visible rather than
+reinvented later, the same reasoning `ITEM-046` was filed on.
+
+#### Change
+1. **Registration deals two.** `Accounts.register` calls `rollSquadSheets(rng, ROSTER.size)`
+   today; it deals the opening pair instead (GDD-OVERVIEW §3). The pair is fixed by the story,
+   not by capacity — every starting holding houses at least two.
+2. **Bench capacity becomes computed, not constant.** `ROSTER.size` (`src/config.ts`) stops
+   being a flat 6; `Rosters.recruit` refuses past a capacity the economy computes (sum of
+   whatever each held base/vehicle contributes) instead of the constant. Depends on the
+   base/vehicle economy shipping a capacity number per holding first.
+3. **Squad deploy cap becomes situational, not constant.** `SQUAD_SIZE` (`src/config.ts`) stops
+   being a flat 4; `Referee.verifyRosters`, `deploymentsFrom` (`src/game/Recording.ts`), the
+   default count of `rollSquadSheets` (`src/core/Characters.ts`), and `RosterScreen`'s toggle need a
+   per-match cap supplied by whatever starts the combat (a scenario, a mission, a PvP queue),
+   defaulting to *something* when nothing states one. Depends on a scenario/mission system that
+   can state a cap existing first.
+4. **Everywhere `SQUAD_SIZE`/`ROSTER.size` is referenced as a fixed bound** —
+   `docs/architecture/networking.md`, `docs/architecture/persistence.md`,
+   `docs/backlog/completed.md`'s `ITEM-041`/`ITEM-042`/`ITEM-043` entries — either gets a note
+   that the constant was superseded, or (once built) is updated to describe the computed bound
+   directly, per living-docs policy (architecture docs describe the system *now*).
+
+#### Affected Files
+- `src/config.ts` (`ROSTER.size`, `SQUAD_SIZE`)
+- `src/server/Accounts.ts` (`register` deals two)
+- `src/core/Characters.ts` (`rollSquadSheets` default count)
+- `src/game/Recording.ts` (`deploymentsFrom` bound)
+- `src/server/Rosters.ts` (`recruit`)
+- `src/server/Referee.ts` (`verifyRosters`)
+- `src/hud/RosterScreen.ts` (deploy toggle, defaulting, empty-slot rendering)
+- `docs/architecture/networking.md`, `docs/architecture/persistence.md`
+- Whatever the base/vehicle economy and the scenario/mission system turn out to be, once they
+  exist — not yet files in this repository
+
+#### P2P / Simulation Impact
+- `RecordingHeader`'s deployment count bound (today `1..SQUAD_SIZE`) becomes `1..cap`, where
+  `cap` is carried on the header itself so a replay knows what bound applied without
+  re-deriving it from state that can change later.
+- The balance sweep (`scripts/balance.ts`) has no roster today (`ITEM-042`'s acceptance already
+  noted this) and needs a stated cap once one is no longer implicit in a constant it already
+  imports.
+
+#### Acceptance Criteria
+- [ ] A freshly registered player holds exactly two active roster members.
+- [ ] A player can hold more than six active roster members once they hold enough bases/vehicles
+      to house them, and recruiting past six no longer refuses.
+- [ ] Two combats with different stated caps (e.g. 2 and 6) each accept a squad up to their own
+      cap and refuse past it — not a `SQUAD_SIZE` shared by both.
+- [ ] `RosterScreen` defaults its toggle and empty-slot count to the current combat's cap, not a
+      hardcoded four.
+- [ ] `bun run balance` states whatever cap it sweeps at explicitly (flag or config), not by
+      importing `SQUAD_SIZE` implicitly.
+- [ ] Living documentation updated: `docs/architecture/networking.md`,
+      `docs/architecture/persistence.md` describe the computed bound, not the old constants.
+
+#### Risks & Mitigations
+- **Risk:** shipping the squad-cap half before a real scenario system exists means every combat
+  still gets the same default cap, making the change invisible in play.
+- **Mitigation:** do not pull this half Ready until at least one caller (even a hardcoded
+  per-scenario test fixture) can state a cap different from the default — otherwise it is a
+  refactor with no observable behavior, which is exactly what living-docs policy says not to
+  claim as done.
+- **Risk:** an unbounded bench with no economy yet to gate it (recruit is still free, `ITEM-037`)
+  lets a player recruit without limit before base/vehicle capacity exists to cap it.
+- **Mitigation:** sequence the base/vehicle economy's capacity number ahead of removing
+  `ROSTER.size`'s constant, not after — §Why already states this as a hard dependency, not a
+  nice-to-have ordering.

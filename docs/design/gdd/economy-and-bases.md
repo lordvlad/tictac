@@ -3,7 +3,7 @@ title: "GDD: Economy, Base Building & Crafting"
 id: "GDD-ECONOMY"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-10-01"
 appliesTo:
   - "src/game/**"
 relatedDocs:
@@ -26,6 +26,17 @@ Players choose between two foundational operational models at game start:
 - **Locations**: Refurbished military bunkers, industrial warehouses, or prepper compounds.
 - **Advantages**: High capacity for research equipment, extensive manufacturing workshops, heavy defensive fortifications.
 - **Drawbacks**: Fixed geographical location requiring long expedition travel times; risk of being raided.
+
+### Roster Capacity (`ITEM-047`, designed, not built)
+A base or a vehicle is also how many people a player can keep, not only where they keep
+equipment: each one held adds bench capacity (see
+[Progression & Squads](progression-and-meta.md#5-permadeath-wounds--roster-persistence) §5), and
+a player holding several of either — a bunker and a spare truck, two trucks — stacks their
+capacities rather than picking one. A vehicle's cramped hold naturally rooms fewer than a
+bunker's dormitory, the same Nomadic/Settled trade-off already above, just paid in people as
+well as lab space. This replaces the flat six `ITEM-042` shipped to get a demo playable with a
+number that grows the way the rest of the economy does — by playing, not by a constant in
+`src/config.ts`.
 
 ---
 

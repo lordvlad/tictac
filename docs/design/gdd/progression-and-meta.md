@@ -3,7 +3,7 @@ title: "GDD: Squads, Progression & Meta Roster"
 id: "GDD-PROGRESSION"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-09-28"
+lastReviewed: "2026-10-01"
 appliesTo:
   - "src/core/Characters.ts"
   - "src/config.ts"
@@ -198,12 +198,16 @@ persistence lands (ITEM-012), that is where it ends.
   start their next one with, not full health — healing a stated fraction of what they are
   missing, scaled by their own Health attribute, every match they are settled. The carried-out
   unit starts exactly on 1 HP and heals from there like anyone else.
-- **The bench** (`ITEM-042`, designed, not built): a player keeps six characters and deploys
-  one to four of them. Whoever sits a match out rests, and rest heals by the same rule
-  survival does.
+- **The bench** (`ITEM-042` shipped a demo-scoped six; redesign filed as `ITEM-047`): no flat
+  cap. Capacity comes from what a player holds — each base and each vehicle houses some number
+  of people (see [Economy & Bases](economy-and-bases.md) §1), and holding several of either
+  stacks their capacities rather than picking one. What deploys to any one combat is still a
+  pick from the bench, but the pick's *ceiling* is set by that combat — a narrow interior, a
+  scripted story ambush and an open-field assault each state their own cap, not a flat four.
+  Whoever sits a combat out rests, and rest heals by the same rule survival does.
 - **Fatigue** (`ITEM-039`, designed, not built): each deployment adds a level (cap 4), each
   match sat out takes two off. From level 2, every level past the first costs a point of
-  maximum AP and 10 starting morale. A six-strong rotation never feels it; the same four fielded
+  maximum AP and 10 starting morale. A large enough rotation never feels it; the same handful
   match after match arrive at −3 AP and 70 morale.
 - **Medical-bay downtime** (`ITEM-039`, designed, not built): carried out of a lost match, two
   matches out; surviving on a quarter of their health or less, one. A character in the bay

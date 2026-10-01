@@ -119,11 +119,14 @@ None of it exists yet:
   up front — see §2 — but the single whole-world partition, and the fiction's capacity to
   eventually redraw it, do.
 - **A directory: region id → owning Durable Object.** `env.MATCH.idFromName('singleton')` is a
-  constant today; a region's owner is not, once a region can split. **Decided (§6.3):** Workers
-  KV, read by every routing decision. Its eventual consistency is an accepted trade for not
-  adding a directory Durable Object as one more hop in front of every request; a brief window
-  where two Workers disagree about who owns a freshly-split partition is judged cheaper than
-  that hop paid on every request forever.
+  constant today; a region's owner is not, once a region can split. **Decided, staged by DO
+  count rather than fixed on one mechanism (§6.3):** while there are few enough partitions that
+  the mapping is comfortable to read in a diff, it is baked straight into the Worker's own
+  deployed code (a literal region-id → Durable-Object-name table, no separate store at all) —
+  which costs nothing extra to maintain, because §2 already decided every split and merge lands
+  at a deploy, and this mapping is part of that same deploy. Workers KV is deferred to the point
+  where redeploying the Worker for every reassignment stops being the easy option — not reached
+  for, by default, at hobby scale.
 - **A hand-off protocol between two Durable Object instances.** Cloudflare Durable Objects can
   call each other directly (RPC, or a Worker-mediated fetch); nothing today exercises that path.
   §4 is the shape of what needs to cross it.
@@ -225,10 +228,22 @@ not accidentally load-bearing for an assumption this RFC removes:
    invisible line. There is nothing to debounce once the crossing itself is a discrete,
    intentional action rather than continuous position tracking. See §7 for the alternative this
    replaced.
-3. ~~Directory consistency~~ **Decided: Workers KV**, accepting its eventual-consistency window
-   rather than paying a directory Durable Object's extra hop on every routing decision forever.
-   A brief window where two Workers disagree about who owns a freshly-split partition is the
-   accepted cost (§3).
+3. ~~Directory consistency~~ **Decided, staged: baked into the deployed Worker while the Durable
+   Object count is low; Workers KV once it is not.** A Durable Object with the SQLite storage
+   backend — the one `[ITEM-045]` already uses — has its own free daily allowance (100,000
+   requests, 13,000 GB-s compute duration), so neither stage of this changes anything about
+   whether the Durable Objects themselves stay free-tier-eligible. What changes between the
+   stages is the directory: redeploying the Worker to update a baked-in table costs nothing
+   beyond the deploy §2 already needs for every split and merge, and sidesteps a second store's
+   consistency question entirely for as long as the table is small enough to hand-maintain. The
+   point to switch is reached *by DO count, not by a calendar date*: once there are enough
+   partitions that redeploying for every reassignment is the inconvenient option rather than the
+   free one, Workers KV takes over, accepting its eventual-consistency window — a brief
+   disagreement between two Workers about who owns a freshly-split partition — rather than paying
+   a directory Durable Object's extra hop on every routing decision forever. Worth keeping in
+   mind for that later stage and not before: Workers KV's own free tier caps writes at 1,000/day
+   (reads at 100,000/day), which a cadence of occasional, deliberate splits and merges stays
+   nowhere near, but would be the first free-tier wall hit if reassignments ever became frequent.
 4. ~~Can a match ever span two regions?~~ **Decided: no** (§4). A match belongs entirely to
    whichever instance was hosting it when it started. What is still open is not the rule but its
    enforcement: the world and its story need to make sure combat does not start standing exactly
