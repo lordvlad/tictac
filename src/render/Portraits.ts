@@ -70,7 +70,6 @@ export class OffscreenPortraits {
         const sheet = squads?.[faction]?.[index]
         const scale = characterScale(sheet?.appearance)
         model.scale.set(scale.x, scale.y, scale.z)
-        model.updateMatrixWorld(true)
 
         // Tint material and disable frustum culling for close-up framing
         model.traverse((child) => {
@@ -83,12 +82,17 @@ export class OffscreenPortraits {
             }
           }
         })
+
         scene.add(model)
+        scene.updateMatrixWorld(true)
 
         const head = model.getObjectByName('Head')
         const headY = head ? new Vector3().setFromMatrixPosition(head.matrixWorld).y : 1.57 * scale.y
         camera.position.set(0, headY + 0.05, 0.75)
         camera.lookAt(new Vector3(0, headY + 0.01, 0))
+        camera.updateMatrixWorld(true)
+
+        renderer.render(scene, camera)
         const dataUrl = canvas.toDataURL('image/png')
         this.portraits.set(`${faction}_${index}`, dataUrl)
 
