@@ -167,3 +167,37 @@ still a plan, so a reader can tell a plan from a rule.
   predispositions. Surges are a proposal.
 - [Interaction & Environment](interaction-and-environment.md) — **proposed**: the item verb
   pointed at tiles and objects as well as people — keys and locks, doors, fire.
+- [Retreat](#28-retreat) — **proposed**: getting out of a fight alive by reaching your own
+  edge (`ITEM-051`), and an AI that knows it can (`ITEM-052`).
+
+### 2.8 Retreat
+
+**Status: designed, not built** (`ITEM-051` rules and the player's command, `ITEM-052` the
+AI). Today a fight ends only when one side has nobody left standing. Retreat is the second way
+out, and the main thing standing between a squad and an unwinnable fight, whether the player is
+watching it or not ([World & Travel](world-and-travel.md) §5.3).
+
+- **Your edge is where you came in.** Each side deploys along its own edge of the map; the
+  rows it deployed in, across the full width of the map, are its way out. A squad is standing
+  on its way out when a fight begins, so getting out at once is always possible to try.
+- **Retreat is called for the whole side**, on its own turn. Everyone standing on the side's
+  edge goes. Anyone who is not is **left behind**, and for now a character left behind is lost:
+  dead to the roster, the same as one killed. (Being captured instead, and rescued later, is a
+  later idea, `ITEM-054`.) At least one has to be on the edge to call it.
+- **It is rolled, and it can fail.** The chance rises with the side's morale and health and
+  falls for every enemy that can see somebody trying to leave. A failed attempt ends the turn.
+  The roll is a rule, so it comes from the match's own dice and both sides see the same result.
+- **Getting away ends the fight.** The side that stays holds the field and wins as if the fight
+  had been fought out, survivors growing as usual. Those who got away **keep their wounds and
+  what they learned**: the experience they earned in the fight still grows them. Nobody is
+  carried out, because nobody needs to be.
+- **Panic runs for home.** A panicking soldier already runs from what it can see; it now runs
+  toward its own edge, so a squad that breaks drifts toward the way out, and a skittish soldier
+  can end up standing on it.
+- **The AI knows it can retreat** (`ITEM-052`). It fights to one of four standing orders:
+  stand and fight; fight but pull out after the first wound or death; size the enemy up first and
+  then decide; or avoid the fight and pull out at once. It decides from what its side has seen,
+  never from what it could not know.
+
+Retreat sits between losing everything and winning: those who get out live and keep what they
+learned, and the field and the win go to the other side.

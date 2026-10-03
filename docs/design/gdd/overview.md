@@ -118,7 +118,8 @@ never left with nobody.
 ## 4. Dynamic World & Global Events
 
 The shared world map features emergent environmental hazards, regional player-driven milestones
-and the encounters the AI aliens provide:
+and the encounters the AI aliens provide. How the map, travel and encounters on the road work is
+in [World & Travel](world-and-travel.md).
 - **Wild Encounters**: a random alien squad at a random place, rolled fresh for the fight and
   gone after it (§2). It is the commonest fight early on, and the first kind of fight that states
   its own squad cap rather than a flat one (`ITEM-047`): a player with two characters can be met

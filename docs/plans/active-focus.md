@@ -25,25 +25,29 @@ the [archive](../backlog/completed.md).
 M1 (headless foundation), M2 (tactical depth), M3 (reconnaissance & morale) and M4 (competitive
 meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]`) closed M4 on
 2026-09-30. `[ITEM-045]` (Cloudflare Durable Object deployment) closed on 2026-10-01 — see the
-[archive](../backlog/completed.md). The active backlog otherwise holds four unscheduled items in
-Backlog. Only `[ITEM-048]`, wild alien encounters, is startable today; nothing is Ready.
+[archive](../backlog/completed.md). Next is the shared world: a squad that can get out of a fight
+(retreat), then a squad that is somewhere (the world map and travel), then the fights met on the
+road ([GDD-WORLD](../design/gdd/world-and-travel.md)).
 
 ---
 
 ## 📋 Ready — pull in this order
-- Nothing. File the next item.
+1. `[ITEM-051]` Retreat: the rule and the player's command — needs neither map nor travel.
+2. `[ITEM-050]` The world map and travel — real-Earth tiles from the existing R2 archive,
+   waypoint position, wall-clock travel on alarms, the start location (absorbs `[ITEM-049]`).
 
 ## 🧊 Backlog — not yet queued
-- `[ITEM-046]` Region-sharded Durable Objects — depends on the shared world existing; not
-  startable today.
+- `[ITEM-052]` The AI can retreat (standing orders) — after `[ITEM-051]` and once the policy
+  extraction in `src/sim/Policy.ts` settles.
+- `[ITEM-048]` Wild alien encounters on the road — after `[ITEM-050]`; seats the AI for the
+  aliens and for absent players, with a join window.
+- `[ITEM-053]` Player encounters on the road — after `[ITEM-050]` and `[ITEM-048]`; offline
+  squads engageable, on trial.
+- `[ITEM-046]` Region-sharded Durable Objects — depends on the shared world having load to
+  shard.
 - `[ITEM-047]` Uncap the roster (bench grows with bases/vehicles, squad cap set per combat) —
-  depends on the base/vehicle economy and a scenario/mission system, neither built; not
-  startable today.
-- `[ITEM-048]` Wild alien encounters — a fresh AI-run squad per fight, the referee playing it;
-  startable today, on generated maps, with existing kit. The first item that makes a live match
-  possible without a second human.
-- `[ITEM-049]` Start location from the player's real-world area — 50 km around Cloudflare's
-  reported point; depends on the shared world existing; not startable today.
+  depends on the base/vehicle economy and a scenario/mission system, neither built.
+- `[ITEM-054]` Capture and rescue — an idea; the left-behind of a retreat are lost until then.
 
 ## ⚠️ Left open by finished work
 - **ITEM-019**: the sweep's policy neither sneaks nor throws stones, so the balance sweep does

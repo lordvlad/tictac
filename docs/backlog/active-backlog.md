@@ -216,44 +216,58 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
 
 ---
 
-### [ITEM-048] Wild Alien Encounters: a Fresh AI Squad per Fight
+### [ITEM-048] Wild Alien Encounters on the Road
 **Type:** Feature
 **Priority:** P2
-**Status:** Backlog — designed ([GDD-OVERVIEW](../design/gdd/overview.md) §2, §4); not started
+**Status:** Backlog — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5,
+[GDD-OVERVIEW](../design/gdd/overview.md) §2); not startable until `ITEM-050` (the world map and
+travel) ships
 **Milestone:** Unscheduled
 
 #### Why
 Humans are the only playable faction at the start; the aliens are run by the game and have no
 persistent identity (GDD-OVERVIEW §2). Meeting them is a wild encounter: a random alien squad,
-rolled fresh for the fight, at a random place, gone once the fight is settled. Today there is
-no way to fight the game at all — the live client never imports `src/sim/`, and the only AI,
-`SimMatch`'s policy, plays both sides of a headless sweep. Every live match needs two humans.
+rolled fresh for the fight, gone once the fight is settled. Today there is no way to fight the
+game at all from a live client against the referee; every refereed match needs two humans.
 
-Most of this is startable before the shared world exists: "a random place" is today's
-`generateMap(seed)`; what the world map adds later is *where* the encounter happens, not what it
-is.
+This item first argued it could ship before the world existed, with "a random place" meaning
+only a freshly generated battlefield. That sequencing was overruled (2026-10-02): an encounter
+is something that happens *somewhere on the map*, to a squad that was going somewhere, so it
+waits for `ITEM-050`. The battlefield is still `generateMap(seed)`; the world map adds where
+the squad was and what happens to its journey afterwards.
 
 #### Change
-1. **The AI plays one side of a live, refereed match.** The referee hosts the alien side and
-   issues its commands as intents, the same commands a human sends. Not the human's client: a
-   client that drives its own opponent can make it play badly. `SimMatch`'s policy is the
-   starting point; whether it is reused as-is or split into a policy usable outside the sweep is
-   this item's to decide.
-2. **The alien squad is rolled, not stored.** Sheets and kit are dealt from system randomness
-   at encounter start (setup, like `enlist`), stated in the header like any squad, and never
-   written to `roster`. Settlement treats the alien side the way `Referee.verifyRosters` already
-   treats an anonymous one: nothing to keep.
-3. **The human side settles normally**: growth, HP, fatigue, permadeath, carried-out.
-4. **The encounter sizes the alien squad.** Within today's `1..SQUAD_SIZE` (short-handed squads
-   already deploy and settle, `ITEM-041`), so this does not wait for `ITEM-047`. Once
-   `ITEM-047` lands, the encounter is the caller that states a per-combat cap — the one its
-   Risks section says must exist before the cap is worth building.
+1. **Encounters are found on the road** (GDD-WORLD §5.1). At each travel alarm checkpoint the
+   server rolls whether an alien squad found the squad on the stretch just travelled, scaled by
+   the area's danger and the travel pace. The roll is setup randomness from a stream seeded by
+   (squad, trip, checkpoint), never a match's dice, and is decided at the checkpoint, not in
+   advance, so no future encounter exists to leak. Contact halts travel.
+2. **The referee plays the alien side.** It issues the alien squad's commands as intents, the
+   same commands a human sends, using the policy `ebc3d49` split out of `SimMatch`. Not the
+   human's client: a client that drives its own opponent can make it play badly.
+3. **The referee can also play an absent human's side** (GDD-WORLD §5.2), to that player's
+   standing order (`ITEM-052`). A player online at contact gets a **join window** to take the
+   fight; otherwise the AI plays it. With nobody present the fight is fought out at once on the
+   server, headless. Every one of these is an ordinary match: recorded, replayable, settled.
+4. **The header records who controlled each side** (human or AI), for audit and for the
+   return feed.
+5. **The alien squad is rolled, not stored.** Sheets and kit are dealt from system randomness
+   at encounter start, stated in the header like any squad, never written to `roster`; the
+   alien side settles like an anonymous one does. The encounter sizes it within today's
+   `1..SQUAD_SIZE` (`ITEM-041` already handles short-handed squads); once `ITEM-047` lands the
+   encounter is the caller that states a per-combat cap.
+6. **The human side settles normally**, including growth, whether it played or the AI played
+   for it.
+7. **After the fight** a surviving squad resumes its route or stops and waits: a player
+   setting.
+8. **A return feed**: what happened while the player was away, each fight watchable back.
 
 #### Affected Files
-- `src/server/Referee.ts` (hosting an AI side; settling a side with no roster)
-- `src/sim/SimMatch.ts`, `src/sim/Tactics.ts` (policy usable for one side of a live match)
-- `src/game/Recording.ts` (header records the AI side as rolled, not rostered)
-- `src/hud/` (a way to start an encounter)
+- `src/server/Referee.ts` (an AI-controlled side; settling a side with no roster)
+- `src/sim/Policy.ts`, `src/game/AiOpponent.ts` (the policy seated by the referee)
+- `src/game/Recording.ts` (controller per side in the header)
+- Travel's alarm/checkpoint scheduler from `ITEM-050`
+- `src/hud/` (the join window, the return feed)
 - `docs/architecture/networking.md`, `docs/architecture/persistence.md`
 
 #### P2P / Simulation Impact
@@ -264,10 +278,13 @@ is.
 - The balance sweep is unchanged; it already plays AI against AI.
 
 #### Acceptance Criteria
-- [ ] A signed-in player starts an encounter and plays a whole match against an AI-run squad
-      through the referee, to settlement.
-- [ ] The human side's roster settles exactly as in a match against a human; nothing about the
-      alien squad is written to `roster`.
+- [ ] A travelling squad runs into an alien squad at a checkpoint, and its journey stops.
+- [ ] An online player takes the fight inside the join window and plays it through the referee to
+      settlement; a player who lets the window lapse has it played for them.
+- [ ] With nobody online the fight is fought out on the server and settles the roster, growth
+      included, exactly as a played match would.
+- [ ] Nothing about the alien squad is written to `roster`.
+- [ ] The encounter roll for a given (squad, trip, checkpoint) is reproducible after the fact.
 - [ ] Two encounters roll different alien squads; the same recording replays identically.
 - [ ] `tests/determinism.test.ts` still passes: the AI draws nothing from the match stream.
 - [ ] Living documentation updated.
@@ -278,50 +295,294 @@ is.
   as aliens with human kit.
 - **Mitigation:** ship the encounter with existing kit and file alien kit separately; the
   encounter does not depend on what the squad carries.
-- **Risk:** the sweep policy was written to measure balance, not to be fun to fight; it never
-  sneaks, throws smoke or uses doors (focus board, "Left open").
-- **Mitigation:** accept it for the first encounters; make the policy better as its own item.
+- **Risk:** the policy was written to measure balance, not to be fun to fight or to fight well on
+  a player's behalf; it never sneaks, throws smoke or uses doors (focus board, "Left open").
+  Once it plays absent players' squads, its weaknesses cost real characters.
+- **Mitigation:** retreat (`ITEM-051`, `ITEM-052`) gives an absent squad a way out; improving
+  the policy is filed as its own work once this exposes where it fails.
+- **Risk:** a join window needs a way to tell an online player that something found them.
+- **Mitigation:** in-app only to start (the player's open socket); push notifications are out of
+  scope.
 
 ---
 
-### [ITEM-049] Start Location From the Player's Real-World Area
+### [ITEM-049] Start Location From the Player's Real-World Area — merged into ITEM-050
 **Type:** Feature
-**Priority:** P3
-**Status:** Backlog — designed ([GDD-OVERVIEW](../design/gdd/overview.md) §3); not startable yet
-**Milestone:** Unscheduled — gated on the shared world existing
+**Status:** Merged into `ITEM-050` (2026-10-02): the start location and the world map need the
+same primitive, a squad's position, and ship together. The design is in
+[GDD-WORLD](../design/gdd/world-and-travel.md) §4 and GDD-OVERVIEW §3; the change list moved
+into `ITEM-050`'s.
+
+---
+
+### [ITEM-050] The World Map and Travel
+**Type:** Feature
+**Priority:** P2
+**Status:** Ready — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §1–4); absorbs
+`ITEM-049`
+**Milestone:** Unscheduled
 
 #### Why
-A player starts near where they are (GDD-OVERVIEW §3): at a random point within 50 km of the
-latitude and longitude Cloudflare reports for their connection. There is no world map to place
-them on today, so this waits for the shared world, as `ITEM-046` does.
+Everything the GDD calls the shared world (GDD-OVERVIEW §3, §4) rests on one missing thing: a
+squad has no position. Encounters on the road (`ITEM-048`, `ITEM-053`), where a player starts
+(`ITEM-049`, merged here) and region sharding (`ITEM-046`) all wait on it.
+
+Prior art exists in `../no-way-home`, the project this one grew out of: a real-Earth PMTiles
+basemap served from R2, waypoint travel on Durable Object alarms, path-based fog of war. Its
+waypoint maths (`packages/shared/src/waypoint-utils.ts`, 16 passing tests, no dependencies) is
+sound and ports almost as-is. Its server orchestration is not proven: its integration suite is
+disabled, its unit test is a placeholder and its E2E ran 4/7. And its basemap,
+`map-tiles/world.pmtiles` (33 MB), is already in this account's R2 bucket `map-tiles`.
 
 #### Change
-1. On registration, read `request.cf.latitude`/`longitude` (strings in
-   `@cloudflare/workers-types`; absent off Cloudflare, e.g. `bun run serve:match`).
-2. Draw a point uniformly over the 50 km disc: radius `R·√u`, not `R·u`, which would crowd starts
-   toward the centre. System randomness — setup, not rules.
-3. Redraw while the point is within a minimum distance of an existing start.
-4. Store only the drawn point as the squad's position (RFC-0002 §4); never the reported one.
-5. A fallback when Cloudflare reports nothing.
+1. **Serve the map.** Bind the existing R2 bucket `map-tiles` to `tictac-match-server`; serve
+   `GET /api/tiles/{z}/{x}/{y}.mvt` by range-reading `world.pmtiles` (the prior art's ~70-line
+   R2 `Source` adapter plus its tile route, with abort handling fixed). A client served from
+   GitHub Pages fetches tiles from its match server, across origins.
+2. **A squad has a position**, as a list of waypoints (GDD-WORLD §2), stored with the squad in
+   `Persistence`. Port the waypoint maths into the headless core with the clock injected rather
+   than read (`Date.now()` inside it today) and returning new lists rather than mutating; bring
+   its tests along.
+3. **Wall-clock travel on alarms** (GDD-WORLD §3). The match server's Durable Object holds one
+   alarm, so a scheduler keeps every squad's next due moment and arms the alarm for the
+   earliest. Alarms are at most an hour apart; an arrival is recorded at its expected time, not
+   the time the alarm fired. One mechanism for every scale of movement.
+4. **Orders on the map**: go here, go here now, go here first, go here next, stop (GDD-WORLD §3),
+   as requests to the match server, which validates and updates the waypoint list. Pace
+   (cautious, normal, flat out) sets the speed of a leg.
+5. **Where a player starts** (ex-`ITEM-049`): on registration, read
+   `request.cf.latitude`/`longitude` (absent off Cloudflare); draw a point uniformly over the
+   50 km disc (radius `R·√u`); redraw while within a minimum distance of an existing start;
+   store only the drawn point; fall back to a default anchor when nothing is reported.
+6. **The map in the client**: MapLibre GL with a Protomaps style over the served tiles, the
+   player's squad drawn where it is, moving between frames by the same position function the
+   server uses, and the order verbs on right-click. Written fresh against this project's state,
+   not ported from the prior art's 888-line view.
 
 #### Affected Files
-- `src/server/Accounts.ts` (`register`)
-- `workers/MatchDurableObject.ts` (passing `request.cf` through)
-- The shared world's position store, once it exists
+- `wrangler.jsonc` (R2 binding), `workers/index.ts`, `workers/MatchDurableObject.ts` (tiles,
+  alarm, `request.cf` through to registration)
+- `src/core/` (waypoint maths, headless), `src/server/` (travel orders, the scheduler, the
+  squad's position in `Persistence`), `src/server/db/migrate.ts` (a migration for it)
+- `src/server/Accounts.ts` (`register`: the start location)
+- `src/hud/` or a new map view; `src/main.ts` (getting to it)
+- `package.json` (`pmtiles`, `maplibre-gl`, `protomaps-themes-base`)
+- `docs/architecture/` (a world/travel section), `docs/design/gdd/world-and-travel.md`
 
 #### P2P / Simulation Impact
-- None: the start point is set once, on the server, outside any match.
+- None on matches. Travel has no randomness; its position function is a pure function of the
+  waypoints and the time, so it needs no match stream and does not touch `matchDice`.
+- Travel orders are not match commands and do not go on the match wire; the wire-shape catalogue
+  is untouched unless travel later moves onto the socket.
 
 #### Acceptance Criteria
-- [ ] A player registering through Cloudflare starts within 50 km of the reported point; the
-      reported point is stored nowhere.
-- [ ] Starts drawn from one anchor are spread uniformly over the disc (statistical test over many
-      draws) and none is closer to another than the minimum distance.
-- [ ] Registration off Cloudflare still works, through the fallback.
+- [ ] A freshly registered player through Cloudflare sees their squad on a real map within 50 km
+      of the reported point, which is stored nowhere; starts from one anchor spread uniformly over
+      the disc (statistical test) and respect the minimum distance; registration off Cloudflare
+      still works through the fallback.
+- [ ] Tiles are served from the existing `map-tiles/world.pmtiles` through the match server, to a
+      client on the match server's own origin and to one on GitHub Pages.
+- [ ] All five orders work and the waypoint maths is unit-tested with an injected clock.
+- [ ] A squad sent on a long trip keeps travelling with the tab closed; on return it is where the
+      clock says it should be, and an arrival that happened while away is recorded at its
+      expected time.
+- [ ] A refresh mid-journey resumes without a jump.
+- [ ] Living documentation updated.
 
 #### Risks & Mitigations
-- **Risk:** the disc is drawn on the real map, so a coastal city's start can land in the sea.
-- **Mitigation:** redraw off land as well as too close to another start; needs land data the
-  world map will have to carry anyway.
+- **Risk:** a drawn start can land in the sea; the basemap knows where land is, the server does
+  not yet.
+- **Mitigation:** accept sea starts for now, or redraw against a coarse land mask; decide when
+  it is built, not before.
+- **Risk:** the 33 MB extract may not cover the whole world; a player from outside it starts on
+  a blank map.
+- **Mitigation:** check the extract's bounds first; the prior art's download script can fetch a
+  larger build if needed (rewrite it to stream: it buffers the whole file in memory).
 - **Risk:** IP geolocation can be far off (mobile carriers, VPNs).
 - **Mitigation:** accepted. The start is meant to be roughly local, not exact.
+
+---
+
+### [ITEM-051] Retreat: the Rule and the Player's Command
+**Type:** Feature
+**Priority:** P1
+**Status:** Ready — designed ([GDD-COMBAT](../design/gdd/combat-mechanics.md) §2.8); startable
+today, needs neither the map nor travel
+**Milestone:** Unscheduled
+
+#### Why
+A fight ends only when one side has nobody left standing (`winnerOf`). There is no way to cut
+losses, which matters now and will matter more once the AI fights for absent players
+(`ITEM-048`, `ITEM-053`): retreat is the main lever between a squad and an unwinnable fight.
+
+#### Change
+1. **The way out.** A side's way out is its deployment rows across the full width of the map
+   (Blue rows 2–4, Red rows `size−5`…`size−3` today). It is derived from the same constants
+   `generateMap` uses, by a helper in `src/core/` that the client, `MatchHost` and the referee
+   all call; nothing new is stored, because `generateMap` throws its deployment zones away today.
+2. **`retreat { faction }`**, a side-level command with no acting unit, like `endTurn`. Allowed
+   on the side's own turn while at least one living unit stands on its way out. Everyone on the
+   way out goes; everyone else is **left behind** and counts as dead.
+3. **The roll** comes from the match dice (a rule; both peers draw it). The chance rises with
+   the leavers' morale and health and falls for each enemy that can see a leaver; numbers in
+   `config.ts`, set from the balance sweep. A failed roll ends the turn.
+4. **Getting away ends the match.** The staying side wins and its survivors grow as usual. The
+   result carries how it ended (wiped out, or withdrew), and that state lives where both peers
+   and a replay derive it: `winnerOf` (or a result type over it), `settlement`, `Referee.settle`
+   and the end screens move together.
+5. **A new fate, `withdrew`**: alive, current HP and wounds, deeds kept, **grown from those
+   deeds**, fatigue as usual. The left-behind and the already dead are `died`. Nobody is carried
+   out on a withdrawal. `Rosters` gains the branch.
+6. **Panic runs for home.** `Breakdown.fleeTo` prefers tiles toward the unit's own way out, so a
+   broken skittish soldier drifts toward the exit. A rules change: measured with
+   `bun run balance` before and after.
+7. **The player's command.** A Retreat button on the player's turn, enabled while anyone stands
+   on the way out, showing the chance and naming who would be left behind before it is
+   confirmed. An end screen for a side that got away.
+8. **Protocol.** `PROTOCOL_VERSION` 3 → 4, `RpcMethods` entry, regenerated wire-shape catalogue.
+   `retreat` is a rules command, so it is recorded and replayed. Worked example of every place
+   a command touches: `operateDoor`.
+
+#### Affected Files
+- `src/core/` (the way-out helper; `cannotRetreat`; the chance), `src/core/MapGenerator.ts`
+  (shared deployment-row constants)
+- `src/ecs/systems/CommandSystem.ts`, `src/game/NetworkManager.ts`, `src/game/JsonRpc.ts`,
+  `src/version.ts`, `docs/schemas/wire-shape-catalog.json`
+- `src/game/MatchEnd.ts`, `src/game/Breakdown.ts`, `src/server/Referee.ts`,
+  `src/server/Rosters.ts`
+- `src/hud/HudModel.ts`, `src/game/InteractionController.ts`
+- `src/game/AiOpponent.ts` (only to recognise a match that ended by withdrawal; the AI itself
+  does not retreat until `ITEM-052`)
+- `tests/` (retreat rules, settlement, replay), `docs/architecture/combat-and-rules.md`,
+  `docs/architecture/persistence.md`
+
+#### P2P / Simulation Impact
+- The roll draws from `matchDice`; both peers and the referee draw it in the same order.
+- A recorded `retreat` replays to the same outcome.
+- The sweep's policy never calls retreat yet, so only panic's new direction moves the report;
+  the before/after diff is recorded.
+
+#### Acceptance Criteria
+- [ ] A side with someone on its way out can retreat on its own turn; one with nobody there cannot.
+- [ ] A successful retreat ends the match: the stayer wins and grows; leavers settle as `withdrew`
+      with their HP, wounds and growth; the left-behind are dead on the roster.
+- [ ] A failed roll ends the turn and the match goes on.
+- [ ] Both peers and the referee agree on every roll; a recorded match containing a retreat replays
+      identically.
+- [ ] A panicking unit flees toward its own way out.
+- [ ] `bun run balance` before/after recorded; `tests/determinism.test.ts` passes.
+- [ ] Living documentation updated.
+
+#### Risks & Mitigations
+- **Risk:** retreat is always available from turn one, because a squad starts on its way out; a
+  player could escape every bad matchup for free.
+- **Mitigation:** it is rolled, enemies who can see the leavers make it harder, and getting away
+  forfeits the win. If it still proves too cheap, a minimum turn or an AP price is a constant away.
+- **Risk:** panic now walks units toward an exit while a player may want them to hold.
+- **Mitigation:** that is what panic is; the sweep shows whether it changes outcomes.
+
+---
+
+### [ITEM-052] The AI Can Retreat: Standing Orders
+**Type:** Feature
+**Priority:** P2
+**Status:** Backlog — designed ([GDD-COMBAT](../design/gdd/combat-mechanics.md) §2.8); waits for
+`ITEM-051`, and for the policy extraction in progress (`src/sim/Policy.ts`) to settle
+**Milestone:** Unscheduled
+
+#### Why
+An AI that cannot retreat fights every fight to the last soldier. Once it plays for absent
+players (`ITEM-048`, `ITEM-053`) that costs real characters; and an alien squad that runs is
+better to fight against than one that never does.
+
+#### Change
+1. **Four standing orders** for the policy: *stand* (fight to the end, today's behaviour);
+   *cautious* (pull out after the first wound or death); *opportunist* (scout, then pull out if
+   known contacts outnumber its living units or its HP falls below half); *evade* (pull out on
+   the first turn).
+2. **Walking home.** When pulling out, units head for the way out (`ITEM-051`), using
+   `Tactics.chooseDestination` with a walk-cost field toward it; the side calls retreat once
+   enough are there.
+3. **Belief, not truth.** Triggers read the side's own state and `Intel`'s contacts, never true
+   enemy HP (`Policy.totalHp` reads both sides and must not drive a decision).
+4. **Where an order comes from**: for a player's absent squad, the player's setting
+   (GDD-WORLD §5.3); for an alien squad, the encounter; for the sweep, *stand* by default.
+
+#### Affected Files
+- `src/sim/Policy.ts`, `src/sim/Tactics.ts`, `src/sim/SimMatch.ts` (an order per side),
+  `src/game/AiOpponent.ts`, `scripts/balance.ts` (an option to sweep an order)
+
+#### P2P / Simulation Impact
+- The policy's decisions are intents; it draws nothing from the match stream.
+- With every side on *stand*, `bun run balance` is identical to the post-`ITEM-051` baseline.
+
+#### Acceptance Criteria
+- [ ] Each order behaves as named in headless matches (tests drive each to its trigger).
+- [ ] No order reads enemy state the side has not seen.
+- [ ] `bun run balance` with every side on *stand* is identical to the post-`ITEM-051` baseline;
+      sweeping the other orders reports how often each gets away.
+
+---
+
+### [ITEM-053] Player Encounters on the Road
+**Type:** Feature
+**Priority:** P3
+**Status:** Backlog — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5); waits for
+`ITEM-050` and `ITEM-048`
+**Milestone:** Unscheduled
+
+#### Why
+The "PvP" in PvPvE: two squads whose routes cross can fight. Travel carries on while players
+are away, so most crossings will involve at least one absent player.
+
+#### Change
+1. **Finding each other.** Every leg is a straight line at constant speed, so two squads'
+   closest approach is solved directly. When a route is set, the server checks it against every
+   other squad in the same zone, schedules a meeting if they come within engagement range, and
+   re-checks when it fires. Within one Durable Object only: no cross-DO matches
+   ([RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) §6.4).
+2. **Who plays** follows `ITEM-048`: live for whoever is present (join window), the AI to its
+   player's standing order for whoever is not, fought out on the server if nobody is. Both
+   sides are rostered and both settle.
+3. **Offline squads can be engaged — on trial.** Ships enabled behind a server switch; feedback
+   decides whether it stays. Zone rules (places where an absent squad cannot be engaged) wait for
+   zones.
+
+#### Affected Files
+- Travel's scheduler (`ITEM-050`), the referee's AI seating (`ITEM-048`), `src/server/Referee.ts`
+
+#### P2P / Simulation Impact
+- None on match rules. The meeting check is geometry over waypoints, outside any match.
+
+#### Acceptance Criteria
+- [ ] Two squads whose routes cross within range meet at the computed moment; a route changed
+      beforehand moves or cancels the meeting.
+- [ ] Each of the three presence cases plays and settles both rosters.
+- [ ] Engaging offline squads can be switched off without a deploy of new code.
+
+#### Risks & Mitigations
+- **Risk:** a sleeping squad is a target; griefing.
+- **Mitigation:** standing orders including evade (`ITEM-052`), travel pace, the switch, and zone
+  rules once zones exist.
+
+---
+
+### [ITEM-054] Capture and Rescue
+**Type:** Feature
+**Priority:** P3
+**Status:** Backlog — an idea, not designed
+**Milestone:** Unscheduled
+
+#### Why
+A character left behind on a retreat (`ITEM-051`) is lost, counted as dead. Being captured
+instead, held somewhere on the map and freed by a later fight, would turn that loss into a
+reason to go somewhere.
+
+#### Change
+To be designed. Likely a `captured` roster status alongside `dead`, a place on the map where the
+captive is held (`ITEM-050`), and a fight that frees them. Until then the left-behind are removed
+from the roster the way the dead are; whether that row is deleted or kept makes no difference
+to this item.
+
+#### Acceptance Criteria
+- [ ] Designed in the GDD before any of it is built.

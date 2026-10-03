@@ -23,6 +23,7 @@ tags: ["gdd", "design", "gameplay"]
 | Document | Topic | Description |
 | --- | --- | --- |
 | [Overview & Setting](./overview.md) | Lore, World, Factions, Opening | Ship broken up over many crash sites, post-EMP earth, humans playable and aliens AI-run (playable later), and how a player arrives: the crash site nearest them, two characters. |
+| [World & Travel](./world-and-travel.md) | World Map, Travel, Encounters (designed) | The real-Earth map, a squad's position as waypoints, wall-clock travel, where a player starts, and fights met on the road — including those the AI plays for an absent player. |
 | [Combat Mechanics](./combat-mechanics.md) | Turn-based Tactics | Action Points, LOS DDA, cover rules, ballistic equations, weapons, traits. |
 | [Status, Trait & Worn Kit Catalogue](./status-and-trait-catalog.md) | Reference (generated) | Every status, trait and passive item with its current numbers, and where each trait can be got from. |
 | [Melee Combat](./melee-combat.md) | Contact Fighting (draft) | Fists, blades and bludgeons; contests instead of hit rolls, and the quiet kill. |
