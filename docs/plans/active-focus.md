@@ -25,20 +25,17 @@ the [archive](../backlog/completed.md).
 M1 (headless foundation), M2 (tactical depth), M3 (reconnaissance & morale) and M4 (competitive
 meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]`) closed M4 on
 2026-09-30. `[ITEM-045]` (Cloudflare Durable Object deployment) closed on 2026-10-01 — see the
-[archive](../backlog/completed.md). Next is the shared world: a squad that can get out of a fight
-(retreat), then a squad that is somewhere (the world map and travel), then the fights met on the
-road ([GDD-WORLD](../design/gdd/world-and-travel.md)).
+[archive](../backlog/completed.md). Retreat (`[ITEM-051]`, `[ITEM-052]`) closed on 2026-10-02.
+Next is the shared world: a squad that is somewhere (the world map and travel), then the fights
+met on the road ([GDD-WORLD](../design/gdd/world-and-travel.md)).
 
 ---
 
 ## 📋 Ready — pull in this order
-1. `[ITEM-051]` Retreat: the rule and the player's command — needs neither map nor travel.
-2. `[ITEM-050]` The world map and travel — real-Earth tiles from the existing R2 archive,
+1. `[ITEM-050]` The world map and travel — real-Earth tiles from the existing R2 archive,
    waypoint position, wall-clock travel on alarms, the start location (absorbs `[ITEM-049]`).
 
 ## 🧊 Backlog — not yet queued
-- `[ITEM-052]` The AI can retreat (standing orders) — after `[ITEM-051]` and once the policy
-  extraction in `src/sim/Policy.ts` settles.
 - `[ITEM-048]` Wild alien encounters on the road — after `[ITEM-050]`; seats the AI for the
   aliens and for absent players, with a join window.
 - `[ITEM-053]` Player encounters on the road — after `[ITEM-050]` and `[ITEM-048]`; offline
@@ -50,6 +47,12 @@ road ([GDD-WORLD](../design/gdd/world-and-travel.md)).
 - `[ITEM-054]` Capture and rescue — an idea; the left-behind of a retreat are lost until then.
 
 ## ⚠️ Left open by finished work
+- **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
+  socket is not tested end to end (settlement is tested at the function the referee calls, and
+  `Rosters` is unchanged). The live AI opponent stays on `stand`; which order an AI squad fights
+  to is `[ITEM-048]`'s to choose. Retreat is available from turn one and a fresh, unseen squad
+  gets away 95% of the time — by design (avoiding a fight costs only time), to be revisited if it
+  plays as too cheap.
 - **ITEM-019**: the sweep's policy neither sneaks nor throws stones, so the balance sweep does
   not measure stealth.
 - **ITEM-033**: every predisposition is a net gain. Whether one should cost something is an

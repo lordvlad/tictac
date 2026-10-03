@@ -233,15 +233,20 @@ behaviour change `ITEM-038` makes to a live match, and the reason
 for `ITEM-043` and `ITEM-041`, each for its own reshaping of the same header).
 
 **After the match.** `settlement()` in `src/game/MatchEnd.ts` is pure and reads
-the referee's own world the moment a side is wiped out. Every fate carries the
-unit's HP at that moment and this match's own `Deeds` (the service record
-`ITEM-004` already computes for growth), regardless of who won:
+the referee's own world the moment a side has nobody left on the field — wiped
+out, or withdrawn by a retreat (`ITEM-051`). Every fate carries the unit's HP at
+that moment and this match's own `Deeds` (the service record `ITEM-004` already
+computes for growth), regardless of who won:
 
 - the winner's living units are `survived`, with `grown(sheet, growth)` from
   `debrief`;
 - the winner's dead are `died`;
-- on the losing side the `carriedOut` unit is `carried` and everyone else is
-  `died`. Losers learn nothing — that is what permadeath is for.
+- on a losing side that was wiped out, the `carriedOut` unit is `carried` and
+  everyone else is `died`. Losers learn nothing — that is what permadeath is for;
+- on a losing side that retreated, those who got away are `survived`, grown
+  from their own deeds (`escaped`), and those left behind are `died`. Nobody is
+  carried out. `Rosters` needed no new branch: a leaver's fate is the same shape
+  as any survivor's, and settles the same way (HP, healing, fatigue, downtime).
 
 `Rosters.settle` writes it in one transaction, keyed by `match_results.match_id`
 so a referee asked twice writes the growth once. A dead character is **marked,

@@ -335,8 +335,10 @@ each asked for after the last was carried out and walked, with the origin `rules
 to the *front* of the applier's queue: a peer's commands for the turn can already be waiting
 behind the handover, and they were decided after the runs, on the peer that made them.
 
-- **panic**: stand, walk to the reachable tile in sight of the fewest enemies its side can see,
-  farthest from the nearest of them, then crouch if it can afford to. Seeing nobody, it cowers.
+- **panic**: stand, walk to the reachable tile in sight of the fewest enemies its side can see —
+  among those, one no nearer the nearest of them than it stands now, then the one fewest rows
+  from its own way out (see Retreat below: panic runs for home), then the farthest from the
+  nearest enemy — then crouch if it can afford to. Seeing nobody, it cowers.
 - **frenzy**: strike the nearest enemy its side can see if in reach; otherwise charge to the
   reachable tile nearest it, then strike or fire the cheapest shot until the points or the rounds
   run out, reloading an empty weapon once. Seeing nobody, it goes on watch.
@@ -345,6 +347,26 @@ Integer comparisons only, ties by squad order and tile index, and only enemies t
 can see — a flight away from an enemy nobody has spotted would tell its player where they are.
 The run ends with `endUnitTurn`. A broken unit refuses every command from any other origin
 except `endUnitTurn`, and a `local` command is refused while the rules are still running anyone.
+
+### Retreat
+A side's **way out** is the rows it deployed in, across the whole width of the map
+(`src/core/Retreat.ts`: `DEPLOY_INSET` 2 and `DEPLOY_ROWS` 3, the same two constants
+`generateMap` draws the deployment zones with — Blue rows 2–4, Red rows `size−5`…`size−3`).
+Nothing is stored: every carrier of a match works it out from the map's size.
+
+`retreat { faction }` is a side-level command with no acting unit, like `endTurn`, allowed on the
+side's own turn while at least one living unit stands on its way out (`cannotRetreat`). The
+chance (`retreatChance`, numbers in `RETREAT`) is whole percent: 60, plus up to ±20 by the
+leavers' mean morale and up to ±20 by their mean health fraction, minus 15 for every living enemy
+that can see any leaver (`watchersOf`), clamped to 5–95. The roll is the match's own dice.
+
+- **Caught** (roll ≥ chance): `CommandSystem.handOver` runs — the same handover `endTurn` does.
+- **Away**: every leaver's `HealthComponent.withdrawn` is set (replicated, digested); every
+  other living unit of the side is left behind and its hit points go to zero. The side has
+  nobody on the field (`Soldier.onField`), so `winnerOf` names the other side and the match is
+  over on every carrier.
+
+The command is recorded and replays: `tests/retreat.test.ts`.
 
 ### Fire
 Every tile has a surface (`src/core/Surfaces.ts`: paving, dry grass, concrete, timber, ash), laid
@@ -393,15 +415,17 @@ that asks for Intelligence, each lock opened with keys or forced, and at the han
 outgoing side's turns spent to the last point that will not wind them). Friendly fire teaches
 nobody. Nothing in a match reads the record.
 
-Once one side has nobody standing (`game/MatchEnd.winnerOf`), `debrief` turns the winning side's
-survivors' records into growth with `core/Progression.growthFrom` — a pure function of the sheet
-going in and the record (numbers in `PROGRESSION`, catalogue §10) — and the controller shows the
-end screen (`HudModel.endScreens`): in a local match the loser's "you lost", then the winner's
-survivors; online, each side its own. The losing side learns nothing; `carriedOut` picks one of
-its fallen to leave the match alive on 1 HP, from a stream of the match seed (so both peers pick
-the same one, and the match's dice are untouched), preferring one not lying in fire. `grown`
-applies growth to a sheet; nothing stores either yet (ITEM-012). The sweep reports records and
-growth (`progression:` line).
+Once one side has nobody on the field (`game/MatchEnd.winnerOf`: dead, or withdrawn by a
+retreat), `debrief` turns the winning side's survivors' records into growth with
+`core/Progression.growthFrom` — a pure function of the sheet going in and the record (numbers in
+`PROGRESSION`, catalogue §10) — and the controller shows the end screen (`HudModel.endScreens`):
+in a local match the loser's page, then the winner's survivors; online, each side its own. The
+losing side learns nothing — except those who got away by retreating, whom `escaped` grows the
+same way and the loser's page lists ("you got out"). After a wipe `carriedOut` picks one of the
+fallen to leave the match alive on 1 HP, from a stream of the match seed (so both peers pick the
+same one, and the match's dice are untouched), preferring one not lying in fire; after a retreat
+nobody is carried out. `grown` applies growth to a sheet. The sweep reports records and growth
+(`progression:` line).
 
 ## 3. Damage Resolution & Armor
 

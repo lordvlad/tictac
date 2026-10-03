@@ -100,6 +100,9 @@ against state they both hold. See
   same-length arrays (`sheets`, `loadout`, `hp`) with nothing tying their
   lengths together — exactly the failure `ITEM-041` found.
 - `endTurn`: hands over turn priority to the opposing faction.
+- `retreat`: the faction only (protocol 4, `ITEM-051`). The side tries to get out; whether it
+  does is rolled from the match's dice on every side, and a failed attempt hands over without
+  an `endTurn` of its own. Like `endTurn`, a `digest` is sent just before it.
 - `digest`: a fingerprint of the sender's whole world, sent immediately before
   it hands over. Not a command: it asks the other side to do nothing.
 
@@ -135,6 +138,8 @@ removed, the peer's shots are refused.
   peer sends only its own faction's units, and an inbound update for an entity
   this side owns is dropped. Without that, two simulating peers would overwrite
   each other mid-step.
+- `health` carries `withdrawn` (protocol 4): a unit that got off the field alive by retreating.
+  Both peers set it from the same `retreat`, and the digest compares it like hit points.
 
 ## 4. Agreement, and what happens when it fails
 

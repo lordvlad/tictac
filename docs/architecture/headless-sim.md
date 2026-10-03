@@ -100,6 +100,35 @@ shot, and a side that was forbidden to watch (`--blueWatch=off`) then won
 Watched only with points that would otherwise be wasted, the ability is worth
 a few points of win rate to the side that has it.
 
+### Standing orders: when the AI gets out (`ITEM-052`)
+
+Before a side plays a turn, its **standing order** (`StandingOrder`, on `SquadPlan.order` for a
+sweep, `PolicyOptions.orders` for anyone else) says whether to pull out:
+
+- `stand` (default): never — the loop above, to the end. The sweep measures with this.
+- `cautious`: once any unit of the side is wounded below its starting HP or dead.
+- `opportunist`: once the side's `Intel` knows of more enemies than it has living units, or its
+  total HP is down to half what it started with.
+- `evade`: at once.
+
+All three read the side's own state and its contacts, never the enemy's true state. Once a
+side decides, it keeps pulling out: each unit that still takes orders walks to the reachable
+tile fewest rows from its way out (`core/Retreat`), one tile per intent, and ends its turn; when
+everyone who takes orders stands on the way out the side calls `retreat` (broken units are not
+waited for). A retreat that fails hands over by itself.
+
+`bun run balance -- --blueOrder=cautious --redOrder=opportunist` sets them per side;
+`MatchOutcome.withdrew` names the side that got away, and the report prints a `retreated:` line
+only when somebody did, so a sweep on `stand` prints what it always did. First reading
+(2026-10-02, 100 matches, Blue's order against Red on `stand`):
+
+| Blue's order | Blue wins | Red wins | Draws | Blue retreated | Mean turns |
+|---|---|---|---|---|---|
+| stand | 55 | 43 | 2 | 0 | 9.36 |
+| evade | 0 | 100 | 0 | 100 | 1.03 |
+| cautious | 2 | 98 | 0 | 88 | 4.82 |
+| opportunist | 29 | 69 | 2 | 57 | 6.88 |
+
 ---
 
 ### Ground covered

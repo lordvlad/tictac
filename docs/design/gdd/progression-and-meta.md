@@ -158,11 +158,11 @@ screen, not a number that changed under them mid-turn.
 **Who**: the winning side's survivors. The dead learn nothing, and a side that lost learns
 nothing at all: that is what permadeath is for (§5), and the one of them carried out alive
 comes away with their life, not a lesson. A drawn match does not happen in live play (there is
-no turn cap). **Retreat is the exception** (designed, `ITEM-051`;
+no turn cap). **Retreat is the exception** (built, `ITEM-051`;
 [Combat Mechanics](combat-mechanics.md) §2.8): those who get away grow from what they did
 before they left, though their side does not win. A fight the game's AI played for an absent
-player grows its survivors the same way a played one does
-([World & Travel](world-and-travel.md) §5.2).
+player will grow its survivors the same way a played one does (designed,
+[World & Travel](world-and-travel.md) §5.2).
 
 **How much**: at most one point of each attribute a match, never past the top of the scale.
 Intelligence speeds all of it — it is the learning attribute (§1).
@@ -197,7 +197,7 @@ persistence lands (ITEM-012), that is where it ends.
   preferably one whose condition was not still getting worse when they fell (lying in fire,
   today; poisoned or bleeding once those exist). They learn nothing from the match; everyone
   else is gone. The pick is drawn from the match seed on a stream of its own, so both sides
-  agree on it. A side that **retreats** (`ITEM-051`, designed) has nobody carried out: those who
+  agree on it. A side that **retreats** (`ITEM-051`, built) has nobody carried out: those who
   reached the edge got out on their own feet, and whoever was left behind is lost.
 - **HP between matches** (`ITEM-038`): a survivor's HP at the end of a match is what they
   start their next one with, not full health — healing a stated fraction of what they are

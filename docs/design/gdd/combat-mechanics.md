@@ -167,15 +167,17 @@ still a plan, so a reader can tell a plan from a rule.
   predispositions. Surges are a proposal.
 - [Interaction & Environment](interaction-and-environment.md) — **proposed**: the item verb
   pointed at tiles and objects as well as people — keys and locks, doors, fire.
-- [Retreat](#28-retreat) — **proposed**: getting out of a fight alive by reaching your own
-  edge (`ITEM-051`), and an AI that knows it can (`ITEM-052`).
+- [Retreat](#28-retreat) — **built**: getting out of a fight alive by reaching your own edge
+  (`ITEM-051`), and an AI that knows it can, to a standing order (`ITEM-052`). Capture of the
+  left-behind is an idea (`ITEM-054`).
 
 ### 2.8 Retreat
 
-**Status: designed, not built** (`ITEM-051` rules and the player's command, `ITEM-052` the
-AI). Today a fight ends only when one side has nobody left standing. Retreat is the second way
-out, and the main thing standing between a squad and an unwinnable fight, whether the player is
-watching it or not ([World & Travel](world-and-travel.md) §5.3).
+**Status: built** (`ITEM-051` rules and the player's command, `ITEM-052` the AI; the rules are
+in [Combat & Rules](../../architecture/combat-and-rules.md#retreat)). A fight used to end only
+when one side had nobody left standing. Retreat is the second way out, and the main thing
+standing between a squad and an unwinnable fight, whether the player is watching it or not
+([World & Travel](world-and-travel.md) §5.3).
 
 - **Your edge is where you came in.** Each side deploys along its own edge of the map; the
   rows it deployed in, across the full width of the map, are its way out. A squad is standing

@@ -2231,6 +2231,105 @@ placeholder hint.
       and leaves it empty otherwise, with nothing about either host named in the code.
 ---
 
+### [ITEM-051] Retreat: the Rule and the Player's Command
+**Completed Date:** 2026-10-02  
+**Type:** Feature  
+**Milestone:** Unscheduled  
+
+#### Why
+A fight ended only when one side had nobody left standing (`winnerOf`). There was no way to cut
+losses, which matters now and will matter more once the AI fights for absent players
+(`ITEM-048`, `ITEM-053`). Design: [GDD combat §2.8](../design/gdd/combat-mechanics.md#28-retreat).
+
+#### Key Changes
+- **The way out** (`src/core/Retreat.ts`): a side's deployment rows across the full width of the
+  map, from `DEPLOY_INSET`/`DEPLOY_ROWS`, which `generateMap` now draws its zones with too.
+  `leaversOf`, `cannotRetreat`, `watchersOf`, and `retreatChance` in whole percent (`RETREAT` in
+  `config.ts`: 60, ±20 morale, ±20 health, −15 per watching enemy, clamped 5–95).
+- **`retreat { faction }`**, side-level with no actor, like `endTurn`. The roll is the match's
+  dice. Caught → `CommandSystem.handOver` (the `endTurn` body, now shared). Away → leavers'
+  `health.withdrawn` set, everyone else left behind at 0 HP.
+- **The match ends by who is on the field**: `Soldier.onField`; `winnerOf`, `MatchHost.living`
+  and `SimMatch`'s loop count it, so the referee, the client and `AiOpponent` all see a retreat end
+  the match with no code of their own.
+- **Settlement**: `escaped()` grows the leavers from their deeds; they settle as `survived`, the
+  left-behind as `died`, and `carriedOut` is null after a withdrawal. The planned separate
+  `withdrew` fate was not needed: a leaver's fate has exactly the shape and roster treatment of any
+  survivor's, so `Rosters` and `Referee.settle` are unchanged.
+- **Panic runs for home**: `Breakdown.fleeTo` ranks exposure, then not closing on the nearest
+  enemy, then rows from the way out, then distance from the enemy.
+- **The player's command**: a Retreat button beside End Turn that asks twice and names who would
+  be left behind; a note when an attempt is caught; a "you got out" end screen listing the leavers
+  and what they learned.
+- **Protocol** 3 → 4: `retreat` method, `health.withdrawn`, regenerated wire-shape catalogue.
+- Fixed in passing: `tests/cloudflare.test.ts`, broken since the deploy set the production relying
+  party in `wrangler.jsonc`; the test now pins the local one with `--var`.
+
+#### Measured
+`tests/retreat.test.ts`: the way out holds every spawn of 20 maps; the chance falls with morale,
+health and watchers and clamps; a success withdraws the leavers, kills the stragglers, ends the
+match for the stayer, settles leavers grown and nobody carried out; a failure hands over; refusals
+out of turn and with nobody on the way out; a recorded retreat replays to the same digest. A new
+morale test (panic in the open moves toward its own rows without closing on the enemy) fails on the
+old flight and passes on the new. `bun run balance` was identical before and after the rules
+commit; panic-runs-home moved it slightly (wins unchanged at 55/43/2, mean turns 9.27 → 9.36).
+In a real browser, local versus, seed 11: turn one offers "Retreat · 95%", it arms, confirms, and
+ends on "BLUE — YOU GOT OUT" then "RED WINS". Not exercised end to end: a referee settling a
+*registered* retreat into `roster` through the socket (settlement is tested at the function the
+referee calls; `Rosters` is unchanged).
+
+#### Acceptance Criteria
+- [x] A side with someone on its way out can retreat on its own turn; one with nobody there cannot.
+- [x] A successful retreat ends the match: the stayer wins and grows; leavers settle with their HP,
+      wounds and growth (as `survived` — see above); the left-behind are dead on the roster.
+- [x] A failed roll ends the turn and the match goes on.
+- [x] Both peers and the referee agree on every roll (the match's dice, one `MatchHost`); a
+      recorded match containing a retreat replays identically.
+- [x] A panicking unit flees toward its own way out.
+- [x] `bun run balance` before/after recorded; `tests/determinism.test.ts` passes.
+- [x] Living documentation updated.
+
+---
+
+### [ITEM-052] The AI Can Retreat: Standing Orders
+**Completed Date:** 2026-10-02  
+**Type:** Feature  
+**Milestone:** Unscheduled  
+
+#### Why
+An AI that cannot retreat fights every fight to the last soldier. Once it plays for absent
+players (`ITEM-048`, `ITEM-053`) that costs real characters, and an enemy that runs is better to
+fight against than one that never does.
+
+#### Key Changes
+- **`StandingOrder`** in `src/sim/Policy.ts`: `stand` (default), `cautious` (first wound or
+  death), `opportunist` (known contacts outnumber its living units, or half its starting HP gone),
+  `evade` (at once). Read from the side's own state and `Intel`'s contacts only.
+- **Pulling out** latches: units that take orders walk to the reachable tile fewest rows from the
+  way out, one tile per intent; once everyone who takes orders is on it the side calls `retreat`.
+  Simpler than the planned `chooseDestination` walk-cost field, and enough.
+- **Where an order comes from**: `SquadPlan.order` for a sweep (`--blueOrder=`, `--redOrder=`),
+  `PolicyOptions.orders` for anyone else. `AiOpponent` stays on `stand`; choosing an AI squad's
+  order per encounter is `ITEM-048`'s.
+- **Reporting**: `MatchOutcome.withdrew`; the sweep report's `retreats`, printed only when any
+  happened.
+
+#### Measured
+`bun run balance` on `stand` is byte-identical to the post-`ITEM-051` baseline. Blue's order
+against Red on `stand`, 100 matches: evade 0–100, retreated 100, 1.03 turns; cautious 2–98,
+retreated 88, 4.82 turns; opportunist 29–69 (2 draws), retreated 57, 6.88 turns.
+`tests/orders.test.ts`: stand never retreats however hurt; evade retreats on turn one; cautious
+holds unhurt and goes once wounded; opportunist holds fresh and goes at half health; across 15
+seeds a cautious side never calls retreat before it has been hurt; a match the AI retreated from
+replays to the same digest.
+
+#### Acceptance Criteria
+- [x] Each order behaves as named in headless matches (tests drive each to its trigger).
+- [x] No order reads enemy state the side has not seen.
+- [x] `bun run balance` with every side on *stand* is identical to the post-`ITEM-051` baseline;
+      sweeping the other orders reports how often each gets away.
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the
