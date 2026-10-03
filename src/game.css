@@ -167,6 +167,20 @@ canvas {
   position: absolute;
   right: 16px;
   bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.hud-turn-note {
+  max-width: 260px;
+  font-size: 11px;
+  text-align: right;
+  color: #ff9e95;
+  background: var(--hud-bg);
+  border-radius: 6px;
+  padding: 4px 8px;
 }
 
 .hud-info-card {

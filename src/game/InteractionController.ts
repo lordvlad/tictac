@@ -1,7 +1,7 @@
 import { NetworkManager, type NetworkMessage } from './NetworkManager'
 import { Raycaster, Vector2, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
-import { CAM, Faction, LEVEL_HEIGHT } from '../config'
+import { CAM, Faction, FACTION_INFO, LEVEL_HEIGHT } from '../config'
 import { clientToNdc } from '../core/screen'
 import { type Tile, tileEquals } from '../core/Grid'
 import { doorAhead } from '../core/Doors'
@@ -10,7 +10,7 @@ import type { OrbitRig } from '../camera/OrbitRig'
 import { GroundPicker } from '../camera/GroundPicker'
 import type { Hud } from '../hud/Hud'
 import { buildHudModel, type EndScreen, endScreens, type HudIntent, tileReadout } from '../hud/HudModel'
-import { carriedOut, debrief, winnerOf } from './MatchEnd'
+import { carriedOut, debrief, escaped, winnerOf } from './MatchEnd'
 import { ailmentCost, calculateHitChance } from './Combat'
 import { compareDigests, digestWorld, reportDivergence, type StateDigest } from './StateDigest'
 import { RpcMethods } from './JsonRpc'
@@ -163,6 +163,10 @@ export class InteractionController {
   private groundDirty = false
   /** The end screen's pages still to show, once the match is over; null while it is being played. */
   private endPages: EndScreen[] | null = null
+  /** Retreat has been pressed once; the next press goes. Any other press stands it down. */
+  private retreatArmed = false
+  /** What became of the last retreat that failed, until the next handover. */
+  private retreatNote: string | null = null
   /** Fire on the ground, as the grid has it. */
   private readonly groundFx: GroundFx
   /**
@@ -291,7 +295,7 @@ export class InteractionController {
     this.commands.onBeforeApply = (command, origin) => {
       // The fingerprint is of the world as this side hands it over, so it is
       // taken at the last moment the handover has not happened yet.
-      if (command.type === 'endTurn' && origin === 'local') this.sendStateDigest()
+      if ((command.type === 'endTurn' || command.type === 'retreat') && origin === 'local') this.sendStateDigest()
     }
     this.commands.onApplied = (command, result, origin) => {
       // Everything a player decided, from either side, is what a recording is
@@ -420,6 +424,8 @@ export class InteractionController {
             : null,
         waypointActive: this.planner.waypointMode,
         rulesActing: this.commands.pending,
+        retreatArmed: this.retreatArmed,
+        retreatNote: this.retreatNote,
         grid: this.battlefield.grid,
         selectedLevelFilter: this.selectedLevelFilter,
         topLevel: this.topLevel,
@@ -516,7 +522,21 @@ export class InteractionController {
     // rather than a consequence of the layout.
     if (this.spectating && !SPECTATOR_INTENTS[intent.type]) return
 
+    // Retreat asks twice; anything else pressed in between means not now.
+    if (this.retreatArmed && intent.type !== 'requestRetreat' && intent.type !== 'confirmRetreat') {
+      this.retreatArmed = false
+    }
+
     switch (intent.type) {
+      case 'requestRetreat':
+        this.retreatArmed = true
+        this.refreshHud()
+        break
+      case 'confirmRetreat':
+        this.retreatArmed = false
+        this.commands.apply({ type: 'retreat', faction: this.turnManager.activeFaction }, 'local')
+        this.refreshHud()
+        break
       case 'selectUnit': {
         const soldier = this.squads.byFaction[this.turnManager.activeFaction][intent.index]
         if (soldier && !soldier.isDead) {
@@ -758,9 +778,22 @@ export class InteractionController {
         this.afterCombat()
         return
       case 'endTurn':
+        this.retreatNote = null
         this.onTurnSwitched()
         // The played game picks the incoming side's first unit for the player;
         // a replay does it so the camera follows whoever acts next.
+        if (origin === 'record') this.turnManager.autoSelectFirst()
+        this.refreshHud()
+        return
+      case 'retreat':
+        if (result.retreat?.escaped) {
+          // The left-behind fall; the match is over, which `update` notices.
+          this.afterCombat()
+          return
+        }
+        // Caught: the attempt was the side's turn.
+        this.retreatNote = `${FACTION_INFO[command.faction].name} tried to retreat (${result.retreat?.chance ?? 0}%) and was caught.`
+        this.onTurnSwitched()
         if (origin === 'record') this.turnManager.autoSelectFirst()
         this.refreshHud()
         return
@@ -1274,7 +1307,14 @@ export class InteractionController {
     const carried = this.recordingHeader
       ? carriedOut(this.squads, loser, this.battlefield.grid, this.recordingHeader.seed)
       : null
-    this.endPages = endScreens(winner, viewer, debrief(this.squads, winner), carried, this.portraits)
+    this.endPages = endScreens(
+      winner,
+      viewer,
+      debrief(this.squads, winner),
+      escaped(this.squads, loser),
+      carried,
+      this.portraits,
+    )
     this.shoot.exit()
     this.grenade.exit()
     this.planner.clear()

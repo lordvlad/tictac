@@ -1,5 +1,6 @@
 import type {
   EndScreen,
+  EndScreenSurvivor,
   HudAction,
   HudIntent,
   HudItemPanel,
@@ -278,18 +279,34 @@ export class Hud {
     `
   }
 
-  /** Handing over is the last thing you do, so it sits on its own. */
+  /** Handing over is the last thing you do, so it sits on its own — with getting out beside it. */
   private renderEndTurn(model: HudModel): void {
     const isMyTurn = model.isMyTurn || model.networkMode === 'local'
     // A handover while the rules are still running a broken unit would be
     // refused, so it is not offered.
     const ready = isMyTurn && !model.rulesActing
+    const retreat = model.retreat
+    const lost = retreat && retreat.leftBehind.length > 0 ? ` Leaves ${retreat.leftBehind.join(', ')} behind.` : ''
+    const retreatButton = retreat
+      ? `<button class="hud-btn interactive ${retreat.armed ? 'hud-btn-danger' : ''}"
+              title="Everyone on your way out leaves; ${retreat.chance}% chance of getting away. A failed attempt ends the turn.${lost}"
+              ${Hud.intentAttr({ type: retreat.armed ? 'confirmRetreat' : 'requestRetreat' })}>
+        ${icon('ui-cancel')} ${retreat.armed ? `Confirm retreat · ${retreat.chance}%` : `Retreat · ${retreat.chance}%`}
+      </button>`
+      : ''
+    const armedNote =
+      retreat?.armed && retreat.leftBehind.length > 0
+        ? `<div class="hud-turn-note">Left behind and lost: ${retreat.leftBehind.join(', ')}</div>`
+        : ''
+    const note = model.retreatNote ? `<div class="hud-turn-note">${model.retreatNote}</div>` : ''
     this.endTurnEl.innerHTML = `
+      ${retreatButton}
       <button class="hud-btn interactive ${ready ? 'hud-btn-danger' : ''}"
               title="${!isMyTurn ? "Opponent's Turn" : ready ? 'Hand over to the other faction' : 'Waiting for the units that broke'}"
               ${ready ? '' : 'disabled'} ${Hud.intentAttr({ type: 'requestTurnSwitch' })}>
         ${icon('ui-end-turn')} End Turn
       </button>
+      ${armedNote}${note}
     `
   }
 
@@ -688,17 +705,8 @@ export class Hud {
   showEndScreen(screen: EndScreen): void {
     const side = screen.blue ? 'blue' : 'red'
     const next = Hud.intentAttr(screen.next)
-    if (screen.stage === 'lost') {
-      const carried = screen.carried
-        ? `<div class="end-survivors"><div class="end-survivor"><img class="end-portrait" src="${screen.carried.portrait}" alt="" /><div><div class="end-name">${screen.carried.name}</div><div class="end-line">Carried out alive, on 1 HP. The rest of the squad is gone.</div></div></div></div>`
-        : ''
-      this.endScreenEl.innerHTML = `
-        <div class="turn-title ${side}">${screen.factionName} — you lost</div>
-        <div class="turn-subtitle">Nobody left standing.</div>
-        ${carried}
-        <button class="turn-continue-btn interactive" ${next}>CONTINUE ${icon('ui-continue')}</button>`
-    } else {
-      const survivors = screen.survivors
+    const survivorRows = (survivors: EndScreenSurvivor[]) =>
+      survivors
         .map((survivor) => {
           const lines =
             survivor.lines.length === 0
@@ -712,10 +720,21 @@ export class Hud {
           return `<div class="end-survivor"><img class="end-portrait" src="${survivor.portrait}" alt="" /><div><div class="end-name">${survivor.name}</div>${lines}</div></div>`
         })
         .join('')
+    if (screen.stage === 'lost') {
+      const carried = screen.carried
+        ? `<div class="end-survivors"><div class="end-survivor"><img class="end-portrait" src="${screen.carried.portrait}" alt="" /><div><div class="end-name">${screen.carried.name}</div><div class="end-line">Carried out alive, on 1 HP. The rest of the squad is gone.</div></div></div></div>`
+        : ''
+      const got = screen.escaped.length > 0
+      this.endScreenEl.innerHTML = `
+        <div class="turn-title ${side}">${screen.factionName} — ${got ? 'you got out' : 'you lost'}</div>
+        <div class="turn-subtitle">${got ? 'They live, and keep what they learned. The field is the enemy’s.' : 'Nobody left standing.'}</div>
+        ${got ? `<div class="end-survivors">${survivorRows(screen.escaped)}</div>` : carried}
+        <button class="turn-continue-btn interactive" ${next}>CONTINUE ${icon('ui-continue')}</button>`
+    } else {
       this.endScreenEl.innerHTML = `
         <div class="turn-title ${side}">${screen.factionName} wins</div>
         <div class="turn-subtitle">What the survivors learned</div>
-        <div class="end-survivors">${survivors}</div>
+        <div class="end-survivors">${survivorRows(screen.survivors)}</div>
         <button class="turn-continue-btn interactive" ${next}>BACK TO THE MENU ${icon('ui-continue')}</button>`
     }
     this.endScreenEl.classList.add('visible')

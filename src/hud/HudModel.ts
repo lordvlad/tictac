@@ -21,6 +21,7 @@ import type { TurnManager } from '../game/TurnManager'
 import type { OffscreenPortraits } from '../render/Portraits'
 import type { Attribute } from '../core/Progression'
 import type { Debrief } from '../game/MatchEnd'
+import { leaversOf, retreatChance, watchersOf } from '../core/Retreat'
 /**
  * Everything the player can ask for by touching the HUD. The HUD emits these;
  * it never carries them out, so game state has exactly one mutator.
@@ -48,6 +49,10 @@ export type HudIntent =
   | { type: 'endUnitTurn' }
   | { type: 'requestTurnSwitch' }
   | { type: 'confirmTurnSwitch' }
+  /** Arm the side's retreat: the next press confirms it (`core/Retreat`). */
+  | { type: 'requestRetreat' }
+  /** Retreat now, with whoever is on the way out. */
+  | { type: 'confirmRetreat' }
   | { type: 'toggleFreelook' }
   | { type: 'toggleUnitView' }
   | { type: 'openDebug' }
@@ -261,6 +266,22 @@ export interface HudModel {
   debugMapOpen: boolean
   /** Nothing can be ordered yet: the rules are still running a broken unit. */
   rulesActing: boolean
+  /**
+   * What retreating now would do, on this side's turn while anybody stands on
+   * its way out; null otherwise. `armed` once it has been pressed once.
+   */
+  retreat: HudRetreat | null
+  /** The last retreat attempt that failed, for the line under the turn button. */
+  retreatNote: string | null
+}
+
+export interface HudRetreat {
+  /** Percent chance of getting away. */
+  chance: number
+  leaving: number
+  /** Everyone alive who is not on the way out, and would be lost. */
+  leftBehind: string[]
+  armed: boolean
 }
 
 export interface HudModelSources {
@@ -302,6 +323,10 @@ export interface HudModelSources {
   rulesActing: boolean
   /** The map, for the door in front of the selected unit. */
   grid: Grid
+  /** The player has pressed Retreat once and the next press goes. */
+  retreatArmed: boolean
+  /** The last retreat attempt that failed, if the player should still be told. */
+  retreatNote: string | null
 }
 
 /** What the model builder needs from the shoot planner. */
@@ -539,6 +564,8 @@ export function buildHudModel(sources: HudModelSources): HudModel {
   return {
     isMyTurn,
     rulesActing: sources.rulesActing,
+    retreat: isMyTurn && !sources.rulesActing ? retreatOffer(squads, faction, sources.grid, sources.retreatArmed) : null,
+    retreatNote: sources.retreatNote,
     networkMode: sources.networkMode ?? 'local',
     factionName: FACTION_INFO[faction].name,
     networkBadge,
@@ -822,6 +849,13 @@ export interface EndScreenLine {
   because: string
 }
 
+/** A survivor as an end screen shows them: who, and what they learned. */
+export interface EndScreenSurvivor {
+  name: string
+  portrait: string
+  lines: EndScreenLine[]
+}
+
 /** One screen at the end of a match: the side it is for, and what it shows them. */
 export type EndScreen =
   | {
@@ -830,13 +864,15 @@ export type EndScreen =
       blue: boolean
       /** The one carried out alive, on 1 HP (`carriedOut`), when there is one. */
       carried: { name: string; portrait: string } | null
+      /** Those who got away by retreating, and what they learned; empty when the side was wiped out. */
+      escaped: EndScreenSurvivor[]
       next: HudIntent
     }
   | {
       stage: 'won'
       factionName: string
       blue: boolean
-      survivors: { name: string; portrait: string; lines: EndScreenLine[] }[]
+      survivors: EndScreenSurvivor[]
       next: HudIntent
     }
 
@@ -852,44 +888,62 @@ const ATTRIBUTE_NAME: Record<Attribute, string> = {
  *
  * `viewer` is the side this screen belongs to online; null in a local match,
  * where both sides share it: the loser's "you lost" first — with the one of
- * them carried out alive, when there is one — then the winner's survivors and
- * what they learned. Online each side sees only its own.
+ * them carried out alive, or those who got away, when there are any — then
+ * the winner's survivors and what they learned. Online each side sees only
+ * its own.
  */
 export function endScreens(
   winner: Faction,
   viewer: Faction | null,
   debriefs: readonly Debrief[],
+  escapees: readonly Debrief[],
   carried: Soldier | null,
   portraits: Pick<OffscreenPortraits, 'getPortrait'>,
 ): EndScreen[] {
   const loser = winner === Faction.Blue ? Faction.Red : Faction.Blue
   const done: HudIntent = { type: 'backToMenu' }
+  const survivorOf = ({ unit, growth }: Debrief): EndScreenSurvivor => ({
+    name: unit.name,
+    portrait: portraits.getPortrait(unit.faction, unit.squadIndex),
+    lines: growth.map((change) => ({
+      label: change.kind === 'attribute' ? ATTRIBUTE_NAME[change.attribute] : `${WEAPONS[change.weapon].name} proficiency`,
+      from: change.from,
+      to: change.to,
+      because: change.because,
+    })),
+  })
   const lost = (next: HudIntent): EndScreen => ({
     stage: 'lost',
     factionName: FACTION_INFO[loser].name,
     blue: loser === Faction.Blue,
     carried: carried ? { name: carried.name, portrait: portraits.getPortrait(carried.faction, carried.squadIndex) } : null,
+    escaped: escapees.map(survivorOf),
     next,
   })
   const won: EndScreen = {
     stage: 'won',
     factionName: FACTION_INFO[winner].name,
     blue: winner === Faction.Blue,
-    survivors: debriefs.map(({ unit, growth }) => ({
-      name: unit.name,
-      portrait: portraits.getPortrait(unit.faction, unit.squadIndex),
-      lines: growth.map((change) => ({
-        label:
-          change.kind === 'attribute'
-            ? ATTRIBUTE_NAME[change.attribute]
-            : `${WEAPONS[change.weapon].name} proficiency`,
-        from: change.from,
-        to: change.to,
-        because: change.because,
-      })),
-    })),
+    survivors: debriefs.map(survivorOf),
     next: done,
   }
   if (viewer === null) return [lost({ type: 'endScreenNext' }), won]
   return viewer === winner ? [won] : [lost(done)]
+}
+
+/**
+ * What retreating now would do for `faction`: who goes, who is lost, and the
+ * chance — the same figures the rules will roll against. Null while nobody is
+ * on the way out.
+ */
+function retreatOffer(squads: Squads, faction: Faction, grid: Grid, armed: boolean): HudRetreat | null {
+  const leavers = leaversOf(squads.soldiers, faction, grid.size)
+  if (leavers.length === 0) return null
+  const going = new Set(leavers)
+  return {
+    chance: retreatChance(leavers, watchersOf(grid, squads.soldiers, leavers)),
+    leaving: leavers.length,
+    leftBehind: squads.byFaction[faction].filter((unit) => !unit.isDead && !going.has(unit)).map((unit) => unit.name),
+    armed,
+  }
 }

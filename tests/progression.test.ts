@@ -225,7 +225,7 @@ describe('The end of a match', () => {
 
   test('shows a local match the loser’s page and then the winner’s; online, each side only its own', () => {
     const portraits = { getPortrait: () => '' }
-    const stages = (viewer: Faction | null) => endScreens(Faction.Red, viewer, [], null, portraits).map((page) => [page.stage, page.next.type])
+    const stages = (viewer: Faction | null) => endScreens(Faction.Red, viewer, [], [], null, portraits).map((page) => [page.stage, page.next.type])
     expect(stages(null)).toEqual([
       ['lost', 'endScreenNext'],
       ['won', 'backToMenu'],
