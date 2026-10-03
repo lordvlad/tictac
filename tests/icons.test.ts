@@ -21,7 +21,7 @@ async function sourceFiles(dir: string): Promise<string[]> {
     if (entryStat.isDirectory()) {
       const nested = await sourceFiles(`${path}/`)
       out.push(...nested)
-    } else if (entry.endsWith('.ts')) {
+    } else if (entry.endsWith('.ts') || entry.endsWith('.tsx')) {
       out.push(path)
     }
   }

@@ -81,7 +81,7 @@ describe('Nothing in the rules reaches for its own randomness', () => {
     const rngText = await Bun.file('src/core/rng.ts').text()
     expect(code(rngText).includes('Math.random')).toBe(false)
 
-    const mainText = await Bun.file('src/main.ts').text()
+    const mainText = await Bun.file('src/main.tsx').text()
     const uses = code(mainText).split('Math.random').length - 1
     expect(uses).toBe(1)
     expect(mainText).toContain('resolveSeed')

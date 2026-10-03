@@ -25,15 +25,12 @@ the [archive](../backlog/completed.md).
 M1 (headless foundation), M2 (tactical depth), M3 (reconnaissance & morale) and M4 (competitive
 meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]`) closed M4 on
 2026-09-30. `[ITEM-045]` (Cloudflare Durable Object deployment) closed on 2026-10-01 — see the
-[archive](../backlog/completed.md). Retreat (`[ITEM-051]`, `[ITEM-052]`) closed on 2026-10-02.
+[archive](../backlog/completed.md). Retreat (`[ITEM-051]`, `[ITEM-052]`) closed on 2026-10-02;
+React HUD & menus (`[ITEM-055]`) closed on 2026-10-04.
 Next is the shared world: a squad that is somewhere (the world map and travel), then the fights
 met on the road ([GDD-WORLD](../design/gdd/world-and-travel.md)).
 
 ---
-
-## 🔨 In Progress
-- `[ITEM-055]` Render the HUD and menus with React.
-
 ## 📋 Ready — pull in this order
 1. `[ITEM-050]` The world map and travel — real-Earth tiles from the existing R2 archive,
    waypoint position, wall-clock travel on alarms, the start location (absorbs `[ITEM-049]`).

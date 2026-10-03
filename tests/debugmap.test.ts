@@ -1,39 +1,66 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { Grid, Side } from '../src/core/Grid'
 import { WallKind } from '../src/core/Walls'
 import type { Squads } from '../src/game/Squads'
-import { installCanvasStub } from './support/dom'
-
 import { DebugMap } from '../src/hud/DebugMap'
 
-installCanvasStub()
-
-interface PrivateMap {
-  root: HTMLElement
-}
-
-function getPrivateRoot(map: DebugMap): HTMLElement {
-  const p = map as unknown as PrivateMap
-  return p.root
-}
-
-function setup(): { map: DebugMap; grid: Grid; squads: Squads } {
-  const grid = new Grid(12)
-  grid.setLevel(5, 5, 1)
-  grid.setWall(5, 5, Side.North, WallKind.Solid)
-
-  const squads = {
-    soldiers: [
-      { isDead: false, faction: 0, tile: { x: 2, y: 2 } },
-      { isDead: false, faction: 1, tile: { x: 8, y: 8 } },
-    ],
-  } as unknown as Squads
-
-  const map = new DebugMap()
-  return { map, grid, squads }
-}
-
 describe('DebugMap panel', () => {
+  beforeAll(() => {
+    GlobalRegistrator.register({ url: 'http://localhost/' })
+
+    // Stub 2D canvas context for happy-dom
+    const ctx = {
+      fillRect: () => {},
+      strokeRect: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      arc: () => {},
+      fill: () => {},
+      stroke: () => {},
+      save: () => {},
+      restore: () => {},
+      scale: () => {},
+      setLineDash: () => {},
+      set fillStyle(_v: unknown) {},
+      set strokeStyle(_v: unknown) {},
+      set lineWidth(_v: unknown) {},
+      set imageSmoothingEnabled(_v: unknown) {},
+    }
+    HTMLCanvasElement.prototype.getContext = (() => ctx) as unknown as typeof HTMLCanvasElement.prototype.getContext
+  })
+
+  afterAll(() => {
+    GlobalRegistrator.unregister()
+  })
+
+  interface PrivateMap {
+    root: HTMLElement
+  }
+
+  function getPrivateRoot(map: DebugMap): HTMLElement {
+    const p = map as unknown as PrivateMap
+    return p.root
+  }
+
+  function setup(): { map: DebugMap; grid: Grid; squads: Squads } {
+    const grid = new Grid(12)
+    grid.setLevel(5, 5, 1)
+    grid.setWall(5, 5, Side.North, WallKind.Solid)
+
+    const squads = {
+      soldiers: [
+        { isDead: false, faction: 0, tile: { x: 2, y: 2 } },
+        { isDead: false, faction: 1, tile: { x: 8, y: 8 } },
+      ],
+    } as unknown as Squads
+
+    const map = new DebugMap()
+    return { map, grid, squads }
+  }
+
   test('toggles open and closed state', () => {
     const { map } = setup()
 

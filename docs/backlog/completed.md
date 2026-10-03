@@ -2330,6 +2330,54 @@ replays to the same digest.
       sweeping the other orders reports how often each gets away.
 ---
 
+### [ITEM-055] Render the HUD and Menus with React
+**Completed Date:** 2026-10-04  
+**Type:** Refactor  
+**Milestone:** Unscheduled  
+
+#### Why
+Every HUD and menu surface was a string template assigned to `innerHTML`: 18 sites in `Hud.ts`,
+8 in `main.ts`, 4 in `DebugMap.ts`, one each in `LoadoutScreen`, `RosterScreen`, `DebugPanel`,
+`PlaybackControls` and `FullscreenPrompt`. Each assignment threw the old elements away, causing
+scroll jumps (worked around in `5c7a457`), click loss during redraws, unescaped values, and
+intents serialized as JSON in attributes.
+
+#### Key Changes
+- **React 19 & TSX**: React 19 + `react-dom` installed, `tsconfig.json` enabled `"jsx": "react-jsx"`,
+  bundled natively with Bun.
+- **Shared `<Icon>` component** in `src/hud/Icon.tsx` replaces the `icon()` string helper from
+  the deleted `src/hud/icons.ts`.
+- **Surfaces ported to `.tsx`**:
+  - `src/hud/Hud.tsx`: TopCentre, LevelSelector, CornerActions, EndTurn, SquadBar, TargetStrip,
+    ActionPanel (submenus, ShotCard, ThrowCard, ItemCard), TurnOverlay, EndScreen, ContextMenu,
+    TileReadout.
+  - `src/hud/LoadoutScreen.tsx`: Squad crate pool, kit panel, soldier cards and sheets, deploy button.
+    The scroll save-restore loop from `5c7a457` was removed as DOM reconciliation preserves scroll.
+  - `src/hud/menu/StartMenu.tsx` & `src/hud/menu/InterruptedOverlay.tsx`: Menu, lobby, Host P2P,
+    Join P2P, Match Server passkey/roster flows, disconnection overlay.
+  - `src/hud/RosterScreen.tsx`, `src/hud/PlaybackControls.tsx`, `src/hud/FullscreenPrompt.tsx`.
+  - `src/hud/DebugMap.tsx` & `src/hud/DebugPanel.tsx`.
+- **Test DOM**: `@happy-dom/global-registrator` registered locally in `tests/debugmap.test.ts`
+  and cleaned up in `afterAll` so headless suites remain DOM-free.
+- **Zero `innerHTML` left** across `src/hud/` and `src/main.tsx`.
+
+#### Measured
+- Full suite: 690 pass, 0 fail. `bun run lint` and `bun run build` clean.
+- Bundle size change: 4,052,339 B → 4,262,037 B (+209.7 KB unminified, +65.4 KB gzipped).
+- In-browser verification: Start menu (modes, flows, back buttons), Loadout screen (scrolling
+  panel holds position across kit changes), in-match HUD (action buttons, targeting, submenus,
+  minimap with ESC close, debug panel, two-step retreat, end screen).
+
+#### Acceptance Criteria
+- [x] No `innerHTML` assignment left in `src/hud/` or `src/main.tsx` for app markup.
+- [x] Every surface verified in a real browser: menu, lobby, roster, loadout (scroll survives a
+      pick with no restore code), the in-match HUD (select, shoot panel, items, end turn,
+      retreat), the end screens, playback controls, debug map/panel.
+- [x] `bun run lint`, `bun test`, `bun run build` green; the bundle size change recorded.
+- [x] Living documentation updated (`docs/architecture/rendering.md`, `docs/architecture/overview.md`,
+      `AGENTS.md`).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

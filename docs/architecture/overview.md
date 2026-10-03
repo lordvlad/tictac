@@ -65,7 +65,7 @@ graph TD
 | `src/sim/` | Simulation | Headless matches: `MatchHost` (the ECS match, driven by intents), `SimMatch` (the sweep's policy), `Replay`, `Balance`. | **Yes** |
 | `src/game/` | Game Logic | `TurnManager`, `NetworkManager`, `Battlefield`, `Squads`, movement/shooting planners. | Mostly (decoupling in progress) |
 | `src/render/`| Presentation | Three.js meshes, animations, tracers, particles, material cloning, ground tiles. | **No** (Requires WebGL) |
-| `src/hud/` | Presentation | HTML/CSS HUD overlays, loadout screen, portraits, debug panels. | **No** (Requires DOM) |
+| `src/hud/` | Presentation | React (TSX) HUD overlays, menus, loadout screen, portraits, debug panels. | **No** (Requires DOM) |
 | `src/camera/`| Presentation | `OrbitRig`, camera inputs, ground raycaster picking. | **No** (Requires Canvas/DOM) |
 
 ---

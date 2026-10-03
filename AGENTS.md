@@ -9,6 +9,7 @@ Welcome to **TicTac (No Way Home)**. This document establishes guidelines, archi
 - **Runtime & Package Manager**: [Bun](https://bun.sh) (v1.3.14+)
 - **Language**: TypeScript (strict mode, target ESNext)
 - **Rendering & 3D**: [Three.js](https://threejs.org) + `@mavonengine/core`
+- **HUD & Menus**: [React](https://react.dev) 19 components (`.tsx`, compiled by Bun) over the canvas; see `docs/architecture/rendering.md` §4
 - **Networking**: P2P WebRTC DataChannels via [PeerJS](https://peerjs.com) + JSON-RPC 2.0 notifications
 - **Assets**: Draco-compressed glTF/GLB models (`public/character.glb`), SVG icons from `game-icons.net` (`public/icons/`)
 

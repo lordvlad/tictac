@@ -1,5 +1,6 @@
+import { createRoot, type Root } from 'react-dom/client'
 import { bottomLeftRow } from './CornerStack'
-import { icon } from './icons'
+import { Icon } from './Icon'
 
 /**
  * The same condition the compact HUD uses: whichever viewport axis is smaller
@@ -17,6 +18,28 @@ interface LegacyFullscreenDocument {
   webkitFullscreenEnabled?: boolean
 }
 
+function requestFullscreen(): void {
+  const element = document.documentElement as HTMLElement & LegacyFullscreenElement
+  const request = element.requestFullscreen?.bind(element) ?? element.webkitRequestFullscreen?.bind(element)
+  if (!request) return
+  // A refused request (an iframe without the permission, a user setting) must
+  // not surface as an unhandled rejection; the prompt simply stays put.
+  void Promise.resolve(request()).catch(() => {})
+}
+
+function PromptButtons({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <>
+      <button className="fs-prompt-cta interactive" type="button" onClick={requestFullscreen}>
+        <Icon file="ui-expand" /> <span className="fs-prompt-label">Play fullscreen</span>
+      </button>
+      <button className="fs-prompt-close interactive" type="button" aria-label="Dismiss" onClick={onDismiss}>
+        <Icon file="ui-cancel" />
+      </button>
+    </>
+  )
+}
+
 /**
  * Suggests fullscreen on the screens that gain from it, and asks for it on tap.
  *
@@ -26,21 +49,24 @@ interface LegacyFullscreenDocument {
  * brings it back, unless the player dismissed it.
  */
 export class FullscreenPrompt {
-  private readonly root: HTMLDivElement
+  private readonly container: HTMLDivElement
+  private readonly root: Root
   private readonly media = window.matchMedia(COMPACT_VIEWPORT)
   private dismissed = false
 
   constructor() {
-    this.root = document.createElement('div')
-    this.root.className = 'fs-prompt'
-    this.root.innerHTML = `
-      <button class="fs-prompt-cta interactive" type="button" data-fs="enter">
-        ${icon('ui-expand')} <span class="fs-prompt-label">Play fullscreen</span>
-      </button>
-      <button class="fs-prompt-close interactive" type="button" data-fs="dismiss" aria-label="Dismiss">${icon('ui-cancel')}</button>
-    `
-    this.root.addEventListener('click', this.onClick)
-    bottomLeftRow().appendChild(this.root)
+    this.container = document.createElement('div')
+    this.container.className = 'fs-prompt'
+    bottomLeftRow().appendChild(this.container)
+    this.root = createRoot(this.container)
+    this.root.render(
+      <PromptButtons
+        onDismiss={() => {
+          this.dismissed = true
+          this.sync()
+        }}
+      />,
+    )
 
     this.media.addEventListener('change', this.sync)
     document.addEventListener('fullscreenchange', this.sync)
@@ -49,29 +75,11 @@ export class FullscreenPrompt {
   }
 
   dispose(): void {
-    this.root.removeEventListener('click', this.onClick)
     this.media.removeEventListener('change', this.sync)
     document.removeEventListener('fullscreenchange', this.sync)
     document.removeEventListener('webkitfullscreenchange', this.sync)
-    this.root.remove()
-  }
-
-  private readonly onClick = (event: MouseEvent): void => {
-    const target = (event.target as HTMLElement | null)?.closest('[data-fs]')
-    if (!(target instanceof HTMLElement)) return
-
-    if (target.dataset.fs === 'dismiss') {
-      this.dismissed = true
-      this.sync()
-      return
-    }
-
-    const element = document.documentElement as HTMLElement & LegacyFullscreenElement
-    const request = element.requestFullscreen?.bind(element) ?? element.webkitRequestFullscreen?.bind(element)
-    if (!request) return
-    // A refused request (an iframe without the permission, a user setting) must
-    // not surface as an unhandled rejection; the prompt simply stays put.
-    void Promise.resolve(request()).catch(() => {})
+    this.root.unmount()
+    this.container.remove()
   }
 
   /** Visible only where it is both useful and possible. */
@@ -80,6 +88,6 @@ export class FullscreenPrompt {
     const supported = document.fullscreenEnabled || legacy.webkitFullscreenEnabled === true
     const active = document.fullscreenElement !== null || (legacy.webkitFullscreenElement ?? null) !== null
 
-    this.root.hidden = this.dismissed || !supported || active || !this.media.matches
+    this.container.hidden = this.dismissed || !supported || active || !this.media.matches
   }
 }
