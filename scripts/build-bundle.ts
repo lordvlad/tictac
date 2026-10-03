@@ -39,6 +39,9 @@ const result = await Bun.build({
   sourcemap: 'linked',
   minify: true,
   publicPath: './',
+  loader: {
+    '.glsl': 'text',
+  },
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),
     __BUILD_ID__: JSON.stringify(id),
