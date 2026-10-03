@@ -32,6 +32,8 @@
     "@tweakpane/plugin-essentials": "^0.2.1",
     "@use-gesture/vanilla": "^10.3.1",
     "peerjs": "^1.5.5",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "three": "0.184.0",
     "three-perf": "^1.0.11",
     "tweakpane": "^4.0.5"
@@ -41,7 +43,10 @@
     "@cloudflare/workers-types": "^5.20260930.2",
     "@gltf-transform/core": "^4.4.2",
     "@gltf-transform/functions": "^4.4.2",
+    "@happy-dom/global-registrator": "^20.14.5",
     "@types/bun": "latest",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/three": "~0.184.0",
     "typescript": "^5.9.0",
     "wrangler": "^4.145.0"
