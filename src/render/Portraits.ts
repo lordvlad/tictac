@@ -72,15 +72,17 @@ export class OffscreenPortraits {
         model.scale.set(scale.x, scale.y, scale.z)
         model.updateMatrixWorld(true)
 
-        // Tint material
+        // Tint material and disable frustum culling for close-up framing
         model.traverse((child) => {
-          if (child instanceof Mesh && child.material) {
-            const mat = (child.material as MeshStandardMaterial).clone()
-            mat.color.copy(soldierColor(faction, index))
-            child.material = mat
+          if (child instanceof Mesh) {
+            child.frustumCulled = false
+            if (child.material) {
+              const mat = (child.material as MeshStandardMaterial).clone()
+              mat.color.copy(soldierColor(faction, index))
+              child.material = mat
+            }
           }
         })
-
         scene.add(model)
 
         const head = model.getObjectByName('Head')
