@@ -11,6 +11,7 @@
  *   bun run balance -- --blueSidearm=knife --redSidearm=club
  *   bun run balance -- --blueGrenades=frag:1,incendiary:2
  *   bun run balance -- --blueSize=3
+ *   bun run balance -- --blueOrder=cautious --redOrder=opportunist
  *   bun run balance -- --mapSize=72 --spawns=edge
  *   bun run balance -- --record=recordings
  *   bun run balance -- --json
@@ -33,6 +34,15 @@ import { formatReport, sweep } from '../src/sim/Balance'
 import type { CombatRecording } from '../src/game/Recording'
 import type { MapOptions } from '../src/core/MapGenerator'
 import type { SquadPlan } from '../src/sim/SimMatch'
+import type { StandingOrder } from '../src/sim/Policy'
+
+/** The standing orders a sweep can give a side (`src/sim/Policy.ts`). */
+const ORDERS: Record<StandingOrder, StandingOrder> = {
+  stand: 'stand',
+  cautious: 'cautious',
+  opportunist: 'opportunist',
+  evade: 'evade',
+}
 
 function arg(name: string): string | undefined {
   const raw = process.argv.find((value) => value.startsWith(`--${name}=`))
@@ -85,6 +95,7 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
   const grenades = arg(`${side}Grenades`)
   const size = arg(`${side}Size`)
   const fatigueArg = arg(`${side}Fatigue`)
+  const order = arg(`${side}Order`)
   if (
     sidearm === undefined &&
     weapons === undefined &&
@@ -94,7 +105,8 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
     watch === undefined &&
     grenades === undefined &&
     size === undefined &&
-    fatigueArg === undefined
+    fatigueArg === undefined &&
+    order === undefined
   ) {
     return undefined
   }
@@ -127,6 +139,8 @@ function planFor(side: 'blue' | 'red'): SquadPlan | undefined {
     grenades: grenades === undefined ? undefined : grenadesFor(side, grenades),
     size: squad,
     fatigue,
+    // Policy too: when this side pulls out and retreats.
+    order: order === undefined ? undefined : pick(ORDERS, `${side}Order`, order),
   }
 }
 

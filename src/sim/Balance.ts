@@ -79,6 +79,12 @@ export interface SweepReport {
   wins: Record<'blue' | 'red' | 'draw', number>
   /** Share of matches that ended by the cap rather than by a wipe. */
   drawRate: number
+  /**
+   * Matches each side won by its enemy retreating: the side that stayed is
+   * still counted under `wins`. Zero unless a plan gives a standing order
+   * other than `stand`.
+   */
+  retreats: Record<'blue' | 'red', number>
   turns: { mean: number; median: number; min: number; max: number }
   /** Mean survivors of the winning side: how decisive a win tends to be. */
   meanWinnerSurvivors: number
@@ -209,6 +215,7 @@ export function sweep(options: SweepOptions): SweepReport {
   }
 
   const wins = { blue: 0, red: 0, draw: 0 }
+  const retreats = { blue: 0, red: 0 }
   const turns: number[] = []
   const weapons = new Map<string, WeaponTally>()
   const traitDecided = new Map<string, { decided: number; wins: number }>()
@@ -220,6 +227,8 @@ export function sweep(options: SweepOptions): SweepReport {
     else if (outcome.winner === Faction.Blue) wins.blue += 1
     else wins.red += 1
     if (outcome.winner !== null) winnerSurvivors += outcome.survivors[outcome.winner]
+    if (outcome.withdrew === Faction.Blue) retreats.blue += 1
+    if (outcome.withdrew === Faction.Red) retreats.red += 1
 
     for (const [weapon, tally] of Object.entries(outcome.byWeapon)) {
       const total = weapons.get(weapon) ?? {
@@ -268,6 +277,7 @@ export function sweep(options: SweepOptions): SweepReport {
     turnCap,
     wins,
     drawRate: round(wins.draw / matches, 3),
+    retreats,
     turns: {
       mean: round(turns.reduce((sum, value) => sum + value, 0) / matches),
       median: median(turns),
@@ -348,6 +358,10 @@ export function formatReport(report: SweepReport): string {
   lines.push(
     `blue ${report.wins.blue}  red ${report.wins.red}  draw ${report.wins.draw} (${pct(report.drawRate)} hit the cap)`,
   )
+  // Only when somebody got out: a sweep on `stand` prints exactly what it always did.
+  if (report.retreats.blue + report.retreats.red > 0) {
+    lines.push(`retreated: blue ${report.retreats.blue}  red ${report.retreats.red}`)
+  }
   lines.push(
     `turns  mean ${report.turns.mean}  median ${report.turns.median}  range ${report.turns.min}-${report.turns.max}`,
   )

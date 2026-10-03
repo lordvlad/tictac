@@ -4,12 +4,14 @@ import { GrenadeId, GRENADES } from '../core/Arsenal'
 import { MELEE } from '../core/Melee'
 import { burningTiles } from '../core/Fire'
 import type { Grid } from '../core/Grid'
+import { reachable, routeTo } from '../core/Pathfinding'
+import { leaversOf, onWayOut, rowsFromWayOut } from '../core/Retreat'
 import { hasLineOfSight } from '../core/Visibility'
 import { fromBehind, headingToward } from '../core/Facing'
 import { effectiveWeapon, expectedRoundDamage, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
 import type { Soldier } from '../entities/Soldier'
 import { canMelee, canShoot, shotApCost, shotBreakdown } from '../game/Combat'
-import { stepCostFor } from '../game/Movement'
+import { moveBudget, stepCostFor } from '../game/Movement'
 import type { NetworkMessage } from '../game/NetworkManager'
 import { canWatch } from '../game/Overwatch'
 import type { Applied, Carried } from '../ecs/systems/CommandSystem'
@@ -17,6 +19,21 @@ import { isIndoors } from './Ground'
 import { Intel } from './Intel'
 import type { MatchHost } from './MatchHost'
 import { chooseDestination, type Spacing } from './Tactics'
+
+/**
+ * What a side fights to (GDD combat §2.8, `ITEM-052`): when, if ever, it
+ * pulls back to its way out and retreats.
+ *
+ * - `stand`: never. Fights to the end — the sweep's instrument.
+ * - `cautious`: pulls out after its first wound or death.
+ * - `opportunist`: fights while it believes it is winning; pulls out once the
+ *   enemies it knows of outnumber it, or it is down to half its health.
+ * - `evade`: pulls out at once.
+ *
+ * Decided from what the side holds of itself and what its {@link Intel} has
+ * seen of the enemy, never from the enemy's true state.
+ */
+export type StandingOrder = 'stand' | 'cautious' | 'opportunist' | 'evade'
 
 /**
  * The hit chance a unit will settle for rather than keep closing.
@@ -74,6 +91,8 @@ export interface PolicyOptions {
    * the AI instead.
    */
   spacing?: number
+  /** Each side's {@link StandingOrder}; `stand` when absent. */
+  orders?: Partial<Record<Faction, StandingOrder>>
 }
 
 /**
@@ -99,6 +118,11 @@ export class Policy {
   private readonly watching: Record<Faction, boolean>
   private readonly observer: PolicyObserver
   private readonly spacing: number
+  private readonly orders: Record<Faction, StandingOrder>
+  /** Once a side has decided to pull out it keeps pulling out. */
+  private readonly pullingOut: Record<Faction, boolean> = { [Faction.Blue]: false, [Faction.Red]: false }
+  /** Each unit's hit points when the match began, which is what a first wound is measured from. */
+  private readonly startHp = new Map<Soldier, number>()
 
   /**
    * @param apply Carries one intent out against `host` and answers for it. A
@@ -114,6 +138,11 @@ export class Policy {
     this.watching = options.watching ?? { [Faction.Blue]: true, [Faction.Red]: true }
     this.observer = options.observer ?? {}
     this.spacing = options.spacing ?? 0
+    this.orders = {
+      [Faction.Blue]: options.orders?.[Faction.Blue] ?? 'stand',
+      [Faction.Red]: options.orders?.[Faction.Red] ?? 'stand',
+    }
+    for (const unit of host.squads.soldiers) this.startHp.set(unit, unit.hp)
     const { byFaction } = host.squads
     this.intel = {
       [Faction.Blue]: new Intel(host.grid, byFaction[Faction.Blue], byFaction[Faction.Red]),
@@ -147,6 +176,11 @@ export class Policy {
    */
   *steps(): Generator<void, void> {
     const faction = this.host.activeFaction
+    if (!this.pullingOut[faction] && this.wantsOut(faction)) this.pullingOut[faction] = true
+    if (this.pullingOut[faction]) {
+      yield* this.pullOut(faction)
+      return
+    }
     const before = this.totalHp()
     for (const unit of this.host.squads.byFaction[faction]) {
       if (unit.isDead) continue
@@ -157,6 +191,97 @@ export class Policy {
     this.quiet = this.totalHp() < before ? 0 : this.quiet + 1
     this.observer.ending?.(faction)
     this.act({ type: 'endTurn', faction })
+  }
+
+  /** Whether `faction`'s standing order says it is time to get out. */
+  private wantsOut(faction: Faction): boolean {
+    const side = this.host.squads.byFaction[faction]
+    switch (this.orders[faction]) {
+      case 'stand':
+        return false
+      case 'evade':
+        return true
+      case 'cautious':
+        return side.some((unit) => unit.isDead || unit.hp < (this.startHp.get(unit) ?? unit.maxHp))
+      case 'opportunist': {
+        const living = side.filter((unit) => !unit.isDead)
+        let hp = 0
+        let start = 0
+        for (const unit of side) {
+          hp += Math.max(0, unit.hp)
+          start += this.startHp.get(unit) ?? unit.maxHp
+        }
+        return this.intel[faction].contacts.length > living.length || hp * 2 <= start
+      }
+    }
+  }
+
+  /**
+   * A side getting out: everyone who can walks for the way out, and once
+   * everyone who still takes orders is standing on it, the side retreats.
+   * Anyone the rules are running — broken — is not waited for.
+   */
+  private *pullOut(faction: Faction): Generator<void, void> {
+    const side = this.host.squads.byFaction[faction]
+    for (const unit of side) {
+      if (unit.isDead) continue
+      if (!unit.broken) this.walkHome(unit)
+      // Shot dead on the way: there is no turn left to end.
+      if (unit.isDead) continue
+      this.act({ type: 'endUnitTurn', faction, squadIndex: unit.squadIndex })
+      yield
+    }
+    const size = this.grid.size
+    const leaving = leaversOf(side, faction, size)
+    const ready = leaving.length > 0 && side.every((unit) => unit.isDead || unit.broken || onWayOut(faction, unit.tile, size))
+    this.observer.ending?.(faction)
+    // A retreat that fails hands over by itself; one that succeeds ends the match.
+    this.act(ready ? { type: 'retreat', faction } : { type: 'endTurn', faction })
+  }
+
+  /**
+   * Walk as far toward the way out as the points allow: the reachable tile
+   * fewest rows from it, the cheapest of those, one tile per intent like
+   * every other walk.
+   */
+  private walkHome(unit: Soldier): void {
+    const size = this.grid.size
+    const here = rowsFromWayOut(unit.faction, unit.tile, size)
+    if (here === 0) return
+    const occupied = burningTiles(this.grid)
+    for (const other of this.host.squads.soldiers) {
+      if (other === unit || other.isDead) continue
+      occupied.add(this.grid.index(other.tile.x, other.tile.y))
+    }
+    const reach = reachable(this.grid, unit.tile, occupied, moveBudget(unit))
+    let best = -1
+    let bestRows = here
+    // Cheapest first, so the first tile at the fewest rows is the cheapest.
+    for (const index of reach.tiles) {
+      const rows = rowsFromWayOut(unit.faction, { x: index % size, y: (index / size) | 0 }, size)
+      if (rows < bestRows) {
+        best = index
+        bestRows = rows
+      }
+    }
+    if (best < 0) return
+    const route = routeTo(this.grid, reach, best)
+    for (let i = 1; i < route.length; i++) {
+      const from = route[i - 1]!
+      const step = route[i]!
+      if (unit.ap < stepCostFor(this.grid, unit, from, step)) break
+      this.act({
+        type: 'moveUnit',
+        faction: unit.faction,
+        squadIndex: unit.squadIndex,
+        path: [
+          { x: from.x, y: from.y },
+          { x: step.x, y: step.y },
+        ],
+      })
+      this.observer.stepped?.(unit)
+      if (unit.isDead) break
+    }
   }
 
   /** Play the active side's whole turn, without pause. */

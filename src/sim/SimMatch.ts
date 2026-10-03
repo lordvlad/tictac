@@ -14,7 +14,7 @@ import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
 import type { SquadLoadout } from '../game/Loadout'
-import { type Attack, Policy } from './Policy'
+import { type Attack, Policy, type StandingOrder } from './Policy'
 import {
   type CombatRecording,
   type Deployment,
@@ -53,6 +53,12 @@ export interface SquadPlan {
    * a sweep asking about a mix runs two plans and compares them.
    */
   fatigue?: number
+  /**
+   * When this side's policy pulls out and retreats ({@link StandingOrder});
+   * `stand` — fight to the end — when absent, which is what the sweep
+   * measures the game with.
+   */
+  order?: StandingOrder
 }
 
 /**
@@ -138,6 +144,8 @@ export interface MatchOutcome {
   doors: { hung: number; opened: number }
   /** The winning side's survivors: what they did, and what it taught them. */
   debriefed: { deeds: Deeds; growth: Growth[] }[]
+  /** The side that got away by retreating, or null when the match ended any other way. */
+  withdrew: Faction | null
 }
 
 const DEFAULT_TURN_CAP = 40
@@ -235,6 +243,7 @@ export class SimMatch {
       },
       {
         watching: { [Faction.Blue]: setup.blue.watch !== false, [Faction.Red]: setup.red.watch !== false },
+        orders: { [Faction.Blue]: setup.blue.order, [Faction.Red]: setup.red.order },
         observer: {
           attacked: (attack) => this.tallyAttack(attack),
           threw: () => {
@@ -301,7 +310,16 @@ export class SimMatch {
         [Faction.Blue]: this.ground.of(Faction.Blue),
         [Faction.Red]: this.ground.of(Faction.Red),
       },
+      withdrew: this.withdrawnSide(),
     }
+  }
+
+  /** The side with somebody who got away by retreating, or null. */
+  private withdrawnSide(): Faction | null {
+    for (const faction of [Faction.Blue, Faction.Red]) {
+      if (this.host.squads.byFaction[faction].some((unit) => unit.withdrawn)) return faction
+    }
+    return null
   }
 
   /**
