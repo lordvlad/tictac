@@ -14,22 +14,25 @@ import {
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { EngineContext } from '../engine'
-import { Faction, SOLDIER_HEIGHT, SQUAD_SIZE } from '../config'
+import { Faction, SQUAD_SIZE } from '../config'
+import { characterScale, type CharacterSheet } from '../core/Characters'
 import { soldierColor } from '../entities/palette'
 
 export class OffscreenPortraits {
   private readonly portraits = new Map<string, string>()
 
-  constructor(private readonly engine: EngineContext) {
-    this.generateAll()
+  constructor(
+    private readonly engine: EngineContext,
+    squads?: Partial<Record<Faction, readonly (CharacterSheet | undefined)[]>>,
+  ) {
+    this.generateAll(squads)
   }
-
   getPortrait(faction: Faction, squadIndex: number): string {
     const key = `${faction}_${squadIndex}`
     return this.portraits.get(key) ?? ''
   }
 
-  private generateAll(): void {
+  private generateAll(squads?: Partial<Record<Faction, readonly (CharacterSheet | undefined)[]>>): void {
     const gltf = this.engine.assets['character'] as GLTF | undefined
     if (!gltf) return
 
@@ -64,7 +67,9 @@ export class OffscreenPortraits {
         // the portrait camera sits on +Z, so no rotation is needed. Turning it
         // by PI here is what produced portraits of the back of everyone's head.
         model.rotation.y = 0
-        model.scale.set(1, 1, 1)
+        const sheet = squads?.[faction]?.[index]
+        const scale = characterScale(sheet?.appearance)
+        model.scale.set(scale.x, scale.y, scale.z)
         model.updateMatrixWorld(true)
 
         // Tint material
@@ -78,10 +83,10 @@ export class OffscreenPortraits {
 
         scene.add(model)
 
-        // Head is roughly at y = 1.62
-        camera.position.set(0, 1.62, 0.75)
-        camera.lookAt(new Vector3(0, 1.58, 0))
-        renderer.render(scene, camera)
+        const head = model.getObjectByName('Head')
+        const headY = head ? new Vector3().setFromMatrixPosition(head.matrixWorld).y : 1.57 * scale.y
+        camera.position.set(0, headY + 0.05, 0.75)
+        camera.lookAt(new Vector3(0, headY + 0.01, 0))
         const dataUrl = canvas.toDataURL('image/png')
         this.portraits.set(`${faction}_${index}`, dataUrl)
 

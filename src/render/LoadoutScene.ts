@@ -16,6 +16,7 @@ import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { EngineContext } from '../engine'
 import type { Faction } from '../config'
+import { characterScale, type CharacterSheet } from '../core/Characters'
 import { Rng } from '../core/rng'
 import { soldierColor } from '../entities/palette'
 
@@ -54,6 +55,7 @@ export class LoadoutScene {
 
   private angleTarget: number
   private angleCurrent: number
+  private readonly size: number
 
   private rafHandle = 0
   private lastFrameTime = 0
@@ -63,9 +65,10 @@ export class LoadoutScene {
     private readonly engine: EngineContext,
     seed: number,
     private readonly faction: Faction,
-    /** How many people are standing on the arc: the squad that deploys, not a constant. */
-    private readonly size: number,
+    /** The squad deploying on the arc. */
+    private readonly sheets: readonly CharacterSheet[],
   ) {
+    this.size = sheets.length
     this.angleTarget = this.spokeAngle(0)
     this.angleCurrent = this.angleTarget
     const scene = this.engine.scene
@@ -182,8 +185,8 @@ export class LoadoutScene {
       model.position.set(Math.sin(angle) * RING_RADIUS, 0, Math.cos(angle) * RING_RADIUS)
       // Yaw 0 faces +Z, so the spoke angle is exactly "facing outward".
       model.rotation.y = angle
-      model.scale.set(1, 1, 1)
-
+      const scale = characterScale(this.sheets[index]?.appearance)
+      model.scale.set(scale.x, scale.y, scale.z)
       const tint = soldierColor(this.faction, index)
       model.traverse((child) => {
         if (child instanceof Mesh && child.material) {

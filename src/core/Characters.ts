@@ -55,6 +55,40 @@ export interface Attributes {
  * this build clamps — the envelope is unforgeable by construction rather than
  * by validation.
  */
+export interface CharacterAppearance {
+  /** Vertical stature multiplier (0.90..1.10, default 1.0). Authored at ~1.83m. */
+  height: number
+  /** Lateral shoulder and torso width multiplier (0.90..1.10, default 1.0). */
+  width: number
+  /** Torso depth, chest thickness, and muscular bulk multiplier (0.88..1.14, default 1.0). */
+  bulkiness: number
+}
+
+/** 3D model scaling vector computed from appearance. */
+export interface ModelScale {
+  x: number
+  y: number
+  z: number
+}
+
+/** Pure projection from appearance variations to 3D model scale. */
+export function characterScale(appearance?: CharacterAppearance): ModelScale {
+  if (!appearance) return { x: 1, y: 1, z: 1 }
+  const x = appearance.width * Math.sqrt(appearance.bulkiness)
+  const y = appearance.height
+  const z = appearance.bulkiness
+  return { x, y, z }
+}
+
+/** Roll randomized appearance variations. */
+export function characterAppearance(rng: Rng): CharacterAppearance {
+  return {
+    height: Number(rng.range(0.92, 1.08).toFixed(3)),
+    width: Number(rng.range(0.92, 1.08).toFixed(3)),
+    bulkiness: Number(rng.range(0.88, 1.12).toFixed(3)),
+  }
+}
+
 export interface CharacterSheet {
   attributes: Attributes
   /** Accuracy this character adds, or loses, with each weapon class. */
@@ -67,6 +101,8 @@ export interface CharacterSheet {
   traits: TraitId[]
   /** Which way they go when a break is more than a freeze (`core/Morale`). */
   temperament: Temperament
+  /** Physical 3D stature and proportions for rendering. */
+  appearance: CharacterAppearance
 }
 
 /**
@@ -191,7 +227,9 @@ export function characterSheet(rng: Rng): CharacterSheet {
   if (rng.chance(CHARACTER.predispositionChance)) traits.push(rng.pick(PREDISPOSITIONS))
   const temperament = rng.chance(0.5) ? Temperament.Hothead : Temperament.Skittish
 
-  return { attributes, proficiency, utility, specialism, traits, temperament }
+  const appearance = characterAppearance(rng)
+
+  return { attributes, proficiency, utility, specialism, traits, temperament, appearance }
 }
 
 /**
@@ -240,6 +278,7 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
     specialism: WeaponId.Rifle,
     traits: [],
     temperament: Temperament.Skittish,
+    appearance: { height: 1, width: 1, bulkiness: 1 },
   }
   for (const id of Object.values(WeaponId)) fallback.proficiency[id] = 0
   for (const id of Object.values(UtilityId)) fallback.utility[id] = 0
@@ -278,6 +317,15 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
       if (!traits.includes(id as TraitId)) traits.push(id as TraitId)
     }
   }
+  const rawApp = sheet.appearance as Partial<CharacterAppearance> | undefined
+  const float = (value: unknown, low: number, high: number, fall: number): number =>
+    typeof value === 'number' && Number.isFinite(value) ? clamp(Number(value.toFixed(3)), low, high) : fall
+
+  const appearance: CharacterAppearance = {
+    height: float(rawApp?.height, 0.8, 1.2, fallback.appearance.height),
+    width: float(rawApp?.width, 0.8, 1.2, fallback.appearance.width),
+    bulkiness: float(rawApp?.bulkiness, 0.8, 1.2, fallback.appearance.bulkiness),
+  }
 
   return {
     attributes,
@@ -292,5 +340,6 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
     temperament: (Object.values(Temperament) as unknown[]).includes(sheet.temperament)
       ? (sheet.temperament as Temperament)
       : fallback.temperament,
+    appearance,
   }
 }

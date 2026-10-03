@@ -10,6 +10,8 @@ import {
 } from '../src/core/Ballistics'
 import {
   type CharacterSheet,
+  characterAppearance,
+  characterScale,
   characterSheet,
   derive,
   rollSquadSheets,
@@ -330,6 +332,47 @@ describe('Sanitising a sheet off the wire', () => {
 
     expect(sheet.traits).toEqual([TraitId.Stoic, TraitId.Fleet])
     expect(resolveTraits(sheet.traits).critImmune).toBe(true)
+  })
+
+  test('character appearance produces valid variations and scales model dimensions', () => {
+    const rng = new Rng(42)
+    for (let i = 0; i < 50; i++) {
+      const sheet = characterSheet(rng)
+      expect(sheet.appearance.height).toBeGreaterThanOrEqual(0.92)
+      expect(sheet.appearance.height).toBeLessThanOrEqual(1.08)
+      expect(sheet.appearance.width).toBeGreaterThanOrEqual(0.92)
+      expect(sheet.appearance.width).toBeLessThanOrEqual(1.08)
+      expect(sheet.appearance.bulkiness).toBeGreaterThanOrEqual(0.88)
+      expect(sheet.appearance.bulkiness).toBeLessThanOrEqual(1.12)
+
+      const scale = characterScale(sheet.appearance)
+      expect(scale.y).toBe(sheet.appearance.height)
+      expect(scale.z).toBe(sheet.appearance.bulkiness)
+      expect(scale.x).toBeCloseTo(sheet.appearance.width * Math.sqrt(sheet.appearance.bulkiness), 5)
+    }
+
+    // Default fallback without appearance
+    expect(characterScale(undefined)).toEqual({ x: 1, y: 1, z: 1 })
+  })
+
+  test('sanitizeSheet preserves valid appearance and clamps extreme variations', () => {
+    // Missing appearance falls back to 1.0 default
+    const defaultSheet = sanitizeSheet({})
+    expect(defaultSheet.appearance).toEqual({ height: 1, width: 1, bulkiness: 1 })
+
+    // Valid appearance is preserved
+    const validSheet = sanitizeSheet({
+      appearance: { height: 1.05, width: 0.95, bulkiness: 1.1 },
+    })
+    expect(validSheet.appearance).toEqual({ height: 1.05, width: 0.95, bulkiness: 1.1 })
+
+    // Out of bounds appearance is clamped to safe range [0.8, 1.2]
+    const clampedSheet = sanitizeSheet({
+      appearance: { height: 999, width: -10, bulkiness: NaN },
+    })
+    expect(clampedSheet.appearance.height).toBe(1.2)
+    expect(clampedSheet.appearance.width).toBe(0.8)
+    expect(clampedSheet.appearance.bulkiness).toBe(1.0)
   })
 
   test('a key off the prototype is not a trait', () => {

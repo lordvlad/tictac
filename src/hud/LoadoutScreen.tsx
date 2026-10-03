@@ -89,7 +89,7 @@ export class LoadoutScreen {
     // One kit per person who is actually deploying: a kept roster with an
     // empty slot brings fewer than a full squad, and so does its loadout.
     this.loadout = defaultLoadout(sheets.length)
-    this.scene = new LoadoutScene(engine, seed, faction, sheets.length)
+    this.scene = new LoadoutScene(engine, seed, faction, sheets)
 
     this.container = document.createElement('div')
     this.container.className = 'loadout-root'

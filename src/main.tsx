@@ -288,7 +288,7 @@ function equipThenStart(
 ): void {
   const engine = createEngineContext(Game.instance())
   const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
-  const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine), seed, faction, sheets)
+  const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine, { [faction]: sheets }), seed, faction, sheets)
 
   // The squad the player was shown while equipping is the squad that deploys.
   // Rolled per peer, never from the match seed — that seed is the host's map.
@@ -379,7 +379,10 @@ function start(
     bounds: battlefield.grid.halfExtent,
   })
 
-  const portraits = new OffscreenPortraits(engine)
+  const portraits = new OffscreenPortraits(engine, {
+    [Faction.Blue]: squads.byFaction[Faction.Blue].map((s) => s.sheet),
+    [Faction.Red]: squads.byFaction[Faction.Red].map((s) => s.sheet),
+  })
   const tracers = new Tracers(engine)
   const turnSystem = new TurnSystem()
   const turnManager = new TurnManager(world, turnSystem, squads, rig)
@@ -516,7 +519,10 @@ function startPlayback(recording: CombatRecording): void {
     bounds: battlefield.grid.halfExtent,
   })
 
-  const portraits = new OffscreenPortraits(engine)
+  const portraits = new OffscreenPortraits(engine, {
+    [Faction.Blue]: squads.byFaction[Faction.Blue].map((s) => s.sheet),
+    [Faction.Red]: squads.byFaction[Faction.Red].map((s) => s.sheet),
+  })
   const tracers = new Tracers(engine)
   const turnSystem = new TurnSystem()
   const turnManager = new TurnManager(world, turnSystem, squads, rig)
