@@ -338,7 +338,7 @@ export class SimMatch {
   }
 
   private living(faction: Faction): boolean {
-    return this.host.squads.byFaction[faction].some((unit) => !unit.isDead)
+    return this.host.squads.byFaction[faction].some((unit) => unit.onField)
   }
 
   private traitsOf(faction: Faction): string[] {

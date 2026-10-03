@@ -697,6 +697,19 @@ export class Soldier {
     return this.health.hp <= 0
   }
 
+  /** Got off the field alive by retreating: out of the fight, not dead. */
+  get withdrawn(): boolean {
+    return this.health.withdrawn
+  }
+  set withdrawn(value: boolean) {
+    this.health.withdrawn = value
+  }
+
+  /** Still in the fight: neither dead nor withdrawn. What ends a match is a side with nobody on the field. */
+  get onField(): boolean {
+    return !this.isDead && !this.health.withdrawn
+  }
+
   /**
    * Whether the side whose turn it is can see this unit.
    *

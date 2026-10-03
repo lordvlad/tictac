@@ -81,6 +81,7 @@ describe('JSON-RPC framing', () => {
       'meleeAttack',
       'endUnitTurn',
       'endTurn',
+      'retreat',
       'rightClickFacing',
       'useItem',
       'operateDoor',
@@ -201,7 +202,7 @@ describe('Component replication', () => {
       {
         jsonrpc: '2.0',
         method: 'tictac/component/health/update',
-        params: { entityId: entity, hp: 55, maxHp: 100 },
+        params: { entityId: entity, hp: 55, maxHp: 100, withdrawn: false },
       },
     ])
   })

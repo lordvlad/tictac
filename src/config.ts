@@ -294,6 +294,29 @@ export const MEDICAL_BAY = {
   concussed: 1,
 }
 /**
+ * Getting out of a fight (`core/Retreat`, GDD combat §2.8): the percent chance
+ * a side's attempt succeeds. Whole percent points, so two peers never disagree
+ * about a rounding; the roll is the match's own.
+ *
+ * A fresh, steady squad that nobody can see nearly always gets away — avoiding
+ * a fight costs it only time — while a hurt, shaken one under the enemy's eyes
+ * is a coin toss or worse.
+ */
+export const RETREAT = {
+  /** The chance before anything about the leavers or the enemy counts. */
+  base: 60,
+  /** Added at full morale, taken away at none; pro rata between. */
+  morale: 20,
+  /** Added at full health, taken away at none; pro rata between. */
+  health: 20,
+  /** Taken away for every enemy that can see somebody leaving. */
+  perWatcher: 15,
+  /** Never surer than this, and never hopeless. */
+  min: 5,
+  max: 95,
+}
+
+/**
  * How much a unit can take before it stops taking orders (`core/Morale`).
  *
  * Morale runs 0 to {@link MORALE.max}. Stress takes it down and a few things

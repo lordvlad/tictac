@@ -22,6 +22,7 @@ import { billow, burn, kindle } from '../../core/Fire'
 import type { GrenadeSpec } from '../../core/Arsenal'
 import { faceToward, Side, type Tile } from '../../core/Grid'
 import { cannotWorkDoor, doorAfter, doorApCost } from '../../core/Doors'
+import { cannotRetreat, leaversOf, retreatChance, watchersOf } from '../../core/Retreat'
 import { brokenStep } from '../../game/Breakdown'
 
 /**
@@ -46,6 +47,7 @@ export type Command = Extract<
       | 'operateDoor'
       | 'endUnitTurn'
       | 'endTurn'
+      | 'retreat'
       | 'rightClickFacing'
   }
 >
@@ -62,6 +64,7 @@ const COMMAND_TYPES: ReadonlySet<string> = new Set<Command['type']>([
   'operateDoor',
   'endUnitTurn',
   'endTurn',
+  'retreat',
   'rightClickFacing',
 ])
 
@@ -102,6 +105,8 @@ export interface Carried {
   applied: true
   shot?: ShotResult
   grenade?: GrenadeResult
+  /** A retreat attempt: whether the side got away, and the percent chance it had. */
+  retreat?: { escaped: boolean; chance: number }
 }
 
 export type Applied = Carried | Refusal
@@ -325,6 +330,7 @@ export class CommandSystem extends System {
         return this.unit(command.attackerFaction, command.attackerIndex)
       case 'endUnitTurn':
       case 'endTurn':
+      case 'retreat':
         return undefined
       default:
         return this.unit(command.faction, command.squadIndex)
@@ -502,12 +508,29 @@ export class CommandSystem extends System {
         return carried
       }
       case 'endTurn': {
-        this.pushedThrough(this.turns.activeFaction)
-        this.turns.startNextTurn()
-        this.burnDown()
-        this.sufferAilments()
-        this.rally()
+        this.handOver()
         return carried
+      }
+      case 'retreat': {
+        if (command.faction !== this.turns.activeFaction) return refuse('not this side’s turn')
+        const { grid } = this.combat
+        const why = cannotRetreat(this.squads.soldiers, command.faction, grid.size)
+        if (why) return refuse(why)
+        const leavers = leaversOf(this.squads.soldiers, command.faction, grid.size)
+        const chance = retreatChance(leavers, watchersOf(grid, this.squads.soldiers, leavers))
+        if (this.combat.roll() >= chance / 100) {
+          // Caught: the attempt was the side's turn.
+          this.handOver()
+          return { applied: true, retreat: { escaped: false, chance } }
+        }
+        const going = new Set(leavers)
+        for (const unit of this.squads.byFaction[command.faction] ?? []) {
+          if (unit.isDead) continue
+          // Whoever was not on the way out is left behind, and lost.
+          if (going.has(unit)) unit.withdrawn = true
+          else unit.hp = 0
+        }
+        return { applied: true, retreat: { escaped: true, chance } }
       }
       case 'operateDoor': {
         const unit = this.unit(command.faction, command.squadIndex)
@@ -552,5 +575,18 @@ export class CommandSystem extends System {
         return carried
       }
     }
+  }
+
+  /**
+   * The handover: the outgoing side's records, the next side's turn, fire,
+   * ailments, nerve. What ending a turn does, and what a retreat that failed
+   * does in its place.
+   */
+  private handOver(): void {
+    this.pushedThrough(this.turns.activeFaction)
+    this.turns.startNextTurn()
+    this.burnDown()
+    this.sufferAilments()
+    this.rally()
   }
 }

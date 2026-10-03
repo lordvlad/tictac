@@ -11,6 +11,7 @@ import {
 import { Surface } from './Surfaces'
 import { WallKind } from './Walls'
 import { clamp } from './math'
+import { DEPLOY_INSET, DEPLOY_ROWS } from './Retreat'
 import { Rng } from './rng'
 
 export interface GeneratedMap {
@@ -125,15 +126,16 @@ export function generateMap(seed: number, options: MapOptions = {}): GeneratedMa
   // Blue deploys along the low-Y edge, Red along the high-Y edge: anywhere
   // along it by default, or centred with a few tiles of jitter when asked.
   const zoneW = SQUAD_SIZE + 3
-  const zoneH = 3
+  // Shared with `core/Retreat`: a side's way out is the rows it deployed in.
+  const zoneH = DEPLOY_ROWS
   const alongEdge = (): number => rng.int(2, size - 2 - zoneW)
   const centred = (): number => Math.round(size / 2 - zoneW / 2 + rng.range(-4, 4))
   const blueX = options.spawns === 'centre' ? centred() : alongEdge()
   const redX = options.spawns === 'centre' ? centred() : alongEdge()
-  const blueZone: Rect = { x: clamp(blueX, 2, size - 2 - zoneW), y: 2, w: zoneW, h: zoneH }
+  const blueZone: Rect = { x: clamp(blueX, 2, size - 2 - zoneW), y: DEPLOY_INSET, w: zoneW, h: zoneH }
   const redZone: Rect = {
     x: clamp(redX, 2, size - 2 - zoneW),
-    y: size - 2 - zoneH,
+    y: size - DEPLOY_INSET - zoneH,
     w: zoneW,
     h: zoneH,
   }

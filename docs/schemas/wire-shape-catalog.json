@@ -87,6 +87,10 @@
       "matchId": "string",
       "type": "'resume'"
     },
+    "retreat": {
+      "faction": "Faction",
+      "type": "'retreat'"
+    },
     "rightClickFacing": {
       "faction": "Faction",
       "squadIndex": "number",
@@ -247,7 +251,8 @@
     },
     "health": {
       "hp": "number",
-      "maxHp": "number"
+      "maxHp": "number",
+      "withdrawn": "boolean"
     },
     "identity": {
       "faction": "number",
@@ -423,5 +428,5 @@
       "weaponId": "string"
     }
   },
-  "protocolVersion": 3
+  "protocolVersion": 4
 }

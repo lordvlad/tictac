@@ -206,7 +206,7 @@ describe('World change replication', () => {
     health.hp = 10
     world.syncDirty()
 
-    expect(seen).toEqual([{ entityId: entity, name: 'health', data: { hp: 10, maxHp: 100 } }])
+    expect(seen).toEqual([{ entityId: entity, name: 'health', data: { hp: 10, maxHp: 100, withdrawn: false } }])
   })
 })
 
@@ -214,7 +214,7 @@ describe('Components', () => {
   test('round-trip through serialize/deserialize', () => {
     const cases: [Component, Component][] = [
       [new IdentityComponent(Faction.Blue, 1, 'Alpha'), new IdentityComponent(Faction.Red, 0, '')],
-      [new HealthComponent(80, 120), new HealthComponent()],
+      [new HealthComponent(80, 120, true), new HealthComponent()],
       [new ActionPointsComponent(3, 9), new ActionPointsComponent()],
       [new ArmorComponent(15, 22), new ArmorComponent()],
       [new StanceComponent(true, true, [{ x: 5, y: 10 }], true), new StanceComponent()],

@@ -100,11 +100,27 @@ describe('The planted Cloudflare deployment', () => {
     const built = Bun.spawnSync(['bun', 'run', 'build'], { cwd: import.meta.dir + '/..' })
     if (!built.success) throw new Error(`bun run build failed: ${built.stderr.toString()}`)
 
-    dev = Bun.spawn(['bunx', 'wrangler', 'dev', '--port', String(PORT)], {
-      cwd: import.meta.dir + '/..',
-      stdout: 'ignore',
-      stderr: 'ignore',
-    })
+    // `wrangler.jsonc` names the deployed host as the relying party; the
+    // passkey ceremony here is spoken from localhost, so this run states the
+    // local one instead (what `MatchDurableObject` falls back to when unset).
+    dev = Bun.spawn(
+      [
+        'bunx',
+        'wrangler',
+        'dev',
+        '--port',
+        String(PORT),
+        '--var',
+        'RELYING_PARTY_ID:localhost',
+        '--var',
+        `RELYING_PARTY_ORIGINS:${ORIGIN}`,
+      ],
+      {
+        cwd: import.meta.dir + '/..',
+        stdout: 'ignore',
+        stderr: 'ignore',
+      },
+    )
     await waitForReady(30000)
   }, 60000)
 

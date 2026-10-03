@@ -198,11 +198,14 @@ export class MatchHost {
     return this.turnManager.activeFaction
   }
 
-  /** Whether the match is over, and who is left standing. */
+  /**
+   * Whether the match is over, and who is left standing: units still on the
+   * field, so a side that retreated counts as gone, the same as one wiped out.
+   */
   get living(): Record<Faction, number> {
     return {
-      [Faction.Blue]: this.squads.byFaction[Faction.Blue].filter((u) => !u.isDead).length,
-      [Faction.Red]: this.squads.byFaction[Faction.Red].filter((u) => !u.isDead).length,
+      [Faction.Blue]: this.squads.byFaction[Faction.Blue].filter((u) => u.onField).length,
+      [Faction.Red]: this.squads.byFaction[Faction.Red].filter((u) => u.onField).length,
     }
   }
 

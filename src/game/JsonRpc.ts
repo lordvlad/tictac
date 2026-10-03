@@ -70,6 +70,7 @@ export const RpcMethods = {
   meleeAttack: 'tictac/system/combat/meleeAttack',
   endUnitTurn: 'tictac/system/turn/endUnitTurn',
   endTurn: 'tictac/system/turn/endTurn',
+  retreat: 'tictac/system/turn/retreat',
   useItem: 'tictac/system/items/useItem',
   operateDoor: 'tictac/system/terrain/operateDoor',
   rightClickFacing: 'tictac/system/render/rightClickFacing',

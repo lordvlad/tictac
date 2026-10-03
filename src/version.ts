@@ -25,8 +25,10 @@
  * 3: `ready` carries one `Deployment[]` (`ITEM-043`) instead of separate
  * `sheets`, `loadout` and `hp` fields — a peer speaking version 2 states a
  * shape this build no longer parses.
+ *
+ * 4: the `retreat` command, and `health.withdrawn` on every unit (`ITEM-051`).
  */
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
 
 /**
  * The commit this bundle was built from, or `dev` when it was not built.
