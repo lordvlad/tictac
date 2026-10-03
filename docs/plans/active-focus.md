@@ -31,6 +31,9 @@ met on the road ([GDD-WORLD](../design/gdd/world-and-travel.md)).
 
 ---
 
+## 🔨 In Progress
+- `[ITEM-055]` Render the HUD and menus with React.
+
 ## 📋 Ready — pull in this order
 1. `[ITEM-050]` The world map and travel — real-Earth tiles from the existing R2 archive,
    waypoint position, wall-clock travel on alarms, the start location (absorbs `[ITEM-049]`).

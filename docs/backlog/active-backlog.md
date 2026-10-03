@@ -465,3 +465,52 @@ to this item.
 
 #### Acceptance Criteria
 - [ ] Designed in the GDD before any of it is built.
+
+---
+
+### [ITEM-055] Render the HUD and Menus with React
+**Type:** Refactor
+**Priority:** P1
+**Status:** In Progress
+**Milestone:** Unscheduled
+
+#### Why
+Every HUD and menu surface is a string template assigned to `innerHTML`: 18 sites in `Hud.ts`, 8
+in `main.ts`, 4 in `DebugMap.ts`, one each in `LoadoutScreen`, `RosterScreen`, `DebugPanel`,
+`PlaybackControls` and `FullscreenPrompt`. Each assignment throws the old elements away, which is
+one class of bug with many faces: the loadout panel jumped to the top on every pick (worked
+around in `5c7a457`), the turn overlay is kept out of the 30 Hz redraw because swapping markup
+under a press loses the click, and the open consumables group is held outside the markup so a
+redraw cannot wipe it. Focus, hover and transitions reset the same way. Values are interpolated
+unescaped, and data travels to the click handler as JSON in `data-intent` attributes.
+
+`HudModel` is already a pure model → view layer, so only the drawing changes.
+
+#### Change
+1. React and React DOM, compiled as TSX by Bun (`jsx: react-jsx`); one shared `<Icon>`
+   component replaces the `icon()` string helper.
+2. Each surface becomes components rendered into a React root its existing class owns. The
+   classes keep their public API, so `main.ts`, `InteractionController` and the tests do not
+   change shape. Intents are passed as `onClick` closures; no JSON in attributes.
+3. Markup keeps its class names, so `game.css` keeps working; workarounds the rebuilds needed
+   (the loadout scroll restore, the overlay's separate render) are removed.
+4. Out of scope: Tweakpane's own panels, the frame counter's per-frame text, the Three.js
+   canvas.
+
+#### Affected Files
+- `package.json`, `tsconfig.json`, `src/hud/*`, `src/main.ts`, `src/game.css` (only if markup
+  must change), `docs/architecture/` (the HUD's rendering section)
+
+#### Acceptance Criteria
+- [ ] No `innerHTML` assignment left in `src/hud/` or `src/main.ts` for app markup.
+- [ ] Every surface verified in a real browser: menu, lobby, roster, loadout (scroll survives a
+      pick with no restore code), the in-match HUD (select, shoot panel, items, end turn,
+      retreat), the end screens, playback controls, debug map/panel.
+- [ ] `bun run lint`, `bun test`, `bun run build` green; the bundle size change recorded.
+- [ ] Living documentation updated.
+
+#### Risks & Mitigations
+- **Risk:** two rendering styles coexist mid-migration, against the one-convention rule.
+- **Mitigation:** the migration lands as one item, every surface at once.
+- **Risk:** CSS written against the old markup drifts.
+- **Mitigation:** class names and structure kept; each surface checked in a browser.
