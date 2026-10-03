@@ -193,6 +193,28 @@ export class LoadoutScreen {
   // ---------------------------------------------------------------------------
 
   private render(): void {
+    // Every change rebuilds the markup, which would throw a scrolled panel back
+    // to the top: note where each scroller stood, by class, and put it back.
+    const scrolled = new Map<string, { top: number; left: number }>()
+    for (const el of [this.root, ...this.root.querySelectorAll<HTMLElement>('*')]) {
+      if (el.scrollTop !== 0 || el.scrollLeft !== 0) {
+        scrolled.set(el.className, { top: el.scrollTop, left: el.scrollLeft })
+      }
+    }
+    this.paint()
+    for (const [className, at] of scrolled) {
+      const el =
+        this.root.className === className
+          ? this.root
+          : this.root.querySelector<HTMLElement>(`[class="${CSS.escape(className)}"]`)
+      if (el) {
+        el.scrollTop = at.top
+        el.scrollLeft = at.left
+      }
+    }
+  }
+
+  private paint(): void {
     this.root.innerHTML = `
       <div class="loadout-title">
         <div class="loadout-heading">LOADOUT</div>
