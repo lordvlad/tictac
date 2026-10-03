@@ -197,6 +197,25 @@ describe('A broken unit', () => {
     expect(moves.every(({ origin }) => origin === 'rules')).toBe(true)
   })
 
+  test('panicking in the open, runs for its own way out, never toward the enemy', () => {
+    // Nowhere to hide: every tile it can reach is in the enemy's sight, so the
+    // flight is decided by where home is. Blue's way out is the low rows.
+    const m = match(always(0.1))
+    m.blue.tile = { x: 20, y: 20 }
+    m.red.tile = { x: 26, y: 20 }
+    m.blue.morale = 0
+    be(m.blue, { temperament: Temperament.Skittish })
+    const before = (m.blue.tile.x - m.red.tile.x) ** 2 + (m.blue.tile.y - m.red.tile.y) ** 2
+    // Blue's turn starts at the handover after Red's.
+    m.handOver()
+    m.handOver()
+
+    expect(m.blue.broken).toBe(MoraleBreak.Panic)
+    expect(m.blue.tile.y).toBeLessThan(20)
+    const after = (m.blue.tile.x - m.red.tile.x) ** 2 + (m.blue.tile.y - m.red.tile.y) ** 2
+    expect(after).toBeGreaterThanOrEqual(before)
+  })
+
   test('in a frenzy, charges the nearest enemy its side can see and strikes it', () => {
     const m = match(always(0.5))
     m.red.tile = { x: 10, y: 10 }

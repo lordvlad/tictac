@@ -4,6 +4,7 @@ import type { Combatant } from '../core/Combatant'
 import type { Grid, Tile } from '../core/Grid'
 import { MoraleBreak } from '../core/Morale'
 import { reachable, type Reach, routeTo } from '../core/Pathfinding'
+import { rowsFromWayOut } from '../core/Retreat'
 import { eyesOf, sees } from '../core/Visibility'
 import type { Command } from '../ecs/systems/CommandSystem'
 import { canMelee, canShoot, shotApCost } from './Combat'
@@ -72,27 +73,46 @@ function toggleCover(unit: Combatant): Command {
 
 /**
  * Where a panicking unit runs to: in sight of as few of the enemies its side
- * can see as it can manage, then as far from the nearest of them as it can
- * get, then the cheapest way there. Null when that is where it already is.
+ * can see as it can manage; then without closing on the nearest of them; then
+ * as near its own way out as it can get (`core/Retreat` — panic runs for
+ * home); then as far from the nearest enemy; then the cheapest way there. Null
+ * when that is where it already is.
  */
 function fleeTo(grid: Grid, unit: Combatant, seen: readonly Combatant[], units: readonly Combatant[]) {
   const { reach, tiles } = standable(grid, unit, units)
   const watchers = seen.map((enemy) => ({ tile: enemy.tile, eyes: eyesOf(grid, enemy) }))
+  const nearestFrom = (tile: Tile): number => {
+    let nearest = Infinity
+    for (const watcher of watchers) nearest = Math.min(nearest, distance2(watcher.tile, tile))
+    return nearest
+  }
+  const standing = nearestFrom(unit.tile)
   let best = -1
   let bestExposure = Infinity
+  let bestCloser = Infinity
+  let bestHome = Infinity
   let bestNearest = -1
   for (const index of tiles) {
     const tile = tileOf(grid, index)
     let exposure = 0
-    let nearest = Infinity
-    for (const watcher of watchers) {
-      if (sees(grid, watcher.tile, watcher.eyes, tile)) exposure++
-      nearest = Math.min(nearest, distance2(watcher.tile, tile))
-    }
+    for (const watcher of watchers) if (sees(grid, watcher.tile, watcher.eyes, tile)) exposure++
+    const nearest = nearestFrom(tile)
+    const closer = nearest < standing ? 1 : 0
+    const home = rowsFromWayOut(unit.faction, tile, grid.size)
     // Candidates arrive cheapest first, so a tie keeps the cheaper tile.
-    if (exposure < bestExposure || (exposure === bestExposure && nearest > bestNearest)) {
+    const better =
+      exposure !== bestExposure
+        ? exposure < bestExposure
+        : closer !== bestCloser
+          ? closer < bestCloser
+          : home !== bestHome
+            ? home < bestHome
+            : nearest > bestNearest
+    if (better) {
       best = index
       bestExposure = exposure
+      bestCloser = closer
+      bestHome = home
       bestNearest = nearest
     }
   }
