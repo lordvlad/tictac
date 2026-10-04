@@ -55,6 +55,60 @@ export interface Attributes {
  * this build clamps — the envelope is unforgeable by construction rather than
  * by validation.
  */
+export interface CharacterAppearance {
+  /** Vertical stature multiplier (0.90..1.10, default 1.0). Authored at ~1.83m. */
+  height: number
+  /** Lateral shoulder & frame width multiplier (0.90..1.10, default 1.0). */
+  width: number
+  /** Muscular volume, chest depth, and limb girth (0.85..1.25, default 1.0). */
+  bulkiness: number
+  /** Belly & waist circumference multiplier (0.85..1.35, default 1.0). */
+  gut: number
+}
+
+/** 3D model scaling vector computed from appearance. */
+export interface ModelScale {
+  x: number
+  y: number
+  z: number
+}
+
+/** Pure projection from appearance variations to 3D model scale. */
+export function characterScale(appearance?: CharacterAppearance): ModelScale {
+  if (!appearance) return { x: 1, y: 1, z: 1 }
+  const x = appearance.width * Math.sqrt(appearance.bulkiness)
+  const y = appearance.height
+  const z = appearance.bulkiness
+  return { x, y, z }
+}
+
+/** Roll randomized appearance variations. Bulkiness is derived from strength; gut from heaviness variation. */
+export function characterAppearance(
+  rng: Rng,
+  strength = Math.round((CHARACTER.attribute.min + CHARACTER.attribute.max) / 2),
+): CharacterAppearance {
+  const { min, max } = CHARACTER.attribute
+  const mid = (min + max) / 2
+  const span = (max - min) / 2
+  const clampedStrength = clamp(strength, min, max)
+  const strengthFactor = span > 0 ? (clampedStrength - mid) / span : 0
+
+  const height = Number(rng.range(0.92, 1.08).toFixed(3))
+  const width = Number(rng.range(0.92, 1.08).toFixed(3))
+
+  // Strength shifts base muscular bulk by +/- 0.12, jitter adds +/- 0.05
+  const baseBulkiness = 1.0 + strengthFactor * 0.12
+  const bulkJitter = rng.range(-0.05, 0.05)
+  const bulkiness = Number(clamp(baseBulkiness + bulkJitter, 0.85, 1.25).toFixed(3))
+
+  // Gut / belly circumference variation
+  const baseGut = 0.95 + (bulkiness - 1.0) * 0.4
+  const gutJitter = rng.range(-0.1, 0.2)
+  const gut = Number(clamp(baseGut + gutJitter, 0.85, 1.35).toFixed(3))
+
+  return { height, width, bulkiness, gut }
+}
+
 export interface CharacterSheet {
   attributes: Attributes
   /** Accuracy this character adds, or loses, with each weapon class. */
@@ -67,6 +121,8 @@ export interface CharacterSheet {
   traits: TraitId[]
   /** Which way they go when a break is more than a freeze (`core/Morale`). */
   temperament: Temperament
+  /** Physical 3D stature and proportions for rendering. */
+  appearance: CharacterAppearance
 }
 
 /**
@@ -191,7 +247,9 @@ export function characterSheet(rng: Rng): CharacterSheet {
   if (rng.chance(CHARACTER.predispositionChance)) traits.push(rng.pick(PREDISPOSITIONS))
   const temperament = rng.chance(0.5) ? Temperament.Hothead : Temperament.Skittish
 
-  return { attributes, proficiency, utility, specialism, traits, temperament }
+  const appearance = characterAppearance(rng, attributes.strength)
+
+  return { attributes, proficiency, utility, specialism, traits, temperament, appearance }
 }
 
 /**
@@ -240,6 +298,7 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
     specialism: WeaponId.Rifle,
     traits: [],
     temperament: Temperament.Skittish,
+    appearance: { height: 1, width: 1, bulkiness: 1, gut: 1 },
   }
   for (const id of Object.values(WeaponId)) fallback.proficiency[id] = 0
   for (const id of Object.values(UtilityId)) fallback.utility[id] = 0
@@ -278,6 +337,16 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
       if (!traits.includes(id as TraitId)) traits.push(id as TraitId)
     }
   }
+  const rawApp = sheet.appearance as Partial<CharacterAppearance> | undefined
+  const float = (value: unknown, low: number, high: number, fall: number): number =>
+    typeof value === 'number' && Number.isFinite(value) ? clamp(Number(value.toFixed(3)), low, high) : fall
+
+  const appearance: CharacterAppearance = {
+    height: float(rawApp?.height, 0.8, 1.2, fallback.appearance.height),
+    width: float(rawApp?.width, 0.8, 1.2, fallback.appearance.width),
+    bulkiness: float(rawApp?.bulkiness, 0.75, 1.35, fallback.appearance.bulkiness),
+    gut: float(rawApp?.gut, 0.75, 1.45, fallback.appearance.gut),
+  }
 
   return {
     attributes,
@@ -292,5 +361,6 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
     temperament: (Object.values(Temperament) as unknown[]).includes(sheet.temperament)
       ? (sheet.temperament as Temperament)
       : fallback.temperament,
+    appearance,
   }
 }

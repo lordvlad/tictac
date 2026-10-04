@@ -16,6 +16,8 @@ import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { EngineContext } from '../engine'
 import type { Faction } from '../config'
+import type { CharacterAppearance, CharacterSheet } from '../core/Characters'
+import { applyCharacterProportions } from './Proportions'
 import { Rng } from '../core/rng'
 import { soldierColor } from '../entities/palette'
 
@@ -48,12 +50,13 @@ const SWING_RATE = 6
  */
 export class LoadoutScene {
   private readonly added: Object3D[] = []
+  private readonly models: Group[] = []
   private readonly mixers: AnimationMixer[] = []
   private readonly geometries: { dispose: () => void }[] = []
   private readonly materials: { dispose: () => void }[] = []
-
   private angleTarget: number
   private angleCurrent: number
+  private readonly size: number
 
   private rafHandle = 0
   private lastFrameTime = 0
@@ -63,9 +66,10 @@ export class LoadoutScene {
     private readonly engine: EngineContext,
     seed: number,
     private readonly faction: Faction,
-    /** How many people are standing on the arc: the squad that deploys, not a constant. */
-    private readonly size: number,
+    /** The squad deploying on the arc. */
+    private readonly sheets: readonly CharacterSheet[],
   ) {
+    this.size = sheets.length
     this.angleTarget = this.spokeAngle(0)
     this.angleCurrent = this.angleTarget
     const scene = this.engine.scene
@@ -85,6 +89,14 @@ export class LoadoutScene {
   /** Swing the camera round to the member on this spoke. */
   select(index: number): void {
     this.angleTarget = this.spokeAngle(index)
+  }
+
+  /** Live update proportions for a customized squad member. */
+  updateProportions(index: number, appearance: CharacterAppearance): void {
+    const model = this.models[index]
+    if (model) {
+      applyCharacterProportions(model, appearance)
+    }
   }
 
   dispose(): void {
@@ -182,8 +194,7 @@ export class LoadoutScene {
       model.position.set(Math.sin(angle) * RING_RADIUS, 0, Math.cos(angle) * RING_RADIUS)
       // Yaw 0 faces +Z, so the spoke angle is exactly "facing outward".
       model.rotation.y = angle
-      model.scale.set(1, 1, 1)
-
+      applyCharacterProportions(model, this.sheets[index]?.appearance)
       const tint = soldierColor(this.faction, index)
       model.traverse((child) => {
         if (child instanceof Mesh && child.material) {
@@ -194,7 +205,7 @@ export class LoadoutScene {
           this.materials.push(material)
         }
       })
-
+      this.models.push(model)
       this.add(model)
 
       if (idle) {
