@@ -80,12 +80,26 @@ export function characterScale(appearance?: CharacterAppearance): ModelScale {
   return { x, y, z }
 }
 
-/** Roll randomized appearance variations. */
-export function characterAppearance(rng: Rng): CharacterAppearance {
+/** Roll randomized appearance variations. Bulkiness is derived from strength plus random jitter. */
+export function characterAppearance(
+  rng: Rng,
+  strength = Math.round((CHARACTER.attribute.min + CHARACTER.attribute.max) / 2),
+): CharacterAppearance {
+  const { min, max } = CHARACTER.attribute
+  const mid = (min + max) / 2
+  const span = (max - min) / 2
+  const clampedStrength = clamp(strength, min, max)
+  const strengthFactor = span > 0 ? (clampedStrength - mid) / span : 0
+
+  // Strength shifts base bulkiness by +/- 0.10, jitter adds +/- 0.04
+  const baseBulkiness = 1.0 + strengthFactor * 0.1
+  const jitter = rng.range(-0.04, 0.04)
+  const bulkiness = Number(clamp(baseBulkiness + jitter, 0.85, 1.15).toFixed(3))
+
   return {
     height: Number(rng.range(0.92, 1.08).toFixed(3)),
     width: Number(rng.range(0.92, 1.08).toFixed(3)),
-    bulkiness: Number(rng.range(0.88, 1.12).toFixed(3)),
+    bulkiness,
   }
 }
 
@@ -227,7 +241,7 @@ export function characterSheet(rng: Rng): CharacterSheet {
   if (rng.chance(CHARACTER.predispositionChance)) traits.push(rng.pick(PREDISPOSITIONS))
   const temperament = rng.chance(0.5) ? Temperament.Hothead : Temperament.Skittish
 
-  const appearance = characterAppearance(rng)
+  const appearance = characterAppearance(rng, attributes.strength)
 
   return { attributes, proficiency, utility, specialism, traits, temperament, appearance }
 }

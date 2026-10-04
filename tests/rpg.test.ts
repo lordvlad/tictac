@@ -342,8 +342,8 @@ describe('Sanitising a sheet off the wire', () => {
       expect(sheet.appearance.height).toBeLessThanOrEqual(1.08)
       expect(sheet.appearance.width).toBeGreaterThanOrEqual(0.92)
       expect(sheet.appearance.width).toBeLessThanOrEqual(1.08)
-      expect(sheet.appearance.bulkiness).toBeGreaterThanOrEqual(0.88)
-      expect(sheet.appearance.bulkiness).toBeLessThanOrEqual(1.12)
+      expect(sheet.appearance.bulkiness).toBeGreaterThanOrEqual(0.85)
+      expect(sheet.appearance.bulkiness).toBeLessThanOrEqual(1.15)
 
       const scale = characterScale(sheet.appearance)
       expect(scale.y).toBe(sheet.appearance.height)
@@ -353,6 +353,20 @@ describe('Sanitising a sheet off the wire', () => {
 
     // Default fallback without appearance
     expect(characterScale(undefined)).toEqual({ x: 1, y: 1, z: 1 })
+  })
+
+  test('bulkiness is derived from strength plus random variation', () => {
+    const rngLow = new Rng(100)
+    const lowStrengthApp = characterAppearance(rngLow, CHARACTER.attribute.min)
+    // Low strength (1) produces lower bulkiness (around 0.86 - 0.94)
+    expect(lowStrengthApp.bulkiness).toBeLessThan(0.95)
+
+    const rngHigh = new Rng(100)
+    const highStrengthApp = characterAppearance(rngHigh, CHARACTER.attribute.max)
+    // High strength (10) produces higher bulkiness (around 1.06 - 1.14)
+    expect(highStrengthApp.bulkiness).toBeGreaterThan(1.05)
+
+    expect(highStrengthApp.bulkiness).toBeGreaterThan(lowStrengthApp.bulkiness)
   })
 
   test('sanitizeSheet preserves valid appearance and clamps extreme variations', () => {
