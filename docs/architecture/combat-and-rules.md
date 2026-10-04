@@ -272,8 +272,9 @@ it is engaged. A watcher that is not engaged reacts only to what is in front of 
 turns settles back to unaware (`calmDown`, in `settleTurn`). Engaged does not wear off.
 
 ### Glass and the stone
-A shot, a reaction or a throw whose line passes through glazing breaks it: `glassCrossed`
-(`core/Visibility`, the same `walkLine` that decides sight) lists the panes, `CombatSystem`
+A shot or a reaction whose line passes through glazing breaks it: `glassCrossed`
+(`core/Visibility`, the same `walkLine` that decides sight) lists the panes. A throw breaks the
+panes its flight crossed (`ThrowFlight.panes`, below). Either way `CombatSystem`
 reports each through `onGlass`, and `CommandSystem` sets the wall to `WallKind.None` through
 `WallSystem.setKind` — the replicated component and the grid together — and makes it a noise at
 the window (`NOISE.glass`, 15 m). `MatchHost` now holds wall entities too, so a broken window is
@@ -281,6 +282,42 @@ state there as in a played match. The **stone** is a `GrenadeId` with no damage 
 (`harmless`): the throw reveals nobody and catches nobody; it is heard (8 m) where it lands.
 `GrenadeSpec.issued` — two for a stone — is carried by every soldier outside the crate and the
 grenade cap (`applyUnitLoadout`).
+
+### Throws
+A throw is aimed at a tile **and a storey** — the `throwGrenade` command's `targetTile` and
+`targetLevel` — and resolved where it lands (`src/core/Throw.ts`, numbers in `THROW`).
+`throwFlight` (`game/Combat`) first strays the aim — `scatterAim`, two draws from the match
+stream, sideways then along: up to `THROW.across` (0.36, about 20°) of the length sideways and
+`THROW.along` (0.2) short or long, both times `aimError`, the same training-and-status
+multiplier a shot's error uses — then flies it with `flyThrow`:
+
+- **Lob or low** (`throwsLow`): thrown low from under a roof, and when a roof stands over the
+  storey aimed at — so the same roofed tile is a room to throw into from its own floor and a roof
+  to lob onto from the storey above. The player aims at the storey the level selector shows; the
+  AI at the floor its target stands on.
+- **Height** is the hand (`THROW.release`, 1.2 m over the thrower's floor) plus a parabola over
+  the throw's length peaking at `THROW.apex` (0.25 m a tile, 0.6–2.5 m) for a lob, or
+  `THROW.apexLow` (0.1–0.25 m) for a low throw, which stays under a door's head and a ceiling.
+  Under a roof the arc is held at the roof (`ThrowFlight.ceilings`), so a lob that went in
+  through a door cannot clear the walls of the room.
+- **Walls**: the track is walked edge by edge. A wall that is not see-through and stands at least
+  as tall as the flight at that edge (`Grid.wallTop`) turns it back, mirroring the crossing axis,
+  unless it has a hole at the storey the grenade is flying through (`Grid.wallOpenAt`); the map's
+  edge always turns it. Glass, open doorways and parapets are flown through or over. Through an
+  exact corner the x face is crossed first.
+- **Landing**: at the end of its length, or earlier where the falling arc meets the surface
+  below it — the floor, or a roof the grenade is above. It gets above a roof only from open sky,
+  and stays under one it went in beneath.
+
+The result carries the `ThrowFlight`: the track (hand, bounces, landing), the landed tile and the
+height of what it landed on (`landedY`). The blast is measured in three dimensions from there
+(`blastOn`); fire, smoke and the noise start on the landed tile. The preview and the AI fly the
+same throw without the stray (`throwFlight` with no dice) and judge it by where it lands: the
+preview shows that blast, and the AI throws only when that blast catches two enemies it can see
+and no friend (an incendiary: its target, and no friend within a tile of the blast). The drawn
+line and the thrown globe both follow `heightAt` — the height the rules judged, then a fall onto
+`landedY` after the last edge crossing, where no rule looks. Arithmetic and square roots only:
+both peers fly every throw.
 
 ### Doors
 A door is a wall kind with a state (`src/core/Doors.ts`, numbers in `DOORS`): **shut**

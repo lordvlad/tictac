@@ -1,5 +1,5 @@
 import { Faction } from '../config'
-import type { Grid, Tile } from '../core/Grid'
+import { type Grid, isIndoors, type Tile } from '../core/Grid'
 import { distance } from '../core/math'
 
 /**
@@ -29,18 +29,6 @@ export interface GroundCovered {
   turnsIndoors: number
   /** Share of the map's walkable ground that is indoors — the baseline the others are read against. */
   mapIndoors: number
-}
-
-/**
- * Under a roof: a slab stands over the floor this tile is at.
- *
- * Rooftops are not indoors — they are the most exposed ground on the map —
- * and neither is a courtyard inside a footprint. Indoors is where walls are
- * close on every side and a fight is at arm's length, which is the ground a
- * shotgun is for.
- */
-export function isIndoors(grid: Grid, tile: Tile): boolean {
-  return grid.roofAt(tile.x, tile.y) > grid.levelAt(tile.x, tile.y)
 }
 
 interface UnitReach {

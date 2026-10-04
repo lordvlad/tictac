@@ -50,8 +50,13 @@ import type { NetworkMessage } from './NetworkManager'
  * has the old three arrays; reading it as the new one would zip a sheet
  * against the wrong unit's kit the moment they disagreed, which is exactly
  * the failure that made version 4 necessary in the first place.
+ *
+ * 6: a `throwGrenade` carries `targetLevel`, and a throw strays and flies —
+ * off walls, onto roofs, in under them. A version-5 file's throws have no
+ * storey and were resolved where they were aimed; replayed today they would
+ * land somewhere else.
  */
-export const RECORDING_VERSION = 5
+export const RECORDING_VERSION = 6
 
 /**
  * Session state for one deployed soldier: what a match starts them on top of

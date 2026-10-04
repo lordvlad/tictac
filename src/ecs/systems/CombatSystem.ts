@@ -14,6 +14,7 @@ import { MELEE } from '../../core/Melee'
 import { type Noise, shotLoudness } from '../../core/Noise'
 import { glassCrossed } from '../../core/Visibility'
 import type { Roll } from '../../core/rng'
+import type { ThrowTarget } from '../../core/Throw'
 import { shake } from '../../core/Morale'
 import { Awareness } from '../../core/Awareness'
 import { fromBehind } from '../../core/Facing'
@@ -142,17 +143,16 @@ export class CombatSystem extends System {
     return result
   }
 
-  throwGrenade(thrower: Soldier, at: Tile, kind: GrenadeId): GrenadeResult {
-    const from = { ...thrower.tile }
+  throwGrenade(thrower: Soldier, at: ThrowTarget, kind: GrenadeId): GrenadeResult {
     const result = throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx, this.roll)
     if (!result.thrown) return result
     shake(this.squads.soldiers, thrower, result.hits)
     this.record(thrower, result.hits, 'blast')
-    const landedAt = result.path?.end ?? at
-    // A throw that meets a window breaks it on the way, then goes off — and is
-    // heard — where it lands, not where it was thrown from.
-    this.through(from, landedAt, thrower.faction)
-    this.onNoise?.({ at: { ...landedAt }, loudness: thrower.grenadeSpecs[kind].loudness, faction: thrower.faction })
+    // A throw breaks every window its flight went through, then goes off — and
+    // is heard — where it lands, not where it was aimed or thrown from.
+    const { panes, landed } = result.flight
+    for (const edge of panes) this.onGlass?.(edge, thrower.faction)
+    this.onNoise?.({ at: { ...landed }, loudness: thrower.grenadeSpecs[kind].loudness, faction: thrower.faction })
     return result
   }
 

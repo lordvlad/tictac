@@ -102,6 +102,7 @@
       "kind": "GrenadeId",
       "shooterFaction": "Faction",
       "shooterIndex": "number",
+      "targetLevel": "number",
       "targetTile": "{ x: number; y: number }",
       "type": "'throwGrenade'"
     },
@@ -428,5 +429,5 @@
       "weaponId": "string"
     }
   },
-  "protocolVersion": 4
+  "protocolVersion": 5
 }

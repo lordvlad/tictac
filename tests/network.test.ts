@@ -147,6 +147,7 @@ describe('Command transport', () => {
       shooterIndex: 1,
       kind: GrenadeId.Frag,
       targetTile: { x: 4, y: 7 },
+      targetLevel: 0,
     }
 
     net.send(original)

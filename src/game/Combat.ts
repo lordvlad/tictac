@@ -1,9 +1,10 @@
 import type { Grid, Tile } from '../core/Grid'
 import { shotCoverLevel } from '../core/Cover'
 import {
+  aimError,
   bleedChance,
-  castThrowTrajectory,
   critBreakdown,
+  type DamageResult,
   type EffectiveWeapon,
   effectiveWeapon,
   grenadeDamageAt,
@@ -14,16 +15,16 @@ import {
   resolveDamage,
   statusStacks,
   type StatusState,
-  type ThrowPath,
 } from '../core/Ballistics'
+import { flyThrow, scatterAim, type ThrowFlight, type ThrowTarget, throwsLow } from '../core/Throw'
 import { MELEE } from '../core/Melee'
 import { hasLineOfSight } from '../core/Visibility'
-import { type GrenadeId, harmless, ShotMode, STATUSES, StatusKind } from '../core/Arsenal'
+import { type GrenadeId, type GrenadeSpec, harmless, ShotMode, STATUSES, StatusKind } from '../core/Arsenal'
 import { type Casualty, type Combatant, type CombatFx, NO_FX } from '../core/Combatant'
 import type { Roll } from '../core/rng'
-import { distance, facingYaw, throwAngle } from '../core/math'
+import { distance, facingYaw } from '../core/math'
 import { fromBehind, headingToward } from '../core/Facing'
-import { LEVEL_HEIGHT } from '../config'
+import { LEVEL_HEIGHT, TILE } from '../config'
 import { engage } from '../core/Awareness'
 
 export interface ShotResult {
@@ -60,12 +61,15 @@ export interface ResolvedHit {
   crit: boolean
 }
 
-export interface GrenadeResult {
-  thrown: boolean
-  apSpent: number
-  hits: ResolvedHit[]
-  path?: ThrowPath
-}
+export type GrenadeResult =
+  | { thrown: false; apSpent: 0; hits: ResolvedHit[] }
+  | {
+      thrown: true
+      apSpent: number
+      hits: ResolvedHit[]
+      /** Where it actually went: scattered, off whatever walls, down where it landed. */
+      flight: ThrowFlight
+    }
 
 /**
  * The odds of a round from `shooter` landing on `target`, from where they
@@ -455,62 +459,75 @@ function openWound(hit: ResolvedHit, chance: number, roll: Roll): void {
 }
 
 /**
+ * What a blast centred where `flight` came down does to `target`, or null
+ * when the target is out of its reach.
+ *
+ * Reach is measured in three dimensions from what the grenade landed on — a
+ * roof is a storey away from the room under it — and walls between the two
+ * shield as they would a shot.
+ */
+export function blastOn(grid: Grid, flight: ThrowFlight, spec: GrenadeSpec, target: Combatant): DamageResult | null {
+  const across = grid.distance(flight.landed, target.tile)
+  const up = flight.landedY - grid.levelAt(target.tile.x, target.tile.y) * LEVEL_HEIGHT
+  const reach = distance(across, up)
+  if (reach > spec.areaRadius) return null
+  return grenadeDamageAt(spec, reach, target, shotCoverLevel(grid, flight.landed, target.tile))
+}
+
+/**
+ * The flight of a throw by `thrower` at `target`: strayed by the thrower's aim
+ * error when there are dice (two draws from `roll`), exactly as aimed without
+ * them — which is what the aiming preview and the AI fly to judge a throw
+ * before making it.
+ */
+export function throwFlight(
+  grid: Grid,
+  thrower: Combatant,
+  spec: GrenadeSpec,
+  target: ThrowTarget,
+  roll?: Roll,
+): ThrowFlight {
+  const aimed = { dx: target.x - thrower.tile.x, dy: target.y - thrower.tile.y }
+  const thrown = roll ? scatterAim(aimed, aimError(thrower), roll) : aimed
+  return flyThrow(grid, thrower.tile, thrown, spec.throwRange / TILE, throwsLow(grid, thrower.tile, target))
+}
+
+/**
  * Throw a grenade at a tile.
  *
- * Blast effects are resolved per unit by distance from the centre, and the
- * grenade's status (shredded / flashed / smoked) is applied to everyone caught —
- * including your own squad, because a frag does not check uniforms.
+ * The throw strays and then flies — off walls, onto roofs or in under them —
+ * to wherever it comes down ({@link throwFlight}, `core/Throw`). Blast effects
+ * are resolved there, per unit, and the grenade's status (shredded / flashed /
+ * smoked) is applied to everyone caught — including your own squad, because a
+ * frag does not check uniforms.
  */
 export function throwGrenade(
   grid: Grid,
   thrower: Combatant,
-  at: Tile,
+  at: ThrowTarget,
   kind: GrenadeId,
   soldiers: readonly Combatant[],
   fx: CombatFx = NO_FX,
   roll?: Roll,
 ): GrenadeResult {
   const spec = thrower.grenadeSpecs[kind]
-  if (thrower.isDead || thrower.ap < spec.apCost) return { thrown: false, apSpent: 0, hits: [] }
-  if ((thrower.grenades[kind] ?? 0) <= 0) return { thrown: false, apSpent: 0, hits: [] }
-  if (grid.distance(thrower.tile, at) > spec.throwRange) return { thrown: false, apSpent: 0, hits: [] }
+  if (
+    thrower.isDead ||
+    thrower.ap < spec.apCost ||
+    (thrower.grenades[kind] ?? 0) <= 0 ||
+    grid.distance(thrower.tile, at) > spec.throwRange
+  ) {
+    return { thrown: false, apSpent: 0, hits: [] }
+  }
 
   thrower.ap = Math.max(0, thrower.ap - spec.apCost)
   thrower.grenades[kind] -= 1
   fx.throwing(thrower)
-
-  // Compute intended parameters
-  const dx = at.x - thrower.tile.x
-  const dy = at.y - thrower.tile.y
-  const baseDist = distance(dx, dy)
-  const baseAngle = baseDist > 0 ? throwAngle(dy, dx) : 0
-
-  let actualAngle = baseAngle
-  let actualDist = baseDist
-
-  // Apply scatter on direction and strength if dice are available
-  if (roll && baseDist > 0) {
-    // Proficiency reduces variance (e.g. 100 proficiency = 0 spread; 50 proficiency = 0.5 spread multiplier)
-    const varianceScale = Math.max(0, (100 - thrower.proficiency) / 100)
-    // Angle deviation up to +/- ~20 degrees at maximum variance
-    const maxAngleDev = (Math.PI / 9) * varianceScale
-    // Distance variance up to +/- 20%
-    const maxDistDev = (baseDist * 0.2) * varianceScale
-
-    const angleRoll = roll() * 2 - 1 // -1 .. 1
-    const distRoll = roll() * 2 - 1 // -1 .. 1
-
-    actualAngle = baseAngle + angleRoll * maxAngleDev
-    actualDist = Math.max(0.5, baseDist + distRoll * maxDistDev)
-  }
-
-  const floorY = grid.levelAt(thrower.tile.x, thrower.tile.y) * LEVEL_HEIGHT
-  const throwPath = castThrowTrajectory(grid, thrower.tile, actualAngle, actualDist, spec.throwRange, floorY)
-  const landedAt = throwPath.end
+  const flight = throwFlight(grid, thrower, spec, at, roll)
 
   // A stone is only a noise where it lands: the throw gives nothing away,
   // and it catches nobody.
-  if (harmless(spec)) return { thrown: true, apSpent: spec.apCost, hits: [], path: throwPath }
+  if (harmless(spec)) return { thrown: true, apSpent: spec.apCost, hits: [], flight }
 
   // A thrown grenade is not a quiet act, and there is no silenced version of
   // one: the thrower is on show whatever they are carrying.
@@ -519,23 +536,11 @@ export function throwGrenade(
   // Smoke for your own side is cover, not an attack; anything else is a fight.
   if (!spec.friendly) engage(thrower)
 
-  const blastRoof = grid.roofAt(landedAt.x, landedAt.y)
-  const blastFloor = grid.levelAt(landedAt.x, landedAt.y)
-  const blastElevationY = Math.max(blastRoof, blastFloor) * LEVEL_HEIGHT
-
   const hits: ResolvedHit[] = []
   for (const soldier of soldiers) {
     if (soldier.isDead) continue
-    const soldierFloorY = grid.levelAt(soldier.tile.x, soldier.tile.y) * LEVEL_HEIGHT
-    // 3D distance between blast point and soldier
-    const horizontalDist = grid.distance(landedAt, soldier.tile)
-    const verticalDist = Math.abs(blastElevationY - soldierFloorY)
-    const total3DDist = distance(horizontalDist, verticalDist)
-    if (total3DDist > spec.areaRadius) continue
-
-    // Compute cover/wall obstruction between blast centre and soldier
-    const cover = shotCoverLevel(grid, landedAt, soldier.tile)
-    const result = grenadeDamageAt(spec, total3DDist, soldier, cover)
+    const result = blastOn(grid, flight, spec, soldier)
+    if (!result) continue
     applyHitEffects(soldier, result.damage, result.armorShred, spec.applies, fx)
     if (!soldier.unreadable) soldier.known = true
     if (soldier.faction !== thrower.faction) engage(soldier)
@@ -549,9 +554,8 @@ export function throwGrenade(
       crit: false,
     })
   }
-  return { thrown: true, apSpent: spec.apCost, hits, path: throwPath }
+  return { thrown: true, apSpent: spec.apCost, hits, flight }
 }
-
 
 /** Apply (or refresh) a status on a unit. */
 export function applyStatus(soldier: Casualty, kind: StatusKind, stacks = 1): void {

@@ -459,11 +459,15 @@ export class CommandSystem extends System {
       case 'throwGrenade': {
         const thrower = this.unit(command.shooterFaction, command.shooterIndex)
         if (!thrower) return refuse('no such thrower')
-        const grenade = this.combat.throwGrenade(thrower, command.targetTile, command.kind)
+        const target = { ...command.targetTile, level: command.targetLevel }
+        const grenade = this.combat.throwGrenade(thrower, target, command.kind)
         if (!grenade.thrown) return refuse('throw refused by the rules')
         const spec = thrower.grenadeSpecs[command.kind]
-        if (spec.ignites > 0) this.kindle(command.targetTile, spec)
-        if (spec.smokes > 0) billow(this.ground, command.targetTile, spec.areaRadius, spec.smokes)
+        // Fire and smoke start where it came down, which a stray throw or a
+        // wall can put well away from where it was aimed.
+        const { landed } = grenade.flight
+        if (spec.ignites > 0) this.kindle(landed, spec)
+        if (spec.smokes > 0) billow(this.ground, landed, spec.areaRadius, spec.smokes)
         return { applied: true, grenade }
       }
       case 'reload': {

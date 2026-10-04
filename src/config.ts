@@ -494,6 +494,28 @@ export const AIM = {
 }
 
 /**
+ * How a thrown grenade flies (`core/Throw`). Heights in metres, lengths in
+ * tiles.
+ *
+ * The flight is judged at the height of the hand plus a parabolic arc over the
+ * throw's length: walls taller than that turn it back, roofs it comes down to
+ * catch it. Multiplication, division and square roots only, for the reason
+ * {@link AIM} gives.
+ */
+export const THROW = {
+  /** Height above the thrower's floor the grenade leaves the hand at. */
+  release: 1.2,
+  /** How far the arc rises above the release, per tile thrown, and its bounds, under open sky. */
+  apex: { perTile: 0.25, min: 0.6, max: 2.5 },
+  /** The same for a low throw — from under a roof, or aimed under one — that stays beneath the ceiling. */
+  apexLow: { perTile: 0.05, min: 0.1, max: 0.25 },
+  /** Largest sideways miss, as a share of the throw's length, at an aim error of 1 (about 20°). */
+  across: 0.36,
+  /** Largest short or long miss, as a share of the throw's length, at an aim error of 1. */
+  along: 0.2,
+}
+
+/**
  * How a critical hit is earned. The weapon decides the odds it starts from and
  * what a crit is worth ({@link Arsenal}); this is only the scale of what the
  * shot's circumstances can do to those odds.

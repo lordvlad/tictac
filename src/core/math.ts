@@ -53,10 +53,3 @@ const FACING_STEP = 1000
 export function facingYaw(dx: number, dz: number): number {
   return Math.round(Math.atan2(dx, dz) * FACING_STEP) / FACING_STEP
 }
-
-/**
- * Direction angle in radians along `(dy, dx)`, quantised to match across engines.
- */
-export function throwAngle(dy: number, dx: number): number {
-  return Math.round(Math.atan2(dy, dx) * FACING_STEP) / FACING_STEP
-}

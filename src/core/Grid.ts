@@ -70,6 +70,18 @@ export function tileEquals(a: Tile | null, b: Tile | null): boolean {
   return a.x === b.x && a.y === b.y
 }
 
+/**
+ * Under a roof: a slab stands over the floor this tile is at.
+ *
+ * Rooftops are not indoors — they are the most exposed ground on the map —
+ * and neither is a courtyard inside a footprint. Indoors is where walls are
+ * close on every side and a fight is at arm's length, which is the ground a
+ * shotgun is for, and where a throw has a ceiling over it.
+ */
+export function isIndoors(grid: Grid, tile: Tile): boolean {
+  return grid.roofAt(tile.x, tile.y) > grid.levelAt(tile.x, tile.y)
+}
+
 /** 8-connected neighbour offsets, orthogonals first. */
 export const NEIGHBOURS: readonly (readonly [number, number])[] = [
   [1, 0],

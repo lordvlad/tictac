@@ -100,7 +100,15 @@ export type NetworkMessage =
       targetIndex: number
       mode: ShotMode
     }
-  | { type: 'throwGrenade'; shooterFaction: Faction; shooterIndex: number; kind: GrenadeId; targetTile: { x: number; y: number } }
+  /** `targetLevel`: the storey of the tile aimed at, so a roofed tile is a room or its roof (`throwsLow`). */
+  | {
+      type: 'throwGrenade'
+      shooterFaction: Faction
+      shooterIndex: number
+      kind: GrenadeId
+      targetTile: { x: number; y: number }
+      targetLevel: number
+    }
   | { type: 'reload'; faction: Faction; squadIndex: number }
   /** Strike an adjacent enemy with the sidearm. Intent only, like a shot. */
   | {

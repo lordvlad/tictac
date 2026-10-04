@@ -74,7 +74,7 @@ between squads standing either side of a wall.
 Each unit, in squad order, spends its points in this order until nothing applies:
 
 1. **Reload** if nothing its weapon can fire is loaded.
-2. **Grenade** a cluster of two or more enemies that catches no friend.
+2. **Grenade** a cluster of two or more enemies that catches no friend — judged where the throw would land (`throwFlight`), not where it is aimed.
 3. **Shoot** if a shot of at least 50% is on offer (best expected damage per AP).
 4. **Reposition**, once per turn, to where `src/sim/Tactics.ts` says, never through fire. Every tile
    reachable this turn is scored in expected hit points against the side's

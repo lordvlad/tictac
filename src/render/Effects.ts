@@ -30,10 +30,14 @@ interface SmokePuff {
 }
 interface ActiveGrenade {
   mesh: Mesh
-  points: Vector3[]
-  progress: number
+  /** The flight as drawn, in world space. */
+  points: readonly Vector3[]
+  /** Distance along `points` to each of them, so the grenade keeps one speed through every bend. */
+  along: number[]
+  /** Index of the point the grenade is heading for. */
+  next: number
+  elapsed: number
   duration: number
-  arcHeight: number
   onLanded: () => void
 }
 
@@ -147,39 +151,30 @@ export class Effects {
   }
 
   /**
-   * Spawn a flying grenade projectile that traces `points` with a parabolic arc
-   * and detonates via `onLanded`.
+   * Fly a grenade along `points` — the whole flight, arc and bounces already
+   * in them — at one steady speed, and call `onLanded` when it gets there.
    */
-  spawnGrenade(points: Vector3[], onLanded: () => void): void {
-    if (points.length < 2) {
+  spawnGrenade(points: readonly Vector3[], onLanded: () => void): void {
+    const along = [0]
+    for (let i = 1; i < points.length; i++) along.push(along[i - 1]! + points[i]!.distanceTo(points[i - 1]!))
+    const total = along[along.length - 1]!
+    if (total === 0) {
       onLanded()
       return
     }
 
-    if (!this.grenadeGeometry) {
-      this.grenadeGeometry = new SphereGeometry(0.12, 8, 8)
-    }
-    if (!this.grenadeMaterial) {
-      this.grenadeMaterial = new MeshBasicMaterial({ color: 0x1a1a1a })
-    }
-
+    this.grenadeGeometry ??= new SphereGeometry(0.12, 8, 8)
+    this.grenadeMaterial ??= new MeshBasicMaterial({ color: 0x1a1a1a })
     const mesh = new Mesh(this.grenadeGeometry, this.grenadeMaterial)
     mesh.position.copy(points[0]!)
     this.grenadeGroup.add(mesh)
-
-    // Compute total length
-    let totalDist = 0
-    for (let i = 1; i < points.length; i++) {
-      totalDist += points[i]!.distanceTo(points[i - 1]!)
-    }
-    const duration = clamp(totalDist * 0.05, 0.25, 0.6)
-    const arcHeight = clamp(totalDist * 0.25, 0.6, 2.5)
     this.activeGrenades.push({
       mesh,
       points,
-      progress: 0,
-      duration,
-      arcHeight,
+      along,
+      next: 1,
+      elapsed: 0,
+      duration: clamp(total * 0.05, 0.25, 0.6),
       onLanded,
     })
   }
@@ -201,25 +196,18 @@ export class Effects {
       }
     }
 
-    // 2. Active grenade projectiles
+    // 2. Grenades in the air
     for (let i = this.activeGrenades.length - 1; i >= 0; i--) {
       const g = this.activeGrenades[i]!
-      g.progress += delta / g.duration
-      const t = clamp(g.progress, 0, 1)
+      g.elapsed += delta
+      const last = g.points.length - 1
+      const flown = clamp(g.elapsed / g.duration, 0, 1) * g.along[last]!
+      while (g.next < last && g.along[g.next]! < flown) g.next++
+      const from = g.along[g.next - 1]!
+      const span = g.along[g.next]! - from
+      g.mesh.position.lerpVectors(g.points[g.next - 1]!, g.points[g.next]!, span > 0 ? (flown - from) / span : 1)
 
-      // Interpolate position along waypoint chain
-      const numSegments = g.points.length - 1
-      const segIndex = clamp(Math.floor(t * numSegments), 0, numSegments - 1)
-      const segT = (t * numSegments) - segIndex
-      const p0 = g.points[segIndex]!
-      const p1 = g.points[segIndex + 1]!
-
-      g.mesh.position.lerpVectors(p0, p1, segT)
-      // Parabolic hop
-      const hop = Math.sin(t * Math.PI) * g.arcHeight
-      g.mesh.position.y += hop
-
-      if (t >= 1) {
+      if (g.elapsed >= g.duration) {
         this.grenadeGroup.remove(g.mesh)
         this.activeGrenades.splice(i, 1)
         g.onLanded()

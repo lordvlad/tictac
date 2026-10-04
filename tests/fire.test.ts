@@ -20,6 +20,12 @@ import { TurnManager } from '../src/game/TurnManager'
 
 const always = (value: number): Roll => () => value
 
+/** `then`, after a throw's two stray draws come up dead centre: it lands where it was aimed. */
+const dead = (then: Roll): Roll => {
+  let draws = 0
+  return () => (draws++ < 2 ? 0.5 : then())
+}
+
 /**
  * A small match with no scene, on dice the test chooses, and ground the test
  * lays before anything reads it. Everyone but Blue 0 and Red 0 is parked in
@@ -118,7 +124,7 @@ describe('Fire spreads by what the ground is made of', () => {
 
 describe('Fire hurts whoever is in it', () => {
   test('an incendiary sets its blast alight, and burns whoever is standing in it, armour or not', () => {
-    const m = match(always(0.99))
+    const m = match(dead(always(0.99)))
     m.blue.tile = { x: 10, y: 10 }
     m.blue.grenades[GrenadeId.Incendiary] = 1
     m.red.tile = { x: 10, y: 15 }
@@ -126,7 +132,7 @@ describe('Fire hurts whoever is in it', () => {
     expect(before.armor).toBeGreaterThan(0)
 
     const thrown = m.commands.apply(
-      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: GrenadeId.Incendiary, targetTile: { x: 10, y: 15 } },
+      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: GrenadeId.Incendiary, targetTile: { x: 10, y: 15 }, targetLevel: 0 },
       'local',
     )
 
@@ -168,13 +174,13 @@ describe('Smoke', () => {
   })
 
   test('a smoke grenade fills its blast but not past a wall, and the cloud thins away', () => {
-    const m = match(always(0.99), (grid) => grid.setWall(10, 12, Side.West, WallKind.Glass))
+    const m = match(dead(always(0.99)), (grid) => grid.setWall(10, 12, Side.West, WallKind.Glass))
     m.blue.tile = { x: 10, y: 5 }
     m.blue.grenades[GrenadeId.Smoke] = 1
     const turns = GRENADES[GrenadeId.Smoke].smokes
 
     m.commands.apply(
-      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: GrenadeId.Smoke, targetTile: { x: 10, y: 12 } },
+      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: GrenadeId.Smoke, targetTile: { x: 10, y: 12 }, targetLevel: 0 },
       'local',
     )
 

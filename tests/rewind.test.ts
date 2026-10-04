@@ -66,6 +66,7 @@ describe('Stepping a replay back', () => {
       shooterIndex: 0,
       kind: GrenadeId.Incendiary,
       targetTile: { x: thrower.tile.x, y: thrower.tile.y + 3 },
+      targetLevel: 0,
     })
     host.apply({ type: 'endTurn', faction: Faction.Blue })
     expect(host.digest().terrain).not.toBe(untouched.terrain)

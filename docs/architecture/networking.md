@@ -109,7 +109,7 @@ against state they both hold. See
 ### 2. Player Tactical Actions (`NetworkMessage`)
 - `moveUnit`: faction, squad index, and waypoint array `{x, y}[]`.
 - `fireShot`: shooter, target, and shot mode. Nothing else.
-- `throwGrenade`: thrower, grenade kind, and the aimed tile.
+- `throwGrenade`: thrower, grenade kind, the aimed tile and the storey aimed at (`targetLevel`: a roofed tile is a room or its roof).
 - `meleeAttack`: attacker and target. The sidearm is known to both sides from the loadout.
 - `overwatch`: the unit going on watch. Reactions it provokes are never sent; both peers
   resolve them from the mover's `moveUnit`.

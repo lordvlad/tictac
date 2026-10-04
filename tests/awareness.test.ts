@@ -111,14 +111,14 @@ describe('Sneaking up on a sentry', () => {
     m.intruder.grenades.frag = 1
     m.intruder.ap = 20
     const res = m.commands.apply(
-      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'frag', targetTile: { x: 15, y: 10 } },
+      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'frag', targetTile: { x: 15, y: 10 }, targetLevel: 0 },
       'local',
     )
     expect(m.sentry.awareness).toBe(Awareness.Alerted)
-    const landed = (res.applied && res.grenade?.path?.end) ? res.grenade.path.end : { x: 15, y: 10 }
-    const dx = Math.sign(landed.x - m.sentry.tile.x)
-    const dy = Math.sign(landed.y - m.sentry.tile.y)
-    expect(m.sentry.heading).toBe(heading(dx, dy))
+    // Wherever the throw strayed to: that is where it went off.
+    if (!res.applied || !res.grenade?.thrown) throw new Error('throw refused')
+    expect(inFront(m.sentry, res.grenade.flight.landed)).toBe(true)
+    expect(inFront(m.sentry, m.intruder.tile)).toBe(false)
   })
 })
 
@@ -221,18 +221,18 @@ describe('A thrown stone', () => {
     m.sentry.heading = heading(0, 1)
     // Thrown from behind the sentry, landing off to its east.
     m.intruder.tile = { x: 10, y: 4 }
-    m.intruder.sheet.proficiency.rifle = 100
+    // A steady hand: a stone that strays back toward the thrower turns the
+    // sentry to face him, which is a different test.
+    m.intruder.sheet.proficiency.rifle = 50
     const stones = m.intruder.grenades.stone
     const res = m.commands.apply(
-      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'stone', targetTile: { x: 16, y: 10 } },
+      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'stone', targetTile: { x: 16, y: 10 }, targetLevel: 0 },
       'local',
     )
     expect(m.intruder.grenades.stone).toBe(stones - 1)
     expect(m.sentry.awareness).toBe(Awareness.Alerted)
-    const landed = (res.applied && res.grenade?.path?.end) ? res.grenade.path.end : { x: 16, y: 10 }
-    const dx = Math.sign(landed.x - m.sentry.tile.x)
-    const dy = Math.sign(landed.y - m.sentry.tile.y)
-    expect(m.sentry.heading).toBe(heading(dx, dy))
+    if (!res.applied || !res.grenade?.thrown) throw new Error('throw refused')
+    expect(inFront(m.sentry, res.grenade.flight.landed)).toBe(true)
     // Turned away from the thrower, who stays unseen and unrevealed.
     expect(inFront(m.sentry, m.intruder.tile)).toBe(false)
     expect(m.intruder.firedThisTurn).toBe(false)
@@ -274,9 +274,10 @@ describe('Glass', () => {
     m.sentry.tile = { x: 18, y: 9 }
     m.sentry.heading = heading(1, 0)
     m.intruder.tile = { x: 10, y: 3 }
-    m.intruder.sheet.proficiency.rifle = 100
+    // A steady hand, so the stone stays on the line through the window.
+    m.intruder.sheet.proficiency.rifle = 50
     m.commands.apply(
-      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'stone', targetTile: { x: 10, y: 14 } },
+      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'stone', targetTile: { x: 10, y: 14 }, targetLevel: 0 },
       'local',
     )
     expect(m.grid.wallBetween({ x: 10, y: 7 }, { x: 10, y: 8 })).toBe(WallKind.None)
@@ -287,7 +288,7 @@ describe('Glass', () => {
     const m = match(false, window)
     m.intruder.tile = { x: 3, y: 3 }
     m.commands.apply(
-      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'stone', targetTile: { x: 3, y: 12 } },
+      { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'stone', targetTile: { x: 3, y: 12 }, targetLevel: 0 },
       'local',
     )
     expect(m.grid.wallBetween({ x: 10, y: 7 }, { x: 10, y: 8 })).toBe(WallKind.Glass)

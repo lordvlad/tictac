@@ -82,7 +82,7 @@ describe('What a unit gives away', () => {
     const caught = squads.byFaction[Faction.Red][0]!
     thrower.grenades[GrenadeId.Frag] = 1
 
-    const result = throwGrenade(grid, thrower, caught.tile, GrenadeId.Frag, squads.soldiers)
+    const result = throwGrenade(grid, thrower, { ...caught.tile, level: 0 }, GrenadeId.Frag, squads.soldiers)
 
     expect(result.thrown).toBe(true)
     // There is no quiet way to throw one, whatever is on the rifle.
@@ -159,7 +159,7 @@ describe('What a unit gives away', () => {
     inscrutable.refreshTraits()
     thrower.grenades[GrenadeId.Frag] = 1
 
-    throwGrenade(grid, thrower, readable.tile, GrenadeId.Frag, squads.soldiers)
+    throwGrenade(grid, thrower, { ...readable.tile, level: 0 }, GrenadeId.Frag, squads.soldiers)
 
     expect(readable.known).toBe(true)
     expect(inscrutable.known).toBe(false)

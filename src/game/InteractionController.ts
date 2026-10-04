@@ -375,12 +375,6 @@ export class InteractionController {
 
     this.battlefield.blocks.setLevelFilter(0)
 
-    this.grenade.onThrowResolved = () => {
-      this.recomputeVisibility()
-      this.renderOverlay()
-      this.refreshHud()
-    }
-
     this.shoot.onShotResolved = () => {
       this.recomputeVisibility()
       this.renderOverlay()
@@ -696,6 +690,7 @@ export class InteractionController {
         this.selectedLevelFilter = intent.level
         this.battlefield.blocks.setLevelFilter(intent.level)
         this.rig.setFocusLevel(intent.level)
+        this.grenade.viewStorey(intent.level)
         this.renderOverlay()
         if (this.debugMap.isOpen) this.debugMap.refresh(this.battlefield.grid, this.squads, this.selectedLevelFilter, this.seedLabel)
         this.refreshHud()
@@ -761,15 +756,9 @@ export class InteractionController {
       }
       case 'throwGrenade': {
         const thrower = this.squads.byFaction[command.shooterFaction][command.shooterIndex]
-        if (thrower && result.grenade) {
-          const landedAt = result.grenade.path?.end ?? command.targetTile
-          this.grenade.replayThrow(
-            command.kind,
-            landedAt,
-            thrower.grenadeSpecs[command.kind].areaRadius,
-            result.grenade.hits,
-            result.grenade.path,
-          )
+        if (thrower && result.grenade?.thrown) {
+          const { flight, hits } = result.grenade
+          this.grenade.replayThrow(command.kind, flight, thrower.grenadeSpecs[command.kind].areaRadius, hits)
         }
         this.afterCombat()
         return
@@ -899,6 +888,7 @@ export class InteractionController {
         shooterIndex: thrower.squadIndex,
         kind: aimed.kind,
         targetTile: aimed.targetTile,
+        targetLevel: aimed.targetLevel,
       },
       'local',
     )

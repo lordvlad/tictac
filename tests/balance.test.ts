@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { Grid } from '../src/core/Grid'
-import { GroundTracker, isIndoors } from '../src/sim/Ground'
+import { Grid, isIndoors } from '../src/core/Grid'
+import { GroundTracker } from '../src/sim/Ground'
 import { Faction, SQUAD_SIZE } from '../src/config'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
 import { ItemId } from '../src/core/Items'

@@ -3,19 +3,19 @@ import type { ShotMode } from '../core/Arsenal'
 import { GrenadeId, GRENADES } from '../core/Arsenal'
 import { MELEE } from '../core/Melee'
 import { burningTiles } from '../core/Fire'
-import type { Grid } from '../core/Grid'
+import { type Grid, isIndoors } from '../core/Grid'
 import { reachable, routeTo } from '../core/Pathfinding'
 import { leaversOf, onWayOut, rowsFromWayOut } from '../core/Retreat'
 import { hasLineOfSight } from '../core/Visibility'
+import type { ThrowTarget } from '../core/Throw'
 import { fromBehind, headingToward } from '../core/Facing'
 import { effectiveWeapon, expectedRoundDamage, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
 import type { Soldier } from '../entities/Soldier'
-import { canMelee, canShoot, shotApCost, shotBreakdown } from '../game/Combat'
+import { blastOn, canMelee, canShoot, shotApCost, shotBreakdown, throwFlight } from '../game/Combat'
 import { moveBudget, stepCostFor } from '../game/Movement'
 import type { NetworkMessage } from '../game/NetworkManager'
 import { canWatch } from '../game/Overwatch'
 import type { Applied, Carried } from '../ecs/systems/CommandSystem'
-import { isIndoors } from './Ground'
 import { Intel } from './Intel'
 import type { MatchHost } from './MatchHost'
 import { chooseDestination, type Spacing } from './Tactics'
@@ -463,7 +463,8 @@ export class Policy {
    *
    * A grenade is worth its slot when it catches two, so that is the bar. It
    * also refuses to catch its own side, which is the rule a player is applying
-   * when they decide not to throw.
+   * when they decide not to throw. Both are judged where the throw would come
+   * down rather than where it is aimed — a wall in the way can turn it back.
    */
   private tryFrag(unit: Soldier): boolean {
     const spec = unit.grenadeSpecs.frag
@@ -474,9 +475,10 @@ export class Policy {
 
     for (const centre of enemies) {
       if (this.grid.distance(unit.tile, centre.tile) > spec.throwRange) continue
+      const flight = throwFlight(this.grid, unit, spec, this.aimAt(centre))
       // Only what it can see counts toward the pair: an enemy crouched round
       // the corner is not a reason to throw, however near it happens to be.
-      const caught = (other: Soldier) => !other.isDead && this.grid.distance(centre.tile, other.tile) <= spec.areaRadius
+      const caught = (other: Soldier) => !other.isDead && blastOn(this.grid, flight, spec, other) !== null
       if (enemies.filter(caught).length < 2) continue
       if (this.host.squads.byFaction[unit.faction].some(caught)) continue
       this.throwAt(unit, GrenadeId.Frag, centre)
@@ -489,7 +491,7 @@ export class Policy {
    * Set an enemy it can see alight, when none of its own side is near enough
    * to be caught by the blast or by what spreads from it in a turn. One body
    * is enough here, unlike a frag: the fire keeps burning it, and the ground
-   * it stands on is denied to it.
+   * it stands on is denied to it. Judged, like a frag, where it would land.
    */
   private tryIncendiary(unit: Soldier): boolean {
     const spec = unit.grenadeSpecs.incendiary
@@ -498,7 +500,9 @@ export class Policy {
     for (const target of this.visibleEnemies(unit)) {
       if (this.grid.distance(unit.tile, target.tile) > spec.throwRange) continue
       if (this.grid.fireAt(target.tile.x, target.tile.y) > 0) continue
-      const near = (other: Soldier) => !other.isDead && this.grid.distance(target.tile, other.tile) <= clear
+      const { landed } = throwFlight(this.grid, unit, spec, this.aimAt(target))
+      if (this.grid.distance(landed, target.tile) > spec.areaRadius) continue
+      const near = (other: Soldier) => !other.isDead && this.grid.distance(landed, other.tile) <= clear
       if (this.host.squads.byFaction[unit.faction].some(near)) continue
       this.throwAt(unit, GrenadeId.Incendiary, target)
       return true
@@ -506,13 +510,20 @@ export class Policy {
     return false
   }
 
+  /** A throw at the floor `target` stands on: in under its roof, if it has one. */
+  private aimAt(target: Soldier): ThrowTarget {
+    return { x: target.tile.x, y: target.tile.y, level: this.grid.levelAt(target.tile.x, target.tile.y) }
+  }
+
   private throwAt(unit: Soldier, kind: GrenadeId, target: Soldier): void {
+    const { level, ...targetTile } = this.aimAt(target)
     this.act({
       type: 'throwGrenade',
       shooterFaction: unit.faction,
       shooterIndex: unit.squadIndex,
       kind,
-      targetTile: { x: target.tile.x, y: target.tile.y },
+      targetTile,
+      targetLevel: level,
     })
     this.observer.threw?.(unit)
   }

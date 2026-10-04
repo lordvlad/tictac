@@ -27,8 +27,11 @@
  * shape this build no longer parses.
  *
  * 4: the `retreat` command, and `health.withdrawn` on every unit (`ITEM-051`).
+ *
+ * 5: `throwGrenade` carries `targetLevel`, the storey aimed at, which decides
+ * whether the throw is lobbed or thrown low under a roof.
  */
-export const PROTOCOL_VERSION = 4
+export const PROTOCOL_VERSION = 5
 
 /**
  * The commit this bundle was built from, or `dev` when it was not built.
