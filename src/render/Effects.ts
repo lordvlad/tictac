@@ -2,7 +2,10 @@ import {
   AdditiveBlending,
   CanvasTexture,
   Group,
+  Mesh,
+  MeshBasicMaterial,
   NormalBlending,
+  SphereGeometry,
   Sprite,
   SpriteMaterial,
   Vector3,
@@ -25,6 +28,14 @@ interface SmokePuff {
   age: number
   lifetime: number
 }
+interface ActiveGrenade {
+  mesh: Mesh
+  points: Vector3[]
+  progress: number
+  duration: number
+  arcHeight: number
+  onLanded: () => void
+}
 
 /**
  * Visual effects for grenades: the fullscreen DOM flash and transient blast
@@ -36,11 +47,15 @@ interface SmokePuff {
 export class Effects {
   private readonly flashEl: HTMLDivElement
   private readonly smokeGroup = new Group()
+  private readonly grenadeGroup = new Group()
 
   private flash: FlashState | null = null
   private readonly puffs: SmokePuff[] = []
+  private readonly activeGrenades: ActiveGrenade[] = []
 
   private smokeTexture: CanvasTexture | null = null
+  private grenadeGeometry: SphereGeometry | null = null
+  private grenadeMaterial: MeshBasicMaterial | null = null
 
   constructor(private readonly engine: EngineContext) {
     this.flashEl = document.createElement('div')
@@ -56,19 +71,26 @@ export class Effects {
     document.body.appendChild(this.flashEl)
 
     this.smokeGroup.name = 'grenade-effects'
+    this.grenadeGroup.name = 'grenade-projectiles'
     engine.scene.add(this.smokeGroup)
+    engine.scene.add(this.grenadeGroup)
   }
 
   dispose(): void {
     this.flashEl.remove()
     this.engine.scene.remove(this.smokeGroup)
+    this.engine.scene.remove(this.grenadeGroup)
     for (const p of this.puffs) {
       p.sprite.geometry.dispose()
       ;(p.sprite.material as SpriteMaterial).dispose()
     }
+    for (const g of this.activeGrenades) {
+      this.grenadeGroup.remove(g.mesh)
+    }
+    this.grenadeGeometry?.dispose()
+    this.grenadeMaterial?.dispose()
     this.smokeTexture?.dispose()
   }
-
   /** Trigger the fullscreen overlay flash. */
   triggerFlash(kind: GrenadeId): void {
     if (kind === GrenadeId.Flash) {
@@ -124,7 +146,45 @@ export class Effects {
     }
   }
 
-  /** Per-frame update: animates flash, ticks transient puffs. */
+  /**
+   * Spawn a flying grenade projectile that traces `points` with a parabolic arc
+   * and detonates via `onLanded`.
+   */
+  spawnGrenade(points: Vector3[], onLanded: () => void): void {
+    if (points.length < 2) {
+      onLanded()
+      return
+    }
+
+    if (!this.grenadeGeometry) {
+      this.grenadeGeometry = new SphereGeometry(0.12, 8, 8)
+    }
+    if (!this.grenadeMaterial) {
+      this.grenadeMaterial = new MeshBasicMaterial({ color: 0x1a1a1a })
+    }
+
+    const mesh = new Mesh(this.grenadeGeometry, this.grenadeMaterial)
+    mesh.position.copy(points[0]!)
+    this.grenadeGroup.add(mesh)
+
+    // Compute total length
+    let totalDist = 0
+    for (let i = 1; i < points.length; i++) {
+      totalDist += points[i]!.distanceTo(points[i - 1]!)
+    }
+    const duration = clamp(totalDist * 0.05, 0.25, 0.6)
+    const arcHeight = clamp(totalDist * 0.25, 0.6, 2.5)
+    this.activeGrenades.push({
+      mesh,
+      points,
+      progress: 0,
+      duration,
+      arcHeight,
+      onLanded,
+    })
+  }
+
+  /** Per-frame update: animates flash, ticks transient puffs and flying grenades. */
   update(delta: number): void {
     // 1. Fullscreen flash
     if (this.flash) {
@@ -141,7 +201,32 @@ export class Effects {
       }
     }
 
-    // 2. Transient puffs (blast + fading smoke)
+    // 2. Active grenade projectiles
+    for (let i = this.activeGrenades.length - 1; i >= 0; i--) {
+      const g = this.activeGrenades[i]!
+      g.progress += delta / g.duration
+      const t = clamp(g.progress, 0, 1)
+
+      // Interpolate position along waypoint chain
+      const numSegments = g.points.length - 1
+      const segIndex = clamp(Math.floor(t * numSegments), 0, numSegments - 1)
+      const segT = (t * numSegments) - segIndex
+      const p0 = g.points[segIndex]!
+      const p1 = g.points[segIndex + 1]!
+
+      g.mesh.position.lerpVectors(p0, p1, segT)
+      // Parabolic hop
+      const hop = Math.sin(t * Math.PI) * g.arcHeight
+      g.mesh.position.y += hop
+
+      if (t >= 1) {
+        this.grenadeGroup.remove(g.mesh)
+        this.activeGrenades.splice(i, 1)
+        g.onLanded()
+      }
+    }
+
+    // 3. Transient puffs (blast + fading smoke)
     for (let i = this.puffs.length - 1; i >= 0; i--) {
       const p = this.puffs[i]!
       p.age += delta

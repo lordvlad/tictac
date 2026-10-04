@@ -762,11 +762,13 @@ export class InteractionController {
       case 'throwGrenade': {
         const thrower = this.squads.byFaction[command.shooterFaction][command.shooterIndex]
         if (thrower && result.grenade) {
+          const landedAt = result.grenade.path?.end ?? command.targetTile
           this.grenade.replayThrow(
             command.kind,
-            command.targetTile,
+            landedAt,
             thrower.grenadeSpecs[command.kind].areaRadius,
             result.grenade.hits,
+            result.grenade.path,
           )
         }
         this.afterCombat()

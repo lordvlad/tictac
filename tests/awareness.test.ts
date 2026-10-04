@@ -110,12 +110,15 @@ describe('Sneaking up on a sentry', () => {
     m.intruder.tile = { x: 6, y: 10 }
     m.intruder.grenades.frag = 1
     m.intruder.ap = 20
-    m.commands.apply(
+    const res = m.commands.apply(
       { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'frag', targetTile: { x: 15, y: 10 } },
       'local',
     )
     expect(m.sentry.awareness).toBe(Awareness.Alerted)
-    expect(m.sentry.heading).toBe(heading(1, 0))
+    const landed = (res.applied && res.grenade?.path?.end) ? res.grenade.path.end : { x: 15, y: 10 }
+    const dx = Math.sign(landed.x - m.sentry.tile.x)
+    const dy = Math.sign(landed.y - m.sentry.tile.y)
+    expect(m.sentry.heading).toBe(heading(dx, dy))
   })
 })
 
@@ -218,14 +221,18 @@ describe('A thrown stone', () => {
     m.sentry.heading = heading(0, 1)
     // Thrown from behind the sentry, landing off to its east.
     m.intruder.tile = { x: 10, y: 4 }
+    m.intruder.sheet.proficiency.rifle = 100
     const stones = m.intruder.grenades.stone
-    m.commands.apply(
+    const res = m.commands.apply(
       { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'stone', targetTile: { x: 16, y: 10 } },
       'local',
     )
     expect(m.intruder.grenades.stone).toBe(stones - 1)
     expect(m.sentry.awareness).toBe(Awareness.Alerted)
-    expect(m.sentry.heading).toBe(heading(1, 0))
+    const landed = (res.applied && res.grenade?.path?.end) ? res.grenade.path.end : { x: 16, y: 10 }
+    const dx = Math.sign(landed.x - m.sentry.tile.x)
+    const dy = Math.sign(landed.y - m.sentry.tile.y)
+    expect(m.sentry.heading).toBe(heading(dx, dy))
     // Turned away from the thrower, who stays unseen and unrevealed.
     expect(inFront(m.sentry, m.intruder.tile)).toBe(false)
     expect(m.intruder.firedThisTurn).toBe(false)
@@ -267,6 +274,7 @@ describe('Glass', () => {
     m.sentry.tile = { x: 18, y: 9 }
     m.sentry.heading = heading(1, 0)
     m.intruder.tile = { x: 10, y: 3 }
+    m.intruder.sheet.proficiency.rifle = 100
     m.commands.apply(
       { type: 'throwGrenade', shooterFaction: Faction.Blue, shooterIndex: 0, kind: 'stone', targetTile: { x: 10, y: 14 } },
       'local',
@@ -275,7 +283,6 @@ describe('Glass', () => {
     expect(m.sentry.awareness).toBe(Awareness.Alerted)
     expect(m.sentry.heading).toBe(heading(-1, 0))
   })
-
   test('a throw that goes nowhere near a window breaks nothing', () => {
     const m = match(false, window)
     m.intruder.tile = { x: 3, y: 3 }

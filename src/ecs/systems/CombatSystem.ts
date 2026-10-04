@@ -144,14 +144,15 @@ export class CombatSystem extends System {
 
   throwGrenade(thrower: Soldier, at: Tile, kind: GrenadeId): GrenadeResult {
     const from = { ...thrower.tile }
-    const result = throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx)
+    const result = throwGrenade(this.grid, thrower, at, kind, this.squads.soldiers, this.fx, this.roll)
     if (!result.thrown) return result
     shake(this.squads.soldiers, thrower, result.hits)
     this.record(thrower, result.hits, 'blast')
+    const landedAt = result.path?.end ?? at
     // A throw that meets a window breaks it on the way, then goes off — and is
     // heard — where it lands, not where it was thrown from.
-    this.through(from, at, thrower.faction)
-    this.onNoise?.({ at: { ...at }, loudness: thrower.grenadeSpecs[kind].loudness, faction: thrower.faction })
+    this.through(from, landedAt, thrower.faction)
+    this.onNoise?.({ at: { ...landedAt }, loudness: thrower.grenadeSpecs[kind].loudness, faction: thrower.faction })
     return result
   }
 

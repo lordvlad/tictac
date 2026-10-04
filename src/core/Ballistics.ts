@@ -1,4 +1,4 @@
-import { AIM, BLEED, COVER, CRIT } from '../config'
+import { AIM, BLEED, COVER, CRIT, LEVEL_HEIGHT } from '../config'
 import {
   type AmmoSpec,
   type GrenadeSpec,
@@ -8,9 +8,10 @@ import {
   type StatusKind,
   Weapon,
 } from './Arsenal'
-import { CoverLevel } from './Walls'
+import { CoverLevel, WallKind } from './Walls'
 import { LONG_GUN_PARRY, MELEE, type MeleeId } from './Melee'
-import { clamp } from './math'
+import { clamp, distance, facingYaw, throwAngle } from './math'
+import { Side, type Tile } from './Grid'
 
 /** A live status on a unit. */
 export interface StatusState {
@@ -410,17 +411,27 @@ export function blastFalloff(distance: number, radius: number): number {
  * A blast never crits: there is no vital to aim a shockwave at, and falloff
  * already decides what being close was worth.
  */
-export function grenadeDamageAt(spec: GrenadeSpec, distance: number, target: CombatantStats): DamageResult {
+export function grenadeDamageAt(
+  spec: GrenadeSpec,
+  distance: number,
+  target: CombatantStats,
+  cover: CoverLevel = CoverLevel.None,
+): DamageResult {
   const falloff = blastFalloff(distance, spec.areaRadius)
   if (falloff === 0) return { damage: 0, armorShred: 0, absorbed: 0, crit: false }
   const status = statusTotals(target.statuses)
+
+  // Walls and cover shield against the blast wave, but fragments and pressure still deal partial damage
+  // Tall cover (solid wall) shields 50% damage; Low cover (half-block/parapet) shields 25%
+  const coverMultiplier = cover === CoverLevel.Tall ? 0.5 : cover === CoverLevel.Low ? 0.75 : 1.0
+
   // Explosives ignore worn armour far more than bullets do: the blast wave gets
   // through regardless, so only a quarter of armour applies.
   const armorInPlay = Math.max(0, target.armor) * 0.25
-  const raw = spec.damage * falloff * (1 + status.damageTakenBonus)
+  const raw = spec.damage * falloff * coverMultiplier * (1 + status.damageTakenBonus)
   return {
     damage: spec.damage === 0 ? 0 : Math.max(AIM.minDamage, Math.round(raw - armorInPlay)),
-    armorShred: Math.round(spec.armorShred * falloff),
+    armorShred: Math.round(spec.armorShred * falloff * coverMultiplier),
     absorbed: Math.round(Math.min(armorInPlay, raw)),
     crit: false,
   }
@@ -506,3 +517,186 @@ export function meleeWeapon(attacker: CombatantStats, fromBehind = false): Effec
     bleedChance: spec.bleedChance,
   }
 }
+
+/** The continuous path and landing tile of a thrown projectile. */
+export interface ThrowPath {
+  /** Continuous 2D coordinates of the trajectory keypoints (start, bounce vertices, end). */
+  points: { x: number; y: number }[]
+  /** Tiles the grenade passes through in order. */
+  path: Tile[]
+  /** The final resting tile. */
+  end: Tile
+}
+
+/** Grid interface subset needed by trajectory raycasting. */
+export interface TrajectoryGrid {
+  wallAt(x: number, y: number, side: Side): WallKind
+  wallTop(x: number, y: number, side: Side): number
+  levelAt(x: number, y: number): number
+  roofAt?(x: number, y: number): number
+  inBounds(x: number, y: number): boolean
+}
+
+/**
+ * Cast a 3D parabolic ray for a grenade throw, reflecting off walls when flight height is below the wall top.
+ *
+ * The throw travels along `angleRad` for up to `distance` (capped at `maxRange`),
+ * with vertical arc height `1.2 + sin(progress * PI) * arcHeight`.
+ * A wall collision triggers a bounce only if `currentFlightY < wallTop`.
+ * If flight height clears the wall, it sails over (e.g. onto roofs/upper floors).
+ */
+export function castThrowTrajectory(
+  grid: TrajectoryGrid,
+  from: Tile,
+  angleRad: number,
+  distance: number,
+  maxRange: number,
+  observerFloorY: number,
+): ThrowPath {
+  const totalDist = Math.min(Math.max(0, distance), maxRange)
+  let distLeft = totalDist
+  if (distLeft <= 0) {
+    return {
+      points: [{ x: from.x + 0.5, y: from.y + 0.5 }],
+      path: [{ ...from }],
+      end: { ...from },
+    }
+  }
+
+  const fromRoof = grid.roofAt ? grid.roofAt(from.x, from.y) : 0
+  const fromFloor = grid.levelAt(from.x, from.y)
+  const throwerIndoors = fromRoof > fromFloor
+
+  // When indoors, ceiling restricts the arc to a low throw (e.g. 0.2m) under the roof
+  const arcHeight = throwerIndoors
+    ? Math.min(0.25, Math.max(0.1, totalDist * 0.05))
+    : Math.min(2.5, Math.max(0.6, totalDist * 0.25))
+
+  let vx = Math.cos(angleRad)
+  let vy = Math.sin(angleRad)
+  let px = from.x + 0.5
+  let py = from.y + 0.5
+  let cx = from.x
+  let cy = from.y
+
+  const points: { x: number; y: number }[] = [{ x: px, y: py }]
+  const path: Tile[] = [{ x: cx, y: cy }]
+  let steps = 0
+
+  while (distLeft > 1e-4 && steps < 100) {
+    steps++
+    const progress = totalDist > 0 ? (totalDist - distLeft) / totalDist : 0
+    const currentFlightY = observerFloorY + 1.2 + Math.sin(progress * Math.PI) * arcHeight
+
+    const tileX = Math.floor(px)
+    const tileY = Math.floor(py)
+    const roofLevel = grid.roofAt ? grid.roofAt(tileX, tileY) : 0
+    const floorLevel = grid.levelAt(tileX, tileY)
+    // If thrower is outdoors and tile is roofed, surface is the roof; if thrower is indoors, surface is the room floor
+    const surfaceHeight = (!throwerIndoors && roofLevel > 0 ? Math.max(roofLevel, floorLevel) : floorLevel) * LEVEL_HEIGHT
+
+    // If descending (past arc midpoint progress > 0.5) and the flight height has reached the surface
+    if (progress > 0.5 && currentFlightY <= surfaceHeight + 0.05) {
+      distLeft = 0
+      break
+    }
+
+    const tNextX = Math.abs(vx) > 1e-6 ? (vx > 0 ? cx + 1 - px : px - cx) / Math.abs(vx) : Infinity
+    const tNextY = Math.abs(vy) > 1e-6 ? (vy > 0 ? cy + 1 - py : py - cy) / Math.abs(vy) : Infinity
+    const tNext = Math.min(tNextX, tNextY)
+
+    if (tNext > distLeft) {
+      px += vx * distLeft
+      py += vy * distLeft
+      distLeft = 0
+      break
+    }
+
+    px += vx * tNext
+    py += vy * tNext
+    distLeft -= tNext
+
+    const nextProgress = totalDist > 0 ? (totalDist - distLeft) / totalDist : 0
+    const nextFlightY = observerFloorY + 1.2 + Math.sin(nextProgress * Math.PI) * arcHeight
+
+    let bounceX = false
+    let bounceY = false
+
+    if (Math.abs(tNext - tNextX) < 1e-6) {
+      const nextCx = cx + Math.sign(vx)
+      const side = vx > 0 ? Side.East : Side.West
+      const kind = grid.wallAt(cx, cy, side)
+      const top = grid.wallTop(cx, cy, side)
+      if (kind !== WallKind.None && kind !== WallKind.DoorOpen && kind !== WallKind.Glass && nextFlightY < top) {
+        bounceX = true
+      } else {
+        cx = nextCx
+      }
+    }
+
+    if (Math.abs(tNext - tNextY) < 1e-6) {
+      const nextCy = cy + Math.sign(vy)
+      const side = vy > 0 ? Side.South : Side.North
+      const kind = grid.wallAt(cx, cy, side)
+      const top = grid.wallTop(cx, cy, side)
+      if (kind !== WallKind.None && kind !== WallKind.DoorOpen && kind !== WallKind.Glass && nextFlightY < top) {
+        bounceY = true
+      } else {
+        cy = nextCy
+      }
+    }
+
+    if (bounceX || bounceY) {
+      // Record exact continuous collision / bounce vertex
+      points.push({ x: px, y: py })
+    }
+
+    if (bounceX) {
+      vx = -vx
+      px += vx * 1e-4
+    }
+    if (bounceY) {
+      vy = -vy
+      py += vy * 1e-4
+    }
+
+    const last = path[path.length - 1]
+    if (!last || last.x !== cx || last.y !== cy) {
+      path.push({ x: cx, y: cy })
+    }
+  }
+
+  // Add final continuous landing point
+  points.push({ x: px, y: py })
+
+  // Final tile is determined by floor coordinate Math.floor(p)
+  const finalTile = {
+    x: Math.floor(px),
+    y: Math.floor(py),
+  }
+
+  return {
+    points,
+    path,
+    end: finalTile,
+  }
+}
+
+/**
+ * Calculate intended throw trajectory from `from` towards `target`.
+ */
+export function calculateIntendedThrow(
+  grid: TrajectoryGrid,
+  from: Tile,
+  target: Tile,
+  maxRange: number,
+): ThrowPath {
+  const dx = target.x - from.x
+  const dy = target.y - from.y
+  const dist = distance(dx, dy)
+  if (dist <= 0) return { points: [{ x: from.x + 0.5, y: from.y + 0.5 }], path: [{ ...from }], end: { ...from } }
+  const angle = throwAngle(dy, dx)
+  const floorY = grid.levelAt(from.x, from.y) * LEVEL_HEIGHT
+  return castThrowTrajectory(grid, from, angle, dist, maxRange, floorY)
+}
+
