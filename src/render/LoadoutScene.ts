@@ -16,7 +16,8 @@ import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { EngineContext } from '../engine'
 import type { Faction } from '../config'
-import { characterScale, type CharacterSheet } from '../core/Characters'
+import type { CharacterSheet } from '../core/Characters'
+import { applyCharacterProportions } from './Proportions'
 import { Rng } from '../core/rng'
 import { soldierColor } from '../entities/palette'
 
@@ -185,8 +186,7 @@ export class LoadoutScene {
       model.position.set(Math.sin(angle) * RING_RADIUS, 0, Math.cos(angle) * RING_RADIUS)
       // Yaw 0 faces +Z, so the spoke angle is exactly "facing outward".
       model.rotation.y = angle
-      const scale = characterScale(this.sheets[index]?.appearance)
-      model.scale.set(scale.x, scale.y, scale.z)
+      applyCharacterProportions(model, this.sheets[index]?.appearance)
       const tint = soldierColor(this.faction, index)
       model.traverse((child) => {
         if (child instanceof Mesh && child.material) {

@@ -59,8 +59,15 @@ for (const anim of root.listAnimations()) {
   if (key) {
     seen.add(name)
     anim.setName(key)
+    // Strip static scale animation channels so bone scales can be steered per character
+    for (const channel of anim.listChannels()) {
+      if (channel.getTargetPath() === 'scale') {
+        const sampler = channel.getSampler()
+        channel.dispose()
+        if (sampler && sampler.listParents().length === 0) sampler.dispose()
+      }
+    }
   } else {
-    // Disposing the Animation only detaches its channels/samplers; the orphaned
     // samplers keep referencing their input/output accessors, so prune() would
     // still consider that keyframe data live. Dispose the children explicitly.
     for (const channel of anim.listChannels()) channel.dispose()

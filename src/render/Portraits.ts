@@ -15,9 +15,9 @@ import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { EngineContext } from '../engine'
 import { Faction, SQUAD_SIZE } from '../config'
-import { characterScale, type CharacterSheet } from '../core/Characters'
+import type { CharacterSheet } from '../core/Characters'
+import { applyCharacterProportions } from './Proportions'
 import { soldierColor } from '../entities/palette'
-
 export class OffscreenPortraits {
   private readonly portraits = new Map<string, string>()
 
@@ -68,9 +68,7 @@ export class OffscreenPortraits {
         // by PI here is what produced portraits of the back of everyone's head.
         model.rotation.y = 0
         const sheet = squads?.[faction]?.[index]
-        const scale = characterScale(sheet?.appearance)
-        model.scale.set(scale.x, scale.y, scale.z)
-
+        applyCharacterProportions(model, sheet?.appearance)
         // Tint material and disable frustum culling for close-up framing
         model.traverse((child) => {
           if (child instanceof Mesh) {
@@ -87,7 +85,7 @@ export class OffscreenPortraits {
         scene.updateMatrixWorld(true)
 
         const head = model.getObjectByName('Head')
-        const headY = head ? new Vector3().setFromMatrixPosition(head.matrixWorld).y : 1.57 * scale.y
+        const headY = head ? new Vector3().setFromMatrixPosition(head.matrixWorld).y : 1.57 * (sheet?.appearance?.height ?? 1)
         camera.position.set(0, headY + 0.05, 0.75)
         camera.lookAt(new Vector3(0, headY + 0.01, 0))
         camera.updateMatrixWorld(true)

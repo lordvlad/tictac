@@ -58,10 +58,12 @@ export interface Attributes {
 export interface CharacterAppearance {
   /** Vertical stature multiplier (0.90..1.10, default 1.0). Authored at ~1.83m. */
   height: number
-  /** Lateral shoulder and torso width multiplier (0.90..1.10, default 1.0). */
+  /** Lateral shoulder & frame width multiplier (0.90..1.10, default 1.0). */
   width: number
-  /** Torso depth, chest thickness, and muscular bulk multiplier (0.88..1.14, default 1.0). */
+  /** Muscular volume, chest depth, and limb girth (0.85..1.25, default 1.0). */
   bulkiness: number
+  /** Belly & waist circumference multiplier (0.85..1.35, default 1.0). */
+  gut: number
 }
 
 /** 3D model scaling vector computed from appearance. */
@@ -80,7 +82,7 @@ export function characterScale(appearance?: CharacterAppearance): ModelScale {
   return { x, y, z }
 }
 
-/** Roll randomized appearance variations. Bulkiness is derived from strength plus random jitter. */
+/** Roll randomized appearance variations. Bulkiness is derived from strength; gut from heaviness variation. */
 export function characterAppearance(
   rng: Rng,
   strength = Math.round((CHARACTER.attribute.min + CHARACTER.attribute.max) / 2),
@@ -91,16 +93,20 @@ export function characterAppearance(
   const clampedStrength = clamp(strength, min, max)
   const strengthFactor = span > 0 ? (clampedStrength - mid) / span : 0
 
-  // Strength shifts base bulkiness by +/- 0.10, jitter adds +/- 0.04
-  const baseBulkiness = 1.0 + strengthFactor * 0.1
-  const jitter = rng.range(-0.04, 0.04)
-  const bulkiness = Number(clamp(baseBulkiness + jitter, 0.85, 1.15).toFixed(3))
+  const height = Number(rng.range(0.92, 1.08).toFixed(3))
+  const width = Number(rng.range(0.92, 1.08).toFixed(3))
 
-  return {
-    height: Number(rng.range(0.92, 1.08).toFixed(3)),
-    width: Number(rng.range(0.92, 1.08).toFixed(3)),
-    bulkiness,
-  }
+  // Strength shifts base muscular bulk by +/- 0.12, jitter adds +/- 0.05
+  const baseBulkiness = 1.0 + strengthFactor * 0.12
+  const bulkJitter = rng.range(-0.05, 0.05)
+  const bulkiness = Number(clamp(baseBulkiness + bulkJitter, 0.85, 1.25).toFixed(3))
+
+  // Gut / belly circumference variation
+  const baseGut = 0.95 + (bulkiness - 1.0) * 0.4
+  const gutJitter = rng.range(-0.1, 0.2)
+  const gut = Number(clamp(baseGut + gutJitter, 0.85, 1.35).toFixed(3))
+
+  return { height, width, bulkiness, gut }
 }
 
 export interface CharacterSheet {
@@ -292,7 +298,7 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
     specialism: WeaponId.Rifle,
     traits: [],
     temperament: Temperament.Skittish,
-    appearance: { height: 1, width: 1, bulkiness: 1 },
+    appearance: { height: 1, width: 1, bulkiness: 1, gut: 1 },
   }
   for (const id of Object.values(WeaponId)) fallback.proficiency[id] = 0
   for (const id of Object.values(UtilityId)) fallback.utility[id] = 0
@@ -338,7 +344,8 @@ export function sanitizeSheet(raw: unknown): CharacterSheet {
   const appearance: CharacterAppearance = {
     height: float(rawApp?.height, 0.8, 1.2, fallback.appearance.height),
     width: float(rawApp?.width, 0.8, 1.2, fallback.appearance.width),
-    bulkiness: float(rawApp?.bulkiness, 0.8, 1.2, fallback.appearance.bulkiness),
+    bulkiness: float(rawApp?.bulkiness, 0.75, 1.35, fallback.appearance.bulkiness),
+    gut: float(rawApp?.gut, 0.75, 1.45, fallback.appearance.gut),
   }
 
   return {

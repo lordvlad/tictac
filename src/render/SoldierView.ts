@@ -12,7 +12,7 @@ import {
 } from 'three'
 import { RULES } from '../config'
 import type { EngineContext } from '../engine'
-import { characterScale } from '../core/Characters'
+import { applyCharacterProportions } from './Proportions'
 import { MeleeId } from '../core/Melee'
 import { soldierColor } from '../entities/palette'
 import type { Soldier } from '../entities/Soldier'
@@ -136,10 +136,8 @@ export class SoldierView extends Entity3D {
     this.initModel(gltf)
 
     if (this.instance) {
-      // character.glb is authored at 1.829 m tall in default scale (1,1,1).
-      // Scale variations (height, width, bulkiness) are applied from character appearance.
-      const scale = characterScale(this.unit.sheet.appearance)
-      this.instance.scale.set(scale.x, scale.y, scale.z)
+      // Apply physical proportions (height, shoulder width, gut/waist, chest, limb girth)
+      applyCharacterProportions(this.instance, this.unit.sheet.appearance)
 
       // Tint per soldier, not per faction: squadmates get neighbouring hues so
       // they can be told apart on the field and in their portraits.

@@ -343,7 +343,9 @@ describe('Sanitising a sheet off the wire', () => {
       expect(sheet.appearance.width).toBeGreaterThanOrEqual(0.92)
       expect(sheet.appearance.width).toBeLessThanOrEqual(1.08)
       expect(sheet.appearance.bulkiness).toBeGreaterThanOrEqual(0.85)
-      expect(sheet.appearance.bulkiness).toBeLessThanOrEqual(1.15)
+      expect(sheet.appearance.bulkiness).toBeLessThanOrEqual(1.25)
+      expect(sheet.appearance.gut).toBeGreaterThanOrEqual(0.85)
+      expect(sheet.appearance.gut).toBeLessThanOrEqual(1.35)
 
       const scale = characterScale(sheet.appearance)
       expect(scale.y).toBe(sheet.appearance.height)
@@ -372,21 +374,22 @@ describe('Sanitising a sheet off the wire', () => {
   test('sanitizeSheet preserves valid appearance and clamps extreme variations', () => {
     // Missing appearance falls back to 1.0 default
     const defaultSheet = sanitizeSheet({})
-    expect(defaultSheet.appearance).toEqual({ height: 1, width: 1, bulkiness: 1 })
+    expect(defaultSheet.appearance).toEqual({ height: 1, width: 1, bulkiness: 1, gut: 1 })
 
     // Valid appearance is preserved
     const validSheet = sanitizeSheet({
-      appearance: { height: 1.05, width: 0.95, bulkiness: 1.1 },
+      appearance: { height: 1.05, width: 0.95, bulkiness: 1.1, gut: 1.2 },
     })
-    expect(validSheet.appearance).toEqual({ height: 1.05, width: 0.95, bulkiness: 1.1 })
+    expect(validSheet.appearance).toEqual({ height: 1.05, width: 0.95, bulkiness: 1.1, gut: 1.2 })
 
-    // Out of bounds appearance is clamped to safe range [0.8, 1.2]
+    // Out of bounds appearance is clamped to safe range
     const clampedSheet = sanitizeSheet({
-      appearance: { height: 999, width: -10, bulkiness: NaN },
+      appearance: { height: 999, width: -10, bulkiness: NaN, gut: 50 },
     })
     expect(clampedSheet.appearance.height).toBe(1.2)
     expect(clampedSheet.appearance.width).toBe(0.8)
     expect(clampedSheet.appearance.bulkiness).toBe(1.0)
+    expect(clampedSheet.appearance.gut).toBe(1.45)
   })
 
   test('a key off the prototype is not a trait', () => {
