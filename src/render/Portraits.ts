@@ -20,6 +20,10 @@ import { applyCharacterProportions } from './Proportions'
 import { soldierColor } from '../entities/palette'
 export class OffscreenPortraits {
   private readonly portraits = new Map<string, string>()
+  private canvas: HTMLCanvasElement | null = null
+  private renderer: WebGLRenderer | null = null
+  private scene: Scene | null = null
+  private camera: PerspectiveCamera | null = null
 
   constructor(
     private readonly engine: EngineContext,
@@ -27,39 +31,61 @@ export class OffscreenPortraits {
   ) {
     this.generateAll(squads)
   }
+
   getPortrait(faction: Faction, squadIndex: number): string {
     const key = `${faction}_${squadIndex}`
     return this.portraits.get(key) ?? ''
   }
+
   update(faction: Faction, squadIndex: number, sheet?: CharacterSheet): void {
     const gltf = this.engine.assets['character'] as GLTF | undefined
     if (!gltf) return
 
-    const canvas = document.createElement('canvas')
-    canvas.width = 128
-    canvas.height = 128
+    const pipe = this.ensurePipeline()
+    if (!pipe) return
 
-    const renderer = new WebGLRenderer({
-      canvas,
+    this.renderSlot(pipe.renderer, pipe.canvas, pipe.scene, pipe.camera, gltf, faction, squadIndex, sheet)
+  }
+
+  dispose(): void {
+    if (this.renderer) {
+      this.renderer.dispose()
+      this.renderer = null
+      this.canvas = null
+      this.scene = null
+      this.camera = null
+    }
+  }
+
+  private ensurePipeline(): { renderer: WebGLRenderer; canvas: HTMLCanvasElement; scene: Scene; camera: PerspectiveCamera } | null {
+    if (this.renderer && this.canvas && this.scene && this.camera) {
+      return { renderer: this.renderer, canvas: this.canvas, scene: this.scene, camera: this.camera }
+    }
+    if (typeof document === 'undefined') return null
+
+    this.canvas = document.createElement('canvas')
+    this.canvas.width = 128
+    this.canvas.height = 128
+
+    this.renderer = new WebGLRenderer({
+      canvas: this.canvas,
       alpha: false,
       antialias: true,
       preserveDrawingBuffer: true,
     })
-    renderer.setPixelRatio(1)
-    renderer.setSize(128, 128)
-    renderer.setClearColor(0x1a222d, 1)
+    this.renderer.setPixelRatio(1)
+    this.renderer.setSize(128, 128)
+    this.renderer.setClearColor(0x1a222d, 1)
 
-    const scene = new Scene()
-    const camera = new PerspectiveCamera(30, 1, 0.1, 10)
-    scene.add(new AmbientLight(0xffffff, 1.2))
+    this.scene = new Scene()
+    this.camera = new PerspectiveCamera(30, 1, 0.1, 10)
+    this.scene.add(new AmbientLight(0xffffff, 1.2))
     const dir = new DirectionalLight(0xffffff, 1.5)
     dir.position.set(1, 2, 2)
-    scene.add(dir)
+    this.scene.add(dir)
 
-    this.renderSlot(renderer, canvas, scene, camera, gltf, faction, squadIndex, sheet)
-    renderer.dispose()
+    return { renderer: this.renderer, canvas: this.canvas, scene: this.scene, camera: this.camera }
   }
-
   private renderSlot(
     renderer: WebGLRenderer,
     canvas: HTMLCanvasElement,
@@ -106,35 +132,14 @@ export class OffscreenPortraits {
     const gltf = this.engine.assets['character'] as GLTF | undefined
     if (!gltf) return
 
-    const canvas = document.createElement('canvas')
-    canvas.width = 128
-    canvas.height = 128
-
-    const renderer = new WebGLRenderer({
-      canvas,
-      alpha: false,
-      antialias: true,
-      preserveDrawingBuffer: true,
-    })
-    renderer.setPixelRatio(1)
-    renderer.setSize(128, 128)
-    renderer.setClearColor(0x1a222d, 1)
-
-    const scene = new Scene()
-    const camera = new PerspectiveCamera(30, 1, 0.1, 10)
-
-    scene.add(new AmbientLight(0xffffff, 1.2))
-    const dir = new DirectionalLight(0xffffff, 1.5)
-    dir.position.set(1, 2, 2)
-    scene.add(dir)
+    const pipe = this.ensurePipeline()
+    if (!pipe) return
 
     for (const faction of [Faction.Blue, Faction.Red]) {
       for (let index = 0; index < SQUAD_SIZE; index++) {
         const sheet = squads?.[faction]?.[index]
-        this.renderSlot(renderer, canvas, scene, camera, gltf, faction, index, sheet)
+        this.renderSlot(pipe.renderer, pipe.canvas, pipe.scene, pipe.camera, gltf, faction, index, sheet)
       }
     }
-
-    renderer.dispose()
   }
 }

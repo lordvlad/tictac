@@ -116,6 +116,7 @@ export class LoadoutScreen {
     this.view.unmount()
     this.container.remove()
     this.scene.dispose()
+    this.portraits.dispose()
   }
 
   private readonly apply: Apply = (action) => {
