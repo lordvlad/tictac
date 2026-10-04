@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { AMMO, AmmoId, GRENADES, GrenadeId, SHOT_MODES, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
-import { derive, type CharacterSheet } from '../core/Characters'
+import { derive, type CharacterAppearance, type CharacterSheet } from '../core/Characters'
 import { ITEMS, ItemId } from '../core/Items'
 import { MELEE, MeleeId } from '../core/Melee'
 import { TEMPERAMENTS } from '../core/Morale'
@@ -48,8 +48,8 @@ type LoadoutAction =
   | { kind: 'item'; id: ItemId; delta: number }
   | { kind: 'attachment'; id: AttachmentId; delta: number }
   | { kind: 'role'; id: RoleId }
+  | { kind: 'appearance'; field: keyof CharacterAppearance; value: number }
   | { kind: 'deploy' }
-
 type Apply = (action: LoadoutAction) => void
 
 /**
@@ -154,6 +154,13 @@ export class LoadoutScreen {
       case 'role':
         setRole(this.loadout, this.selected, action.id)
         break
+      case 'appearance': {
+        const sheet = this.sheets[this.selected]!
+        sheet.appearance[action.field] = Number(action.value.toFixed(3))
+        this.scene.updateProportions(this.selected, sheet.appearance)
+        this.portraits.update(this.faction, this.selected, sheet)
+        break
+      }
       case 'deploy':
         this.deployed.resolve(this.loadout)
         return
@@ -327,6 +334,49 @@ function Panel({
       </button>
     </div>
   )
+  const slider = (
+    label: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    onChange: (val: number) => void,
+  ) => {
+    const percent = Math.round(value * 100)
+    return (
+      <div key={label} className="loadout-slider-row">
+        <div className="loadout-slider-header">
+          <span className="loadout-slider-label">{label}</span>
+          <span className="loadout-slider-val">{percent}%</span>
+        </div>
+        <div className="loadout-slider-controls">
+          <button
+            className="loadout-step interactive"
+            disabled={value <= min}
+            onClick={() => onChange(Math.max(min, Number((value - step * 2).toFixed(3))))}
+          >
+            −
+          </button>
+          <input
+            type="range"
+            className="loadout-slider interactive"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={(e) => onChange(Number(e.target.value))}
+          />
+          <button
+            className="loadout-step interactive"
+            disabled={value >= max}
+            onClick={() => onChange(Math.min(max, Number((value + step * 2).toFixed(3))))}
+          >
+            +
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   // The sidearm and the weapon are the picks whose options are not simply
   // better or worse than each other, so their buttons have to carry enough
@@ -424,6 +474,16 @@ function Panel({
     <div className="loadout-panel">
       <div className="loadout-panel-head">{name}</div>
 
+      <div className="loadout-section">Physique</div>
+      {slider('Height', sheet.appearance.height, 0.88, 1.12, 0.01, (val) =>
+        apply({ kind: 'appearance', field: 'height', value: val }),
+      )}
+      {slider('Bulkiness', sheet.appearance.bulkiness, 0.8, 1.3, 0.01, (val) =>
+        apply({ kind: 'appearance', field: 'bulkiness', value: val }),
+      )}
+      {slider('Gut', sheet.appearance.gut, 0.8, 1.4, 0.01, (val) =>
+        apply({ kind: 'appearance', field: 'gut', value: val }),
+      )}
       <div className="loadout-section">Role</div>
       {Object.values(RoleId).map((id) =>
         pick(`role-${id}`, ROLES[id].name, unit.role === id, true, { kind: 'role', id }),

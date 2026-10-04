@@ -2095,6 +2095,66 @@ canvas {
   font-variant-numeric: tabular-nums;
 }
 
+.loadout-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(18, 24, 34, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.loadout-slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.loadout-slider-label {
+  color: var(--hud-text);
+}
+
+.loadout-slider-val {
+  font-size: 10px;
+  font-family: monospace;
+  color: #38bdf8;
+  font-variant-numeric: tabular-nums;
+}
+
+.loadout-slider-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.loadout-slider {
+  flex: 1;
+  height: 4px;
+  appearance: none;
+  background: rgba(40, 52, 68, 0.9);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.loadout-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #38bdf8;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.loadout-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
 /* A sidearm or weapon pick is the plain pick with its spec underneath: the
    options trade off rather than rank, so the numbers have to be on the
    button. The spec wraps onto its own line and is indented past the icon so
