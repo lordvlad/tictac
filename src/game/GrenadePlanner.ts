@@ -197,6 +197,7 @@ export class GrenadePlanner {
     const onDetonate = () => {
       const worldPos = this.grid.tileToWorld(targetTile)
       this.effects.triggerFlash(kind)
+      this.effects.spawnBlast(worldPos, areaRadius, kind)
 
       if (kind === 'frag') this.rig.shake(FX.shakeIntensityFrag, FX.shakeDurationFrag)
       if (kind === 'frag' || kind === 'incendiary' || kind === 'smoke') {

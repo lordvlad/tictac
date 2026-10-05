@@ -13,6 +13,7 @@ import {
 import { FX } from '../config'
 import { GrenadeId } from '../core/Arsenal'
 import type { EngineContext } from '../engine'
+import { Blast } from './Blast'
 
 interface FlashState {
   time: number
@@ -52,12 +53,14 @@ export class Effects {
   private flash: FlashState | null = null
   private readonly puffs: SmokePuff[] = []
   private readonly activeGrenades: ActiveGrenade[] = []
+  private readonly blast: Blast
 
   private smokeTexture: CanvasTexture | null = null
   private grenadeGeometry: SphereGeometry | null = null
   private grenadeMaterial: MeshBasicMaterial | null = null
 
   constructor(private readonly engine: EngineContext) {
+    this.blast = new Blast(engine)
     this.flashEl = document.createElement('div')
     this.flashEl.className = 'fullscreen-flash'
     Object.assign(this.flashEl.style, {
@@ -77,6 +80,7 @@ export class Effects {
   }
 
   dispose(): void {
+    this.blast.dispose()
     this.flashEl.remove()
     this.engine.scene.remove(this.smokeGroup)
     this.engine.scene.remove(this.grenadeGroup)
@@ -184,8 +188,14 @@ export class Effects {
     })
   }
 
+  /** The bang itself: fireball, shockwave and sparks for whatever `kind` is. */
+  spawnBlast(worldPos: Vector3, radius: number, kind: GrenadeId): void {
+    this.blast.spawn(worldPos, radius, kind)
+  }
+
   /** Per-frame update: animates flash, ticks transient puffs and flying grenades. */
   update(delta: number): void {
+    this.blast.update(delta)
     // 1. Fullscreen flash
     if (this.flash) {
       this.flash.time += delta

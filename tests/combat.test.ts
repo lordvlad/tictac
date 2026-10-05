@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { StatusKind, WEAPONS, type Weapon, WeaponId } from '../src/core/Arsenal'
 import type { StatusState } from '../src/core/Ballistics'
 import { Faction } from '../src/config'
-import type { Casualty, CombatFx } from '../src/core/Combatant'
+import type { Casualty, CombatFx, HitMark } from '../src/core/Combatant'
 import { applyHitEffects } from '../src/game/Combat'
 
 /** A casualty that also carries the weapon the applier must never consult. */
@@ -65,6 +65,7 @@ function countingFx(): CountingFx {
     hit: () => {
       fx.hits += 1
     },
+    miss: () => {},
     melee: () => {
       fx.blows += 1
     },
@@ -88,6 +89,19 @@ describe('Applying a resolved hit', () => {
     expect(target.hp).toBe(70)
     expect(target.armor).toBe(10)
     expect(fx.hits).toBe(1)
+  })
+
+  /** What the view tints the body for: a crit outranks a strip of armour, and neither is plain. */
+  test('a hit is announced with what marked it', () => {
+    const marks: HitMark[] = []
+    const fx = { ...countingFx(), hit: (_unit: unknown, mark: HitMark) => void marks.push(mark) }
+
+    applyHitEffects(stubUnit(), 10, 0, null, fx)
+    applyHitEffects(stubUnit(), 10, 5, null, fx)
+    applyHitEffects(stubUnit(), 10, 5, null, fx, true)
+    applyHitEffects(stubUnit(), 10, 0, null, fx, true)
+
+    expect(marks).toEqual(['plain', 'shred', 'crit', 'crit'])
   })
 
   /**

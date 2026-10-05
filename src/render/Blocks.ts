@@ -28,7 +28,7 @@ const BLOCK_COLORS: Record<Exclude<Block, typeof Block.None>, number> = {
 }
 
 /** How a wall looks, per kind. Glazing is drawn see-through, as it is played. */
-const WALL_STYLE: Record<
+export const WALL_STYLE: Record<
   Exclude<WallKind, typeof WallKind.None>,
   { color: number; opacity: number }
 > = {
@@ -45,10 +45,10 @@ const WALL_STYLE: Record<
 }
 
 /** An open door's leaf, as a share of the tile it is hung across. */
-const DOOR_LEAF = 0.85
+export const DOOR_LEAF = 0.85
 
 /** Thickness of a wall face in metres — a boundary, not a room-sized block. */
-const WALL_THICKNESS = 0.12
+export const WALL_THICKNESS = 0.12
 
 /** Ladders are edges, not tiles, so they get their own colour and layer. */
 const LADDER_COLOR = 0xff8800
@@ -60,7 +60,7 @@ const LEVEL_FILTER_OPACITY = 0.15
 const LADDER_FACE_ORDER: readonly Side[] = [Side.North, Side.East, Side.South, Side.West]
 
 /** Grid-space step from a tile centre toward each face, as [dx, dy]. */
-const FACE_OFFSET: Record<number, readonly [number, number]> = {
+export const FACE_OFFSET: Record<number, readonly [number, number]> = {
   [Side.North]: [0, -1],
   [Side.East]: [1, 0],
   [Side.South]: [0, 1],
@@ -322,6 +322,8 @@ export class Blocks {
 
   private readonly layers: BlockLayer[] = []
   private readonly dummy = new Object3D()
+  /** Edges whose wall is drawn by something else for now: a door mid-swing. */
+  private readonly hiddenWalls = new Set<number>()
   private readonly scratch = new Color()
 
   /** Occlusion scratch for the x-ray pass: tiles for occupants, edges for walls. */
@@ -382,6 +384,20 @@ export class Blocks {
   }
 
   /**
+   * Leave an edge's wall out of the mesh while something else draws it — a
+   * door being swung. Takes effect at the next {@link rebuildWalls}, so a
+   * caller about to rebuild anyway does not pay for two.
+   */
+  hideWall(edge: number): void {
+    this.hiddenWalls.add(edge)
+  }
+
+  /** Draw an edge's wall from the grid again. */
+  showWall(edge: number): void {
+    if (this.hiddenWalls.delete(edge)) this.rebuildWalls()
+  }
+
+  /**
    * Rebuild what stands on the floors, and the floors: a crate that burned
    * away is gone, and a floor that burned is ash. Same approach as the walls.
    * Fog and the level filter are re-applied by the caller's next pass.
@@ -432,6 +448,7 @@ export class Blocks {
 
     const byKind = new Map<WallKind, BlockInstance[]>(kinds.map((kind) => [kind, []]))
     for (let edge = 0; edge < this.grid.edgeCount; edge++) {
+      if (this.hiddenWalls.has(edge)) continue
       const { x, y, side } = this.grid.edgeTile(edge)
       const found = byKind.get(this.grid.wallAt(x, y, side))
       if (found) found.push({ x, y, side, edge, index: found.length })
