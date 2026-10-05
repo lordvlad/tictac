@@ -1,4 +1,4 @@
-import { Euler, MathUtils, Object3D, Quaternion, Vector3, type Group } from 'three'
+import { Euler, MathUtils, Matrix4, Object3D, Quaternion, Vector3, type Group } from 'three'
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { WeaponId } from '../core/Arsenal'
 
@@ -55,11 +55,12 @@ const RAISE_RANGE = 0.3
 
 const handPosition = new Vector3()
 const shoulderPosition = new Vector3()
-const handQuaternion = new Quaternion()
 const wanted = new Quaternion()
 const pitch = new Quaternion()
 const xAxis = new Vector3(1, 0, 0)
 const origin = new Vector3()
+const uniform = new Vector3()
+const worldPose = new Matrix4()
 
 /**
  * A weapon in a soldier's right hand.
@@ -79,7 +80,8 @@ export class HeldWeapon {
     private readonly hand: Object3D,
     private readonly shoulder: Object3D,
   ) {
-    model.scale.setScalar(WEAPON_SCALE)
+    // Posed by matrix in `update`, never by position/rotation/scale.
+    model.matrixAutoUpdate = false
     hand.add(model)
     this.update()
   }
@@ -112,14 +114,15 @@ export class HeldWeapon {
     // model's origin must sit relative to the hand.
     origin.copy(palmInModel(this.id)).multiplyScalar(-1)
     origin.applyQuaternion(wanted).add(handPosition)
-    model.position.copy(hand.worldToLocal(origin))
 
-    hand.getWorldQuaternion(handQuaternion)
-    model.quaternion.copy(handQuaternion.invert().multiply(wanted))
-
-    // Counter whatever girth the proportions put on the hand.
-    const handScale = hand.getWorldScale(origin).x
-    model.scale.setScalar(WEAPON_SCALE / (handScale || 1))
+    // The pose is decided in the world, at a fixed size, and then expressed in
+    // the hand's space as a matrix. Position, rotation and scale cannot do it:
+    // the hand inherits the soldier's height, width and girth non-uniformly,
+    // and undoing that on the model takes a shear no TRS triple can hold.
+    // Taking the matrix directly keeps a weapon the same size on every body.
+    worldPose.compose(origin, wanted, uniform.setScalar(WEAPON_SCALE))
+    model.matrix.copy(hand.matrixWorld).invert().multiply(worldPose)
+    model.matrixWorldNeedsUpdate = true
   }
 
   remove(): void {
