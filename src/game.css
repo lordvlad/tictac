@@ -31,6 +31,14 @@ body {
   -webkit-user-select: none;
 }
 
+/* Text fields must stay selectable: WebKit will not focus or type into an
+   input whose user-select is none, and the body sets none for the game view. */
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 canvas {
   display: block;
   position: fixed;
@@ -1862,6 +1870,15 @@ canvas {
   z-index: 200;
   font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
   color: var(--hud-text);
+  /* The canvas underneath takes the drag that turns the camera; only the
+     panels and buttons stop it. */
+  pointer-events: none;
+}
+
+.loadout-root .interactive,
+.loadout-root .loadout-panel,
+.loadout-root .loadout-cards:not(.hidden) {
+  pointer-events: auto;
 }
 
 /* game-icons glyphs are white-on-transparent, so mask them and let the
@@ -2142,11 +2159,42 @@ canvas {
 
 .loadout-cards {
   position: absolute;
+  top: 50%;
+  left: 16px;
+  transform: translateY(-50%);
+  display: flex;
+  transition: opacity 0.15s;
+}
+
+.loadout-cards.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loadout-nav {
+  position: absolute;
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 12px;
+  gap: 10px;
+}
+
+.loadout-nav-btn {
+  width: 36px;
+  height: 28px;
+  font-size: 12px;
+  color: var(--hud-text);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+
+.loadout-nav-btn:hover {
+  border-color: var(--hud-accent);
+  color: var(--hud-accent);
 }
 
 /* The role badge, between the name and the kit row: a small caption rather

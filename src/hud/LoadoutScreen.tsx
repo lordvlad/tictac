@@ -41,6 +41,7 @@ import type { OffscreenPortraits } from '../render/Portraits'
 /** What a press on the screen asks for. */
 type LoadoutAction =
   | { kind: 'select'; index: number }
+  | { kind: 'step'; delta: -1 | 1 }
   | { kind: 'weapon'; id: WeaponId }
   | { kind: 'ammo'; id: AmmoId }
   | { kind: 'sidearm'; id: MeleeId }
@@ -69,6 +70,7 @@ export class LoadoutScreen {
   private readonly scene: LoadoutScene
   private readonly loadout: SquadLoadout
   private selected = 0
+  private dragging = false
   private waitingLabel: string | null = null
   private readonly deployed = Promise.withResolvers<SquadLoadout>()
   private disposed = false
@@ -89,7 +91,15 @@ export class LoadoutScreen {
     // One kit per person who is actually deploying: a kept roster with an
     // empty slot brings fewer than a full squad, and so does its loadout.
     this.loadout = defaultLoadout(sheets.length)
-    this.scene = new LoadoutScene(engine, seed, faction, sheets)
+    this.scene = new LoadoutScene(engine, seed, faction, sheets, {
+      onDragChange: (dragging) => {
+        this.dragging = dragging
+        this.render()
+      },
+      onSnap: (index) => {
+        this.selected = index
+      },
+    })
     this.loadout.forEach((unit, index) => this.scene.setWeapon(index, unit.weaponId))
 
     this.container = document.createElement('div')
@@ -125,6 +135,10 @@ export class LoadoutScreen {
       case 'select':
         this.selected = action.index
         this.scene.select(action.index)
+        break
+      case 'step':
+        this.selected = this.scene.neighbour(this.selected, action.delta)
+        this.scene.select(this.selected)
         break
       case 'weapon':
         equipWeapon(this.loadout, this.selected, action.id)
@@ -179,6 +193,7 @@ export class LoadoutScreen {
         faction={this.faction}
         loadout={this.loadout}
         selected={this.selected}
+        dragging={this.dragging}
         sheets={this.sheets}
         portraits={this.portraits}
         waitingLabel={this.waitingLabel}
@@ -216,6 +231,7 @@ function LoadoutView({
   faction,
   loadout,
   selected,
+  dragging,
   sheets,
   portraits,
   waitingLabel,
@@ -224,6 +240,7 @@ function LoadoutView({
   faction: Faction
   loadout: SquadLoadout
   selected: number
+  dragging: boolean
   sheets: CharacterSheet[]
   portraits: OffscreenPortraits
   waitingLabel: string | null
@@ -237,7 +254,32 @@ function LoadoutView({
         <div className="loadout-credit">Icons by game-icons.net (CC BY 3.0)</div>
       </div>
       <Panel faction={faction} loadout={loadout} selected={selected} sheet={sheets[selected]!} apply={apply} />
-      <Cards faction={faction} loadout={loadout} selected={selected} sheets={sheets} portraits={portraits} apply={apply} />
+      <Cards
+        faction={faction}
+        loadout={loadout}
+        selected={selected}
+        hidden={dragging}
+        sheets={sheets}
+        portraits={portraits}
+      />
+      {loadout.length > 1 ? (
+        <div className="loadout-nav">
+          <button
+            className="loadout-nav-btn interactive"
+            aria-label="Previous soldier"
+            onClick={() => apply({ kind: 'step', delta: -1 })}
+          >
+            ◀
+          </button>
+          <button
+            className="loadout-nav-btn interactive"
+            aria-label="Next soldier"
+            onClick={() => apply({ kind: 'step', delta: 1 })}
+          >
+            ▶
+          </button>
+        </div>
+      ) : null}
       {waitingLabel === null ? (
         <button
           className="hud-btn hud-btn-danger loadout-deploy interactive"
@@ -615,20 +657,22 @@ function Cards({
   faction,
   loadout,
   selected,
+  hidden,
   sheets,
   portraits,
-  apply,
 }: {
   faction: Faction
   loadout: SquadLoadout
   selected: number
+  /** True while the camera is being dragged: the card steps out of the way. */
+  hidden: boolean
   sheets: CharacterSheet[]
   portraits: OffscreenPortraits
-  apply: Apply
 }) {
   return (
-    <div className="loadout-cards">
+    <div className={classes('loadout-cards', { hidden })}>
       {loadout.map((unit, index) => {
+        if (index !== selected) return null
         const name = FACTION_INFO[faction].squadNames[index] ?? ''
         const carried = [
           ...Object.values(GrenadeId).map((id) => ({
@@ -646,8 +690,7 @@ function Cards({
         return (
           <div
             key={index}
-            className={classes('squad-card interactive', { selected: index === selected })}
-            onClick={() => apply({ kind: 'select', index })}
+            className="squad-card selected"
           >
             <img className="squad-portrait" src={portraits.getPortrait(faction, index)} alt={name} />
             <div className="squad-name">{name}</div>

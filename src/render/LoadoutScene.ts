@@ -36,6 +36,24 @@ const EYE_HEIGHT = 1.65
 const LOOK_HEIGHT = 1.0
 /** How fast the camera swings to a newly selected member. */
 const SWING_RATE = 6
+/** Camera travel per pixel of drag, in radians: a screen width is roughly the arc. */
+const DRAG_RADIANS_PER_PIXEL = 0.004
+/** Pixels before a press becomes a drag, so a tap is not mistaken for one. */
+const DRAG_THRESHOLD = 6
+/** Release speed, in pixels per millisecond, above which a drag is a flick. */
+const FLICK_SPEED = 0.45
+/** Only the last stretch of a drag says how fast it ended. */
+const FLICK_WINDOW_MS = 90
+/** How far past the end spokes the camera may be pulled before it resists. */
+const OVERDRAG = 0.5 * SPOKE_STEP
+
+/** What the scene tells the screen about the camera being handled. */
+export interface LoadoutSceneListeners {
+  /** A drag began or ended: the card is hidden for as long as it lasts. */
+  onDragChange(dragging: boolean): void
+  /** A drag or flick settled on this member. */
+  onSnap(index: number): void
+}
 
 /**
  * The pre-combat staging ground: the squad on a semi-circle, backs to its
@@ -61,6 +79,16 @@ export class LoadoutScene {
   private angleCurrent: number
   private readonly size: number
 
+  private drag?: {
+    pointerId: number
+    startX: number
+    startAngle: number
+    startIndex: number
+    active: boolean
+    samples: { x: number; t: number }[]
+  }
+  private canvasTouchAction = ''
+
   private rafHandle = 0
   private lastFrameTime = 0
   private disposed = false
@@ -71,6 +99,7 @@ export class LoadoutScene {
     private readonly faction: Faction,
     /** The squad deploying on the arc. */
     private readonly sheets: readonly CharacterSheet[],
+    private readonly listeners: LoadoutSceneListeners,
   ) {
     this.size = sheets.length
     this.angleTarget = this.spokeAngle(0)
@@ -84,6 +113,7 @@ export class LoadoutScene {
     this.buildWalls(new Rng(seed))
     this.buildLights()
     this.buildSquad()
+    this.bindDrag()
 
     this.lastFrameTime = performance.now()
     this.loop()
@@ -92,6 +122,92 @@ export class LoadoutScene {
   /** Swing the camera round to the member on this spoke. */
   select(index: number): void {
     this.angleTarget = this.spokeAngle(index)
+  }
+
+  /** The member one step left (-1) or right (+1) of `from`, circling round. */
+  neighbour(from: number, step: -1 | 1): number {
+    return (from + step + this.size) % this.size
+  }
+
+  /** The spoke the camera is nearest to, which is who a drag settles on. */
+  private nearestIndex(angle: number): number {
+    const at = Math.round(angle / SPOKE_STEP + (this.size - 1) / 2)
+    return Math.min(this.size - 1, Math.max(0, at))
+  }
+
+  private bindDrag(): void {
+    const canvas = this.engine.canvas
+    this.canvasTouchAction = canvas.style.touchAction
+    canvas.style.touchAction = 'none'
+    canvas.addEventListener('pointerdown', this.onPointerDown)
+    canvas.addEventListener('pointermove', this.onPointerMove)
+    canvas.addEventListener('pointerup', this.onPointerUp)
+    canvas.addEventListener('pointercancel', this.onPointerUp)
+  }
+
+  private unbindDrag(): void {
+    const canvas = this.engine.canvas
+    canvas.style.touchAction = this.canvasTouchAction
+    canvas.removeEventListener('pointerdown', this.onPointerDown)
+    canvas.removeEventListener('pointermove', this.onPointerMove)
+    canvas.removeEventListener('pointerup', this.onPointerUp)
+    canvas.removeEventListener('pointercancel', this.onPointerUp)
+  }
+
+  private readonly onPointerDown = (event: PointerEvent): void => {
+    if (this.size < 2 || this.drag || !event.isPrimary) return
+    this.drag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startAngle: this.angleCurrent,
+      startIndex: this.nearestIndex(this.angleTarget),
+      active: false,
+      samples: [{ x: event.clientX, t: event.timeStamp }],
+    }
+    this.engine.canvas.setPointerCapture(event.pointerId)
+  }
+
+  private readonly onPointerMove = (event: PointerEvent): void => {
+    const drag = this.drag
+    if (!drag || event.pointerId !== drag.pointerId) return
+    const dx = event.clientX - drag.startX
+    if (!drag.active) {
+      if (Math.abs(dx) < DRAG_THRESHOLD) return
+      drag.active = true
+      this.listeners.onDragChange(true)
+    }
+    drag.samples.push({ x: event.clientX, t: event.timeStamp })
+    // Content follows the finger, so the camera goes the other way.
+    const low = this.spokeAngle(0) - OVERDRAG
+    const high = this.spokeAngle(this.size - 1) + OVERDRAG
+    this.angleTarget = Math.min(high, Math.max(low, drag.startAngle - dx * DRAG_RADIANS_PER_PIXEL))
+    this.angleCurrent = this.angleTarget
+  }
+
+  private readonly onPointerUp = (event: PointerEvent): void => {
+    const drag = this.drag
+    if (!drag || event.pointerId !== drag.pointerId) return
+    this.drag = undefined
+    if (this.engine.canvas.hasPointerCapture(event.pointerId)) {
+      this.engine.canvas.releasePointerCapture(event.pointerId)
+    }
+    if (!drag.active) return
+
+    // A flick is judged on the last moments only: a slow drag that ended with
+    // a hesitation is a placement, whatever it did on the way.
+    const last = drag.samples[drag.samples.length - 1]!
+    const first = drag.samples.find((sample) => last.t - sample.t <= FLICK_WINDOW_MS) ?? last
+    const elapsed = last.t - first.t
+    const velocity = elapsed > 0 ? (last.x - first.x) / elapsed : 0
+
+    const index =
+      event.type === 'pointerup' && Math.abs(velocity) > FLICK_SPEED
+        ? // Content flung left brings the member on the right into view.
+          this.neighbour(drag.startIndex, velocity < 0 ? 1 : -1)
+        : this.nearestIndex(this.angleCurrent)
+    this.select(index)
+    this.listeners.onSnap(index)
+    this.listeners.onDragChange(false)
   }
 
   /** Put `id` in the hands of the member on this spoke, in place of what they held. */
@@ -114,6 +230,7 @@ export class LoadoutScene {
     if (this.disposed) return
     this.disposed = true
     cancelAnimationFrame(this.rafHandle)
+    this.unbindDrag()
 
     const scene = this.engine.scene
     for (const object of this.added) scene.remove(object)

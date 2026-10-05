@@ -143,6 +143,10 @@ function showMenu(): void {
     z-index: 10000;
     font-family: inherit;
     color: #e2e8f0;
+    /* #ui is pointer-events: none and only its buttons opt back in, so without
+       this a menu <input> is click-through: it never takes focus and a phone
+       never raises its keyboard. */
+    pointer-events: auto;
   `
   container.addEventListener('pointerdown', (e) => e.stopPropagation())
   container.addEventListener('mousedown', (e) => e.stopPropagation())
