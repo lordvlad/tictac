@@ -253,7 +253,14 @@ function LoadoutView({
         <div className="loadout-sub">{FACTION_INFO[faction].label} — share out the crate, then deploy</div>
         <div className="loadout-credit">Icons by game-icons.net (CC BY 3.0)</div>
       </div>
-      <Panel faction={faction} loadout={loadout} selected={selected} sheet={sheets[selected]!} apply={apply} />
+      <Panel
+        faction={faction}
+        loadout={loadout}
+        selected={selected}
+        sheet={sheets[selected]!}
+        hidden={dragging}
+        apply={apply}
+      />
       <Cards
         faction={faction}
         loadout={loadout}
@@ -299,12 +306,15 @@ function Panel({
   loadout,
   selected,
   sheet,
+  hidden,
   apply,
 }: {
   faction: Faction
   loadout: SquadLoadout
   selected: number
   sheet: CharacterSheet
+  /** True while the camera is being dragged: the panel steps out of the way. */
+  hidden: boolean
   apply: Apply
 }) {
   const unit = loadout[selected]!
@@ -500,7 +510,7 @@ function Panel({
   }
 
   return (
-    <div className="loadout-panel">
+    <div className={classes('loadout-panel', { hidden })}>
       <div className="loadout-panel-head">{name}</div>
 
       <div className="loadout-section">Physique</div>

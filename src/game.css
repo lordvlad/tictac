@@ -1876,7 +1876,7 @@ canvas {
 }
 
 .loadout-root .interactive,
-.loadout-root .loadout-panel,
+.loadout-root .loadout-panel:not(.hidden),
 .loadout-root .loadout-cards:not(.hidden) {
   pointer-events: auto;
 }
@@ -1973,6 +1973,7 @@ canvas {
 }
 
 .loadout-panel {
+  transition: opacity 0.15s;
   position: absolute;
   top: 50%;
   right: 16px;
@@ -2166,7 +2167,8 @@ canvas {
   transition: opacity 0.15s;
 }
 
-.loadout-cards.hidden {
+.loadout-cards.hidden,
+.loadout-panel.hidden {
   opacity: 0;
   pointer-events: none;
 }
