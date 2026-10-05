@@ -170,6 +170,8 @@ export class GrenadePlanner {
     const landing = curve[curve.length - 1]!
     this.effects.spawnGrenade(curve, () => {
       this.effects.triggerFlash(kind)
+      this.effects.spawnBlast(landing, areaRadius, kind)
+
       if (kind === 'frag') this.rig.shake(FX.shakeIntensityFrag, FX.shakeDurationFrag)
       // A pop for anything that goes off. A fire or a cloud afterwards is the
       // ground's, drawn for as long as the rules say it lasts.

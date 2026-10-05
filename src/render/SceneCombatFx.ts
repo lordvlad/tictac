@@ -1,5 +1,5 @@
 import type { Vector3 } from 'three'
-import type { CombatFx, UnitRef } from '../core/Combatant'
+import type { CombatFx, HitMark, UnitRef } from '../core/Combatant'
 import type { SquadViews } from './SquadViews'
 import type { Tracers } from './Tracers'
 
@@ -28,8 +28,14 @@ export class SceneCombatFx implements CombatFx {
     this.viewOf(unit)?.playShoot()
   }
 
-  hit(unit: UnitRef): void {
-    this.viewOf(unit)?.playHit()
+  hit(unit: UnitRef, mark: HitMark): void {
+    const view = this.viewOf(unit)
+    view?.playHit()
+    view?.flash(mark)
+  }
+
+  miss(unit: UnitRef): void {
+    this.viewOf(unit)?.playDuck()
   }
 
   melee(unit: UnitRef): void {

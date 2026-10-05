@@ -2,6 +2,7 @@ import { NetworkManager, type NetworkMessage } from './NetworkManager'
 import { Raycaster, Vector2, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
 import { CAM, Faction, FACTION_INFO, LEVEL_HEIGHT } from '../config'
+import { VisState } from '../core/Visibility'
 import { clientToNdc } from '../core/screen'
 import { type Tile, tileEquals } from '../core/Grid'
 import { doorAhead } from '../core/Doors'
@@ -25,7 +26,10 @@ import { downloadJson } from '../hud/download'
 import { DebugMap } from '../hud/DebugMap'
 import { GrenadePlanner } from './GrenadePlanner'
 import { ShootPlanner } from './ShootPlanner'
+import { FACE_OFFSET } from '../render/Blocks'
+import { DoorFx } from '../render/DoorFx'
 import { Effects } from '../render/Effects'
+import { GlassFx } from '../render/GlassFx'
 import { SceneCombatFx } from '../render/SceneCombatFx'
 import { SquadViews } from '../render/SquadViews'
 import { WallXray } from './WallXray'
@@ -169,6 +173,8 @@ export class InteractionController {
   private retreatNote: string | null = null
   /** Fire on the ground, as the grid has it. */
   private readonly groundFx: GroundFx
+  private readonly doorFx: DoorFx
+  private readonly glassFx: GlassFx
   /**
    * Every command the world applied while armed, from either side. Fed by the
    * applier rather than by the network's send, which only ever saw this side.
@@ -241,6 +247,12 @@ export class InteractionController {
     // One entity per wall, so the map's boundaries are state the systems and
     // the network can reach like any other.
     this.wallSystem.spawnFromGrid(this.world)
+    this.doorFx = new DoorFx(engine, battlefield.grid, battlefield.blocks, (edge) => this.edgeInSight(edge))
+    this.glassFx = new GlassFx(engine, battlefield.grid, (edge) => this.edgeInSight(edge))
+    this.wallSystem.onKindChanged = (edge, from, to) => {
+      this.doorFx.changed(edge, from, to)
+      this.glassFx.changed(edge, from, to)
+    }
     this.wallSystem.onWallsChanged = () => {
       this.battlefield.blocks.rebuildWalls()
       this.recomputeVisibility()
@@ -274,8 +286,11 @@ export class InteractionController {
       this.recomputeVisibility()
       this.refreshHud()
     }
-    this.commands.onDoorWorked = (unit) => {
+    this.commands.onDoorWorked = (unit, edge, verb) => {
       this.views.viewOf(unit)?.playUse()
+      // A shoulder that gives is swung open by the wall change that follows; one
+      // that does not is a shudder, and this is the only place that is known.
+      if (verb === 'force') this.doorFx.rattle(edge)
     }
     this.noiseMarks = new NoiseMarks(engine, battlefield.grid)
     this.commands.onNoise = (noise, heard) => {
@@ -856,6 +871,8 @@ export class InteractionController {
     this.noiseMarks.dispose()
     this.callouts.dispose()
     this.groundFx.dispose()
+    this.doorFx.dispose()
+    this.glassFx.dispose()
     this.grenade.dispose()
     this.debug.dispose()
     this.debugMap.dispose()
@@ -1043,6 +1060,24 @@ export class InteractionController {
     this.recomputeVisibility()
   }
 
+  /** Whose eyes the screen is: one's own over the network, whoever is up when sharing a screen. */
+  private viewerFaction(): Faction {
+    return this.network && this.network.mode !== 'local' ? this.network.myFaction : this.turnManager.activeFaction
+  }
+
+  /** Is either side of this wall in the viewer's sight right now? A replay watches everything. */
+  private edgeInSight(edge: number): boolean {
+    if (this.spectating) return true
+    const grid = this.battlefield.grid
+    const { x, y, side } = grid.edgeTile(edge)
+    const [dx, dz] = FACE_OFFSET[side]!
+    const map = this.fog.mapFor(this.viewerFaction())
+    return (
+      map[grid.index(x, y)] === VisState.Visible ||
+      (grid.inBounds(x + dx, y + dz) && map[grid.index(x + dx, y + dz)] === VisState.Visible)
+    )
+  }
+
   recomputeVisibility(): void {
     // A replay is watched, not played: hiding half the fight from the only
     // person in the room would be hiding it from nobody's advantage.
@@ -1054,10 +1089,7 @@ export class InteractionController {
       return
     }
 
-    const fogFaction =
-      this.network && this.network.mode !== 'local'
-        ? this.network.myFaction
-        : this.turnManager.activeFaction
+    const fogFaction = this.viewerFaction()
     this.fog.recompute(fogFaction, this.squads)
     this.noiseMarks.show(fogFaction, this.handovers)
   }
@@ -1341,6 +1373,8 @@ export class InteractionController {
       if (this.hoveredTile) this.hud.showTile(tileReadout(this.battlefield.grid, this.hoveredTile))
     }
     this.groundFx.update(delta)
+    this.doorFx.update(delta)
+    this.glassFx.update(delta)
     this.effects.update(delta)
     this.planner.update(delta)
 

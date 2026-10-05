@@ -17,6 +17,12 @@ export class WallSystem extends System {
   /** Fired when the grid changed shape, so the renderer can rebuild. */
   onWallsChanged?: () => void
 
+  /**
+   * Fired for one wall's change of kind, before {@link onWallsChanged}: what a
+   * door was and what it has become, which is what a swing is drawn from.
+   */
+  onKindChanged?: (edge: number, from: WallKind, to: WallKind) => void
+
   /** edgeId -> entity, so an edge can be found without scanning the world. */
   private readonly byEdge = new Map<number, number>()
 
@@ -55,8 +61,10 @@ export class WallSystem extends System {
     if (entityId === undefined) return
     const wall = world.getComponent(entityId, WallComponent)
     if (!wall || wall.kind === kind) return
+    const from = wall.kind
     wall.kind = kind
     this.writeToGrid(wall.edge, kind)
+    this.onKindChanged?.(edge, from, kind)
     this.onWallsChanged?.()
   }
 

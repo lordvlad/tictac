@@ -218,7 +218,10 @@ export function executeShot(
     const hit = landed > 0
     rolls.push(hit)
     if (hit) anyHit = true
-    else misses++
+    else {
+      misses++
+      fx.miss(target)
+    }
 
     fx.tracer(shooterWorld, targetWorld, hit)
     // Only the first tracer-spawn plays the sound/visual cue
@@ -415,13 +418,14 @@ export function applyHitEffects(
   armorShred: number,
   status: StatusKind | null,
   fx: CombatFx = NO_FX,
+  crit = false,
 ): void {
   target.armor = Math.max(0, target.armor - armorShred)
   if (damage > 0) target.hp = Math.max(0, target.hp - damage)
   if (status) applyStatus(target, status)
   // No death call: a corpse is `hp <= 0` in a component, and the view collapses
   // on seeing it.
-  if (damage > 0 && !target.isDead) fx.hit(target)
+  if (damage > 0 && !target.isDead) fx.hit(target, crit ? 'crit' : armorShred > 0 ? 'shred' : 'plain')
 }
 
 function applyWeaponDamage(
@@ -433,7 +437,7 @@ function applyWeaponDamage(
   landed = 1,
 ): ResolvedHit {
   const result = resolveDamage(eff, target, falloff, crit, landed)
-  applyHitEffects(target, result.damage, result.armorShred, null, fx)
+  applyHitEffects(target, result.damage, result.armorShred, null, fx, result.crit)
   return {
     soldier: target,
     damage: result.damage,

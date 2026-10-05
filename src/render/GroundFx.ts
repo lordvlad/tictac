@@ -14,6 +14,20 @@ interface Mote {
   size: number
 }
 
+/** A spark lifted off a fire: how many a burning tile throws per second, and how many may be up at once. */
+const EMBERS_PER_TILE_SECOND = 1.6
+const EMBER_CAP = 90
+
+interface Ember {
+  sprite: Sprite
+  age: number
+  lifetime: number
+  rise: number
+  /** Where in its sway this one is. */
+  phase: number
+  size: number
+}
+
 /** One kind of thing on the ground: which tiles have it, and how it is drawn. */
 interface Layer {
   motes: Map<number, Mote[]>
@@ -39,6 +53,8 @@ export class GroundFx {
   private readonly group = new Group()
   private flameTexture: CanvasTexture | null = null
   private smokeTexture: CanvasTexture | null = null
+  private emberTexture: CanvasTexture | null = null
+  private readonly embers: Ember[] = []
   private time = 0
   private readonly flames: Layer = {
     motes: new Map(),
@@ -111,6 +127,7 @@ export class GroundFx {
         flame.sprite.material.opacity = 0.75 + 0.25 * flicker
       }
     }
+    this.updateEmbers(delta)
     for (const motes of this.smoke.motes.values()) {
       for (const puff of motes) {
         const t = this.time * 0.6 + puff.phase
@@ -119,6 +136,58 @@ export class GroundFx {
         puff.sprite.material.rotation = t * 0.2
       }
     }
+  }
+
+  /** Throw sparks off the fires and carry the ones in the air up and out. */
+  private updateEmbers(delta: number): void {
+    if (this.embers.length < EMBER_CAP) {
+      for (const motes of this.flames.motes.values()) {
+        if (Math.random() >= EMBERS_PER_TILE_SECOND * delta) continue
+        const from = motes[Math.floor(Math.random() * motes.length)]!.sprite.position
+        this.spawnEmber(from.x + (Math.random() - 0.5) * 0.5, from.y, from.z + (Math.random() - 0.5) * 0.5)
+        if (this.embers.length >= EMBER_CAP) break
+      }
+    }
+    for (let i = this.embers.length - 1; i >= 0; i--) {
+      const ember = this.embers[i]!
+      ember.age += delta
+      const t = ember.age / ember.lifetime
+      if (t >= 1) {
+        this.group.remove(ember.sprite)
+        ember.sprite.material.dispose()
+        this.embers.splice(i, 1)
+        continue
+      }
+      const sway = ember.age * 5 + ember.phase
+      ember.sprite.position.x += Math.sin(sway) * 0.25 * delta
+      ember.sprite.position.z += Math.cos(sway * 0.8) * 0.25 * delta
+      ember.sprite.position.y += ember.rise * delta
+      const size = ember.size * (1 - 0.6 * t)
+      ember.sprite.scale.set(size, size, 1)
+      ember.sprite.material.opacity = 1 - t * t
+    }
+  }
+
+  private spawnEmber(x: number, y: number, z: number): void {
+    const material = new SpriteMaterial({
+      map: (this.emberTexture ??= gradient([[0, '255,245,200,1'], [0.4, '255,160,50,0.9'], [1, '255,80,10,0']], 0.5)),
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    })
+    const sprite = new Sprite(material)
+    const size = 0.07 + Math.random() * 0.06
+    sprite.position.set(x, y, z)
+    sprite.scale.set(size, size, 1)
+    this.group.add(sprite)
+    this.embers.push({
+      sprite,
+      age: 0,
+      lifetime: 1 + Math.random() * 0.8,
+      rise: 0.7 + Math.random() * 0.8,
+      phase: Math.random() * Math.PI * 2,
+      size,
+    })
   }
 
   private drop(mote: Mote): void {
@@ -131,7 +200,10 @@ export class GroundFx {
       for (const motes of layer.motes.values()) for (const mote of motes) this.drop(mote)
       layer.motes.clear()
     }
+    for (const ember of this.embers) ember.sprite.material.dispose()
+    this.embers.length = 0
     this.engine.scene.remove(this.group)
+    this.emberTexture?.dispose()
     this.flameTexture?.dispose()
     this.smokeTexture?.dispose()
   }

@@ -3,6 +3,7 @@ import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import {
   AnimationClip,
   AnimationUtils,
+  Color,
   type AnimationAction,
   LoopOnce,
   LoopRepeat,
@@ -15,6 +16,7 @@ import type { EngineContext } from '../engine'
 import { applyCharacterProportions } from './Proportions'
 import { HeldWeapon } from './WeaponModel'
 import type { WeaponId } from '../core/Arsenal'
+import type { HitMark } from '../core/Combatant'
 import { MeleeId } from '../core/Melee'
 import { soldierColor } from '../entities/palette'
 import type { Soldier } from '../entities/Soldier'
@@ -96,6 +98,13 @@ export function additiveClips(gltf: GLTF): Map<string, AnimationClip> {
 /** How long an overlay takes to blend in and back out again. */
 const OVERLAY_FADE = 0.12
 
+/** How long a unit stays down after a round goes past it, in seconds. */
+const DUCK_TIME = 0.55
+
+/** How long a wound's tint takes to fade, and what colour each kind leaves. */
+const FLASH_TIME = 0.3
+const FLASH_COLOR: Record<Exclude<HitMark, 'plain'>, number> = { crit: 0xff1a1a, shred: 0x8a9099 }
+
 /**
  * The body of a soldier: its mesh, its skeleton and its animation state.
  *
@@ -120,6 +129,13 @@ export class SoldierView extends Entity3D {
   /** The weapon model in the right hand, and which weapon it shows. */
   private weaponModel?: HeldWeapon
   private weaponShown?: WeaponId
+  /** This body's own materials, so a tint reaches nobody else's. */
+  private readonly skins: MeshStandardMaterial[] = []
+  private readonly flashColor = new Color()
+  /** Seconds since the last wound's tint; at or past {@link FLASH_TIME} there is none. */
+  private flashAge = FLASH_TIME
+  /** Seconds left of a duck; the stance is restored when it runs out. */
+  private duckLeft = 0
 
   constructor(
     private readonly engine: EngineContext,
@@ -152,6 +168,7 @@ export class SoldierView extends Entity3D {
           const mat = (child.material as MeshStandardMaterial).clone()
           mat.color.copy(tint)
           child.material = mat
+          this.skins.push(mat)
         }
       })
 
@@ -210,6 +227,7 @@ export class SoldierView extends Entity3D {
   private playLoop(key: string, timeScale = 1): void {
     const action = this.animationsMap.get(key)
     if (!action) return
+    this.duckLeft = 0
     action.setLoop(LoopRepeat, Infinity)
     action.clampWhenFinished = false
     this.fadeToAction(action, 0.15)
@@ -260,6 +278,7 @@ export class SoldierView extends Entity3D {
   private playOnce(key: string): void {
     const action = this.animationsMap.get(key)
     if (!action) return
+    this.duckLeft = 0
     action.setLoop(LoopOnce, 1)
     action.clampWhenFinished = true
     this.fadeToAction(action, 0.1)
@@ -269,6 +288,7 @@ export class SoldierView extends Entity3D {
   private playOverlay(key: string, loop = false): boolean {
     const action = this.overlays.get(key)
     if (!action) return false
+    this.duckLeft = 0
     if (this.overlay && this.overlay !== action) this.overlay.fadeOut(OVERLAY_FADE)
     action.reset()
     action.setLoop(loop ? LoopRepeat : LoopOnce, loop ? Infinity : 1)
@@ -329,6 +349,31 @@ export class SoldierView extends Entity3D {
     this.playAction('interact')
   }
 
+  /**
+   * Drop into the crouch for a moment because something went past.
+   *
+   * Only a unit standing still on its feet does: one already crouched has
+   * nowhere to go, and one on the move is not going to stop for it. Any other
+   * action ends the duck early, so it can never stand a unit up out of a fire
+   * pose.
+   */
+  playDuck(): void {
+    if (this.unit.isDead || this.unit.isMoving || this.unit.isCrouching) return
+    const action = this.animationsMap.get('crouch')
+    if (!action) return
+    action.setLoop(LoopRepeat, Infinity)
+    action.clampWhenFinished = false
+    this.fadeToAction(action, 0.08)
+    this.duckLeft = DUCK_TIME
+  }
+
+  /** Tint the body for a moment: red for a crit, grey for armour stripped. */
+  flash(mark: HitMark): void {
+    if (mark === 'plain') return
+    this.flashColor.set(FLASH_COLOR[mark])
+    this.flashAge = 0
+  }
+
   /** Collapse and hold the final frame. */
   playDeath(): void {
     // Whole-body, whatever the stance: a unit that dies crouched still falls.
@@ -349,6 +394,18 @@ export class SoldierView extends Entity3D {
     while (diff > Math.PI) diff -= Math.PI * 2
     while (diff < -Math.PI) diff += Math.PI * 2
     this.currentYaw += diff * k
+
+    if (this.duckLeft > 0) {
+      this.duckLeft -= delta
+      if (this.unit.isDead) this.duckLeft = 0
+      else if (this.duckLeft <= 0) this.playStanceClip()
+    }
+
+    if (this.flashAge < FLASH_TIME) {
+      this.flashAge += delta
+      const strength = Math.max(0, 1 - this.flashAge / FLASH_TIME)
+      for (const skin of this.skins) skin.emissive.copy(this.flashColor).multiplyScalar(strength * 0.8)
+    }
 
     if (!this.instance) return
     this.syncWeaponModel()

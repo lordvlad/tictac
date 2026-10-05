@@ -21,7 +21,7 @@ import { MoraleBreak, rollMorale } from '../../core/Morale'
 import { billow, burn, kindle } from '../../core/Fire'
 import type { GrenadeSpec } from '../../core/Arsenal'
 import { faceToward, Side, type Tile } from '../../core/Grid'
-import { cannotWorkDoor, doorAfter, doorApCost } from '../../core/Doors'
+import { cannotWorkDoor, doorAfter, doorApCost, type DoorVerb } from '../../core/Doors'
 import { cannotRetreat, leaversOf, retreatChance, watchersOf } from '../../core/Retreat'
 import { brokenStep } from '../../game/Breakdown'
 
@@ -167,7 +167,7 @@ export class CommandSystem extends System {
    * still a shove — and announced on both peers, because both resolve the
    * intent.
    */
-  onDoorWorked?: (unit: Soldier) => void
+  onDoorWorked?: (unit: Soldier, edge: number, verb: DoorVerb) => void
 
   /** Reactions fired so far: a fact about the match, not about any one command. */
   reactions = 0
@@ -555,7 +555,7 @@ export class CommandSystem extends System {
         const dx = doorway.x - unit.tile.x
         const dz = doorway.y - unit.tile.y
         if (distance(dx, dz) > 0) unit.targetYaw = facingYaw(dx, dz)
-        this.onDoorWorked?.(unit)
+        this.onDoorWorked?.(unit, command.edge, command.verb)
         if (command.verb === 'force') {
           // Heard whether it gives or not, from the door.
           const { x, y } = grid.edgeTile(command.edge)

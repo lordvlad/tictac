@@ -123,11 +123,16 @@ export interface Combatant extends CombatantStats, Casualty {
  * is listening is somebody else's problem: a scene in a match, nothing at all
  * in a simulation.
  */
+export type HitMark = 'crit' | 'shred' | 'plain'
+
 export interface CombatFx {
   /** A round in flight, and whether it landed. */
   tracer(from: Vector3, to: Vector3, hit: boolean): void
   shoot(unit: UnitRef): void
-  hit(unit: UnitRef): void
+  /** A wound that did not kill, and what marked it: a crit, a strip of armour, or neither. */
+  hit(unit: UnitRef, mark: HitMark): void
+  /** A round that went past `unit`, which it noticed. */
+  miss(unit: UnitRef): void
   /**
    * A blow with the sidearm. Which sidearm is not announced: the view already
    * knows what the unit is holding, and a resolved blow carries no kit.
@@ -165,6 +170,7 @@ export const NO_FX: CombatFx = {
   tracer: () => {},
   shoot: () => {},
   hit: () => {},
+  miss: () => {},
   melee: () => {},
   throwing: () => {},
   reload: () => {},
