@@ -27,7 +27,6 @@
   "role-medic": "sbed/medical-pack",
   "role-scout": "delapouite/binoculars",
   "role-marksman": "delapouite/crosshair",
-  "ui-pool": "delapouite/cargo-crate",
   "ui-deploy": "delapouite/check-mark",
   "ui-shoot": "lorc/targeting",
   "ui-cover": "sbed/shield",

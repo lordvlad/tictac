@@ -28,7 +28,6 @@ role-rifleman: helmet by sbed
 role-medic: medical-pack by sbed
 role-scout: binoculars by delapouite
 role-marksman: crosshair by delapouite
-ui-pool: cargo-crate by delapouite
 ui-deploy: check-mark by delapouite
 ui-shoot: targeting by lorc
 ui-cover: shield by sbed

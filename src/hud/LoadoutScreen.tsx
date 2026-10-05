@@ -236,7 +236,6 @@ function LoadoutView({
         <div className="loadout-sub">{FACTION_INFO[faction].label} — share out the crate, then deploy</div>
         <div className="loadout-credit">Icons by game-icons.net (CC BY 3.0)</div>
       </div>
-      <Pool loadout={loadout} />
       <Panel faction={faction} loadout={loadout} selected={selected} sheet={sheets[selected]!} apply={apply} />
       <Cards faction={faction} loadout={loadout} selected={selected} sheets={sheets} portraits={portraits} apply={apply} />
       {waitingLabel === null ? (
@@ -250,40 +249,6 @@ function LoadoutView({
         <div className="loadout-waiting">{waitingLabel}</div>
       )}
     </>
-  )
-}
-
-function Pool({ loadout }: { loadout: SquadLoadout }) {
-  const left = remaining(loadout)
-  const row = (file: string, name: string, count: number) => (
-    <div key={file} className={classes('loadout-pool-row', { depleted: count === 0 })}>
-      <Icon file={file} />
-      <span className="loadout-pool-name">{name}</span>
-      <span className="loadout-pool-count">{count}</span>
-    </div>
-  )
-
-  return (
-    <div className="loadout-pool">
-      <div className="loadout-pool-head">
-        <Icon file="ui-pool" /> Squad crate
-      </div>
-      {Object.values(WeaponId).map((id) => row(`weapon-${id}`, WEAPONS[id].name, left.weapons[id]))}
-      {Object.values(AmmoId).map((id) => row(`ammo-${id}`, AMMO[id].name, left.ammo[id]))}
-      {Object.values(GrenadeId)
-        // Issued kit (a stone) is nobody's to hand out.
-        .filter((id) => GRENADES[id].issued === 0)
-        .map((id) => row(`grenade-${id}`, GRENADES[id].name, left.grenades[id]))}
-      {Object.values(ItemId).map((id) => row(`item-${id}`, ITEMS[id].name, left.items[id]))}
-      {Object.values(AttachmentId).map((id) =>
-        row(`attachment-${id}`, ATTACHMENTS[id].name, left.attachments[id]),
-      )}
-      {Object.values(MeleeId)
-        // Fists are not in the crate: a row for them would read as a stock
-        // that could run out.
-        .filter((id) => id !== MeleeId.Fists)
-        .map((id) => row(`melee-${id}`, MELEE[id].name, left.sidearms[id]))}
-    </div>
   )
 }
 
@@ -301,9 +266,25 @@ function Panel({
   apply: Apply
 }) {
   const unit = loadout[selected]!
+  const left = remaining(loadout)
   const name = FACTION_INFO[faction].squadNames[selected] ?? ''
 
-  const pick = (file: string, label: string, active: boolean, enabled: boolean, action: LoadoutAction) => (
+  // What the crate still holds of a thing, on the row that draws from it: a
+  // button that has gone dead needs its reason beside it.
+  const stock = (count: number) => (
+    <span className={classes('loadout-pool-count', { depleted: count === 0 })} title="Left in the squad crate">
+      ×{count}
+    </span>
+  )
+
+  const pick = (
+    file: string,
+    label: string,
+    active: boolean,
+    enabled: boolean,
+    action: LoadoutAction,
+    count?: number,
+  ) => (
     <button
       key={file}
       className={classes('action-btn interactive', { active })}
@@ -312,6 +293,7 @@ function Panel({
     >
       <Icon file={file} />
       <span className="loadout-pick-name">{label}</span>
+      {count === undefined ? null : stock(count)}
     </button>
   )
 
@@ -322,12 +304,14 @@ function Panel({
     canAdd: boolean,
     minus: LoadoutAction,
     plus: LoadoutAction,
+    inCrate: number,
     note: ReactNode = null,
   ) => (
     <div key={file} className="loadout-stepper">
       <Icon file={file} />
       <span className="loadout-pick-name">{label}</span>
       {note}
+      {stock(inCrate)}
       <button className="loadout-step interactive" disabled={count <= 0} onClick={() => apply(minus)}>
         −
       </button>
@@ -389,7 +373,6 @@ function Panel({
   // greyed-out knife needs its reason beside it, the same argument the pouch
   // pips make. Fists are never short, so they show no number at all rather
   // than a zero or an infinity to puzzle over.
-  const left = remaining(loadout)
   const sidearm = (id: MeleeId) => {
     const spec = MELEE[id]
     return (
@@ -402,7 +385,7 @@ function Panel({
       >
         <Icon file={`melee-${id}`} />
         <span className="loadout-pick-name">{spec.name}</span>
-        {id === MeleeId.Fists ? null : <span className="loadout-pool-count">×{left.sidearms[id]}</span>}
+        {id === MeleeId.Fists ? null : stock(left.sidearms[id])}
         <span className="loadout-pick-spec">
           {spec.apCost} AP · {spec.damage} dmg · {Math.round(spec.armorPen * 100)}% pen
           <br />
@@ -435,6 +418,7 @@ function Panel({
         <Icon file={`weapon-${id}`} />
         <span className="loadout-pick-name">{spec.name}</span>
         <span className="loadout-pick-tag">{weaponCharacter(id)}</span>
+        {stock(left.weapons[id])}
         <span className="loadout-pick-spec">
           {spec.apCost} AP · {damage} dmg · {spec.maxRange} m · clip {spec.maxClip}
           <br />
@@ -500,7 +484,7 @@ function Panel({
         pick(`ammo-${id}`, AMMO[id].name, unit.ammoId === id, canEquipAmmo(loadout, selected, id), {
           kind: 'ammo',
           id,
-        }),
+        }, left.ammo[id]),
       )}
 
       <div className="loadout-section">Sidearm</div>
@@ -517,6 +501,7 @@ function Panel({
             canAddGrenade(loadout, selected, id),
             { kind: 'grenade', id, delta: -1 },
             { kind: 'grenade', id, delta: 1 },
+            left.grenades[id],
           ),
         )}
 
@@ -535,6 +520,7 @@ function Panel({
           canAddItem(loadout, selected, id, carrySlots) && meetsRequirement(sheet, id),
           { kind: 'item', id, delta: -1 },
           { kind: 'item', id, delta: 1 },
+          left.items[id],
           requirement(id),
         ),
       )}
@@ -548,6 +534,7 @@ function Panel({
           canFitAttachment(loadout, selected, id),
           { kind: 'attachment', id, delta: -1 },
           { kind: 'attachment', id, delta: 1 },
+          left.attachments[id],
         ),
       )}
     </div>

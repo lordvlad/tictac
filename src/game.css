@@ -1945,55 +1945,14 @@ canvas {
   margin-top: 4px;
 }
 
-.loadout-pool {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  width: 210px;
-  padding: 10px;
-  background: var(--hud-bg);
-  border: 1px solid var(--hud-border);
-  border-radius: 8px;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-
-.loadout-pool-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--hud-accent);
-  padding-bottom: 6px;
-  margin-bottom: 6px;
-  border-bottom: 1px solid var(--hud-border);
-}
-
-.loadout-pool-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  padding: 2px 0;
-}
-
-.loadout-pool-row.depleted {
-  opacity: 0.35;
-}
-
-.loadout-pool-name {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .loadout-pool-count {
+  margin-left: auto;
   font-variant-numeric: tabular-nums;
   color: var(--hud-dim);
+}
+
+.loadout-pool-count.depleted {
+  color: var(--hud-danger, #e5534b);
 }
 
 .loadout-panel {
