@@ -13,6 +13,8 @@ import {
 import { RULES } from '../config'
 import type { EngineContext } from '../engine'
 import { applyCharacterProportions } from './Proportions'
+import { HeldWeapon } from './WeaponModel'
+import type { WeaponId } from '../core/Arsenal'
 import { MeleeId } from '../core/Melee'
 import { soldierColor } from '../entities/palette'
 import type { Soldier } from '../entities/Soldier'
@@ -115,6 +117,9 @@ export class SoldierView extends Entity3D {
   private readonly overlays = new Map<string, AnimationAction>()
   /** The one overlay currently on top of the stance, if any. */
   private overlay?: AnimationAction
+  /** The weapon model in the right hand, and which weapon it shows. */
+  private weaponModel?: HeldWeapon
+  private weaponShown?: WeaponId
 
   constructor(
     private readonly engine: EngineContext,
@@ -346,10 +351,25 @@ export class SoldierView extends Entity3D {
     this.currentYaw += diff * k
 
     if (!this.instance) return
+    this.syncWeaponModel()
+    this.weaponModel?.update()
     this.instance.position.copy(this.smoothed)
     this.instance.rotation.y = this.currentYaw
     // Corpses stay drawn so the death clip's last frame reads as a body, and
     // enemy corpses are still subject to fog: `seen` already says both.
     this.instance.visible = this.unit.seen
+  }
+
+  /**
+   * Keep the model in the hand matching the weapon in the unit's hands. The unit can be
+   * re-equipped after the view exists (loadout, a peer's sheets arriving), so
+   * this is checked every frame rather than once at construction.
+   */
+  private syncWeaponModel(): void {
+    const id = this.unit.weaponId
+    if (id === this.weaponShown) return
+    this.weaponShown = id
+    this.weaponModel?.remove()
+    this.weaponModel = this.instance && HeldWeapon.attach(this.instance, this.engine.assets, id)
   }
 }

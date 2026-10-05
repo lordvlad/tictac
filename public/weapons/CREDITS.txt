@@ -1,0 +1,7 @@
+Weapon models: "Ultimate Guns Pack" by Quaternius (https://quaternius.com), CC0 1.0 Universal.
+Sourced from https://poly.pizza/bundle/Ultimate-Guns-Pack-cpgUfI4t2F
+
+rifle.glb   AssaultRifle_4
+shotgun.glb Shotgun_3
+sniper.glb  SniperRifle_5
+gatling.glb Bullpup_1 (no handheld minigun in the pack; the bulkiest body stands in)

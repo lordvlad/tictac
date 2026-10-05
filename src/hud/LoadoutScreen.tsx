@@ -90,6 +90,7 @@ export class LoadoutScreen {
     // empty slot brings fewer than a full squad, and so does its loadout.
     this.loadout = defaultLoadout(sheets.length)
     this.scene = new LoadoutScene(engine, seed, faction, sheets)
+    this.loadout.forEach((unit, index) => this.scene.setWeapon(index, unit.weaponId))
 
     this.container = document.createElement('div')
     this.container.className = 'loadout-root'
@@ -127,6 +128,7 @@ export class LoadoutScreen {
         break
       case 'weapon':
         equipWeapon(this.loadout, this.selected, action.id)
+        this.scene.setWeapon(this.selected, this.loadout[this.selected]!.weaponId)
         break
       case 'ammo':
         equipAmmo(this.loadout, this.selected, action.id)

@@ -8,6 +8,9 @@ appliesTo:
   - "scripts/build-character.mjs"
   - "scripts/build-icons.mjs"
   - "scripts/icons.json"
+  - "src/render/SoldierView.ts"
+  - "src/render/WeaponModel.ts"
+  - "src/render/LoadoutScene.ts"
   - "public/**"
 relatedDocs:
   - "docs/guides/getting-started.md"
@@ -53,6 +56,23 @@ bun run build:character
 No Draco pass runs today: the mesh is small and the file is nearly all animation. The runtime
 still points `DRACOLoader` at `public/draco/` (`src/main.ts`), so a Draco-compressed asset would
 load if one were produced.
+
+---
+
+## 2b. Weapon Models
+
+`public/weapons/<WeaponId>.glb` are CC0 models from Quaternius' *Ultimate Guns Pack* (credits in
+`public/weapons/CREDITS.txt`). `main.tsx` loads one asset per `WeaponId` as `weapon-<id>`, and
+`HeldWeapon` (`src/render/WeaponModel.ts`, used by `SoldierView` and `LoadoutScene`) parents the
+matching model to the `hand_r` bone. Models are authored stock down +X, muzzle toward -X, ~5.5
+units long, so one `WEAPON_SCALE` serves them.
+
+The model is *not* fixed to the palm's orientation: clips disagree about which way the hand
+faces, so a rigid attachment points at the floor whenever the arm hangs. Every frame `update()`
+turns the muzzle to the soldier's front, level when the hand is at shoulder height and dropped
+40° at low ready as it falls, and keeps the tuned grip point (`GRIP_POSITION`, measured against the
+`aim` clip, shotgun overridden) in the palm. The pack has no handheld minigun, so `gatling` uses
+the bulkiest body (`Bullpup_1`). Portraits are still unarmed.
 
 ---
 

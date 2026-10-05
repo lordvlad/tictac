@@ -18,6 +18,8 @@ import type { EngineContext } from '../engine'
 import type { Faction } from '../config'
 import type { CharacterAppearance, CharacterSheet } from '../core/Characters'
 import { applyCharacterProportions } from './Proportions'
+import { HeldWeapon } from './WeaponModel'
+import type { WeaponId } from '../core/Arsenal'
 import { Rng } from '../core/rng'
 import { soldierColor } from '../entities/palette'
 
@@ -51,6 +53,7 @@ const SWING_RATE = 6
 export class LoadoutScene {
   private readonly added: Object3D[] = []
   private readonly models: Group[] = []
+  private readonly weapons: (HeldWeapon | undefined)[] = []
   private readonly mixers: AnimationMixer[] = []
   private readonly geometries: { dispose: () => void }[] = []
   private readonly materials: { dispose: () => void }[] = []
@@ -89,6 +92,14 @@ export class LoadoutScene {
   /** Swing the camera round to the member on this spoke. */
   select(index: number): void {
     this.angleTarget = this.spokeAngle(index)
+  }
+
+  /** Put `id` in the hands of the member on this spoke, in place of what they held. */
+  setWeapon(index: number, id: WeaponId): void {
+    const model = this.models[index]
+    if (!model) return
+    this.weapons[index]?.remove()
+    this.weapons[index] = HeldWeapon.attach(model, this.engine.assets, id)
   }
 
   /** Live update proportions for a customized squad member. */
@@ -227,6 +238,7 @@ export class LoadoutScene {
     this.lastFrameTime = now
 
     for (const mixer of this.mixers) mixer.update(delta)
+    for (const weapon of this.weapons) weapon?.update()
 
     // Shortest way round, so selecting across the arc never unwinds the long way.
     const difference = this.angleTarget - this.angleCurrent

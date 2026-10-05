@@ -7,6 +7,7 @@ import { Faction, SIM } from './config'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
 import { hashSeed, matchDice, Rng } from './core/rng'
+import { WeaponId } from './core/Arsenal'
 import { createGlobalRules } from './ecs/globals'
 import { TurnSystem } from './ecs/systems'
 import { World } from './ecs/World'
@@ -98,6 +99,9 @@ function probeOwnOriginServer(): Promise<string | null> {
 
 const ASSETS: Asset[] = [
   { name: 'character', type: 'gltfModel', path: `${baseUrl}character.glb` },
+  ...Object.values(WeaponId).map(
+    (id): Asset => ({ name: `weapon-${id}`, type: 'gltfModel', path: `${baseUrl}weapons/${id}.glb` }),
+  ),
 ]
 
 const game = new Game(ASSETS)
