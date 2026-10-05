@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Account, type Player } from '../../game/Account'
+import { BUILD_ID } from '../../version'
 
 export interface StartMenuProps {
   onLocalVersus: () => void
@@ -621,6 +622,14 @@ export function StartMenu({
           </p>
         </div>
       )}
+
+      <p
+        id="build-id"
+        title="The commit this build was made from; peers on different builds are refused a match"
+        style={{ margin: '24px 0 0 0', fontSize: 11, color: '#64748b', fontFamily: 'monospace' }}
+      >
+        build {BUILD_ID}
+      </p>
     </div>
   )
 }
