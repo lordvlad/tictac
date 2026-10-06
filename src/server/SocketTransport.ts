@@ -10,7 +10,7 @@ import type { Transport } from '../game/Transport'
  * defines `startGameServer`, which calls `Bun.serve` directly, and importing
  * anything from a file that references the `Bun` global pulls that reference
  * into whichever TypeScript project imports it — `workers/MatchDurableObject.ts`
- * (`[ITEM-045]`) wires the same `Referee` behind a Cloudflare `WebSocket`
+ * (`[ITEM-045]`) wires the same `Lobby` behind a Cloudflare `WebSocket`
  * instead of a `Bun.serve` one, and needs this function without `Bun.serve`'s
  * types along for the ride.
  */

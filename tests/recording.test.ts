@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction, SQUAD_SIZE } from '../src/config'
-import { AmmoId, ShotMode, WeaponId } from '../src/core/Arsenal'
+import { AmmoId, GrenadeId, ShotMode, WeaponId } from '../src/core/Arsenal'
 import { NO_FX } from '../src/core/Combatant'
 import { characterSheet, rollSquadSheets } from '../src/core/Characters'
 import { Grid } from '../src/core/Grid'
@@ -9,6 +9,7 @@ import { World } from '../src/ecs/World'
 import { HealthComponent } from '../src/ecs/components'
 import { fireWeapon } from '../src/game/Combat'
 import { deploymentStateFrom, parseRecording, RECORDING_VERSION, Recorder } from '../src/game/Recording'
+import { defaultLoadout } from '../src/game/Loadout'
 import { Squads } from '../src/game/Squads'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
@@ -369,5 +370,23 @@ describe('A squad reads back what it was told to deploy', () => {
       { [Faction.Blue]: [{ sheet }] },
     )
     expect(squads.deploymentsOf(Faction.Blue)[0]!.characterId).toBeUndefined()
+  })
+
+  test('the grenades a squad states rebuild the same pouch, issued stones included once', () => {
+    // Regression: `loadoutOf` read each pouch back *with* the stones every
+    // soldier is issued, and applying that loadout issued them again — so
+    // the header a host sends a referee deployed every soldier with twice the
+    // stones, and the first digest at the first handover disagreed on every
+    // unit's inventory and aborted the match.
+    const spawns = { [Faction.Blue]: [{ x: 1, y: 1 }], [Faction.Red]: [{ x: 10, y: 10 }] }
+    const sheet = characterSheet(new Rng(1))
+    const packed = { ...defaultLoadout(1)[0]!, grenades: { ...defaultLoadout(1)[0]!.grenades, [GrenadeId.Frag]: 2 } }
+    const original = new Squads(new World(), new Grid(16), spawns, { [Faction.Blue]: [{ sheet, loadout: packed }] })
+
+    const stated = original.deploymentsOf(Faction.Blue)
+    const rebuilt = new Squads(new World(), new Grid(16), spawns, { [Faction.Blue]: stated })
+
+    expect(rebuilt.byFaction[Faction.Blue][0]!.grenades).toEqual(original.byFaction[Faction.Blue][0]!.grenades)
+    expect(stated[0]!.loadout!.grenades[GrenadeId.Stone]).toBe(0)
   })
 })

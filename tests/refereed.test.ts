@@ -3,37 +3,51 @@ import { Faction } from '../src/config'
 import { rollSquadSheets } from '../src/core/Characters'
 import { Rng } from '../src/core/rng'
 import { isJsonRpcFrame, type JsonRpcFrame } from '../src/game/JsonRpc'
+import { isCommand } from '../src/ecs/systems/CommandSystem'
 import { defaultLoadout } from '../src/game/Loadout'
+import { parseIntent } from '../src/game/Lobby'
 import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
-import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
+import { RECORDING_VERSION, type Deployment, type RecordingHeader } from '../src/game/Recording'
 import { PROTOCOL_VERSION } from '../src/version'
 import type { Transport } from '../src/game/Transport'
+import type { Player } from '../src/server/Accounts'
 import { openPersistence } from '../src/server/db/BunSqlDb'
-import { Referee } from '../src/server/Referee'
+import { Lobby } from '../src/server/Lobby'
+import type { Room } from '../src/server/Room'
 import { STOCK_PLAN } from '../src/sim/Balance'
+import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'
-import { simulateOverWire } from '../src/sim/WireMatch'
+import { simulateOverWire, type WireMatchResult } from '../src/sim/WireMatch'
 
 /**
- * A referee on a real socket, in-process.
+ * A match server on a real socket, in-process.
  *
  * The loopback tests cover what the referee decides; this covers the thing they
- * cannot — that two `NetworkManager`s reach each other *through* a server over
- * a real WebSocket, that the referee relays to the other side and not back to
- * the sender, and that what it wrote down refights.
+ * cannot — that `NetworkManager`s reach each other *through* a server over a
+ * real WebSocket, by the url intents the lobby reads, that the server relays
+ * to the other side and not back to the sender, and that what it wrote down
+ * refights.
+ *
+ * Who a socket is signed in as is stated in its url (`?as=`) rather than by a
+ * ticket: tickets are the accounts' business and tested there, and this is
+ * about what the lobby does with a player once it has one.
  *
  * Port 0 so the test cannot collide with anything, including itself.
  */
-async function refereeOnASocket() {
+async function lobbyOnASocket() {
   const persistence = await openPersistence()
   const store = persistence.matches
-  const referee = new Referee({ matches: store, log: () => {} })
+  const lobby = new Lobby({ matches: store, log: () => {} })
   const sockets = new WeakMap<object, { deliver: (raw: string) => void; closed: () => void }>()
 
   const server = Bun.serve({
     port: 0,
-    fetch: (request, server) => (server.upgrade(request) ? undefined : new Response('no')),
+    fetch: (request, server) =>
+      server.upgrade(request, { data: { params: new URL(request.url).searchParams } })
+        ? undefined
+        : new Response('no'),
     websocket: {
+      data: {} as { params: URLSearchParams },
       open(ws) {
         const frames: ((frame: JsonRpcFrame) => void)[] = []
         const closers: ((reason: string) => void)[] = []
@@ -52,7 +66,9 @@ async function refereeOnASocket() {
             for (const handler of closers) handler('closed')
           },
         })
-        referee.attach(transport)
+        const name = ws.data.params.get('as')
+        const player: Player | null = name ? { id: `id-${name}`, name } : null
+        lobby.attach(transport, player, parseIntent(ws.data.params))
       },
       message(ws, message) {
         sockets.get(ws)?.deliver(String(message))
@@ -64,17 +80,29 @@ async function refereeOnASocket() {
   })
 
   return {
-    referee,
+    lobby,
     store,
     url: `ws://127.0.0.1:${server.port}/`,
+    as: (name: string) => `ws://127.0.0.1:${server.port}/?as=${name}`,
     stop: async () => {
+      lobby.dispose()
       server.stop(true)
       await persistence.close()
     },
   }
 }
 
-function header(seed: number, sheets: Record<Faction, ReturnType<typeof rollSquadSheets>>): RecordingHeader {
+const SHEETS = {
+  [Faction.Blue]: rollSquadSheets(new Rng(1)),
+  [Faction.Red]: rollSquadSheets(new Rng(2)),
+}
+
+function squadOf(faction: Faction): Deployment[] {
+  const kit = defaultLoadout()
+  return SHEETS[faction].map((sheet, i) => ({ sheet, loadout: kit[i]! }))
+}
+
+function header(seed: number): RecordingHeader {
   return {
     version: RECORDING_VERSION,
     seed,
@@ -82,54 +110,63 @@ function header(seed: number, sheets: Record<Faction, ReturnType<typeof rollSqua
     source: 'live',
     createdAt: new Date().toISOString(),
     turnCap: null,
-    squads: {
-      [Faction.Blue]: sheets[Faction.Blue].map((sheet, i) => ({ sheet, loadout: defaultLoadout()[i]! })),
-      [Faction.Red]: sheets[Faction.Red].map((sheet, i) => ({ sheet, loadout: defaultLoadout()[i]! })),
-    },
+    squads: { [Faction.Blue]: squadOf(Faction.Blue), [Faction.Red]: squadOf(Faction.Red) },
   }
 }
 
-describe('Two clients playing through a referee', () => {
+/**
+ * Resolves with the next intent `manager` hears, held for it if it came
+ * already. Session frames on the way (an opening restated, the header the
+ * host opened the match with) are passed over: they are not moves.
+ */
+function nextIntent(manager: NetworkManager): Promise<NetworkMessage> {
+  const { promise, resolve } = Promise.withResolvers<NetworkMessage>()
+  manager.onMessage = (message) => {
+    if (!isCommand(message)) return
+    manager.onMessage = null
+    resolve(message)
+  }
+  return promise
+}
+
+/**
+ * Open a room at `hostUrl`, join it from `joinerUrl`, deploy both stock
+ * squads and open the match — everything two players in a lobby do before the
+ * first shot.
+ */
+async function playing(hostUrl: string, joinerUrl: string, seed: number) {
+  const host = new NetworkManager()
+  const joiner = new NetworkManager()
+  const opened = await host.connectToServer(hostUrl, { kind: 'open' })
+  const joined = await joiner.connectToServer(joinerUrl, { kind: 'join', roomId: opened.roomId })
+  host.hostMatch(seed, String(seed))
+  const opening = await joiner.joinMatch()
+  host.send({ type: 'ready', squad: squadOf(Faction.Blue) })
+  joiner.send({ type: 'ready', squad: squadOf(Faction.Red) })
+  const [seenByHost, seenByJoiner] = await Promise.all([host.waitForPeerReady(), joiner.waitForPeerReady()])
+  host.send({ type: 'matchHeader', header: header(seed) })
+  return { host, joiner, roomId: opened.roomId, opened, joined, opening, seenByHost, seenByJoiner }
+}
+
+describe('Two clients playing through a match server', () => {
   test('they reach each other over sockets, and the referee keeps the match', async () => {
-    const { referee, store, url, stop } = await refereeOnASocket()
-    const host = new NetworkManager()
-    const joiner = new NetworkManager()
-    const hostSaw: NetworkMessage[] = []
-    const joinerSaw: NetworkMessage[] = []
-    host.onMessage = (m) => hostSaw.push(m)
-    joiner.onMessage = (m) => joinerSaw.push(m)
-
+    const { lobby, store, url, stop } = await lobbyOnASocket()
     const seed = 777
-    host.hostOnServer(url, seed, String(seed))
-    const opening = await joiner.joinOnServer(url)
+    const { host, joiner, roomId, opened, joined, opening, seenByHost, seenByJoiner } = await playing(url, url, seed)
 
-    // The seed came from the host, through the referee, over a socket.
+    // The lobby seated them where they asked, and the seed came from the
+    // host, through the server, over a socket.
+    expect(opened).toEqual({ roomId, faction: Faction.Blue, phase: 'waiting', redirected: false })
+    expect(joined).toEqual({ roomId, faction: Faction.Red, phase: 'deploying', redirected: false })
     expect(opening.seed).toBe(seed)
-    expect([host.myFaction, joiner.myFaction]).toEqual([Faction.Blue, Faction.Red])
-
-    const sheets = {
-      [Faction.Blue]: rollSquadSheets(new Rng(1)),
-      [Faction.Red]: rollSquadSheets(new Rng(2)),
-    }
-    const kit = defaultLoadout()
-    host.send({
-      type: 'ready',
-      squad: sheets[Faction.Blue].map((sheet, i) => ({ sheet, loadout: kit[i]! })),
-    })
-    joiner.send({
-      type: 'ready',
-      squad: sheets[Faction.Red].map((sheet, i) => ({ sheet, loadout: kit[i]! })),
-    })
+    expect([host.mode, joiner.mode]).toEqual(['host', 'join'])
 
     // Both sides learn who the other brought *and* what they are carrying —
     // the kit is what a referee cannot derive from the intents.
-    const seenByHost = await host.waitForPeerReady()
-    const seenByJoiner = await joiner.waitForPeerReady()
-    expect(seenByHost?.squad.map((d) => d.sheet)).toEqual(sheets[Faction.Red])
-    expect(seenByJoiner?.squad.map((d) => d.sheet)).toEqual(sheets[Faction.Blue])
+    expect(seenByHost?.squad.map((d) => d.sheet)).toEqual(SHEETS[Faction.Red])
+    expect(seenByJoiner?.squad.map((d) => d.sheet)).toEqual(SHEETS[Faction.Blue])
     expect(seenByHost?.squad.every((d) => d.loadout !== undefined)).toBe(true)
 
-    host.send({ type: 'matchHeader', header: header(seed, sheets) })
     host.send({
       type: 'moveUnit',
       faction: Faction.Blue,
@@ -137,23 +174,24 @@ describe('Two clients playing through a referee', () => {
       path: [{ x: 20, y: 5 }, { x: 20, y: 6 }],
     })
     host.send({ type: 'endTurn', faction: Faction.Blue })
+    expect((await nextIntent(joiner)).type).toBe('moveUnit')
+    expect((await nextIntent(joiner)).type).toBe('endTurn')
     joiner.send({ type: 'toggleCover', faction: Faction.Red, squadIndex: 1 })
-    await Bun.sleep(150)
 
     // Relayed to the other side, never back to the sender: a frame that echoed
-    // would be applied twice by the client that sent it.
-    expect(joinerSaw.map((m) => m.type)).toContain('moveUnit')
-    expect(hostSaw.map((m) => m.type)).toContain('toggleCover')
-    expect(hostSaw.map((m) => m.type)).not.toContain('moveUnit')
+    // would be applied twice by the client that sent it. Anything the host
+    // had been sent would be held for it in order, so the first thing it
+    // hears is the first thing anybody said to it.
+    expect((await nextIntent(host)).type).toBe('toggleCover')
 
-    // And the referee's own log refights: what it kept is a match, not a note
-    // about one.
-    await referee.idle()
-    const stored = (await store.match(referee.openMatchId!))!
+    // And the referee's own log, kept under the room's id, refights: what it
+    // kept is a match, not a note about one.
+    await lobby.idle()
+    const stored = (await store.match(roomId))!
     expect(stored.events).toHaveLength(3)
     const refought = replay(stored)
     expect(refought.skipped).toEqual([])
-    expect(refought.digest.total).toBe(referee.digest()!.total)
+    expect(refought.digest.total).toBe(lobby.room(roomId)!.digest()!.total)
 
     host.dispose()
     joiner.dispose()
@@ -161,12 +199,12 @@ describe('Two clients playing through a referee', () => {
   })
 
   test('a client on another build is turned away at the socket', async () => {
-    // The same gate as peer-to-peer play, over a different channel: the referee
+    // The same gate as peer-to-peer play, over a different channel: the server
     // refuses a build it cannot agree with rather than accusing it later.
-    const { url, stop } = await refereeOnASocket()
+    const { url, stop } = await lobbyOnASocket()
     // Spoken by hand rather than through a `NetworkManager`, because the point
     // is a client this build would never produce: one claiming another build.
-    const socket = new WebSocket(url)
+    const socket = new WebSocket(`${url}?intent=open`)
     await new Promise<void>((resolve) => socket.addEventListener('open', () => resolve()))
     socket.send(
       JSON.stringify({
@@ -187,16 +225,102 @@ describe('Two clients playing through a referee', () => {
     await stop()
   })
 
+  test('a room that is not there is a reason, not a hang', async () => {
+    const { url, stop } = await lobbyOnASocket()
+    const lost = new NetworkManager()
+    await expect(lost.connectToServer(url, { kind: 'join', roomId: 'nowhere' })).rejects.toThrow('gone')
+    lost.dispose()
+    await stop()
+  })
+
+  test('a player who opens a second window takes their match with them, rebuilt to the same world', async () => {
+    const { lobby, as, stop } = await lobbyOnASocket()
+    const { host, joiner, roomId } = await playing(as('alice'), as('bob'), 4242)
+
+    // A few intents in, so there is a match to rebuild rather than an opening.
+    const moved = nextIntent(joiner)
+    host.send({ type: 'moveUnit', faction: Faction.Blue, squadIndex: 0, path: [{ x: 20, y: 5 }, { x: 20, y: 6 }] })
+    await moved
+    const ended = nextIntent(joiner)
+    host.send({ type: 'endTurn', faction: Faction.Blue })
+    await ended
+
+    // The window being replaced is told why, in so many words.
+    const superseded = Promise.withResolvers<string>()
+    host.onDisconnected = (reason) => superseded.resolve(reason ?? '')
+
+    const second = new NetworkManager()
+    const seat = await second.connectToServer(as('alice'), { kind: 'resume' })
+    expect(seat).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', redirected: false })
+    expect(second.mode).toBe('host')
+    expect(await superseded.promise).toContain('another window')
+
+    // The log rebuilds the referee's world exactly: same opening, same
+    // intents, same dice drawn in the same order.
+    const log = await second.waitForLog()
+    expect(log.matchId).toBe(roomId)
+    expect(log.events.map((e) => e.command.type)).toEqual(['moveUnit', 'endTurn'])
+    const rebuilt = new MatchHost(log.header)
+    for (const event of log.events) rebuilt.apply(event.command)
+    expect(rebuilt.digest()).toEqual(lobby.room(roomId)!.digest()!)
+
+    // And the match goes on in the new window: the opponent's next intent
+    // arrives there, held until something is listening.
+    joiner.send({ type: 'toggleCover', faction: Faction.Red, squadIndex: 1 })
+    expect((await nextIntent(second)).type).toBe('toggleCover')
+
+    // Asking for anything else while that match is on puts the player back
+    // in it, and says so.
+    const third = new NetworkManager()
+    const back = await third.connectToServer(as('alice'), { kind: 'open' })
+    expect(back).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', redirected: true })
+    expect((await third.waitForLog()).events).toHaveLength(3)
+
+    for (const manager of [host, joiner, second, third]) manager.dispose()
+    await stop()
+  })
+
+  test('a spectator is shown the match so far, then follows it live without a word', async () => {
+    const { lobby, url, stop } = await lobbyOnASocket()
+    const { host, joiner, roomId } = await playing(url, url, 99)
+    const moved = nextIntent(joiner)
+    host.send({ type: 'moveUnit', faction: Faction.Blue, squadIndex: 0, path: [{ x: 20, y: 5 }, { x: 20, y: 6 }] })
+    await moved
+
+    const watcher = new NetworkManager()
+    const seat = await watcher.connectToServer(url, { kind: 'watch', roomId })
+    expect(seat).toEqual({ roomId, faction: null, phase: 'playing', redirected: false })
+    expect(watcher.mode).toBe('spectate')
+    const log = await watcher.waitForLog()
+    expect(log.events.map((e) => e.command.type)).toEqual(['moveUnit'])
+
+    // Every intent after that reaches the watcher as it is played, and the
+    // log plus what followed it is the referee's match exactly.
+    const relayed = nextIntent(watcher)
+    host.send({ type: 'endTurn', faction: Faction.Blue })
+    const live = await relayed
+    expect(live.type).toBe('endTurn')
+    const watched = new MatchHost(log.header)
+    for (const event of log.events) watched.apply(event.command)
+    watched.apply(live)
+    await lobby.idle()
+    expect(watched.digest()).toEqual(lobby.room(roomId)!.digest()!)
+
+    for (const manager of [host, joiner, watcher]) manager.dispose()
+    await stop()
+  })
+
   test('a whole simulated match reaches settlement live, the same as it does headless', async () => {
     // `SimMatch` already plays a decisive match in milliseconds; this is the
     // one that reuses that instead of scripting a handful of moves by hand,
-    // to reach the part the other test in this file does not: a real winner,
+    // to reach the part the other tests in this file do not: a real winner,
     // over a real socket, refereed by a *second*, independent recomputation
     // of the same match (`src/sim/WireMatch.ts`).
-    const { referee, store, url, stop } = await refereeOnASocket()
+    const { lobby, store, url, stop } = await lobbyOnASocket()
 
     let seed = 5000
-    let result: Awaited<ReturnType<typeof simulateOverWire>> | undefined
+    let result: WireMatchResult | undefined
+    let room: Room | undefined
     while (!result && seed < 5040) {
       const attempt = await simulateOverWire({
         seed,
@@ -205,6 +329,8 @@ describe('Two clients playing through a referee', () => {
         turnCap: 60,
         url,
       })
+      // Taken at once: a settled room is let go once its sockets have closed.
+      room = lobby.room(attempt.roomId)
       if (attempt.outcome.winner !== null) result = attempt
       else seed++
     }
@@ -212,12 +338,12 @@ describe('Two clients playing through a referee', () => {
 
     // Independently recomputed twice — once by this side's own `SimMatch`,
     // once by the referee watching the wire — and they agree bit for bit.
-    await referee.idle()
-    expect(referee.digest()).toEqual(result.digest)
+    await lobby.idle()
+    expect(room!.digest()).toEqual(result.digest)
 
     // What the referee kept is the whole match, not a sample of it, and
     // refighting the log it wrote reaches the exact same state a third time.
-    const stored = (await store.match(referee.openMatchId!))!
+    const stored = (await store.match(result.roomId))!
     expect(stored.events).toHaveLength(result.recording.events.length)
     const refought = replay(stored)
     expect(refought.skipped).toEqual([])

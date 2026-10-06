@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
+import { Faction } from '../src/config'
+import { RpcMethods } from '../src/game/JsonRpc'
+import { intentQuery, type LobbyView, type ServerIntent } from '../src/game/Lobby'
 import { startGameServer } from '../src/server/GameServer'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import { LOCAL_RELYING_PARTY } from '../src/server/Persistence'
+import { MY_VERSION } from '../src/version'
 import { softwareAuthenticator } from './support/authenticator'
 
 /**
@@ -15,12 +19,26 @@ import { softwareAuthenticator } from './support/authenticator'
 
 const ORIGIN = LOCAL_RELYING_PARTY.origins[0]!
 
-/** Whether a socket got as far as open, rather than how long it took. */
-function opens(socket: WebSocket): Promise<boolean> {
-  return new Promise((resolve) => {
-    socket.addEventListener('open', () => resolve(true))
-    socket.addEventListener('error', () => resolve(false))
+/**
+ * Open a socket the way a page does — ticket and intent in the url, `hello`
+ * as the first frame — and resolve with the `seated` frame the server answers.
+ */
+function seated(base: string, intent: ServerIntent, ticket?: string): Promise<{ socket: WebSocket; roomId: string }> {
+  const url = new URL(base.replace('http', 'ws'))
+  if (ticket) url.searchParams.set('ticket', ticket)
+  for (const [key, value] of new URLSearchParams(intentQuery(intent))) url.searchParams.set(key, value)
+  const socket = new WebSocket(url)
+  const { promise, resolve, reject } = Promise.withResolvers<{ socket: WebSocket; roomId: string }>()
+  socket.addEventListener('open', () => {
+    socket.send(JSON.stringify({ jsonrpc: '2.0', method: RpcMethods.hello, params: MY_VERSION }))
   })
+  socket.addEventListener('message', (event) => {
+    const frame = JSON.parse(String(event.data)) as { method: string; params: Record<string, unknown> }
+    if (frame.method === RpcMethods.seated) resolve({ socket, roomId: frame.params.roomId as string })
+    if (frame.method === RpcMethods.abort) reject(new Error(String(frame.params.reason)))
+  })
+  socket.addEventListener('error', () => reject(new Error('the socket failed')))
+  return promise
 }
 
 async function registered(base: string): Promise<string> {
@@ -44,7 +62,7 @@ async function registered(base: string): Promise<string> {
 }
 
 describe('The match server on a real port', () => {
-  test('a signed-in player trades a session for a socket', async () => {
+  test('a signed-in player trades a session for a seat, and the lobby shows it as theirs alone', async () => {
     const persistence = await openPersistence()
     // Port 0 so the test cannot collide with anything, including itself.
     const server = await startGameServer({
@@ -62,10 +80,35 @@ describe('The match server on a real port', () => {
     })
     const { ticket } = (await ticketed.json()) as { ticket: string }
 
-    const socket = new WebSocket(`${base.replace('http', 'ws')}/?ticket=${ticket}`)
-    expect(await opens(socket)).toBe(true)
-    socket.close()
+    const { socket, roomId } = await seated(base, { kind: 'open' }, ticket)
 
+    const lobby = async (authorization?: string): Promise<LobbyView> => {
+      const response = await fetch(`${base}/api/lobby`, {
+        headers: authorization ? { authorization } : {},
+      })
+      expect(response.status).toBe(200)
+      return (await response.json()) as LobbyView
+    }
+    // Anybody may read the room list; the seat is named by the ticket's player.
+    const seen = await lobby()
+    expect(seen.rooms).toHaveLength(1)
+    expect(seen.rooms[0]).toMatchObject({
+      id: roomId,
+      phase: 'waiting',
+      blue: { name: 'Tester', connected: true },
+      red: null,
+      spectators: 0,
+      turn: null,
+    })
+    expect(seen.you).toBeNull()
+    // Only the player holding it is told it is theirs — and a token the
+    // server no longer honours costs that, not the list.
+    expect((await lobby(`Bearer ${token}`)).you).toEqual({ roomId, faction: Faction.Blue, phase: 'waiting' })
+    const stale = await lobby('Bearer not-a-token')
+    expect(stale.you).toBeNull()
+    expect(stale.rooms).toHaveLength(1)
+
+    socket.close()
     await server.stop()
     await persistence.close()
   })
@@ -109,8 +152,9 @@ describe('The match server on a real port', () => {
       log: () => {},
     })
 
-    const socket = new WebSocket(server.url.replace('http', 'ws'))
-    expect(await opens(socket)).toBe(true)
+    const { socket, roomId } = await seated(server.url.replace(/\/$/, ''), { kind: 'open' })
+    const view = (await (await fetch(`${server.url}api/lobby`)).json()) as LobbyView
+    expect(view.rooms.map((room) => [room.id, room.blue.name])).toEqual([[roomId, null]])
     socket.close()
 
     await server.stop()
@@ -128,7 +172,7 @@ describe('The match server on a real port', () => {
 
     const status = (await (await fetch(server.url)).json()) as Record<string, unknown>
     expect(status.referee).toBe('tictac')
-    expect(status.match).toBeNull()
+    expect(status.rooms).toBe(0)
     expect(status.recent).toEqual([])
 
     await server.stop()

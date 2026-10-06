@@ -41,6 +41,8 @@ export const MENU_COLOURS = {
   accent: '#38bdf8',
   muted: '#94a3b8',
   danger: '#ef4444',
+  /** Not wrong yet, but about to cost the player something if they carry on. */
+  warning: '#f59e0b',
   signedIn: '#2dd4bf',
   field: '#0f172a',
   line: '#475569',
@@ -61,6 +63,7 @@ export function MenuButton({
   tone,
   size = 'md',
   grow,
+  disabled,
   onClick,
   children,
 }: {
@@ -69,6 +72,12 @@ export function MenuButton({
   size?: keyof typeof SIZES
   /** Share the row evenly with the other growing buttons on it. */
   grow?: boolean
+  /**
+   * Greyed and inert, for a way into a match while another attempt is still
+   * in flight: two sockets racing for the same player would supersede each
+   * other.
+   */
+  disabled?: boolean
   onClick: () => void
   children: ReactNode
 }) {
@@ -77,6 +86,7 @@ export function MenuButton({
     <button
       id={id}
       type="button"
+      disabled={disabled}
       onClick={onClick}
       style={{
         flex: grow ? 1 : undefined,
@@ -87,7 +97,8 @@ export function MenuButton({
         color: 'white',
         border: 'none',
         borderRadius: size === 'lg' ? 6 : 4,
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       {children}

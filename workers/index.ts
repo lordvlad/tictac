@@ -15,8 +15,8 @@ export interface Env {
  * Every request — a page load, an asset, a WebSocket upgrade — is forwarded
  * to the same Durable Object instance, addressed by a fixed name rather than
  * one derived from the request. `[ITEM-045]` plants a single DO on purpose:
- * a match server is one referee, so there is one of it, the same way
- * `startGameServer` binds one port to one `Referee` today.
+ * a match server is one lobby of rooms, so there is one of it, the same way
+ * `startGameServer` binds one port to one `Lobby` today.
  */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

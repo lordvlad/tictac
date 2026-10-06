@@ -10,21 +10,24 @@ import { Rng } from '../src/core/rng'
 import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { TurnSystem } from '../src/ecs/systems'
-import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../src/game/JsonRpc'
 import { carriedOut, settlement, winnerOf, type UnitFate } from '../src/game/MatchEnd'
-import type { NetworkMessage } from '../src/game/NetworkManager'
 import type { CombatRecording, Deployment, RecordingHeader } from '../src/game/Recording'
 import { Squads } from '../src/game/Squads'
 import { TurnManager } from '../src/game/TurnManager'
-import { loopback } from '../src/game/Transport'
-import { Referee, type RefereeVerdict } from '../src/server/Referee'
+import type { Player } from '../src/server/Accounts'
+import { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
+import type { RefereeVerdict } from '../src/server/Room'
 import type { RosterMember } from '../src/server/Rosters'
 import { MatchHost } from '../src/sim/MatchHost'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
 import { DATABASE_URLS, freshPersistence } from './support/db'
+import { connect, decisive, roomOf, seatBoth } from './support/lobby'
 import { stockSquads } from './support/squads'
+
+const ADA: Player = { id: 'A', name: 'Ada' }
+const BO: Player = { id: 'B', name: 'Bo' }
 
 /**
  * What a refereed match leaves behind.
@@ -485,16 +488,6 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   })
 })
 
-/** A recorded match that somebody actually won, from the first seed that produces one. */
-function decisive(from = 4242): CombatRecording {
-  for (let seed = from; seed < from + 40; seed++) {
-    const match = new SimMatch({ seed, blue: STOCK_PLAN, red: STOCK_PLAN, turnCap: 60, record: true })
-    const outcome = match.run()
-    if (outcome.winner !== null && match.recording) return match.recording
-  }
-  throw new Error('no decisive match in 40 seeds')
-}
-
 /** The people a header's squad states, for tests that only want the sheet. */
 function sheetsOf(header: RecordingHeader, faction: Faction): CharacterSheet[] {
   return header.squads[faction].map((deployment) => deployment.sheet)
@@ -534,51 +527,28 @@ function withCharacterIds(
   return { ...header, squads: { [Faction.Blue]: stamp(Faction.Blue), [Faction.Red]: stamp(Faction.Red) } }
 }
 
-/** A client, as the referee sees one, signed in as `playerId` or not at all. */
-function client(referee: Referee, playerId: string | null) {
-  const [mine, theirs] = loopback()
-  referee.attach(theirs, playerId)
-  const received: NetworkMessage[] = []
-  mine.onFrame((frame) => {
-    if (!('method' in frame)) return
-    const params = (frame as JsonRpcNotification).params as Record<string, unknown>
-    for (const [type, method] of Object.entries(RpcMethods)) {
-      if (method === frame.method) received.push({ ...params, type } as NetworkMessage)
-    }
-  })
-  const send = (message: NetworkMessage): void => {
-    const params = { ...message } as Record<string, unknown>
-    delete params.type
-    mine.send({ jsonrpc: '2.0', method: RpcMethods[message.type], params } as JsonRpcFrame)
-  }
-  return { send, received }
-}
-
 describe('A refereed match is kept on the rosters it was played with', () => {
   async function playing(url: string, blueSheets: CharacterSheet[], redSheets: CharacterSheet[]) {
     const persistence = await freshPersistence(url)
-    for (const [id, name] of [
-      ['A', 'Ada'],
-      ['B', 'Bo'],
-    ]) {
+    for (const { id, name } of [ADA, BO]) {
       await persistence.db
-        .query`INSERT INTO players (id, name, created_at) VALUES (${id!}, ${name!}, ${'2026-01-01T00:00:00Z'})`
+        .query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${name}, ${'2026-01-01T00:00:00Z'})`
     }
     await persistence.rosters.enlist(persistence.db, 'A', blueSheets)
     await persistence.rosters.enlist(persistence.db, 'B', redSheets)
     const verdicts: RefereeVerdict[] = []
-    const referee = new Referee({
+    const lobby = new Lobby({
       matches: persistence.matches,
       rosters: persistence.rosters,
       onVerdict: (verdict) => verdicts.push(verdict),
       log: () => {},
     })
-    return { persistence, referee, verdicts }
+    return { persistence, lobby, verdicts }
   }
 
   test('the survivors come back grown and the dead do not come back', async () => {
     const recording = decisive()
-    const { persistence, referee, verdicts } = await playing(
+    const { persistence, lobby, verdicts } = await playing(
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
@@ -595,14 +565,13 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
 
-    const blue = client(referee, 'A')
-    client(referee, 'B')
+    const { blue } = seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(recording.header, characterIds), startingHp),
     })
     for (const event of recording.events) blue.send(event.command)
-    await referee.idle()
+    await lobby.idle()
 
     expect(verdicts).toEqual([])
 
@@ -648,15 +617,14 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     // real character it holds and still lie about who that character is.
     const recording = decisive()
     const others = Array.from({ length: SQUAD_SIZE }, (_, i) => characterSheet(new Rng(900 + i)))
-    const { persistence, referee, verdicts } = await playing(
+    const { persistence, lobby, verdicts } = await playing(
       ':memory:',
       others,
       sheetsOf(recording.header, Faction.Red),
     )
     const before = await persistence.rosters.active('A')
 
-    const blue = client(referee, 'A')
-    client(referee, 'B')
+    const { blue } = seatBoth(lobby, ADA, BO)
     // A real id of A's, a sheet that is not that character's.
     blue.send({
       type: 'matchHeader',
@@ -665,7 +633,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
         [Faction.Red]: [],
       }),
     })
-    await referee.idle()
+    await lobby.idle()
 
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toMatch(/not the roster/)
@@ -680,7 +648,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     // its wounds would otherwise deploy a signed-in player's character
     // healthier than the roster it belongs to says they are.
     const recording = decisive()
-    const { persistence, referee, verdicts } = await playing(
+    const { persistence, lobby, verdicts } = await playing(
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
@@ -690,12 +658,11 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const blue = client(referee, 'A')
-    client(referee, 'B')
+    const { blue } = seatBoth(lobby, ADA, BO)
     // No `startingHp` at all — exactly what an old client, or one that
     // simply left it out, would send.
     blue.send({ type: 'matchHeader', header: withCharacterIds(recording.header, characterIds) })
-    await referee.idle()
+    await lobby.idle()
 
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toMatch(/starting health/)
@@ -706,7 +673,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test("a signed-in squad's stated starting health that does not match the roster is aborted", async () => {
     const recording = decisive()
-    const { persistence, referee, verdicts } = await playing(
+    const { persistence, lobby, verdicts } = await playing(
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
@@ -720,13 +687,12 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const blue = client(referee, 'A')
-    client(referee, 'B')
+    const { blue } = seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(recording.header, characterIds), wrongHp),
     })
-    await referee.idle()
+    await lobby.idle()
 
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toMatch(/starting health/)
@@ -737,7 +703,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test("a signed-in squad's stated fatigue that does not match the roster is aborted", async () => {
     const recording = decisive()
-    const { persistence, referee, verdicts } = await playing(
+    const { persistence, lobby, verdicts } = await playing(
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
@@ -755,13 +721,12 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const blue = client(referee, 'A')
-    client(referee, 'B')
+    const { blue } = seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(recording.header, characterIds), startingHp, wrongFatigue),
     })
-    await referee.idle()
+    await lobby.idle()
 
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toMatch(/fatigue/)
@@ -772,7 +737,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test('a squad that deploys a member still in the medical bay is aborted', async () => {
     const recording = decisive()
-    const { persistence, referee, verdicts } = await playing(
+    const { persistence, lobby, verdicts } = await playing(
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
@@ -791,13 +756,12 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: enlisted.map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const blue = client(referee, 'A')
-    client(referee, 'B')
+    const { blue } = seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(recording.header, characterIds), startingHp),
     })
-    await referee.idle()
+    await lobby.idle()
 
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toMatch(/medical bay/)
@@ -807,43 +771,49 @@ describe('A refereed match is kept on the rosters it was played with', () => {
   })
 
   test('one player cannot play both sides of a kept match', async () => {
+    // The only way to try is from a second window, and a second window is a
+    // new window: the first one's room is abandoned before the join is even
+    // weighed, so there is nothing left to join and nothing to keep.
     const recording = decisive()
-    const { persistence, referee, verdicts } = await playing(
-      ':memory:',
-      sheetsOf(recording.header, Faction.Blue),
-      sheetsOf(recording.header, Faction.Red),
-    )
-
-    const blue = client(referee, 'A')
-    client(referee, 'A')
-    blue.send({ type: 'matchHeader', header: recording.header })
-    await referee.idle()
-
-    expect(verdicts).toHaveLength(1)
-    expect(verdicts[0]!.reason).toMatch(/both sides/)
-
-    await persistence.close()
-  })
-
-  test('an anonymous match is watched and written down, and kept on nobody', async () => {
-    const recording = decisive()
-    const { persistence, referee, verdicts } = await playing(
+    const { persistence, lobby, verdicts } = await playing(
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
     )
     const before = await persistence.rosters.active('A')
 
-    const blue = client(referee, null)
-    client(referee, null)
+    const first = connect(lobby, ADA, { kind: 'open' })
+    const roomId = roomOf(first)
+    const second = connect(lobby, ADA, { kind: 'join', roomId })
+    first.send({ type: 'matchHeader', header: recording.header })
+    await lobby.idle()
+
+    expect(first.of('abort')[0]?.reason).toMatch(/another window/)
+    expect(second.of('seated')).toEqual([])
+    expect(second.of('abort')[0]?.reason).toBe('That match is gone.')
+    expect(await persistence.matches.header(roomId)).toBeNull()
+    expect(await persistence.rosters.active('A')).toEqual(before)
+    expect(verdicts).toEqual([])
+
+    await persistence.close()
+  })
+
+  test('an anonymous match is watched and written down, and kept on nobody', async () => {
+    const recording = decisive()
+    const { persistence, lobby, verdicts } = await playing(
+      ':memory:',
+      sheetsOf(recording.header, Faction.Blue),
+      sheetsOf(recording.header, Faction.Red),
+    )
+    const before = await persistence.rosters.active('A')
+
+    const { blue, roomId } = seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
     for (const event of recording.events) blue.send(event.command)
-    await referee.idle()
+    await lobby.idle()
 
     expect(verdicts).toEqual([])
-    expect(await persistence.matches.events(referee.openMatchId!)).toHaveLength(
-      recording.events.length,
-    )
+    expect(await persistence.matches.events(roomId)).toHaveLength(recording.events.length)
     expect(await persistence.rosters.active('A')).toEqual(before)
     expect(await persistence.db.query`SELECT match_id FROM match_results`).toEqual([])
 
@@ -864,7 +834,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     // Four enlisted and the one in slot 1 killed, so the living three sit in
     // slots 0, 2 and 3 — the squad deploys them in slot order, gap closed.
     const fallen = characterSheet(new Rng(77))
-    const { persistence, referee, verdicts } = await playing(
+    const { persistence, lobby, verdicts } = await playing(
       ':memory:',
       [first!, fallen, second!, third!],
       sheetsOf(header, Faction.Red),
@@ -882,14 +852,13 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: living.map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const blue = client(referee, 'A')
-    client(referee, 'B')
+    const { blue } = seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(header, characterIds), startingHp),
     })
     for (const event of recording!.events) blue.send(event.command)
-    await referee.idle()
+    await lobby.idle()
 
     expect(verdicts).toEqual([])
     const played = await persistence.db.query<{ character_id: string; matches: number }>`
@@ -904,20 +873,19 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test('a signed-in player with nobody left on the roster is refused', async () => {
     const recording = decisive()
-    const { persistence, referee, verdicts } = await playing(
+    const { persistence, lobby, verdicts } = await playing(
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
     )
     await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE player_id = ${'A'}`
 
-    const blue = client(referee, 'A')
-    client(referee, 'B')
+    const { blue } = seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: { ...recording.header, squads: { ...recording.header.squads, [Faction.Blue]: [] } },
     })
-    await referee.idle()
+    await lobby.idle()
 
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toMatch(/nobody left/)

@@ -3,7 +3,7 @@ title: "Persistence: Database Port, Migrations, Accounts & Rosters"
 id: "ARCH-PERSISTENCE"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-30"
+lastReviewed: "2026-10-06"
 appliesTo:
   - "src/server/**"
   - "scripts/serve-match.ts"
@@ -156,7 +156,8 @@ verify would register a passkey nobody could ever sign in with.
 so a stolen database is not a drawer full of working sessions. **Socket
 tickets** are in memory, single-use and worth 60 seconds: a browser cannot put
 an `Authorization` header on a WebSocket, and a session token in a url is a
-session token in somebody's logs.
+session token in somebody's logs. A ticket redeems to the whole `Player`
+(`{ id, name }`), because the lobby seats and names players by it.
 
 ### HTTP surface (`src/server/Api.ts`)
 
@@ -171,6 +172,7 @@ session token in somebody's logs.
 | `GET /api/roster` | bearer | `{ roster }` |
 | `POST /api/roster/recruit` | bearer | `{ member }` — `400` if the roster is already full |
 | `POST /api/ticket` | bearer | `{ ticket }` |
+| `GET /api/lobby` | bearer optional | `LobbyView` (`src/game/Lobby.ts`): open rooms newest first, and `you` — the asker's seat, null without a valid token (never a `401`) |
 
 CORS is granted only to the configured origins — the same list the ceremony is
 checked against, because they are the same question: which pages is this server
@@ -186,7 +188,7 @@ that never dies. Registration deals `ROSTER.size` (6) characters, server-rolled
 from system randomness — a bench, not a squad: `SQUAD_SIZE` (4) of them deploy
 to any one match, and a signed-in player picks which (`[ITEM-042]`).
 
-**Before the match.** `Referee.verifyRosters` runs once the header arrives.
+**Before the match.** `Room.verifyRosters` runs once the header arrives.
 For each signed-in side: the deployed squad must be **1 to `SQUAD_SIZE`**
 units, and every one of them must *name* a character — `Deployment.characterId`
 — that is this player's, is presently active (not dead, not a duplicate within
@@ -359,7 +361,8 @@ default to `localhost` and `http://localhost:5173`. For a GitHub Pages
 deployment the server runs with `--rp-id=lordvlad.github.io
 --origins=https://lordvlad.github.io` behind HTTPS/WSS.
 
-The referee writes through **one queue** (`Referee.enqueue`, `Referee.idle`).
+Each room's referee writes through **one queue** (`Room.enqueue`; `Room.idle`, and
+`Lobby.idle` across every room).
 `MatchHost` is synchronous and the database is not, so frames are judged
 synchronously in arrival order and every write is appended to one chain that
 drains in that order. A write that fails ends the match: a referee that could

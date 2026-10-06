@@ -93,11 +93,15 @@ export class Accounts {
    *
    * A WebSocket cannot carry an `Authorization` header from a browser, so the
    * page trades its session for a short single-use ticket and puts that in the
-   * url. In memory because there is one referee per process today, which is the
-   * same assumption the referee itself makes; moving to several instances means
+   * url. In memory because there is one lobby per process today, which is the
+   * same assumption the lobby itself makes; moving to several instances means
    * moving these into `auth_challenges` with `purpose='ticket'`.
+   *
+   * A ticket carries the whole `Player`, name included, because the lobby
+   * shows seats by name and says who walked out of a match — and a socket
+   * upgrade is the wrong moment to go back to the database for it.
    */
-  private readonly tickets = new Map<string, { playerId: string; expires: number }>()
+  private readonly tickets = new Map<string, { player: Player; expires: number }>()
 
   constructor(
     private readonly db: Db,
@@ -267,21 +271,21 @@ export class Accounts {
   }
 
   /** A one-shot credential for a WebSocket url. */
-  issueTicket(playerId: string): string {
+  issueTicket(player: Player): string {
     const ticket = toBase64Url(crypto.getRandomValues(new Uint8Array(24)))
     this.tickets.set(ticket, {
-      playerId,
+      player: { id: player.id, name: player.name },
       expires: this.now().getTime() + TICKET_SECONDS * 1000,
     })
     return ticket
   }
 
   /** Spend a ticket. Single use: a url that leaks is a url that no longer works. */
-  redeemTicket(ticket: string): string | null {
+  redeemTicket(ticket: string): Player | null {
     const found = this.tickets.get(ticket)
     this.tickets.delete(ticket)
     if (!found || found.expires <= this.now().getTime()) return null
-    return found.playerId
+    return found.player
   }
 
   private async issueChallenge(

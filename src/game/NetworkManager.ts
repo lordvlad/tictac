@@ -4,14 +4,17 @@ import type { GrenadeId, ShotMode } from '../core/Arsenal'
 import type { DoorVerb } from '../core/Doors'
 import type { ItemId } from '../core/Items'
 import type { World } from '../ecs/World'
+import { isCommand } from '../ecs/systems/CommandSystem'
 import {
   deploymentStateFrom,
+  parseRecording,
   unitLoadoutFrom,
   type Deployment,
   type RecordedEvent,
   type RecordingHeader,
 } from './Recording'
 import type { UnitLoadout } from './Loadout'
+import { intentQuery, type RoomPhase, type Seated, type ServerIntent } from './Lobby'
 import { SocketTransport } from './SocketTransport'
 import type { StateDigest } from './StateDigest'
 import { MY_VERSION, versionRefusal } from '../version'
@@ -29,7 +32,23 @@ import {
 } from './DataChannelTransport'
 import type { Transport } from './Transport'
 
-export type NetworkMode = 'local' | 'host' | 'join'
+/**
+ * Which side of a match this manager speaks for.
+ *
+ * `spectate` is a socket to a match server that holds no seat: it hears the
+ * match and says nothing, so nothing it might send — a command, a digest, a
+ * component update — ever leaves it (`sendRpc`).
+ */
+export type NetworkMode = 'local' | 'host' | 'join' | 'spectate'
+
+/** A match so far, as a match server states it to a socket taking a seat in it or watching it. */
+export interface MatchLog {
+  matchId: string
+  header: RecordingHeader
+  events: RecordedEvent[]
+}
+
+const ROOM_PHASES: readonly RoomPhase[] = ['waiting', 'deploying', 'playing']
 
 /** What a peer brought: one entry per soldier, its kit absent where this build could not read it. */
 export interface PeerSquad {
@@ -75,14 +94,20 @@ export type NetworkMessage =
    */
   | { type: 'matchHeader'; header: RecordingHeader }
   /**
-   * A client that lost its tab, asking for the rest of the log.
-   *
-   * `afterSeq` is the last intent it is sure of; -1 means it has nothing and
-   * wants the match from the beginning.
+   * The match so far: its opening position and every intent the referee has
+   * accepted. Sent by a match server to a socket that is seated in a match
+   * already playing, or watching one — which is how a second window takes a
+   * match over and how a spectator catches up (`src/game/Lobby.ts`). Asked
+   * for by the socket's url (`intent=resume`/`watch`), not by a frame.
    */
-  | { type: 'resume'; matchId: string; afterSeq: number }
-  /** The log a resuming client replays to catch up. */
   | { type: 'log'; matchId: string; header: RecordingHeader; events: RecordedEvent[] }
+  /**
+   * Which room this socket is in and as whom (`src/game/Lobby.ts`). The
+   * server's first frame, sent once the client's `hello` has passed the
+   * version gate; a seat in a match already playing, and any spectator, is
+   * sent the `log` next.
+   */
+  | { type: 'seated'; roomId: string; faction: Faction | null; phase: RoomPhase; redirected: boolean }
   /**
    * The match is over because it stopped being one match.
    *
@@ -167,7 +192,27 @@ export class NetworkManager {
   myId: string = ''
   myFaction: Faction = Faction.Blue
 
-  onMessage: ((msg: NetworkMessage) => void) | null = null
+  /**
+   * Where the other side's commands go, once something is ready to apply them.
+   *
+   * Until then they are held, in order, and handed over the moment a handler
+   * is assigned. A side that takes over a match in progress learns the match
+   * from the server's `log` and then spends a moment building the world from
+   * it; the other player does not stop playing for that, and a command
+   * relayed in between, dropped, would be a step this side never took.
+   */
+  get onMessage(): ((msg: NetworkMessage) => void) | null {
+    return this.handler
+  }
+  set onMessage(handler: ((msg: NetworkMessage) => void) | null) {
+    this.handler = handler
+    // Shifted one at a time, re-reading the handler each round, so a handler
+    // that replaces itself (a one-shot wait for the next message) leaves the
+    // rest for whoever comes next rather than swallowing them.
+    while (this.handler && this.held.length > 0) this.handler(this.held.shift()!)
+  }
+  private handler: ((msg: NetworkMessage) => void) | null = null
+  private readonly held: NetworkMessage[] = []
   onConnected: (() => void) | null = null
   onDisconnected: ((reason?: string) => void) | null = null
   /** Fired after peer state has been written into the world. */
@@ -196,6 +241,27 @@ export class NetworkManager {
   private opened: { seed: number; seedLabel: string } | null = null
   /** The squad this side has already deployed, for the same reason. */
   private deployed: Deployment[] | null = null
+
+  /**
+   * A socket's wait for the server to say where it sits (`connectToServer`),
+   * while there is one. Held here for the same reason `opening` is: an abort
+   * or a dropped socket before the seat is a failure to connect, owed to the
+   * menu with its reason.
+   */
+  private seating: PromiseWithResolvers<Seated> | null = null
+
+  /**
+   * The match so far, once a server has stated it. Kept rather than passed on,
+   * because it can arrive before whoever needs it has asked: straight after
+   * the seat, while the menu is still deciding what to show.
+   */
+  private readonly matchLog = Promise.withResolvers<MatchLog>()
+
+  constructor() {
+    // A log that never comes is only a failure to whoever waits for one;
+    // most managers never do.
+    this.matchLog.promise.catch(() => {})
+  }
 
   /**
    * Replicate component mutations for the entities this peer owns.
@@ -235,9 +301,20 @@ export class NetworkManager {
       // A channel that dropped is not a peer that was turned away, so this
       // does not go through `refuse`: a player told the build was refused
       // would go looking for a version to fix.
-      this.opening?.reject(new Error(reason))
+      this.disappoint(reason)
       this.onDisconnected?.(reason)
     })
+  }
+
+  /**
+   * Tell everything still waiting on the other side — the opening, the seat,
+   * the log — that it is not coming, and why.
+   */
+  private disappoint(reason: string): void {
+    const error = new Error(reason)
+    this.opening?.reject(error)
+    this.seating?.reject(error)
+    this.matchLog.reject(error)
   }
 
   /**
@@ -259,7 +336,7 @@ export class NetworkManager {
     this.refused = true
     console.warn(`[net] The match cannot go on: ${reason}`)
     this.onDisconnected?.(reason)
-    this.opening?.reject(new Error(reason))
+    this.disappoint(reason)
     this.transport?.close()
     this.transport = null
   }
@@ -297,6 +374,43 @@ export class NetworkManager {
       return
     }
 
+    // Where the server put this socket. Taken at the edge because it decides
+    // what this manager *is* — a seat speaks for its side, a spectator speaks
+    // for nobody — before anything downstream exists to be told.
+    if (method === RpcMethods.seated) {
+      const faction = params.faction === Faction.Blue || params.faction === Faction.Red ? params.faction : null
+      const phase = ROOM_PHASES.find((known) => known === params.phase)
+      if (typeof params.roomId !== 'string' || (faction === null && params.faction !== null) || !phase) {
+        this.refuse('The match server sent a seat this build cannot read.')
+        return
+      }
+      if (faction === null) {
+        this.mode = 'spectate'
+      } else {
+        this.mode = faction === Faction.Blue ? 'host' : 'join'
+        this.myFaction = faction
+      }
+      this.seating?.resolve({ roomId: params.roomId, faction, phase, redirected: params.redirected === true })
+      return
+    }
+
+    // The match so far, for a side that was not there for it. Kept until it
+    // is asked for (`waitForLog`), and checked the way a recording file is:
+    // it is the same thing, and the world is about to be built from it.
+    if (method === RpcMethods.log) {
+      if (typeof params.matchId !== 'string') {
+        this.refuse('The match server sent a match this build cannot read.')
+        return
+      }
+      try {
+        const { header, events } = parseRecording({ header: params.header, events: params.events })
+        this.matchLog.resolve({ matchId: params.matchId, header, events })
+      } catch (err) {
+        this.refuse(`The match server sent a match this build cannot read: ${(err as Error).message}`)
+      }
+      return
+    }
+
     // The version gate, checked at the edge on both of the frames that can
     // carry it: the host's `init` and the joiner's `hello`. Before the seed is
     // taken and before anything is forwarded as a command, because a peer on
@@ -311,7 +425,7 @@ export class NetworkManager {
       // to forward once it has been accepted — but it is also the only sign
       // this side gets that somebody has arrived who may have missed what it
       // already said. A referee relays live and keeps nothing for a latecomer
-      // (that is what `resume` is for, and it needs a match already open), so
+      // (its `log` is only for a match that is already playing), so
       // a host whose opponent connects after it opened the match would
       // otherwise sit on the loadout screen forever, each side waiting for
       // the other.
@@ -354,6 +468,10 @@ export class NetworkManager {
           sheet,
           ...(loadouts ? { loadout: loadouts[i]! } : {}),
           ...(state ? { state } : {}),
+          // Who on the peer's roster this is, when it brought a roster: the
+          // host states the opening to the referee, and a referee settles a
+          // signed-in squad only on the characters it names.
+          ...(typeof entries[i]!.characterId === 'string' ? { characterId: entries[i]!.characterId } : {}),
         }
       })
       this.peerReady.resolve({ squad })
@@ -361,10 +479,14 @@ export class NetworkManager {
     }
 
     const msg = this.rpcToMessage(method, params)
-    if (msg) {
-      console.info(`%c[NET 📥 IN: ${msg.type}]`, 'color: #a855f7; font-weight: bold;', msg)
-      this.onMessage?.(msg)
-    }
+    if (!msg) return
+    console.info(`%c[NET 📥 IN: ${msg.type}]`, 'color: #a855f7; font-weight: bold;', msg)
+    if (this.handler) this.handler(msg)
+    // Only what the match is made of is held for a handler still to come: a
+    // command, and the digest that checks the commands before it. An opening
+    // said again to a side already past it means nothing later, and handing
+    // it to the next listener would pass it off as news.
+    else if (isCommand(msg) || msg.type === 'digest') this.held.push(msg)
   }
 
   private messageToRpc(msg: NetworkMessage): JsonRpcNotification {
@@ -381,24 +503,44 @@ export class NetworkManager {
   }
 
   /**
-   * Play through a referee at `url`, as the side that opens the match.
+   * Connect to the match server at `url`, asking it for `intent`, and wait to
+   * be told where this socket sits.
    *
-   * The referee relays between clients as well as watching, so the handshake
-   * below is the same one two peers do directly — which is the point of the
-   * transport port: a socket to a referee and a data channel to a peer are the
-   * same match from here. What a referee adds is that a third recomputation is
-   * watching, that the log outlives the tab, and that a client which loses its
-   * tab can come back.
+   * The intent rides in the url (`intentQuery`) rather than in a frame because
+   * the server has to know who is asking for what before it reads a word —
+   * which room, which seat, which window this player had open before. Added
+   * through `searchParams`, so a ticket the url already carries is kept.
+   *
+   * Resolves with the seat, and rejects with the server's own reason on an
+   * `abort` (a build it will not play, a room that is gone or full) or with
+   * the socket's on a connection that died first. What follows depends on the
+   * seat: a room still being set up goes on with `hostMatch`/`joinMatch`
+   * exactly as a data channel would; a match already playing, or any room
+   * watched, is stated as a `log` (`waitForLog`).
+   *
+   * The server relays between clients as well as watching, so a socket to it
+   * and a data channel to a peer are the same match from here. What it adds is
+   * a third recomputation watching, a log that outlives the tab, and a seat
+   * that a player who loses their tab can come back to.
    */
-  hostOnServer(url: string, seed: number, seedLabel: string): void {
-    this.attach(new SocketTransport(new WebSocket(url)))
-    this.hostMatch(seed, seedLabel)
+  connectToServer(url: string, intent: ServerIntent): Promise<Seated> {
+    const target = new URL(url)
+    for (const [key, value] of new URLSearchParams(intentQuery(intent))) target.searchParams.set(key, value)
+    this.seating = Promise.withResolvers()
+    this.attach(new SocketTransport(new WebSocket(target.href)))
+    // Straight to the transport rather than through `send`: this side has no
+    // mode yet, and a version is a fact about this bundle, not an intent.
+    this.sendRpc(this.messageToRpc({ type: 'hello', ...MY_VERSION }))
+    return this.seating.promise
   }
 
-  /** Join a refereed match at `url`, and wait for its opening frame. */
-  joinOnServer(url: string): Promise<{ seed: number; seedLabel: string }> {
-    this.attach(new SocketTransport(new WebSocket(url)))
-    return this.joinMatch()
+  /**
+   * The match so far, once the server has stated it: straight after the seat
+   * for a match already playing, or when a watched room starts. Rejects if the
+   * connection ends first.
+   */
+  waitForLog(): Promise<MatchLog> {
+    return this.matchLog.promise
   }
 
   /**
@@ -462,6 +604,7 @@ export class NetworkManager {
 
   isMyTurn(activeFaction: Faction): boolean {
     if (this.mode === 'local') return true
+    if (this.mode === 'spectate') return false
     return activeFaction === this.myFaction
   }
 
@@ -503,7 +646,14 @@ export class NetworkManager {
     return opening
   }
 
+  /**
+   * Put a frame on the wire — unless this side holds no seat. A spectator's
+   * only word is the `hello` it connected with, which went out before the
+   * server said it was one; after that the one gate every frame passes is the
+   * one place a watcher's command, digest or replicated state is stopped.
+   */
   sendRpc(frame: JsonRpcFrame): void {
+    if (this.mode === 'spectate') return
     this.transport?.send(frame)
   }
 
@@ -524,8 +674,8 @@ export class NetworkManager {
    * on this side.
    *
    * Blue moves first and the host is Blue, so without this barrier the host
-   * could fire while the joiner is still on the loadout screen — and with no
-   * `onMessage` attached yet, those commands would be dropped outright. The
+   * could fire while the joiner is still on the loadout screen, at a squad
+   * this side has never been told about. The
    * sheets ride the same message because this is exactly the moment both sides
    * know who they brought: any later and a shot could be resolved against a
    * squad this side had guessed at.

@@ -19,7 +19,7 @@ import { World } from '../ecs/World'
  *
  * The world a played match builds, minus the scene: the same systems, the same
  * {@link CommandSystem} applying the same commands. Its users are the replay
- * runner (`Replay.ts`), the referee (`src/server/Referee.ts`), the sweep
+ * runner (`Replay.ts`), each refereed room (`src/server/Room.ts`), the sweep
  * (`SimMatch`) and any test that wants a match without an engine. Because the
  * applier is shared with the played game, everything they exercise is the
  * path real players take — which was not true while the controller kept

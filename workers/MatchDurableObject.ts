@@ -1,12 +1,13 @@
 import { DurableObject } from 'cloudflare:workers'
+import { parseIntent } from '../src/game/Lobby'
 import { apiHandler } from '../src/server/Api'
+import { Lobby } from '../src/server/Lobby'
 import {
   LOCAL_RELYING_PARTY,
   persistenceOverDb,
   type Persistence,
   type RelyingParty,
 } from '../src/server/Persistence'
-import { Referee } from '../src/server/Referee'
 import { socketTransport } from '../src/server/SocketTransport'
 import { dbOverSqlStorage } from './DoSqliteDb'
 import type { Env } from './index'
@@ -14,29 +15,33 @@ import type { Env } from './index'
 /**
  * One Durable Object for the whole deployment (`[ITEM-045]`).
  *
- * A match server is one referee, so there is exactly one instance: the Worker
- * always addresses it by the same fixed name (see `index.ts`), never by a
- * name derived from the request. Everything the Worker receives — a page
- * load, an asset, an `/api/…` call, a WebSocket upgrade — arrives here.
+ * A match server is one lobby of rooms, so there is exactly one instance: the
+ * Worker always addresses it by the same fixed name (see `index.ts`), never by
+ * a name derived from the request. Everything the Worker receives — a page
+ * load, an asset, an `/api/…` call, a WebSocket upgrade — arrives here, and
+ * every room this deployment holds lives in this one object.
  *
- * `Referee`, `Persistence` and `apiHandler` are the same classes
+ * `Lobby`, `Persistence` and `apiHandler` are the same classes
  * `startGameServer` (`src/server/GameServer.ts`) runs behind a Bun process —
  * nothing about them is Bun-specific once they are handed a `Db`
  * (`DoSqliteDb.ts` is that `Db`, over `ctx.storage.sql`) and a transport with
  * `send`/`close` (`socketTransport`, already exported for exactly this).
  *
- * **A match socket does not hibernate.** `Referee` keeps a match's open
- * state — `this.clients`, `this.host`, `this.sides` — in memory, with no
+ * **A match socket does not hibernate.** The lobby keeps every open room —
+ * its seats, its spectators, its live `MatchHost` — in memory, with no
  * durable backing; hibernation evicts the whole object, and there is
  * nothing this class could deserialize a live `MatchHost` back out of. So a
  * WebSocket here is accepted with plain `server.accept()`, not
- * `ctx.acceptWebSocket()`: as long as a match socket is open, the runtime
- * keeps this instance resident rather than evicting it between messages,
- * the ordinary cost of a stateful connection rather than the hibernatable
- * one this class first shipped with. Once every socket closes, nothing
- * pins the instance and it can be evicted like any other idle Durable
- * Object; static-asset and `/api/…` traffic never needed to be exempt from
- * that, since both are stateless replies against durable storage.
+ * `ctx.acceptWebSocket()`: as long as any socket is open, the runtime keeps
+ * this instance resident rather than evicting it between messages, the
+ * ordinary cost of a stateful connection rather than the hibernatable one
+ * this class first shipped with. Once every socket closes, nothing pins the
+ * instance and it can be evicted like any other idle Durable Object — taking
+ * any room still open with it (a seat held for a player who dropped, say),
+ * though never a log: those are already in `ctx.storage.sql`. Static-asset
+ * and `/api/…` traffic never needed to be exempt from that, since both are
+ * stateless replies against durable storage, or against the room list as it
+ * stands.
  */
 export class MatchDurableObject extends DurableObject<Env> {
   private readonly log = (message: string): void => console.info(`[referee] ${message}`)
@@ -47,7 +52,7 @@ export class MatchDurableObject extends DurableObject<Env> {
    * object until the block's promise has settled.
    */
   private persistence!: Persistence
-  private referee!: Referee
+  private lobby!: Lobby
   private api!: (request: Request) => Promise<Response | null>
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -55,7 +60,7 @@ export class MatchDurableObject extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       const party = relyingPartyOf(env)
       this.persistence = await persistenceOverDb(dbOverSqlStorage(ctx.storage.sql), party)
-      this.referee = new Referee({
+      this.lobby = new Lobby({
         matches: this.persistence.matches,
         rosters: this.persistence.rosters,
         log: this.log,
@@ -66,7 +71,7 @@ export class MatchDurableObject extends DurableObject<Env> {
           }
         },
       })
-      this.api = apiHandler(this.persistence, party, this.log)
+      this.api = apiHandler(this.persistence, this.lobby, party, this.log)
     })
   }
 
@@ -75,9 +80,10 @@ export class MatchDurableObject extends DurableObject<Env> {
       // A ticket is how an account reaches a socket: a browser cannot put an
       // `Authorization` header on a WebSocket, and a session token in a url
       // is a session token in somebody's logs.
-      const ticket = new URL(request.url).searchParams.get('ticket')
-      const playerId = ticket ? this.persistence.accounts.redeemTicket(ticket) : null
-      if (ticket && !playerId) {
+      const params = new URL(request.url).searchParams
+      const ticket = params.get('ticket')
+      const player = ticket ? this.persistence.accounts.redeemTicket(ticket) : null
+      if (ticket && !player) {
         return Response.json(
           { error: 'that sign-in ticket is not valid; sign in again' },
           { status: 401 },
@@ -99,8 +105,10 @@ export class MatchDurableObject extends DurableObject<Env> {
       server.addEventListener('error', () => {
         transport.closed('the socket errored')
       })
-      this.referee.attach(transport, playerId)
-      this.log(`a client connected${playerId ? ' signed in' : ''}`)
+      // An intent the url states badly is refused in-band by the lobby, after
+      // the version gate, where the page can show the reason.
+      this.lobby.attach(transport, player, parseIntent(params))
+      this.log(`a client connected${player ? ` as ${player.name}` : ''}`)
       return new Response(null, { status: 101, webSocket: client })
     }
 

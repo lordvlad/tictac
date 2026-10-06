@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { ROSTER } from '../src/config'
 import { fromBase64Url, toBase64Url } from '../src/game/Base64Url'
 import { apiHandler } from '../src/server/Api'
+import { Lobby } from '../src/server/Lobby'
 import { LOCAL_RELYING_PARTY, type Persistence } from '../src/server/Persistence'
 import type { RosterMember } from '../src/server/Rosters'
 import { softwareAuthenticator, type SoftwareAuthenticator } from './support/authenticator'
@@ -32,7 +33,8 @@ interface ApiDriver {
 }
 
 function driver(persistence: Persistence): ApiDriver {
-  const handle = apiHandler(persistence, LOCAL_RELYING_PARTY, () => {})
+  const lobby = new Lobby({ matches: persistence.matches, log: () => {} })
+  const handle = apiHandler(persistence, lobby, LOCAL_RELYING_PARTY, () => {})
 
   const call = async (
     method: string,
@@ -297,9 +299,11 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
     const ticket = issued.body.ticket as string
     expect(typeof ticket).toBe('string')
 
-    // Single use: a url with a ticket in it is a url that stops working the
-    // moment it has been used once.
-    expect(persistence.accounts.redeemTicket(ticket)).not.toBeNull()
+    // A ticket names the whole player, so the socket it opens knows who sits
+    // down without another trip to the database. Single use: a url with a
+    // ticket in it is a url that stops working the moment it has been used.
+    const me = await api.call('GET', '/api/me', { token })
+    expect(persistence.accounts.redeemTicket(ticket)).toEqual(me.body.player as { id: string; name: string })
     expect(persistence.accounts.redeemTicket(ticket)).toBeNull()
     expect(persistence.accounts.redeemTicket('invented')).toBeNull()
 

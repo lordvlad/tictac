@@ -3,12 +3,15 @@ title: "P2P Networking & JSON-RPC Wire Protocol"
 id: "ARCH-NETWORKING"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-29"
+lastReviewed: "2026-10-06"
 appliesTo:
   - "src/game/NetworkManager.ts"
   - "src/game/JsonRpc.ts"
+  - "src/game/Lobby.ts"
   - "src/game/Recording.ts"
   - "src/game/Squads.ts"
+  - "src/server/Lobby.ts"
+  - "src/server/Room.ts"
   - "src/version.ts"
   - "scripts/schemaCatalog.ts"
   - "scripts/build-schema-catalog.ts"
@@ -300,3 +303,129 @@ component would itself be a hand-maintained second source of truth. And it
 guards the *wire* shape (`PROTOCOL_VERSION`); `RECORDING_VERSION` is a separate
 concern (whether the same header replays the same map) with its own refusal in
 `parseRecording`.
+
+## 8. Refereed Matches: Rooms on One Server
+
+A match server (`src/server/GameServer.ts` behind `Bun.serve`, or the one Durable Object in
+`docs/architecture/deployment.md` §2) is a **lobby of rooms** (`src/server/Lobby.ts`). A room
+(`src/server/Room.ts`) is one match: a Blue seat (whoever opened it), a Red seat (whoever
+joined it) and any number of spectators, plus the referee's own recomputation of the match —
+the version gate, roster verification, recording, settlement and attribution that used to be
+a single-use `Referee` watching one match for the life of the process. The shapes both sides
+share are in `src/game/Lobby.ts`.
+
+### Connecting
+
+A socket says what it wants in its url, not in a frame: `ticket` (signed-in players, from
+`POST /api/ticket`) plus `intentQuery(intent)` — `intent=open|join|watch|resume`, and
+`room=<id>` for `join`/`watch`. Its first frame is `hello`, which the server version-gates
+(§5, in the server's voice); only then is the intent resolved and answered with **one**
+`seated { roomId, faction, phase, redirected }`. A seat in a room that is `playing`, and a
+spectator of one, get the `log` (header and every intent so far) straight after; a spectator of
+a room that starts later gets it, with no events, the moment Blue's `matchHeader` arrives.
+A url without a readable intent is refused in-band with a reason rather than as a failed
+upgrade, so the page can show why.
+
+| Intent | Resolves to | Refused with |
+| --- | --- | --- |
+| `open` | a new room, Blue seat, `waiting` | — |
+| `join{room}` | that room's Red seat; the room becomes `deploying` | *That match already has two players — watch it instead.* / *That match is gone.* |
+| `watch{room}` | a spectator of that room, in any phase | *That match is gone.* |
+| `resume` | the player's own seat in a `playing` room, with the log | *You have no match in progress.* |
+
+After `seated`, a seat in a room still being set up carries on exactly as a peer match does:
+Blue announces the seed (`init`), Red states its build (`hello`), both deploy (`ready`), and
+Blue's `matchHeader` opens the match (`playing`). The in-band `resume { matchId, afterSeq }`
+of protocol 5 is gone: taking a seat back is an intent of the url, and the log comes whole.
+
+### What goes where
+
+| Frame | Accepted from | Sent on to |
+| --- | --- | --- |
+| `hello`, `init`, `ready` | either seat | the other seat only — it is how Blue restates its opening to a late joiner (§3) |
+| `matchHeader` | Blue, once Red has joined | Red; spectators get `log` instead |
+| an intent (`isCommand`) | either seat, once `playing` — legality is the rules' business | recorded, refought, then the other seat and every spectator |
+| `digest` | either seat, once `playing` | checked against the referee's world, then the other seat |
+| `log`, `seated`, `abort` | nobody: the server's to say | — |
+| anything from a spectator | — | dropped |
+
+The `log` a socket is handed is the room's own in-memory copy of what it accepted, numbered as
+`MatchStore` numbers it, so it arrives synchronously — before the next relayed intent could. The
+room's id is also the match's id in the store.
+
+### The two rules that span rooms
+
+Both bind signed-in players only; an anonymous socket has no identity to hold anything to.
+
+- **One match per player.** A player holding a seat in a room that is playing who asks to
+  open, join or watch anything is put back in their own seat instead, with
+  `redirected: true` and the log.
+- **One live window per player.** A player's newest socket, once past the version gate,
+  replaces their previous one wherever it was: that socket is sent *You opened TicTac in
+  another window; this one was disconnected.* and closed. A seat it held in a match already
+  `playing` passes to the new socket untouched — the opponent never notices. A seat it held in
+  a room still `waiting` or `deploying` is abandoned: that room is aborted for everybody in it
+  (*Ada left before the match began.*) and the player is free before the new intent is
+  weighed. A half-equipped loadout lives in the window equipping it and is not moved.
+
+### Leaving, and the end of a room
+
+- A seat closing before the match began aborts the room (*Bo left before the match began.*,
+  or *The other player left before the match began.* for an anonymous seat).
+- An anonymous seat closing mid-match aborts it at once (*The other player left the
+  match.*). A signed-in one is held for a grace period (`GRACE_MS`, two minutes; injectable),
+  shown as `connected: false` in the lobby; `resume` within it takes the seat back, and its
+  expiry aborts the match (*Bo left the match.*).
+- A room is over when it settles (`winnerOf`) or aborts. Either way it leaves the listing and
+  its players are free to open or join another at once. A settled room keeps its sockets —
+  both clients finish on their own end screens — while an abort is sent to every socket in it.
+  An abort for a player leaving is not a verdict: `onVerdict` hears only the referee's own
+  judgements (a digest that disagrees, an intent it cannot carry out, a squad that is not the
+  roster, a write that failed).
+
+`GET /api/lobby` answers a `LobbyView`: rooms not over, newest first, each with its phase,
+seats (name, connected), spectator count and turn; and `you`, the asker's own seat, when a
+valid bearer token names them. A token the server no longer honours is treated as anonymous
+rather than refused: the room list is public.
+
+Everything here is in memory. A process restart, or an evicted Durable Object, loses every
+open room and every held seat; what survives is every log a room started.
+
+### The browser's side
+
+`NetworkManager.connectToServer(url, intent)` opens the socket with the intent on its url,
+sends `hello`, and resolves with the `seated` frame — or rejects with the stated reason if an
+`abort` or a close comes first. `seated` and `log` are taken at its edge, never forwarded as
+commands; `waitForLog()` hands the log over whenever it is asked for, and any intent relayed
+while the window is still being built is held and released, in order, the moment `onMessage`
+is assigned. A spectator is `mode: 'spectate'`: it hears everything and transmits nothing after
+`hello` — no intents, no digests, no component updates.
+
+What `main.tsx` does with the seat (`takeSeat`):
+
+- **A seat in a room being set up** — Blue announces the match and goes to its loadout; Red
+  waits for the opening and goes to its own. The same flow a peer match has.
+- **A seat in a match being played** (`resume`, or `redirected`) — the match is rebuilt from
+  the log's header and replayed with `InteractionController.catchUp`, which applies each logged
+  intent the way a replay does and steps time in fixed ticks until its walk and reactions have
+  finished: the world a headless `MatchHost` reaches, from the same dice. Then it is simply the
+  match, on the same side, with the same controls. `catchUp` logs how long it took to the
+  console; a short log (four intents) took 33 ms in Chromium.
+- **A spectator** — the same rebuild with no network handed to the controller, every field
+  revealed and the HUD hidden, exactly like a recording; live intents are applied as they
+  arrive, one after the previous one has finished walking. A `SpectatorBar`
+  (`src/hud/SpectatorBar.tsx`) says whose turn it is, who won once the last intent has played
+  out, and offers the way back to the menu.
+
+Taking a match over is proven the only way that counts: the referee compares the new window's
+digest at its next handover and aborts the room on any difference. Two things used to fail
+that check on the very first handover of *every* refereed match, and are fixed with it:
+
+- `Squads.loadoutOf` read each pouch back with the stones every soldier is issued
+  (`GrenadeSpec.issued`), and applying that loadout issued them again — so the header deployed
+  every soldier with twice the stones the players had. A loadout is what was *packed*; the
+  issued grenades come off when it is read back.
+- Fog (`SightedComponent.seen`) was serialised with the unit, so it travelled and was
+  digested as if it were a fact about the unit rather than one window's view of it, and the
+  referee — which draws no fog — disagreed about every hidden enemy. `seen` is no longer in
+  `serialize`; `known`, which the rules set on every peer alike, still is.

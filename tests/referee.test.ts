@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import { AmmoId, ShotMode, WeaponId } from '../src/core/Arsenal'
 import { Faction } from '../src/config'
-import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../src/game/JsonRpc'
-import type { NetworkMessage } from '../src/game/NetworkManager'
 import type { CombatRecording } from '../src/game/Recording'
-import { loopback, type Transport } from '../src/game/Transport'
 import { openPersistence } from '../src/server/db/BunSqlDb'
-import { Referee, type RefereeVerdict } from '../src/server/Referee'
+import type { Player } from '../src/server/Accounts'
+import { Lobby } from '../src/server/Lobby'
+import type { RefereeVerdict } from '../src/server/Room'
 import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'
 import { SimMatch, type SquadPlan } from '../src/sim/SimMatch'
 import { MY_VERSION } from '../src/version'
+import { connect, seatBoth } from './support/lobby'
 
 const STOCK: SquadPlan = {
   weapons: [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun],
@@ -19,6 +19,9 @@ const STOCK: SquadPlan = {
   items: {},
   attachments: [],
 }
+
+const ADA: Player = { id: 'A', name: 'Ada' }
+const BO: Player = { id: 'B', name: 'Bo' }
 
 /** A match somebody already played, to use as two clients' intents. */
 function recorded(seed: number): CombatRecording {
@@ -29,36 +32,18 @@ function recorded(seed: number): CombatRecording {
   return recording!
 }
 
-/** A client, as the referee sees one: it sends frames and collects replies. */
-function client(referee: Referee) {
-  const [mine, theirs] = loopback()
-  referee.attach(theirs)
-  const received: NetworkMessage[] = []
-  mine.onFrame((frame) => {
-    if (!('method' in frame)) return
-    const params = (frame as JsonRpcNotification).params as Record<string, unknown>
-    for (const [type, method] of Object.entries(RpcMethods)) {
-      if (method === frame.method) received.push({ ...params, type } as NetworkMessage)
-    }
-  })
-  const send = (message: NetworkMessage): void => {
-    const params = { ...message } as Record<string, unknown>
-    delete params.type
-    mine.send({ jsonrpc: '2.0', method: RpcMethods[message.type], params } as JsonRpcFrame)
-  }
-  return { send, received, transport: mine as Transport }
-}
-
 async function harness(seed = 4242) {
   const recording = recorded(seed)
   const persistence = await openPersistence()
   const verdicts: RefereeVerdict[] = []
-  const referee = new Referee({
+  const lobby = new Lobby({
     matches: persistence.matches,
     onVerdict: (v) => verdicts.push(v),
     log: () => {},
+    // A dropped seat is held on a clock nothing here ever runs out.
+    schedule: () => () => {},
   })
-  return { recording, store: persistence.matches, persistence, referee, verdicts }
+  return { recording, store: persistence.matches, persistence, lobby, verdicts }
 }
 
 describe('A third recomputation of the same match', () => {
@@ -66,56 +51,70 @@ describe('A third recomputation of the same match', () => {
     // Both clients are clients: they resolve their own intents, and the referee
     // resolves the same stream. What it ends up holding is not a copy of what
     // they told it — it is its own answer to the same question.
-    const { recording, store, referee } = await harness()
-    const blue = client(referee)
+    const { recording, store, lobby } = await harness()
+    const { blue, roomId } = seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
 
     for (const event of recording.events) blue.send(event.command)
 
-    const matchId = referee.openMatchId
-    expect(matchId).not.toBeNull()
     // The referee judges a frame the moment it arrives and writes afterwards,
-    // so a reader of the log waits for the writes it already decided on.
-    await referee.idle()
-    expect(await store.events(matchId!)).toHaveLength(recording.events.length)
+    // so a reader of the log waits for the writes it already decided on. The
+    // match is written under the room's own id.
+    await lobby.idle()
+    expect(await store.events(roomId)).toHaveLength(recording.events.length)
 
     // And the referee's own world is the match: the same survivors the players'
     // own run reached, from intents alone.
     const independent = replay(recording)
-    expect(referee.digest()!.total).toBe(independent.digest.total)
+    expect(lobby.room(roomId)!.digest()!.total).toBe(independent.digest.total)
   })
 
   test('the log it keeps is a match somebody else can refight', async () => {
     // The persistence half. What is stored is the intent stream, so the stored
     // match is re-derivable rather than a summary that could disagree with it.
-    const { recording, store, referee } = await harness()
-    const blue = client(referee)
+    const { recording, store, lobby } = await harness()
+    const { blue, roomId } = seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
     for (const event of recording.events) blue.send(event.command)
 
-    await referee.idle()
-    const stored = await store.match(referee.openMatchId!)
+    await lobby.idle()
+    const stored = await store.match(roomId)
     expect(stored).not.toBeNull()
 
     const fromStore = replay(stored!)
     expect(fromStore.skipped).toEqual([])
-    expect(fromStore.digest.total).toBe(referee.digest()!.total)
+    expect(fromStore.digest.total).toBe(lobby.room(roomId)!.digest()!.total)
   })
 
-  test('intents reach the other client, and never echo back to the sender', async () => {
+  test('intents reach the other seat and every spectator, and never echo back to the sender', async () => {
     // The referee relays as well as watches, which is what removes the
     // signalling broker from a refereed match. A frame coming back to its
     // sender would be applied twice.
-    const { recording, referee } = await harness()
-    const blue = client(referee)
-    const red = client(referee)
+    const { recording, lobby } = await harness()
+    const { blue, red, roomId } = seatBoth(lobby, null, null)
+    const watcher = connect(lobby, null, { kind: 'watch', roomId })
     blue.send({ type: 'matchHeader', header: recording.header })
 
     const first = recording.events[0]!.command
     blue.send(first)
 
     expect(red.received.map((m) => m.type)).toContain(first.type)
+    expect(watcher.received.map((m) => m.type)).toContain(first.type)
     expect(blue.received.map((m) => m.type)).not.toContain(first.type)
+  })
+
+  test('a match cannot start before somebody has joined it', async () => {
+    // The opening position is Blue's to state once both sides have deployed;
+    // stated into a room with nobody in the other seat, it opens nothing.
+    const { recording, store, lobby } = await harness()
+    const blue = connect(lobby, null, { kind: 'open' })
+    blue.send({ type: 'matchHeader', header: recording.header })
+    blue.send(recording.events[0]!.command)
+
+    await lobby.idle()
+    const roomId = blue.of('seated')[0]!.roomId
+    expect(lobby.view(null).rooms[0]!.phase).toBe('waiting')
+    expect(await store.header(roomId)).toBeNull()
   })
 })
 
@@ -124,8 +123,8 @@ describe('Attribution, which is the only thing a third party adds', () => {
     // Two peers can notice a disagreement; neither can prove whose fault it is.
     // The referee is not asking whether the client agrees with its opponent —
     // it is asking whether it agrees with a recomputation neither player owns.
-    const { recording, referee, verdicts } = await harness()
-    const blue = client(referee)
+    const { recording, lobby, verdicts } = await harness()
+    const { blue, red } = seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
     for (const event of recording.events.slice(0, 6)) blue.send(event.command)
 
@@ -140,26 +139,31 @@ describe('Attribution, which is the only thing a third party adds', () => {
 
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toContain('disagrees with the referee')
+    expect(verdicts[0]!.side).toBe(Faction.Blue)
     expect(verdicts[0]!.found.some((d) => d.what.startsWith('component'))).toBe(true)
-    expect(blue.received.some((m) => m.type === 'abort')).toBe(true)
+    // Both seats are told, and the room is over.
+    expect(blue.of('abort')).toHaveLength(1)
+    expect(red.of('abort')).toHaveLength(1)
+    expect(lobby.view(null).rooms).toEqual([])
   })
 
-  test('an honest digest is silent', async () => {
-    const { recording, referee, verdicts } = await harness()
-    const blue = client(referee)
+  test('an honest digest is silent, and reaches the other seat', async () => {
+    const { recording, lobby, verdicts } = await harness()
+    const { blue, red, roomId } = seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
     for (const event of recording.events.slice(0, 6)) blue.send(event.command)
 
-    blue.send({ type: 'digest', digest: referee.digest()! })
+    blue.send({ type: 'digest', digest: lobby.room(roomId)!.digest()! })
 
     expect(verdicts).toEqual([])
+    expect(red.of('digest')).toHaveLength(1)
   })
 
   test('an intent the referee cannot carry out ends the match too', async () => {
     // A disagreement about what was *possible* is larger than a disagreement
     // about a number, so it is a verdict rather than a logged shrug.
-    const { recording, referee, verdicts } = await harness()
-    const blue = client(referee)
+    const { recording, lobby, verdicts } = await harness()
+    const { blue, red } = seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
 
     blue.send({
@@ -173,75 +177,77 @@ describe('Attribution, which is the only thing a third party adds', () => {
     // Nobody is in range at the opening position, so the rules refuse it.
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toContain('could not carry out')
+    // Refused, so not passed on: the other seat hears why, not the shot.
+    expect(red.of('fireShot')).toEqual([])
+    expect(red.of('abort')).toHaveLength(1)
   })
 
-  test('a client on another build is refused rather than accused', async () => {
+  test('a client on another build is refused rather than accused, before it is placed anywhere', async () => {
     // The precondition for ever naming a side: this project deploys on every
     // push, so two builds diverge innocently and the first player a referee
     // accused would be somebody with a stale cache.
-    const { referee, verdicts } = await harness()
-    const stale = client(referee)
+    const { lobby, verdicts } = await harness()
+    const stale = connect(lobby, null, { kind: 'open' }, { hello: false })
 
     stale.send({ type: 'hello', protocol: MY_VERSION.protocol, build: 'c0ffee1' })
 
-    const abort = stale.received.find((m) => m.type === 'abort')
-    expect(abort).toBeDefined()
-    expect(abort && 'reason' in abort ? abort.reason : '').toContain('c0ffee1')
-    // Refused, not judged: no verdict is recorded against a build mismatch.
+    const abort = stale.of('abort')[0]
+    expect(abort?.reason).toContain('c0ffee1')
+    expect(stale.closed).toBe(true)
+    // Refused, not judged: no verdict, and no room opened for it.
     expect(verdicts).toEqual([])
+    expect(stale.of('seated')).toEqual([])
+    expect(lobby.view(null).rooms).toEqual([])
+  })
+
+  test('a url that asks for nothing readable is refused in words, after the build is checked', async () => {
+    const { lobby } = await harness()
+    const lost = connect(lobby, null, null)
+
+    expect(lost.of('abort')[0]?.reason).toMatch(/does not say which match/)
+    expect(lost.closed).toBe(true)
   })
 })
 
 describe('Rejoining a match that outlived its tab', () => {
-  test('a returning client is handed the log it is missing', async () => {
-    const { recording, referee } = await harness()
-    const blue = client(referee)
+  test('a player who takes their seat back is handed the whole log, and it refights to the referee', async () => {
+    const { recording, store, lobby } = await harness()
+    const { blue, roomId } = seatBoth(lobby, ADA, BO)
+    // Part of a match, so it is still being played when Blue comes back.
+    const played = recording.events.slice(0, 20)
     blue.send({ type: 'matchHeader', header: recording.header })
-    for (const event of recording.events) blue.send(event.command)
+    for (const event of played) blue.send(event.command)
+    blue.close()
 
-    const returning = client(referee)
-    returning.send({ type: 'resume', matchId: referee.openMatchId!, afterSeq: -1 })
+    const returning = connect(lobby, ADA, { kind: 'resume' })
 
-    // The log is read from the database, so the answer arrives once the
-    // referee's queue has drained.
-    await referee.idle()
-    const log = returning.received.find((m) => m.type === 'log')
-    expect(log).toBeDefined()
-    if (!log || log.type !== 'log') throw new Error('no log')
-    expect(log.events).toHaveLength(recording.events.length)
+    expect(returning.of('seated')).toEqual([
+      { type: 'seated', roomId, faction: Faction.Blue, phase: 'playing', redirected: false },
+    ])
+    // The log follows the seat immediately, without waiting on the database:
+    // nothing relayed after it may arrive before it.
+    expect(returning.received.map((m) => m.type)).toEqual(['seated', 'log'])
+    const log = returning.of('log')[0]!
+    expect(log.matchId).toBe(roomId)
+    expect(log.events.map((event) => event.seq)).toEqual(played.map((_, i) => i))
+    expect(log.events.map((event) => event.command)).toEqual(played.map((event) => event.command))
 
     // And replaying what it was handed reaches the referee's own world, which
-    // is the whole claim: rejoin is replay.
+    // is the whole claim: rejoin is replay. The store numbers the same log the
+    // same way.
     const rebuilt = replay({ header: log.header, events: log.events })
-    expect(rebuilt.digest.total).toBe(referee.digest()!.total)
+    expect(rebuilt.digest.total).toBe(lobby.room(roomId)!.digest()!.total)
+    await lobby.idle()
+    expect(await store.events(roomId)).toEqual(log.events)
   })
 
-  test('a client that already has most of the log only gets the tail', async () => {
-    // What `afterSeq` is for: a rejoining client states the last intent it is
-    // sure of, and a log it already has is bytes nobody needs to send.
-    const { recording, referee } = await harness()
-    const blue = client(referee)
-    blue.send({ type: 'matchHeader', header: recording.header })
-    for (const event of recording.events) blue.send(event.command)
+  test('taking back a seat nobody holds is refused in words', async () => {
+    const { lobby } = await harness()
 
-    const returning = client(referee)
-    returning.send({ type: 'resume', matchId: referee.openMatchId!, afterSeq: 9 })
+    const anonymous = connect(lobby, null, { kind: 'resume' })
+    const signedIn = connect(lobby, ADA, { kind: 'resume' })
 
-    await referee.idle()
-    const log = returning.received.find((m) => m.type === 'log')
-    if (!log || log.type !== 'log') throw new Error('no log')
-    expect(log.events).toHaveLength(recording.events.length - 10)
-    expect(log.events[0]!.seq).toBe(10)
-  })
-
-  test('resuming a match nobody has heard of is refused with the id', async () => {
-    const { referee } = await harness()
-    const lost = client(referee)
-
-    lost.send({ type: 'resume', matchId: 'not-a-match', afterSeq: -1 })
-
-    await referee.idle()
-    const abort = lost.received.find((m) => m.type === 'abort')
-    expect(abort && 'reason' in abort ? abort.reason : '').toContain('not-a-match')
+    expect(anonymous.of('abort')[0]?.reason).toBe('You have no match in progress.')
+    expect(signedIn.of('abort')[0]?.reason).toBe('You have no match in progress.')
   })
 })

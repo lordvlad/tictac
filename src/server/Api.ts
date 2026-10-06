@@ -1,14 +1,17 @@
 import type { Player } from './Accounts'
+import type { Lobby } from './Lobby'
 import type { Persistence, RelyingParty } from './Persistence'
 import { AuthError } from './WebAuthn'
 
 /**
- * The match server's HTTP side: signing in, and what being signed in gets you.
+ * The match server's HTTP side: signing in, what being signed in gets you, and
+ * the lobby's room list.
  *
  * Everything the game itself does still travels over the WebSocket as JSON-RPC
  * notifications. What is here is the part that cannot: a passkey ceremony needs
- * request/response, and a browser cannot put an `Authorization` header on a
- * socket — hence `/api/ticket`.
+ * request/response, a browser cannot put an `Authorization` header on a
+ * socket — hence `/api/ticket` — and a player choosing a room to join wants to
+ * see the rooms before holding a socket to any of them (`/api/lobby`).
  *
  * It answers null for anything that is not `/api/…`, so the caller keeps its
  * own routes (the upgrade, the status document) without this file knowing about
@@ -17,6 +20,7 @@ import { AuthError } from './WebAuthn'
 
 export function apiHandler(
   persistence: Persistence,
+  lobby: Lobby,
   party: RelyingParty,
   log: (message: string) => void,
 ): (request: Request) => Promise<Response | null> {
@@ -39,10 +43,15 @@ export function apiHandler(
     }
   }
 
-  const bearer = async (request: Request): Promise<Player> => {
+  /** The player a bearer token names, or null for none — or for one this server will not honour. */
+  const signedIn = async (request: Request): Promise<Player | null> => {
     const header = request.headers.get('authorization') ?? ''
     const token = header.startsWith('Bearer ') ? header.slice(7) : ''
-    const player = token ? await accounts.playerFor(token) : null
+    return token ? await accounts.playerFor(token) : null
+  }
+
+  const bearer = async (request: Request): Promise<Player> => {
+    const player = await signedIn(request)
     if (!player) throw new AuthError(401, 'sign in first')
     return player
   }
@@ -102,6 +111,12 @@ export function apiHandler(
         }
         case 'GET /api/me':
           return Response.json({ player: await bearer(request) }, { headers })
+        // Open to anybody, signed in or not: the lobby is a public room list.
+        // A token only adds which seat is the asker's own, so one that has
+        // expired costs them that and nothing else — not a 401 on a page
+        // they could read without it.
+        case 'GET /api/lobby':
+          return Response.json(lobby.view(await signedIn(request)), { headers })
         case 'GET /api/roster': {
           const player = await bearer(request)
           return Response.json({ roster: await rosters.active(player.id) }, { headers })
@@ -112,7 +127,7 @@ export function apiHandler(
         }
         case 'POST /api/ticket': {
           const player = await bearer(request)
-          return Response.json({ ticket: accounts.issueTicket(player.id) }, { headers })
+          return Response.json({ ticket: accounts.issueTicket(player) }, { headers })
         }
         default:
           return Response.json({ error: 'no such endpoint' }, { status: 404, headers })

@@ -174,7 +174,7 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
 - `src/core/Characters.ts` (`rollSquadSheets` default count)
 - `src/game/Recording.ts` (`deploymentsFrom` bound)
 - `src/server/Rosters.ts` (`recruit`)
-- `src/server/Referee.ts` (`verifyRosters`)
+- `src/server/Room.ts` (`verifyRosters`)
 - `src/hud/RosterScreen.ts` (deploy toggle, defaulting, empty-slot rendering)
 - `docs/architecture/networking.md`, `docs/architecture/persistence.md`
 - Whatever the base/vehicle economy and the scenario/mission system turn out to be, once they
@@ -263,7 +263,7 @@ the squad was and what happens to its journey afterwards.
 8. **A return feed**: what happened while the player was away, each fight watchable back.
 
 #### Affected Files
-- `src/server/Referee.ts` (an AI-controlled side; settling a side with no roster)
+- `src/server/Room.ts` (an AI-controlled side; settling a side with no roster)
 - `src/sim/Policy.ts`, `src/game/AiOpponent.ts` (the policy seated by the referee)
 - `src/game/Recording.ts` (controller per side in the header)
 - Travel's alarm/checkpoint scheduler from `ITEM-050`
@@ -428,7 +428,7 @@ are away, so most crossings will involve at least one absent player.
    zones.
 
 #### Affected Files
-- Travel's scheduler (`ITEM-050`), the referee's AI seating (`ITEM-048`), `src/server/Referee.ts`
+- Travel's scheduler (`ITEM-050`), the referee's AI seating (`ITEM-048`), `src/server/Room.ts`
 
 #### P2P / Simulation Impact
 - None on match rules. The meeting check is geometry over waypoints, outside any match.

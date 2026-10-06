@@ -30,8 +30,12 @@
  *
  * 5: `throwGrenade` carries `targetLevel`, the storey aimed at, which decides
  * whether the throw is lobbed or thrown low under a roof.
+ *
+ * 6: a match server holds many rooms (`src/game/Lobby.ts`). A socket states
+ * what it wants in its url, and the server's first frame is `seated`; a
+ * protocol-5 client would connect, never be seated, and wait forever.
  */
-export const PROTOCOL_VERSION = 5
+export const PROTOCOL_VERSION = 6
 
 /**
  * The commit this bundle was built from, or `dev` when it was not built.

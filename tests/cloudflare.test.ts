@@ -27,7 +27,7 @@ import { softwareAuthenticator } from './support/authenticator'
  * around it; a passkey ceremony, a roster fetch and a ticket all work over
  * real HTTP; a signed-in socket, an anonymous one, and one with an invalid
  * ticket are each treated the way `tests/server.test.ts` proves the
- * `Bun.serve` referee treats them — the same `Referee`, `Persistence` and
+ * `Bun.serve` lobby treats them — the same `Lobby`, `Persistence` and
  * `apiHandler`, now behind a Cloudflare `WebSocket` and `ctx.storage.sql`.
  * And, past a single relayed frame: a whole decisive match, driven by
  * `src/sim/WireMatch.ts`, settles through this object's own independent
@@ -257,7 +257,7 @@ describe('The planted Cloudflare deployment', () => {
 
   test('a frame that is not JSON-RPC is dropped, not relayed, and the socket stays open', async () => {
     // Proves the switch from the earlier bare relay to the real
-    // `Referee`/`socketTransport`: junk text is silently discarded
+    // `Lobby`/`socketTransport`: junk text is silently discarded
     // (`isJsonRpcFrame`) rather than broadcast to whoever else is
     // connected, and discarding it does not close the sender's own socket.
     const socket = new WebSocket(BASE.replace('http', 'ws'))
@@ -274,7 +274,7 @@ describe('The planted Cloudflare deployment', () => {
     // the wire. This proves the referee itself: driven by `src/sim/WireMatch.ts`,
     // a real `SimMatch` plays a decisive match against its own rules, then the
     // exact same commands travel to this deployment's `MatchDurableObject`
-    // over a real WebSocket. Its `Referee` recomputes every one of them
+    // over a real WebSocket. Its `Room` recomputes every one of them
     // independently, on `workers/DoSqliteDb.ts` over `ctx.storage.sql`, inside
     // an actual `workerd` process — not the Bun-hosted referee every other
     // wire test in this repository uses. A referee that disagreed at any

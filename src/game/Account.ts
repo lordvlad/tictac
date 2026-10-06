@@ -1,5 +1,6 @@
 import { sanitizeSheet, type CharacterSheet } from '../core/Characters'
 import { fromBase64Url, toBase64Url } from './Base64Url'
+import type { LobbyView } from './Lobby'
 
 /**
  * The player's account on one match server, from the browser's side.
@@ -167,6 +168,15 @@ export class Account {
   async recruit(): Promise<RosterEntry> {
     const { member } = await this.call<{ member: RosterEntry }>('POST', '/api/roster/recruit', {})
     return { ...member, sheet: sanitizeSheet(member.sheet) }
+  }
+
+  /**
+   * The rooms on this server (`src/game/Lobby.ts`): who is waiting for an
+   * opponent, what is being played, and — when signed in — the seat this
+   * player already holds. Works signed out too; `you` is then null.
+   */
+  async lobby(): Promise<LobbyView> {
+    return this.call<LobbyView>('GET', '/api/lobby')
   }
 
   /**

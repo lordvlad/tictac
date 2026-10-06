@@ -147,7 +147,7 @@ answers two things this RFC would otherwise still be asking:
 - **A presence connection is not forced to be the durable record of where a squad is,** which
   gives it more room to use Cloudflare's Hibernation API than a connection that would lose
   something irreplaceable by hibernating — the constraint that keeps `[ITEM-045]`'s match
-  sockets non-hibernating today (`Referee`'s state has no durable backing) does not automatically
+  sockets non-hibernating today (a `Room`'s live state has no durable backing) does not automatically
   carry over to a presence connection once position itself is durable. Whether it actually can
   hibernate depends on what else a presence connection ends up holding in memory beyond
   position, which is, again, the world-map design's to answer — but it bears directly on §6.5's
@@ -175,7 +175,7 @@ from the instance it is succeeding.
 
 **Decided: a match never spans two Durable Objects (§6.4).** A match belongs entirely to
 whichever region's instance was hosting it when it started, the same way it belongs to one
-`Referee` today. What prevents two players from starting a fight exactly on a boundary is left
+`Room` today. What prevents two players from starting a fight exactly on a boundary is left
 to the world and the story — the same fiction toolkit that explains a boundary at all (§2) is
 responsible for there being a reason combat does not break out standing on top of one.
 
@@ -278,7 +278,7 @@ not accidentally load-bearing for an assumption this RFC removes:
    down, a faction losing ground) rather than an invisible technical event. One thing genuinely
    still unresolved, and it changes how much any of this matters: whether a partition's presence
    connections end up needing to stay non-hibernating at all, the way a match's referee socket
-   does today because `Referee`'s state has no durable backing (§4). If a presence connection can
+   does today because a `Room`'s state has no durable backing (§4). If a presence connection can
    tolerate the Hibernation API once a squad's position is itself durable (§4's correction), an
    underused partition may already cost nothing between messages regardless of merging, and this
    whole calculation changes. If it cannot, merging is the only lever available. Deferred to the

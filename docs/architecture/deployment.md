@@ -3,7 +3,7 @@ title: "Deployment: GitHub Pages and the Planted Cloudflare Durable Object"
 id: "ARCH-DEPLOYMENT"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-30"
+lastReviewed: "2026-10-06"
 appliesTo:
   - ".github/workflows/deploy.yml"
   - "wrangler.jsonc"
@@ -56,21 +56,23 @@ better than a Postgres instance answering every match server that exists.
 ### 2.1 One Durable Object, not one per match
 
 Despite the RFC's phrasing, this deployment runs **one** `MatchDurableObject` instance, not one
-per match:
+per match — and that one instance hosts every room:
 
 ```
 workers/index.ts (Worker)
   └── env.MATCH.idFromName('singleton')  ── always the same id
         └── workers/MatchDurableObject.ts (the one instance)
-              ├── fetch(): a WebSocket upgrade (→ Referee), /api/… (→ apiHandler),
-              │            or env.ASSETS.fetch(request)
+              ├── fetch(): a WebSocket upgrade (→ Lobby → a Room), /api/… (→ apiHandler,
+              │            including /api/lobby), or env.ASSETS.fetch(request)
               └── ctx.storage.sql, behind workers/DoSqliteDb.ts (the Db adapter)
 ```
 
-A match server is one referee, the same reason `startGameServer` (`src/server/GameServer.ts`)
-binds one port to one `Referee` today. Sharding by match would mean the Durable Objects
-namespace stops being "the referee" and starts being "a match," which is a bigger, different
-design than what is planted here.
+A match server is one lobby of rooms (`src/server/Lobby.ts`, `docs/architecture/networking.md`
+§8), the same reason `startGameServer` (`src/server/GameServer.ts`) binds one port to one
+`Lobby` today: the rules that span rooms — one match per player, one live window per player —
+need one place that sees every room. Sharding by match would mean the Durable Objects namespace
+stops being "the match server" and starts being "a match," which is a bigger, different design
+than what is planted here, and would need those two rules enforced across instances.
 
 This is a deliberate first stage, not a ceiling this deployment is meant to live under forever:
 a single Durable Object is one thread, and cannot be scaled up, only replaced.
@@ -95,26 +97,30 @@ one Durable Object that does both.
 
 ### 2.3 A real referee, not a relay — and why a match socket does not hibernate
 
-`MatchDurableObject` runs the same `Referee`, `Persistence` (via `persistenceOverDb`) and
+`MatchDurableObject` runs the same `Lobby`, `Persistence` (via `persistenceOverDb`) and
 `apiHandler` that `startGameServer` runs behind `Bun.serve`. Nothing about any of the three was
 Bun-specific once handed a `Db` (`workers/DoSqliteDb.ts`, §3) and a transport with `send`/
 `close` (`socketTransport`, `src/server/SocketTransport.ts` — split out of `GameServer.ts` for
 the same isolation reason as §4's typecheck). A WebSocket upgrade reads its ticket, redeems it
-through the same `Accounts.redeemTicket` the Bun-hosted referee uses, and attaches to `Referee`
-exactly as `GameServer.ts`'s `websocket.open` handler does.
+through the same `Accounts.redeemTicket` the Bun-hosted server uses, reads the intent off the
+url (`parseIntent`), and attaches to the `Lobby` exactly as `GameServer.ts`'s `websocket.open`
+handler does.
 
 This class's first pass accepted sockets with `ctx.acceptWebSocket`, the hibernatable API, on
 the reasoning that the runtime evicting an idle object between messages is the cost model a
-Durable Object is for. That was wrong for *this* socket specifically: `Referee` keeps a match's
-open state — `this.clients`, `this.host`, `this.sides` — in memory, with no durable backing, and
-hibernation evicts the *whole object*. There is nothing this class could deserialize a live
-`MatchHost` back out of on the next message, so a hibernated match's referee would simply forget
-it was refereeing anything. Sockets are accepted with plain `server.accept()` instead: as long
-as a match socket is open, the runtime keeps this instance resident rather than evicting it, the
-ordinary cost of any stateful connection. Once every socket closes, nothing pins the instance
-and it can be evicted like any other idle Durable Object — static-asset and `/api/…` traffic
-never needed the hibernation exemption, since both are stateless replies against durable
-storage answered without ever touching `Referee`'s in-memory state.
+Durable Object is for. That was wrong for *this* socket specifically: the lobby keeps every
+open room — its seats, its spectators, its live `MatchHost`, the grace timer on a seat whose
+player dropped — in memory, with no durable backing, and hibernation evicts the *whole
+object*. There is nothing this class could deserialize a live `MatchHost` back out of on the
+next message, so a hibernated room's referee would simply forget it was refereeing anything.
+Sockets are accepted with plain `server.accept()` instead: as long as any socket is open, the
+runtime keeps this instance resident rather than evicting it, the ordinary cost of any stateful
+connection. Once every socket closes, nothing pins the instance and it can be evicted like any
+other idle Durable Object — and an eviction takes every room still open with it, a seat held
+for a dropped player included, though never a log: each room writes its match to
+`ctx.storage.sql` as it goes. Static-asset and `/api/…` traffic never needed the hibernation
+exemption, since both are stateless replies against durable storage, or against the room list
+as it stands.
 
 ### 2.4 The Worker is stamped with the build id of the bundle it serves
 
@@ -206,7 +212,7 @@ files is written in.
 implementation (`openDb`/`wrap`). Doing so pulls in `@types/bun`, which pulls in `@types/node`'s
 ambient `NodeJS` namespace — which redeclares `crypto`/`BufferSource` in a way that conflicts
 with `@cloudflare/workers-types`' own the moment both are reachable from one TypeScript project.
-Wiring the real `Referee`/`apiHandler` into `workers/` made that true transitively (`Api.ts` →
+Wiring the real referee and `apiHandler` into `workers/` made that true transitively (`Api.ts` →
 `Persistence.ts`/`Rosters.ts`/`Accounts.ts` → `Db.ts`), so the Bun-specific half moved to
 `src/server/db/BunSqlDb.ts` (`openDb`, and `openPersistence`, which also needed `openDb`),
 leaving `Db.ts` itself — the port: `Dialect`, `SqlValue`, the `Db` interface, `dialectOf` — free
@@ -292,6 +298,6 @@ through it anonymously by `src/sim/WireMatch.ts` with no abort (which, at the ti
 than it looked: see §2.4). What remains open: the match
 above is anonymous; a *registered* match, whose roster is checked afterward via `GET
 /api/roster`, needs `SimMatch` or its wire harness to deploy a squad sourced from a real
-roster's exact rows rather than its own freshly-rolled sheets (`Referee.verifyRosters` checks
+roster's exact rows rather than its own freshly-rolled sheets (`Room.verifyRosters` checks
 for an exact match) — not built, and a different piece of work than making the deploy itself
 real. See the open acceptance criteria on [`ITEM-045`](../backlog/active-backlog.md).

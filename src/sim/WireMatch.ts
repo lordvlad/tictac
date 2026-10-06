@@ -1,7 +1,6 @@
 import { Faction } from '../config'
 import { NetworkManager, type NetworkMessage } from '../game/NetworkManager'
 import type { CombatRecording } from '../game/Recording'
-import { SocketTransport } from '../game/SocketTransport'
 import type { StateDigest } from '../game/StateDigest'
 import { SimMatch, type MatchOutcome, type MatchSetup } from './SimMatch'
 
@@ -31,45 +30,40 @@ export interface WireMatchResult {
   recording: CombatRecording
   /** This side's own final state, once every command has round-tripped. */
   digest: StateDigest
-}
-
-/** Resolves with the next message a manager's own side receives, once. */
-function onceMessage(manager: NetworkManager): Promise<NetworkMessage> {
-  return new Promise((resolve) => {
-    manager.onMessage = resolve
-  })
+  /** The room the server played it in, which is also its match id. */
+  roomId: string
 }
 
 /**
- * A `WebSocket` to `url`, resolved once it has actually opened.
+ * Resolves with the next message a manager's own side receives, once, and
+ * rejects if the match stops instead — an `abort` is taken at the edge and
+ * never arrives as a message, so a referee that disagreed would otherwise
+ * leave this waiting forever.
  *
- * A referee registers a socket as a client synchronously, before its own
- * handshake response reaches the far end (`MatchDurableObject.fetch` calls
- * `Referee.attach` before returning the `101`, and `GameServer.ts`'s
- * `websocket.open` runs before `Bun.serve` reports the socket open to the
- * other side either) — so a socket's own `open` event is already proof the
- * referee knows about it. Waited for explicitly, and *before* either side is
- * told to speak, because two independent connections give no guarantee that
- * the second one has been registered before the first one's opening frame
- * arrives; over one process that race is too fast to ever lose, over a real
- * network it decided this function's very first draft.
+ * The handler is taken down again on arrival, so anything after it is held
+ * by the manager for the next wait rather than spent on this one.
  */
-function connectedSocket(url: string): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url)
-    socket.addEventListener('open', () => resolve(socket), { once: true })
-    socket.addEventListener('error', () => reject(new Error(`could not connect to ${url}`)), { once: true })
-  })
+function onceMessage(manager: NetworkManager): Promise<NetworkMessage> {
+  const { promise, resolve, reject } = Promise.withResolvers<NetworkMessage>()
+  manager.onDisconnected = (reason) => reject(new Error(reason))
+  manager.onMessage = (message) => {
+    manager.onMessage = null
+    resolve(message)
+  }
+  return promise
 }
 
 /**
  * Play one match with `SimMatch`'s own policy, then replay its command
- * stream live through a referee at `url`.
+ * stream live through a match server at `url`.
+ *
+ * One side opens a room, the other joins it by the id the server seated the
+ * first in — the order two players in a lobby take — and from there it is the
+ * handshake two peers do directly.
  *
  * Sent one command at a time, each awaited until the *other* side's socket
  * has received the referee's relay of it, rather than fired off back to
- * back: a referee only accepts a side's commands during that side's own
- * turn, and two independent sockets give no ordering guarantee against each
+ * back: two independent sockets give no ordering guarantee against each
  * other the way one connection gives against itself. Waiting for the relay
  * is also how a disagreement is caught immediately — the referee's own
  * recomputation runs the same command through the same rules a moment after
@@ -86,15 +80,18 @@ export async function simulateOverWire(options: WireMatchOptions): Promise<WireM
   const host = new NetworkManager()
   const joiner = new NetworkManager()
 
+  let roomId: string
   try {
-    const [hostSocket, joinerSocket] = await Promise.all([connectedSocket(url), connectedSocket(url)])
-    joiner.attach(new SocketTransport(joinerSocket))
-    const opening = joiner.joinMatch()
-    host.attach(new SocketTransport(hostSocket))
+    // Seated before the other connects, so the room exists to be joined.
+    roomId = (await host.connectToServer(url, { kind: 'open' })).roomId
+    await joiner.connectToServer(url, { kind: 'join', roomId })
+    // The joiner says hello into the room; the host hears it and states the
+    // opening it announced (`restate`) — the same exchange whichever of the
+    // two speaks first.
     host.hostMatch(recording.header.seed, recording.header.seedLabel)
-    const opened = await opening
-    if (opened.seed !== recording.header.seed) {
-      throw new Error(`the referee opened seed ${opened.seed}, not ${recording.header.seed}`)
+    const opening = await joiner.joinMatch()
+    if (opening.seed !== recording.header.seed) {
+      throw new Error(`the referee opened seed ${opening.seed}, not ${recording.header.seed}`)
     }
 
     host.send({ type: 'ready', squad: recording.header.squads[Faction.Blue] })
@@ -107,15 +104,12 @@ export async function simulateOverWire(options: WireMatchOptions): Promise<WireM
       const receiver = event.faction === Faction.Blue ? joiner : host
       const relayed = onceMessage(receiver)
       sender.send(event.command)
-      const message = await relayed
-      if (message.type === 'abort') {
-        throw new Error(`the referee aborted the match at seq ${event.seq}: ${message.reason}`)
-      }
+      await relayed
     }
   } finally {
     host.dispose()
     joiner.dispose()
   }
 
-  return { outcome, recording, digest: sim.host.digest() }
+  return { outcome, recording, digest: sim.host.digest(), roomId }
 }

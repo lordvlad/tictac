@@ -8,6 +8,7 @@ import { derive, rollSquadSheets } from '../src/core/Characters'
 import { defaultLoadout } from '../src/game/Loadout'
 import { MeleeId } from '../src/core/Melee'
 import { canMelee, type ShotResult } from '../src/game/Combat'
+import type { Seated } from '../src/game/Lobby'
 import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
 import { MatchHost } from '../src/sim/MatchHost'
 import { TraitId } from '../src/core/Traits'
@@ -69,8 +70,8 @@ describe('JSON-RPC framing', () => {
       'hello',
       'digest',
       'matchHeader',
-      'resume',
       'log',
+      'seated',
       'abort',
       'moveUnit',
       'fireShot',
@@ -600,11 +601,14 @@ describe('A match over a linked pair, with no broker', () => {
  */
 function refereeSocket(onOpen: (client: SocketClient) => void) {
   const heard: string[] = []
+  const asked: URL[] = []
   const waiting: (() => void)[] = []
   const server = Bun.serve({
     port: 0,
-    fetch: (request, self) =>
-      self.upgrade(request) ? undefined : new Response('expected a websocket', { status: 400 }),
+    fetch: (request, self) => {
+      asked.push(new URL(request.url))
+      return self.upgrade(request) ? undefined : new Response('expected a websocket', { status: 400 })
+    },
     websocket: {
       open: (ws) =>
         onOpen({
@@ -624,6 +628,8 @@ function refereeSocket(onOpen: (client: SocketClient) => void) {
   })
   return {
     heard,
+    /** The url every socket connected with, in order. */
+    asked,
     url: `ws://localhost:${server.port}`,
     /** Resolves on the next frame this server is told. */
     nextHeard: () => new Promise<void>((resolve) => waiting.push(resolve)),
@@ -749,5 +755,161 @@ describe('A match over a socket, as a referee would host one', () => {
       net.dispose()
       server.stop()
     }
+  })
+})
+
+const notify = (method: string, params: Record<string, unknown>): JsonRpcFrame => ({ jsonrpc: '2.0', method, params })
+
+describe('Connecting to a match server', () => {
+  const seat: Seated = { roomId: 'r00m', faction: Faction.Red, phase: 'playing', redirected: true }
+  const opening: RecordingHeader = {
+    version: RECORDING_VERSION,
+    seed: 77,
+    seedLabel: '77',
+    source: 'live',
+    createdAt: '',
+    turnCap: null,
+    squads: {
+      [Faction.Blue]: rollSquadSheets(new Rng(1)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
+      [Faction.Red]: rollSquadSheets(new Rng(2)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
+    },
+  }
+  const logged = [{ seq: 0, turn: 1, faction: Faction.Blue, command: { type: 'endTurn', faction: Faction.Blue } }]
+
+  test('asks by url, says hello, and is told its seat and the match so far', async () => {
+    const server = refereeSocket((client) => {
+      client.send(notify(RpcMethods.seated, { ...seat }))
+      client.send(notify(RpcMethods.log, { matchId: 'r00m', header: opening, events: logged }))
+    })
+    const net = new NetworkManager()
+    const seen: NetworkMessage[] = []
+    net.onMessage = (msg) => seen.push(msg)
+    try {
+      const hello = server.nextHeard()
+      // A ticket already on the url stays there: the intent is added beside it.
+      const seated = await net.connectToServer(`${server.url}/?ticket=t1`, { kind: 'watch', roomId: 'r00m' })
+      expect(seated).toEqual(seat)
+      expect(Object.fromEntries(server.asked[0]!.searchParams)).toEqual({ ticket: 't1', intent: 'watch', room: 'r00m' })
+      await hello
+      expect(server.heard).toEqual([JSON.stringify({ jsonrpc: '2.0', method: RpcMethods.hello, params: { ...MY_VERSION } })])
+
+      // The seat decides who this side is; the frame that said so is never
+      // mistaken for a move.
+      expect([net.mode, net.myFaction]).toEqual(['join', Faction.Red])
+
+      // Asked for after it arrived, and still there.
+      const log = await net.waitForLog()
+      expect(log.matchId).toBe('r00m')
+      expect(log.header.seed).toBe(77)
+      expect(log.events.map((event) => event.command)).toEqual([{ type: 'endTurn', faction: Faction.Blue }])
+      expect(seen).toEqual([])
+    } finally {
+      net.dispose()
+      server.stop()
+    }
+  })
+
+  test('an abort before the seat is the reason the connection failed, and the log will not come either', async () => {
+    const server = refereeSocket((client) =>
+      client.send(notify(RpcMethods.abort, { reason: 'That match is gone.', side: null })),
+    )
+    const net = new NetworkManager()
+    try {
+      const log = net.waitForLog()
+      await expect(net.connectToServer(server.url, { kind: 'join', roomId: 'nowhere' })).rejects.toThrow('That match is gone.')
+      await expect(log).rejects.toThrow('That match is gone.')
+    } finally {
+      net.dispose()
+      server.stop()
+    }
+  })
+
+  test('a socket that closes before the seat says so rather than waiting forever', async () => {
+    const server = refereeSocket((client) => client.close(4000, 'the server is shutting down'))
+    const net = new NetworkManager()
+    try {
+      await expect(net.connectToServer(server.url, { kind: 'open' })).rejects.toThrow('the server is shutting down')
+    } finally {
+      net.dispose()
+      server.stop()
+    }
+  })
+
+  test('a log this build cannot read is refused, not built from', async () => {
+    const { net, send } = peered('join')
+    const refused: string[] = []
+    net.onDisconnected = (reason) => refused.push(reason ?? '')
+    const log = net.waitForLog()
+    send(notify(RpcMethods.log, { matchId: 'r00m', header: { ...opening, version: -1 }, events: [] }))
+    await expect(log).rejects.toThrow('cannot read')
+    expect(refused).toHaveLength(1)
+  })
+})
+
+describe('A side that arrives in the middle of a match', () => {
+  test('keeps every intent relayed before it could listen, and hands them over in order', () => {
+    const { net, send } = peered('join')
+    const move = { type: 'moveUnit', faction: Faction.Blue, squadIndex: 0, path: [{ x: 1, y: 2 }] }
+    send(notify(RpcMethods.moveUnit, { faction: Faction.Blue, squadIndex: 0, path: [{ x: 1, y: 2 }] }))
+    send(notify(RpcMethods.reload, { faction: Faction.Blue, squadIndex: 1 }))
+    send(notify(RpcMethods.endTurn, { faction: Faction.Blue }))
+
+    const heard: NetworkMessage[] = []
+    net.onMessage = (msg) => heard.push(msg)
+    expect(heard).toEqual([
+      move as NetworkMessage,
+      { type: 'reload', faction: Faction.Blue, squadIndex: 1 },
+      { type: 'endTurn', faction: Faction.Blue },
+    ])
+
+    // Once is enough: a handler assigned again is not handed them twice.
+    const again: NetworkMessage[] = []
+    net.onMessage = (msg) => again.push(msg)
+    expect(again).toEqual([])
+  })
+
+  test('a handler that steps aside after one leaves the rest for the next', () => {
+    const { net, send } = peered('join')
+    send(notify(RpcMethods.reload, { faction: Faction.Blue, squadIndex: 1 }))
+    send(notify(RpcMethods.endTurn, { faction: Faction.Blue }))
+
+    const first: NetworkMessage[] = []
+    net.onMessage = (msg) => {
+      first.push(msg)
+      net.onMessage = null
+    }
+    expect(first.map((m) => m.type)).toEqual(['reload'])
+    const rest: NetworkMessage[] = []
+    net.onMessage = (msg) => rest.push(msg)
+    expect(rest.map((m) => m.type)).toEqual(['endTurn'])
+  })
+})
+
+describe('A spectator', () => {
+  test('says nothing after hello: no commands, no digests, no replicated state', () => {
+    const net = new NetworkManager()
+    const [ours, theirs] = loopback()
+    net.attach(ours)
+    const sent: JsonRpcFrame[] = []
+    theirs.onFrame((frame) => sent.push(frame))
+    theirs.send(notify(RpcMethods.seated, { roomId: 'r00m', faction: null, phase: 'playing', redirected: false }))
+    expect(net.mode).toBe('spectate')
+    expect(net.isMyTurn(Faction.Blue)).toBe(false)
+    expect(net.isMyTurn(Faction.Red)).toBe(false)
+
+    // Everything a seat would have put on the wire, through every door it has.
+    const world = new World()
+    net.bindWorld(world, () => true)
+    const health = world.addComponent(world.createEntity(), new HealthComponent(100, 100))
+    health.hp = 55
+    world.syncDirty()
+    net.send({ type: 'endTurn', faction: Faction.Blue })
+    net.send({ type: 'ready', squad: [] })
+    net.sendRpc(notify(RpcMethods.digest, { digest: {} }))
+    // A hello relayed to it would make a seat restate its opening; a
+    // spectator has none to restate, and would not say it if it had.
+    theirs.send(notify(RpcMethods.hello, { ...MY_VERSION }))
+
+    expect(sent).toEqual([])
   })
 })

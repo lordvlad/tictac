@@ -521,6 +521,43 @@ export class InteractionController {
     return this.commands.busy || this.commands.pending
   }
 
+  /**
+   * Bring a freshly built match up to date with `commands`, all at once.
+   *
+   * For a window that arrives in the middle of a match — taking a seat back,
+   * or watching — the match so far is a log, and the player wants the
+   * position, not a re-enactment. Each command is applied exactly as a replay
+   * applies it, once the one before it has finished walking, and time is
+   * advanced in fixed steps until it has: the same thing a headless host does
+   * (`MatchHost`), so the world reached is the one every other window holds.
+   * Steps rather than a jump to the end because movement *is* stepped state —
+   * a watcher's reaction fires on an arrival — and how far a walk has got is
+   * not something the rules can skip over.
+   *
+   * Presentation advances along with it — `alongside` is for whatever the
+   * caller ticks beside the controller, the tracers — so the blasts and
+   * callouts it set off are long finished by the time anyone sees the field.
+   * Replication does not: state is published once, by the next ordinary
+   * tick, as where things stand rather than as every step on the way there.
+   */
+  catchUp(commands: readonly NetworkMessage[], step: number, alongside?: (step: number) => void): void {
+    for (const command of commands) {
+      this.settle(step, alongside)
+      this.applyRecordedCommand(command)
+    }
+    this.settle(step, alongside)
+  }
+
+  /** Advance time until nothing is walking and the rules have nothing queued. */
+  private settle(step: number, alongside?: (step: number) => void): void {
+    // Bounded, like `MatchHost`, so a walker that never arrives costs a stall
+    // rather than a frozen tab.
+    for (let i = 0; i < 2000 && this.busy; i++) {
+      this.advance(step)
+      alongside?.(step)
+    }
+  }
+
   /** Single place where a HUD press becomes a change to the game. */
   handleIntent(intent: HudIntent): void {
     if (this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) {
@@ -1347,6 +1384,14 @@ export class InteractionController {
   }
 
   update(delta: number): void {
+    this.advance(delta)
+    // One pass at the end: whatever changed this tick — from input, combat,
+    // a system or the debug panel — replicates from here and nowhere else.
+    this.world.syncDirty()
+  }
+
+  /** One tick of everything but replication; see `catchUp` for why the two part. */
+  private advance(delta: number): void {
     // Systems advance the simulation; every mutation lands in a component.
     this.world.update(delta)
     // The HUD offers nothing while the rules are running a broken unit, so it
@@ -1387,10 +1432,6 @@ export class InteractionController {
     }
 
     this.xray.update(this.engine.camera.position)
-
-    // One pass at the end: whatever changed this tick — from input, combat,
-    // a system or the debug panel — replicates from here and nowhere else.
-    this.world.syncDirty()
   }
 
   /**

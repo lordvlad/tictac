@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ServerIntent } from '../../game/Lobby'
 import { BUILD_ID } from '../../version'
 import { MENU_COLOURS, MenuButton, MenuGroup } from './controls'
 import { HostPanel, JoinPanel } from './PeerPanel'
@@ -33,8 +34,13 @@ export interface StartMenuProps {
   onLoadRecording: (file: File) => Promise<void>
   onInitHost: () => Promise<string>
   onJoinP2p: (hostId: string) => Promise<void>
-  onServerHost: (url: string) => Promise<void>
-  onServerJoin: (url: string) => Promise<void>
+  /**
+   * Into a room on the match server at `url` — open one, join one, watch one,
+   * or take back this player's own (`src/game/Lobby.ts`). Resolves once the
+   * match, loadout or spectator view has taken over; rejects with a reason a
+   * player can read.
+   */
+  onServerConnect: (url: string, intent: ServerIntent) => Promise<void>
   probeOwnOriginServer: () => Promise<string | null>
 }
 
@@ -47,8 +53,7 @@ export function StartMenu({
   onLoadRecording,
   onInitHost,
   onJoinP2p,
-  onServerHost,
-  onServerJoin,
+  onServerConnect,
   probeOwnOriginServer,
 }: StartMenuProps) {
   const [mode, setMode] = useState<MenuMode>('main')
@@ -185,8 +190,7 @@ export function StartMenu({
         <ServerPanel
           url={serverUrl}
           onUrlChange={setServerUrl}
-          onHost={onServerHost}
-          onJoin={onServerJoin}
+          onServerConnect={onServerConnect}
           onBack={() => setMode('main')}
         />
       )}

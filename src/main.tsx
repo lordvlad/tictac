@@ -3,21 +3,24 @@ import type { Asset } from '@mavonengine/core/Types/Asset'
 import { createRoot } from 'react-dom/client'
 import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
-import { Faction, SIM } from './config'
+import { Faction, FACTION_INFO, SIM } from './config'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
-import { hashSeed, matchDice, Rng } from './core/rng'
+import { hashSeed, matchDice, Rng, type Roll } from './core/rng'
 import { WeaponId } from './core/Arsenal'
 import { createGlobalRules } from './ecs/globals'
 import { TurnSystem } from './ecs/systems'
+import { isCommand } from './ecs/systems/CommandSystem'
 import { World } from './ecs/World'
-import { createEngineContext } from './engine'
+import { createEngineContext, type EngineContext } from './engine'
 import './game.css'
-import { Account, type Player, type RosterEntry } from './game/Account'
+import { Account } from './game/Account'
 import { AiOpponent } from './game/AiOpponent'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
-import { NetworkManager } from './game/NetworkManager'
+import type { Seated } from './game/Lobby'
+import { winnerOf } from './game/MatchEnd'
+import { type MatchLog, NetworkManager, type NetworkMessage } from './game/NetworkManager'
 import { Playback } from './game/Playback'
 import {
   type CombatRecording,
@@ -36,6 +39,7 @@ import { LoadoutScreen } from './hud/LoadoutScreen'
 import { InterruptedOverlay } from './hud/menu/InterruptedOverlay'
 import { StartMenu } from './hud/menu/StartMenu'
 import { PlaybackControls } from './hud/PlaybackControls'
+import { SpectatorBar } from './hud/SpectatorBar'
 import { RosterScreen } from './hud/RosterScreen'
 import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
@@ -169,47 +173,20 @@ function showMenu(notice?: string): void {
   }
 
   /**
-   * What a signed-in player deploys, and where they connect.
-   *
-   * Signed in: the whole roster this server keeps. Anonymous: neither —
-   * the plain url and a fresh squad, exactly as before.
+   * Who a signed-in player deploys (`[ITEM-042]`): chosen from the roster
+   * that server keeps. Anonymous: nobody chosen, and the squad is rolled as
+   * in any other match.
    */
-  const joining = async (
-    url: string,
-  ): Promise<{ account: Account | null; roster: RosterEntry[] | null }> => {
-    const it = new Account(url)
-    if (!it.token) return { account: null, roster: null }
-    const roster = await it.roster()
+  const pickSquad = async (account: Account | null): Promise<Picked> => {
+    if (!account) return {}
+    const roster = await account.roster()
     // An empty roster has nobody to send, and the referee would refuse it
     // anyway; recruit first.
     if (roster.length === 0) {
       throw new Error('Nobody is left on your roster. Recruit before deploying.')
     }
-    return { account: it, roster }
-  }
-
-  /**
-   * Let a signed-in player choose who deploys (`[ITEM-042]`), then mint the
-   * ticketed url only once they have — a ticket is worth one connection and
-   * expires in a minute, so it must not be spent sitting on a screen the
-   * player might linger on. Anonymous: the plain url and nothing chosen.
-   */
-  const equip = async (
-    url: string,
-    account: Account | null,
-    roster: RosterEntry[] | null,
-  ): Promise<{
-    url: string
-    sheets?: CharacterSheet[]
-    hp?: number[]
-    fatigue?: number[]
-    characterIds?: string[]
-  }> => {
-    if (!account || !roster) return { url }
-    const screen = new RosterScreen(roster, () => account.recruit())
-    const picked = await screen.pick()
+    const picked = await new RosterScreen(roster, () => account.recruit()).pick()
     return {
-      url: await account.socketUrl(url),
       sheets: picked.map((entry) => entry.sheet),
       hp: picked.map((entry) => entry.hp),
       fatigue: picked.map((entry) => entry.fatigue),
@@ -257,26 +234,118 @@ function showMenu(notice?: string): void {
         closeMenu()
         equipThenStart(initData.seed, initData.seedLabel, network)
       }}
-      onServerHost={async (typed) => {
-        const { seed, label } = resolveSeed()
-        const { account, roster } = await joining(typed)
-        const { url, sheets, hp, fatigue, characterIds } = await equip(typed, account, roster)
+      onServerConnect={async (typed, intent) => {
+        const it = new Account(typed)
+        const account = it.token ? it : null
+        // Only a seat in a room still being set up deploys anybody. Watching
+        // brings nobody, and a match taken back already has its squad.
+        const squad = intent.kind === 'open' || intent.kind === 'join' ? await pickSquad(account) : {}
+        // The ticket is minted only once the roster has been chosen: it is
+        // worth one connection and expires in a minute, so it must not be
+        // spent sitting on a screen the player might linger on.
+        const url = account ? await account.socketUrl(typed) : typed
         const network = new NetworkManager()
-        network.hostOnServer(url, seed, label)
-        closeMenu()
-        equipThenStart(seed, label, network, sheets, hp, characterIds, fatigue)
-      }}
-      onServerJoin={async (typed) => {
-        const network = new NetworkManager()
-        const { account, roster } = await joining(typed)
-        const { url, sheets, hp, fatigue, characterIds } = await equip(typed, account, roster)
-        const opening = await network.joinOnServer(url)
-        closeMenu()
-        equipThenStart(opening.seed, opening.seedLabel, network, sheets, hp, characterIds, fatigue)
+        try {
+          await takeSeat(network, await network.connectToServer(url, intent), squad, closeMenu)
+        } catch (err) {
+          // Whatever got as far as a socket goes with the failure; the panel
+          // shows the reason, and the player tries again on a fresh one.
+          network.dispose()
+          throw err
+        }
       }}
       probeOwnOriginServer={probeOwnOriginServer}
     />,
   )
+}
+
+
+/**
+ * The squad a signed-in player brought from the roster their server keeps:
+ * who, and how worn. Empty for everybody else, whose squad is rolled.
+ */
+interface Picked {
+  sheets?: CharacterSheet[]
+  /** This side's roster HP. */
+  hp?: number[]
+  /** This side's roster character ids (`[ITEM-042]`). */
+  characterIds?: string[]
+  /** This side's roster fatigue (`[ITEM-039]`). */
+  fatigue?: number[]
+}
+
+/**
+ * Go wherever the match server put this socket (`src/game/Lobby.ts`).
+ *
+ * Resolves once the menu has gone and something has taken its place — the
+ * loadout screen, the match, the watcher's view — and rejects with a reason
+ * the server panel shows if the seat turns out to lead nowhere: the opening
+ * never came, or the log of a match to take back never did.
+ *
+ * Where the server put the socket is not always where it was asked to go: a
+ * player who already holds a seat in a match being played is put back in it,
+ * whatever they asked for, and is told so.
+ */
+async function takeSeat(network: NetworkManager, seat: Seated, squad: Picked, closeMenu: () => void): Promise<void> {
+  const redirected = seat.redirected
+    ? 'You already have a match on this server, so you are back in it.'
+    : null
+
+  if (seat.faction === null) {
+    closeMenu()
+    watchMatch(network, seat)
+    return
+  }
+
+  if (seat.phase === 'playing') {
+    const log = await network.waitForLog()
+    closeMenu()
+    resumeMatch(network, log)
+    flashNotice(redirected ?? 'Your match continues here; any other window it was open in has been closed.')
+    return
+  }
+
+  // A room still being set up goes on exactly as a match between two peers
+  // does: Blue announces it, Red waits to hear it.
+  if (seat.faction === Faction.Blue) {
+    const { seed, label } = resolveSeed()
+    network.hostMatch(seed, label)
+    closeMenu()
+    equipThenStart(seed, label, network, squad)
+  } else {
+    const opening = await network.joinMatch()
+    closeMenu()
+    equipThenStart(opening.seed, opening.seedLabel, network, squad)
+  }
+  if (redirected) flashNotice(redirected)
+}
+
+/**
+ * Say something briefly over whatever is on screen.
+ *
+ * For news the player did not ask for and cannot act on — being put back in
+ * a match they already had — so it goes away by itself rather than waiting
+ * to be dismissed.
+ */
+function flashNotice(text: string): void {
+  const notice = document.createElement('div')
+  notice.textContent = text
+  notice.style.cssText = `
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10001;
+    padding: 8px 14px;
+    border-radius: 6px;
+    background: rgba(10, 14, 20, 0.92);
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    color: #e2e8f0;
+    font-size: 13px;
+    pointer-events: none;
+  `
+  Game.instance().uiRoot.appendChild(notice)
+  setTimeout(() => notice.remove(), 6000)
 }
 
 /**
@@ -284,25 +353,15 @@ function showMenu(notice?: string): void {
  * equipped too.
  *
  * The barrier matters because Blue moves first and the host is Blue: without it
- * the host could fire while the joiner is still choosing kit, and with no
- * `onMessage` attached yet those commands would be dropped outright.
+ * the host could fire while the joiner is still choosing kit, at a squad it has
+ * not been told about.
  *
- * `sheets` is the squad that deploys. A local or peer-to-peer match rolls a
- * fresh one; a match on a server the player is signed in to brings the roster
- * that server keeps, which is the squad its referee will check and settle.
+ * `squad` is who deploys. A local or peer-to-peer match rolls a fresh one; a
+ * match on a server the player is signed in to brings the roster that server
+ * keeps, which is the squad its referee will check and settle.
  */
-function equipThenStart(
-  seed: number,
-  label: string,
-  network: NetworkManager,
-  sheets: CharacterSheet[] = rollSquadSheets(),
-  /** This side's roster HP, present only when signed in to a match server. */
-  hp?: number[],
-  /** This side's roster character ids, present only when signed in (`[ITEM-042]`). */
-  characterIds?: string[],
-  /** This side's roster fatigue, present only when signed in (`[ITEM-039]`). */
-  fatigue?: number[],
-): void {
+function equipThenStart(seed: number, label: string, network: NetworkManager, squad: Picked = {}): void {
+  const { sheets = rollSquadSheets(), hp, characterIds, fatigue } = squad
   const engine = createEngineContext(Game.instance())
   const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
   const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine, { [faction]: sheets }), seed, faction, sheets)
@@ -348,54 +407,69 @@ function equipThenStart(
   })
 }
 
-function start(
+/** The ground a match is fought on, and who is standing on it. */
+interface Field {
+  world: World
+  battlefield: Battlefield
+  squads: Squads
+}
+
+/**
+ * Lay out the terrain and deploy both squads onto it.
+ *
+ * Apart from `buildMatch` because a match started here has to describe its
+ * own opening position, and can only read it back off the squads once they
+ * exist (see `start`); everything else is built from that description.
+ */
+function buildField(
+  engine: EngineContext,
   seed: number,
-  seedLabel: string,
-  network: NetworkManager,
+  map: RecordingHeader['map'],
   deployed: Record<Faction, Deployment[]>,
-): void {
-  const engine = createEngineContext(Game.instance())
-
-  // The match's dice, from the match's seed — so both peers, a replay and a
-  // sweep draw the same numbers in the same order.
-  const dice = matchDice(seed)
-
+): Field {
   const world = new World()
   createGlobalRules(world)
-
-  // Terrain first, as data; the battlefield is the view of it.
-  const battlefield = new Battlefield(generateMap(seed), engine)
-  const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
+  // Terrain first, as data; the battlefield is the view of it. Not in any
+  // header or log: regenerated from the seed, which is the only reason a
+  // forty-turn fight fits in fifteen kilobytes.
+  const battlefield = new Battlefield(generateMap(seed, map), engine)
   const squads = new Squads(world, battlefield.grid, battlefield.spawns, deployed)
+  return { world, battlefield, squads }
+}
 
-  // The opening position, captured before anything can move it. A recording
-  // armed later still replays from here, which is the only point a stream can
-  // start from and be replayable at all. Read back off the squads rather than
-  // `deployed` itself: a soldier whose kit could not be read deployed on the
-  // stock spread, and the header has to say what actually fought, not what
-  // was asked for.
-  const recordingHeader: RecordingHeader = {
-    version: RECORDING_VERSION,
-    seed,
-    seedLabel,
-    source: 'live',
-    createdAt: new Date().toISOString(),
-    turnCap: null,
-    squads: {
-      [Faction.Blue]: squads.deploymentsOf(Faction.Blue),
-      [Faction.Red]: squads.deploymentsOf(Faction.Red),
-    },
-  }
+/** A match on screen: the field, the camera, the HUD and the controller that runs it. */
+interface MatchScene extends Field {
+  rig: OrbitRig
+  tracers: Tracers
+  turnSystem: TurnSystem
+  turnManager: TurnManager
+  hud: Hud
+  controller: InteractionController
+}
 
-  // A referee is told the opening position once, by the side hosting the
-  // match: it needs the seed, both squads' people and both squads' kit, none of
-  // which is derivable from the stream of intents that follows.
-  if (network.mode === 'host') network.send({ type: 'matchHeader', header: recordingHeader })
-
+/**
+ * Everything a match on screen is built from, in the one order it has to be
+ * built in — whoever is going to drive it: a player starting a match, a
+ * player taking one back, a watcher, or a recording.
+ *
+ * `dice` is the match's stream, from the match's seed, so both peers, a
+ * replay and a sweep draw the same numbers in the same order. `network` is
+ * null where nothing is transmitted; `recordingHeader` is the opening a
+ * recording armed from the debug panel replays from, and what the end screens
+ * draw who carried out from.
+ */
+function buildMatch(
+  engine: EngineContext,
+  field: Field,
+  seedLabel: string,
+  dice: Roll,
+  network: NetworkManager | null,
+  recordingHeader: RecordingHeader | null,
+): MatchScene {
+  const { world, battlefield, squads } = field
   const rig = new OrbitRig(engine.camera, engine.canvas, {
     bounds: battlefield.grid.halfExtent,
   })
-
   const portraits = new OffscreenPortraits(engine, {
     [Faction.Blue]: squads.byFaction[Faction.Blue].map((s) => s.sheet),
     [Faction.Red]: squads.byFaction[Faction.Red].map((s) => s.sheet),
@@ -404,12 +478,11 @@ function start(
   const turnSystem = new TurnSystem()
   const turnManager = new TurnManager(world, turnSystem, squads, rig)
 
-  // Declare controller before hud so hud handler can reference it
+  // Declared before the hud so the hud's handler can reference it.
   let controller!: InteractionController
   const hud = new Hud((intent) => {
     controller.handleIntent(intent)
   })
-
   controller = new InteractionController(
     world,
     battlefield,
@@ -425,52 +498,155 @@ function start(
     network,
     recordingHeader,
   )
+  return { ...field, rig, tracers, turnSystem, turnManager, hud, controller }
+}
 
+/** The match on `window.tictac`, for the console and the browser tests. */
+function expose(scene: MatchScene, more: Record<string, unknown>): void {
+  const { battlefield, squads, rig, turnManager, hud, controller, tracers } = scene
+  Object.assign(window as unknown as Record<string, unknown>, {
+    tictac: { game: Game.instance(), battlefield, squads, rig, turnManager, hud, controller, tracers, ...more },
+  })
+}
+
+/**
+ * Show why a match stopped, over it, with the way back to the menu.
+ *
+ * `teardown` is whatever the screen behind it needs putting away first.
+ */
+function showInterrupted(reason: string | undefined, teardown: () => void): void {
+  const ui = Game.instance().uiRoot
+  if (document.getElementById('disconnection-overlay')) return
+
+  const overlay = document.createElement('div')
+  overlay.id = 'disconnection-overlay'
+  overlay.style.cssText = `
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 14, 20, 0.92);
+    backdrop-filter: blur(8px);
+    z-index: 10000;
+    font-family: inherit;
+    color: #e2e8f0;
+  `
+  overlay.addEventListener('pointerdown', (e) => e.stopPropagation())
+  overlay.addEventListener('mousedown', (e) => e.stopPropagation())
+  overlay.addEventListener('click', (e) => e.stopPropagation())
+
+  ui.appendChild(overlay)
+
+  const root = createRoot(overlay)
+  root.render(
+    <InterruptedOverlay
+      reason={reason}
+      onReturn={() => {
+        root.unmount()
+        overlay.remove()
+        teardown()
+        showMenu()
+      }}
+    />,
+  )
+}
+
+function start(
+  seed: number,
+  seedLabel: string,
+  network: NetworkManager,
+  deployed: Record<Faction, Deployment[]>,
+): void {
+  const engine = createEngineContext(Game.instance())
+  const field = buildField(engine, seed, undefined, deployed)
+
+  // The opening position, captured before anything can move it. A recording
+  // armed later still replays from here, which is the only point a stream can
+  // start from and be replayable at all. Read back off the squads rather than
+  // `deployed` itself: a soldier whose kit could not be read deployed on the
+  // stock spread, and the header has to say what actually fought, not what
+  // was asked for.
+  const recordingHeader: RecordingHeader = {
+    version: RECORDING_VERSION,
+    seed,
+    seedLabel,
+    source: 'live',
+    createdAt: new Date().toISOString(),
+    turnCap: null,
+    squads: {
+      [Faction.Blue]: field.squads.deploymentsOf(Faction.Blue),
+      [Faction.Red]: field.squads.deploymentsOf(Faction.Red),
+    },
+  }
+
+  // A referee is told the opening position once, by the side hosting the
+  // match: it needs the seed, both squads' people and both squads' kit, none of
+  // which is derivable from the stream of intents that follows.
+  if (network.mode === 'host') network.send({ type: 'matchHeader', header: recordingHeader })
+
+  playMatch(buildMatch(engine, field, seedLabel, matchDice(seed), network, recordingHeader), network, recordingHeader)
+}
+
+/**
+ * Take back a seat in a match already being played, from the server's log.
+ *
+ * The match is rebuilt from the opening position the log states and every
+ * intent in it, applied through the same rules every other window applied
+ * them with, from the same dice — so this window reaches the very world the
+ * opponent and the referee hold, and the digests at the next handover say so.
+ * Then it is simply the match: the same side, the same controls.
+ *
+ * `matchHeader` is not sent again: the referee opened this match long ago.
+ */
+function resumeMatch(network: NetworkManager, log: MatchLog): void {
+  const { header } = log
+  const engine = createEngineContext(Game.instance())
+  const field = buildField(engine, header.seed, header.map, header.squads)
+  const scene = buildMatch(engine, field, header.seedLabel, matchDice(header.seed), network, header)
+  catchUp(scene, log)
+  playMatch(scene, network, header)
+}
+
+/**
+ * Apply a log's intents to a freshly built match, at once (`InteractionController.catchUp`).
+ *
+ * Timed, because how long a window takes to arrive in a long match is
+ * something a player feels and nothing else measures.
+ */
+function catchUp(scene: MatchScene, log: MatchLog): void {
+  const started = performance.now()
+  scene.controller.catchUp(
+    log.events.map((event) => event.command),
+    SIM.step,
+    (step) => scene.tracers.update(step),
+  )
+  console.info(
+    `[tictac] caught up with ${log.events.length} intents of ${log.matchId} in ${Math.round(performance.now() - started)} ms`,
+  )
+}
+
+/** Hand a built match to the player who commands one of its sides. */
+function playMatch(scene: MatchScene, network: NetworkManager, header: RecordingHeader): void {
+  const { battlefield, squads, rig, tracers, turnManager, hud, controller } = scene
+  const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
+
+  // Assigned last thing before play, because it is what releases whatever the
+  // other side sent while this one was still being built.
   network.onMessage = (msg) => {
     controller.handleRemoteNetworkMessage(msg)
   }
 
   network.onDisconnected = (reason) => {
-    const ui = Game.instance().uiRoot
-    if (document.getElementById('disconnection-overlay')) return
-
-    const overlay = document.createElement('div')
-    overlay.id = 'disconnection-overlay'
-    overlay.style.cssText = `
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: rgba(10, 14, 20, 0.92);
-      backdrop-filter: blur(8px);
-      z-index: 10000;
-      font-family: inherit;
-      color: #e2e8f0;
-    `
-    overlay.addEventListener('pointerdown', (e) => e.stopPropagation())
-    overlay.addEventListener('mousedown', (e) => e.stopPropagation())
-    overlay.addEventListener('click', (e) => e.stopPropagation())
-
-    ui.appendChild(overlay)
-
-    const root = createRoot(overlay)
-    root.render(
-      <InterruptedOverlay
-        reason={reason}
-        onReturn={() => {
-          root.unmount()
-          overlay.remove()
-          controller.dispose()
-          hud.dispose()
-          network.dispose()
-          showMenu()
-        }}
-      />,
-    )
+    showInterrupted(reason, () => {
+      controller.dispose()
+      hud.dispose()
+      network.dispose()
+    })
   }
-  const commander = squads.byFaction[myFaction][0]
+
+  const commander = squads.getLiving(myFaction)[0]
   if (commander) {
     rig.snapTo(commander.position)
     if (turnManager.activeFaction === myFaction) {
@@ -491,82 +667,118 @@ function start(
     battlefield.flush()
   })
 
-  Object.assign(window as unknown as Record<string, unknown>, {
-    tictac: {
-      game: Game.instance(),
-      battlefield,
-      squads,
-      rig,
-      turnManager,
-      hud,
-      controller,
-      tracers,
-      seed,
-      seedLabel,
-      network,
-    },
-  })
+  expose(scene, { seed: header.seed, seedLabel: header.seedLabel, network })
+  console.info(`[tictac] tactical combat ready — mode: ${network.mode}, seed ${header.seedLabel}`)
+}
 
-  console.info(`[tictac] tactical combat ready — mode: ${network.mode}, seed ${seedLabel}`)
+/**
+ * Watch a match on a server, without a seat in it.
+ *
+ * A recording that is still being written: the world is built from the log
+ * the way a replay is built from its file — every field revealed, the HUD
+ * away, the controller told it is spectating and given no network — and the
+ * intents the players send after that are applied the same way, as they
+ * arrive. Nothing is ever sent back (`NetworkManager` in `spectate` mode).
+ *
+ * A room that has not started yet has no log to build from, so the watcher
+ * waits — with the way out already on screen — until it does.
+ */
+function watchMatch(network: NetworkManager, seat: Seated): void {
+  let scene: MatchScene | null = null
+  let left = false
+  const leave = (): void => {
+    left = true
+    bar.dispose()
+    scene?.controller.dispose()
+    scene?.hud.dispose()
+    network.dispose()
+  }
+  const bar = new SpectatorBar(() => {
+    leave()
+    showMenu()
+  })
+  bar.render({ roomId: seat.roomId, progress: { kind: 'waiting' } })
+  // The room aborted, or this player opened another window: said over
+  // whatever is showing, as a player's interrupted match is.
+  network.onDisconnected = (reason) => showInterrupted(reason, leave)
+
+  void network.waitForLog().then(
+    (log) => {
+      if (left) return
+      const { header } = log
+      const engine = createEngineContext(Game.instance())
+      const field = buildField(engine, header.seed, header.map, header.squads)
+      const built = buildMatch(engine, field, header.seedLabel, matchDice(header.seed), null, null)
+      scene = built
+      const { battlefield, squads, rig, tracers, turnManager, hud, controller } = built
+      controller.spectating = true
+      hud.setHidden(true)
+      turnManager.autoSelectFirst()
+      controller.recomputeVisibility()
+      catchUp(built, log)
+
+      // Held here rather than queued in the rules: a replay applies a command
+      // only once the one before it has finished walking, and so does this.
+      // Assigning the handler releases whatever arrived during the catch-up.
+      const live: NetworkMessage[] = []
+      network.onMessage = (msg) => {
+        if (isCommand(msg)) live.push(msg)
+      }
+
+      const commander = squads.getLiving(turnManager.activeFaction)[0]
+      rig.snapTo(commander ? commander.position : new Vector3(0, 0, 0))
+
+      let accumulator = 0
+      Game.instance().onUpdate((delta) => {
+        if (left) return
+        accumulator = Math.min(accumulator + delta, SIM.maxCatchUp)
+        while (accumulator >= SIM.step) {
+          accumulator -= SIM.step
+          while (live.length > 0 && !controller.busy) controller.applyRecordedCommand(live.shift()!)
+          tracers.update(SIM.step)
+          controller.update(SIM.step)
+        }
+        battlefield.flush()
+        // Decided once everything sent has been played out: the last shot's
+        // walk and reactions are part of how it ended.
+        const winner = live.length === 0 && !controller.busy ? winnerOf(squads) : null
+        bar.render({
+          roomId: seat.roomId,
+          progress:
+            winner !== null
+              ? { kind: 'decided', winner: FACTION_INFO[winner].name }
+              : { kind: 'playing', turn: turnManager.turnNumber, acting: FACTION_INFO[turnManager.activeFaction].name },
+        })
+      })
+
+      expose(built, { seed: header.seed, seedLabel: header.seedLabel, network })
+      console.info(`[tictac] watching ${seat.roomId} — seed ${header.seedLabel}`)
+    },
+    // The connection ended before the room started; `onDisconnected` has
+    // already said why.
+    () => {},
+  )
 }
 
 /**
  * Watch a recording instead of playing a match.
  *
- * The same construction order a match uses, with three differences: both
- * squads are equipped from the file rather than one from a loadout screen,
- * there is no network (nothing to transmit, nothing to record), and the
- * controller is told it is spectating — which reveals the whole field and takes
- * the player's hands off the units.
- *
- * The terrain is not in the file. It is regenerated from the seed, which is the
- * only reason a recording of a forty-turn fight is fifteen kilobytes.
+ * The same construction a match uses, with three differences: both squads are
+ * equipped from the file rather than one from a loadout screen, there is no
+ * network (nothing to transmit, nothing to record), and the controller is told
+ * it is spectating — which reveals the whole field and takes the player's
+ * hands off the units.
  */
 function startPlayback(recording: CombatRecording): void {
   const { header } = recording
   const engine = createEngineContext(Game.instance())
-
-  const world = new World()
-  createGlobalRules(world)
-
-  const battlefield = new Battlefield(generateMap(header.seed, header.map), engine)
-  const squads = new Squads(world, battlefield.grid, battlefield.spawns, header.squads)
-
-  const rig = new OrbitRig(engine.camera, engine.canvas, {
-    bounds: battlefield.grid.halfExtent,
-  })
-
-  const portraits = new OffscreenPortraits(engine, {
-    [Faction.Blue]: squads.byFaction[Faction.Blue].map((s) => s.sheet),
-    [Faction.Red]: squads.byFaction[Faction.Red].map((s) => s.sheet),
-  })
-  const tracers = new Tracers(engine)
-  const turnSystem = new TurnSystem()
-  const turnManager = new TurnManager(world, turnSystem, squads, rig)
+  const field = buildField(engine, header.seed, header.map, header.squads)
+  // Every outcome is resolved here, from the dice the match was fought with.
+  // Held as the generator rather than a wrapped stream, because stepping back
+  // has to put the dice back as well as the world.
   const dice = new Rng(header.seed)
-
-  let controller!: InteractionController
-  const hud = new Hud((intent) => {
-    controller.handleIntent(intent)
-  })
-
-  controller = new InteractionController(
-    world,
-    battlefield,
-    squads,
-    turnManager,
-    rig,
-    hud,
-    portraits,
-    header.seedLabel,
-    // Every outcome is resolved here, from the dice the match was fought
-    // with. Held as the generator rather than a wrapped stream, because
-    // stepping back has to put the dice back as well as the world.
-    () => dice.next(),
-    tracers,
-    engine,
-    null,
-  )
+  const scene = buildMatch(engine, field, header.seedLabel, () => dice.next(), null, null)
+  const { world, battlefield, squads, rig, tracers, turnSystem, turnManager, hud, controller } = scene
   controller.spectating = true
   hud.setHidden(true)
   turnManager.autoSelectFirst()
@@ -647,21 +859,7 @@ function startPlayback(recording: CombatRecording): void {
     battlefield.flush()
   })
 
-  Object.assign(window as unknown as Record<string, unknown>, {
-    tictac: {
-      game: Game.instance(),
-      battlefield,
-      squads,
-      rig,
-      turnManager,
-      hud,
-      controller,
-      tracers,
-      playback,
-      seed: header.seed,
-      seedLabel: header.seedLabel,
-    },
-  })
+  expose(scene, { playback, seed: header.seed, seedLabel: header.seedLabel })
 
   console.info(
     `[tictac] replay ready — ${recording.events.length} events, ${header.source} seed ${header.seedLabel}`,

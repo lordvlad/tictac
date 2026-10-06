@@ -130,12 +130,21 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   the choice and the remembered match-server address and nothing else; the three groups it
   draws — a match server, a peer, nobody — are the question that decides whether signing in
   means anything, whether an id has to be exchanged, and whether a result is kept. Each group's
-  panel owns its own state (`ServerPanel.tsx` for the address, the passkey ceremony and the two
-  ways into a refereed match; `PeerPanel.tsx` for `HostPanel`/`JoinPanel`), and all of them are
-  built from `controls.tsx` — `MenuButton`, `MenuInput`, `MenuGroup`, `StatusLine`, and the
-  tones that colour a group. Before that there was one inline `style` object per element, ten
-  near-copies of the same button, and a flat list of six choices that each hid which kind it
-  was.
+  panel owns its own state (`PeerPanel.tsx` for `HostPanel`/`JoinPanel`; `ServerPanel.tsx` for
+  the match server), and all of them are built from `controls.tsx` — `MenuButton`, `MenuInput`,
+  `MenuGroup`, `StatusLine`, and the tones that colour a group. Before that there was one inline
+  `style` object per element, ten near-copies of the same button, and a flat list of six choices
+  that each hid which kind it was.
+- **The match-server panel is the lobby.** `ServerPanel.tsx` keeps the address, the account
+  line and the passkey ceremony, and below them polls `Account.lobby()` (`GET /api/lobby`,
+  `src/game/Lobby.ts`) every two seconds while it is mounted, dropping answers for an address
+  no longer in the box. `LobbyList.tsx` draws the rooms in two sections by what a visitor can
+  do with them — *waiting for an opponent* (Join) and *in progress* (Watch; a seat held for a
+  dropped player reads "reconnecting…") — inside a scrolling box so a busy server never pushes
+  the card off-screen. **Open a Match**, Join and Watch are all one
+  `onServerConnect(url, intent)` prop; the server decides where the socket lands. When the
+  lobby reports this player's own match as `playing`, the panel takes it over once (`resume`);
+  when it is still being set up elsewhere, a warning says that acting here abandons it.
 - **Not React:** Tweakpane's panels inside `DebugPanel`, the frame counter's per-frame text
   (`FpsCounter`), the page-corner containers (`CornerStack`) and the Three.js canvas.
 - **Tests** that need a DOM register happy-dom for their own file only

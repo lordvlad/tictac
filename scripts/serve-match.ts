@@ -1,5 +1,5 @@
 /**
- * Host a refereed match.
+ * Host refereed matches: a lobby of rooms.
  *
  * Usage:
  *   bun scripts/serve-match.ts
@@ -7,7 +7,8 @@
  *
  * A thin CLI: it reads flags, opens the database and starts the server. What it
  * knows about the game it knows through `GameServer`, which knows it through
- * `Referee`, which knows it through `MatchHost` — the same systems a match uses.
+ * `Lobby` and its `Room`s, which know it through `MatchHost` — the same
+ * systems a match uses.
  *
  * Reachability is the honest cost of a WebSocket. A page served over `https`
  * may not open an insecure socket, so a public referee needs a host and a

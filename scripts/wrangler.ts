@@ -2,7 +2,7 @@
  * Run wrangler with the Worker stamped with the build id of the client bundle
  * it will serve.
  *
- * The Worker is not a bystander to the version gate: `Referee` recomputes
+ * The Worker is not a bystander to the version gate: each `Room` recomputes
  * every intent under ADR-0004, so it states its own build and refuses any
  * client whose build differs (`src/version.ts`). Wrangler builds
  * `workers/index.ts` with its own esbuild run, which knows nothing about

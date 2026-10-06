@@ -141,8 +141,8 @@ const SESSION_COMMANDS: Partial<Record<NetworkMessage['type'], true>> = {
   ready: true,
   digest: true,
   matchHeader: true,
-  resume: true,
   log: true,
+  seated: true,
   abort: true,
 }
 

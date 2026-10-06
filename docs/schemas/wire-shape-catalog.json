@@ -82,11 +82,6 @@
       "squadIndex": "number",
       "type": "'reload'"
     },
-    "resume": {
-      "afterSeq": "number",
-      "matchId": "string",
-      "type": "'resume'"
-    },
     "retreat": {
       "faction": "Faction",
       "type": "'retreat'"
@@ -97,6 +92,13 @@
       "type": "'rightClickFacing'",
       "x": "number",
       "z": "number"
+    },
+    "seated": {
+      "faction": "Faction | null",
+      "phase": "RoomPhase",
+      "redirected": "boolean",
+      "roomId": "string",
+      "type": "'seated'"
     },
     "throwGrenade": {
       "kind": "GrenadeId",
@@ -316,8 +318,7 @@
       }
     },
     "sighted": {
-      "known": "boolean",
-      "seen": "boolean"
+      "known": "boolean"
     },
     "stance": {
       "firedThisTurn": "boolean",
@@ -429,5 +430,5 @@
       "weaponId": "string"
     }
   },
-  "protocolVersion": 5
+  "protocolVersion": 6
 }

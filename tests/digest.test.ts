@@ -103,6 +103,21 @@ describe('Comparing two peers at a handover', () => {
     for (const d of found) expect(d.unit).toBe(unit.name)
   })
 
+  test('what each window can see is not part of the world', () => {
+    // Regression: fog (`seen`) was serialised with the unit, so a client that
+    // had drawn its fog and a referee that draws none disagreed on every
+    // hidden enemy at the first handover, and the referee aborted the match.
+    // Fog is a view: two windows looking from different sides hold one world.
+    const a = peer()
+    const b = peer()
+    for (const unit of b.squads.byFaction[Faction.Red]) unit.seen = false
+    expect(compareDigests(a.digest(), b.digest(), a.nameOf)).toEqual([])
+
+    // What the rules learned about a unit is shared, and still compared.
+    b.squads.byFaction[Faction.Red][0]!.known = true
+    expect(compareDigests(a.digest(), b.digest(), a.nameOf).map((d) => d.what)).toEqual(['component sighted'])
+  })
+
   test('a status nobody replicated is caught', () => {
     const a = peer()
     const b = peer()

@@ -2496,6 +2496,72 @@ the same button, five of the same text field, each free to drift.
 - [x] Living documentation updated (`docs/architecture/rendering.md`).
 ---
 
+### [ITEM-058] A Lobby of Many Matches, With Spectators and One Window per Player
+**Completed Date:** 2026-10-07  
+**Type:** Feature  
+**Milestone:** Unscheduled — infrastructure  
+
+#### Why
+A match server held exactly two players. Its `Referee` watched one match for the life of the
+process and could never open a second; every socket that connected was treated as part of that
+one match, a third socket was silently labelled Red, and the same player in two browser windows
+was indistinguishable from an opponent. There was no way to see who was waiting, nothing to
+watch, and nothing stopping a signed-in player from being in two places at once.
+
+#### Key Changes
+- **Rooms** (`src/server/Lobby.ts`, `src/server/Room.ts`, which replaces `Referee.ts`). A room
+  is one match: a Blue seat, a Red seat, any number of spectators, and the referee's own
+  recomputation. The server holds any number of them; a socket states its intent in its url
+  (`open`, `join`, `watch`, `resume` — `src/game/Lobby.ts`) and is answered with one `seated`
+  frame. Frames are routed within the room: intents to the other seat and every spectator,
+  setup frames to the other seat only, nothing from a spectator.
+- **One match per player; one live window per player.** A player in a match being played who
+  asks for anything else is put back in it. A player's newest window replaces the old one
+  wherever it was: the old window is told why and closed; a match already being played moves to
+  the new window, rebuilt from the referee's log; a match still being set up is abandoned
+  rather than moving a half-equipped loadout between windows. A signed-in seat that drops
+  mid-match is held for two minutes for the player to come back.
+- **`GET /api/lobby`** lists rooms not over (waiting for an opponent / in progress, with names,
+  turn, spectators, and a seat that is reconnecting) and the asker's own seat.
+- **The lobby panel** (`src/hud/menu/ServerPanel.tsx`, `LobbyList.tsx`): *Open a Match*, *Join*
+  on a waiting room, *Watch* on one in progress, polled every two seconds; it takes a playing
+  match over automatically when the player opens it in a new window.
+- **The browser's side** (`NetworkManager.connectToServer`, `main.tsx` `takeSeat`): a seat being
+  set up goes to the loadout as before; a seat in a match being played is rebuilt from the log
+  (`InteractionController.catchUp`) and played on; a spectator watches it like a recording that
+  is still being written, with a `SpectatorBar` and a way back.
+- **Protocol 6.** `seated` added; the in-band `resume { matchId, afterSeq }` removed.
+- **Two bugs that aborted every refereed match at its first handover**, found by playing one
+  through a real Durable Object: `Squads.loadoutOf` read pouches back *with* the issued stones,
+  so the header deployed every soldier with twice as many; and fog (`SightedComponent.seen`)
+  was serialised, so each window's view was digested as if it were state. Both fixed, each with
+  a regression test that fails before and passes after (`tests/recording.test.ts`,
+  `tests/digest.test.ts`).
+
+#### Measured
+- `bun test`: 737 pass, 0 fail, including `tests/cloudflare.test.ts` against a real `workerd`.
+  New: `tests/lobby.test.ts` (listing, join/refusals, spectators, redirect, takeover in play and
+  in setup, grace and its expiry, a second match after the first), connect/log/buffering/
+  spectator-silence tests in `tests/network.test.ts`, takeover and spectating over real sockets
+  in `tests/refereed.test.ts`.
+- In Chromium against a local Durable Object, four windows: a signed-in host opened, an
+  anonymous player joined from the lobby, both deployed and played a full round through the
+  referee's digest checks; a spectator watched from the lobby and caught up; the host opened a
+  second window, which took the match over (the old one showed *You opened TicTac in another
+  window; this one was disconnected.*; catch-up took 33 ms) and played two more handovers the
+  referee accepted. At the end all three live windows agreed on every unit's tile and HP.
+
+#### Acceptance Criteria
+- [x] A lobby lists hosts waiting for a match and matches being played.
+- [x] A waiting match can be joined; a match in progress can be watched read-only.
+- [x] A signed-in player can only ever be in one match.
+- [x] A player's state follows them to a new window, and the old window is disconnected with a
+      reason; a match still being set up is dropped instead of moved.
+- [x] Living documentation updated (`docs/architecture/networking.md` §8,
+      `docs/architecture/deployment.md` §2, `docs/architecture/persistence.md`,
+      `docs/architecture/rendering.md`).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the
