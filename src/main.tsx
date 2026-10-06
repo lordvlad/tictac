@@ -127,7 +127,15 @@ game.resources.on('loaded', () => {
   showMenu()
 })
 
-function showMenu(): void {
+/**
+ * Draw the start menu, optionally stating why the player is back at it.
+ *
+ * `notice` is how a match that never started says so: a referee that refuses
+ * a build sends `abort` before either side has a controller to show the usual
+ * interrupted overlay, and without this the screen would simply reappear with
+ * no explanation at all.
+ */
+function showMenu(notice?: string): void {
   const ui = Game.instance().uiRoot
   const container = document.createElement('div')
   container.id = 'start-menu-overlay'
@@ -211,6 +219,7 @@ function showMenu(): void {
 
   root.render(
     <StartMenu
+      notice={notice}
       onLocalVersus={() => {
         closeMenu()
         const { seed, label } = resolveSeed()
@@ -307,10 +316,10 @@ function equipThenStart(
   // A peer that drops while the player is still equipping would otherwise hang
   // the screen: there is no controller yet to show the usual overlay. `start`
   // reassigns this to the in-match overlay rather than adding a second handler.
-  network.onDisconnected = () => {
+  network.onDisconnected = (reason) => {
     screen.dispose()
     network.dispose()
-    showMenu()
+    showMenu(reason)
   }
 
   void screen.show().then(async (loadout) => {

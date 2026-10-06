@@ -91,7 +91,14 @@ against state they both hold. See
 
 ### 1. Match Lifecycle
 - `hello` / `init`: the joiner states its build, the host answers with the seed
-  and its own. Mismatched builds refuse to *start* — see §5.
+  and its own. Mismatched builds refuse to *start* — see §5. The host answers
+  **every** `hello`, not only the first thing it says: on a data channel the
+  opponent is already there when the match opens, but on a socket to a referee
+  the host opens the match and the opponent connects whenever they like, and a
+  referee relays live rather than replaying for a latecomer. An `init`
+  announced into an empty room is gone, so a `hello` makes the host restate
+  both its opening and, if it has already deployed, its `ready` — neither is
+  an event, and neither is recorded, so saying them twice costs nothing.
 - `ready`: one `Deployment[]` (`ITEM-043`) — a sanitized `CharacterSheet`, the
   kit this side equipped (absent if this build could not read one), and a
   session-state bag per soldier, `{ hp?, fatigue? }`. `hp` is present only on
@@ -171,6 +178,16 @@ This is a precondition rather than hygiene: the project deploys on every push,
 so two peers on different bundles diverge for entirely innocent reasons. Turning
 that into a connection error with a stated cause is what stops it becoming a
 foul with a wronged party once divergence is grounds for naming a side.
+
+A referee is held to the same rule — it recomputes the match, so it states its
+own build and refuses a client that differs — which means the refusal has two
+possible readers. `VersionVoices` names both sides in the text rather than
+saying "this build": between peers it reads *this page* and *the other
+player*, and from a referee it reads *the match server* and *this page*, each
+with its hash. The remedy is not the same one — a stale tab reloads, a server
+stamped with the wrong commit is redeployed (`docs/architecture/deployment.md`
+§2.4) — and a player cannot tell which they are looking at from a message that
+names neither machine.
 
 ## 6. Combat Recording & Spectator Playback
 

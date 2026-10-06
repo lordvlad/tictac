@@ -190,6 +190,14 @@ export class NetworkManager {
   private opening: PromiseWithResolvers<{ seed: number; seedLabel: string }> | null = null
 
   /**
+   * The opening this side announced as host, kept so a joiner that connects
+   * after it was announced can still be told (`restate`).
+   */
+  private opened: { seed: number; seedLabel: string } | null = null
+  /** The squad this side has already deployed, for the same reason. */
+  private deployed: Deployment[] | null = null
+
+  /**
    * Replicate component mutations for the entities this peer owns.
    *
    * Both peers run the same simulation, so without an owner each side would
@@ -233,7 +241,8 @@ export class NetworkManager {
   }
 
   /**
-   * Refuse a peer, with a reason a player can act on.
+   * End the match with a reason a player can act on: a build this side will
+   * not play against, or an `abort` the other side stated.
    *
    * Closing the connection is the whole enforcement: there is no partial
    * compatibility to negotiate, and playing on would produce a match whose
@@ -243,9 +252,12 @@ export class NetworkManager {
     // Latched: a peer that has been refused does not get to carry on by
     // sending an acceptable frame afterwards. The closed channel is the
     // enforcement in practice, but the decision is this side's and it is not
-    // re-litigated per frame.
+    // re-litigated per frame. Closing here is also what keeps the *stated*
+    // reason: this side's own `close` fires no close handler, so the socket
+    // shutting a moment later cannot overwrite "build mismatch" with "the
+    // connection was lost".
     this.refused = true
-    console.warn(`[net] Refusing the connection: ${reason}`)
+    console.warn(`[net] The match cannot go on: ${reason}`)
     this.onDisconnected?.(reason)
     this.opening?.reject(new Error(reason))
     this.transport?.close()
@@ -269,6 +281,22 @@ export class NetworkManager {
       return
     }
 
+    // An abort is the referee (or a peer) saying the match has stopped being
+    // one match, and it is the only frame that arrives already carrying its
+    // own explanation. Taken at the edge rather than forwarded as a command,
+    // because it can land before there is a controller to forward it to —
+    // during the handshake, or while this side is still on the loadout
+    // screen — and that is exactly when a refusal is most worth reading. Left
+    // to the socket, the player would be told "the connection was lost"
+    // instead of why.
+    if (method === RpcMethods.abort) {
+      const stated = typeof params.reason === 'string' && params.reason.length > 0
+        ? params.reason
+        : 'The match server ended the match without saying why.'
+      this.refuse(stated)
+      return
+    }
+
     // The version gate, checked at the edge on both of the frames that can
     // carry it: the host's `init` and the joiner's `hello`. Before the seed is
     // taken and before anything is forwarded as a command, because a peer on
@@ -279,9 +307,18 @@ export class NetworkManager {
         this.refuse(reason)
         return
       }
-      // `hello` states a version and nothing else, so there is nothing left to
-      // forward once it has been accepted.
-      if (method === RpcMethods.hello) return
+      // `hello` states a version and nothing else, so there is nothing left
+      // to forward once it has been accepted — but it is also the only sign
+      // this side gets that somebody has arrived who may have missed what it
+      // already said. A referee relays live and keeps nothing for a latecomer
+      // (that is what `resume` is for, and it needs a match already open), so
+      // a host whose opponent connects after it opened the match would
+      // otherwise sit on the loadout screen forever, each side waiting for
+      // the other.
+      if (method === RpcMethods.hello) {
+        this.restate()
+        return
+      }
       // Only now, past the gate: the seed is the first thing a match is built
       // from, and a joiner is waiting on exactly this frame to have arrived
       // from a build it can play against.
@@ -370,11 +407,38 @@ export class NetworkManager {
    * The host is Blue and Blue moves first, which is why the role comes with
    * the announcement rather than with the channel: a socket to a referee and a
    * data channel to a peer are the same match from here.
+   *
+   * Announced immediately *and* remembered, because the two transports differ
+   * in when the other side exists. A data channel only exists once a peer has
+   * joined it, so the announcement always has a listener; a socket to a
+   * referee exists the moment the host opens the match, and the opponent
+   * connects minutes later. The referee relays rather than replays, so an
+   * `init` spoken into an empty room is simply gone — which is why `hello`
+   * is answered with it again (see `restate`).
    */
   hostMatch(seed: number, seedLabel: string): void {
     this.mode = 'host'
     this.myFaction = Faction.Blue
+    this.opened = { seed, seedLabel }
     this.send({ type: 'init', seed, seedLabel, ...MY_VERSION })
+  }
+
+  /**
+   * Say again, to a side that has just announced itself, everything this side
+   * said before it could hear.
+   *
+   * Both frames are statements of position rather than events, so repeating
+   * them is harmless where it is redundant: a joiner resolves its opening
+   * once, and a `ready` is the squad this side brought, which does not change.
+   * Neither is an intent, so neither reaches the recorded stream — a referee
+   * has not even opened the match until `matchHeader`, which comes after
+   * both sides have deployed.
+   */
+  private restate(): void {
+    if (this.opened) {
+      this.send({ type: 'init', ...this.opened, ...MY_VERSION })
+    }
+    if (this.deployed) this.send({ type: 'ready', squad: this.deployed })
   }
 
   /**
@@ -448,6 +512,8 @@ export class NetworkManager {
     // from either side, and only the applier sees both. When this recorded,
     // a match's file held this side's moves and none of the opponent's.
     if (this.mode === 'local') return
+    // Kept so a side that connects afterwards can still be told (`restate`).
+    if (msg.type === 'ready') this.deployed = msg.squad
     console.info(`%c[NET 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
     this.sendRpc(this.messageToRpc(msg))
   }

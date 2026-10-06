@@ -23,8 +23,8 @@
     "icons": "bun run build:icons",
     "replay": "bun scripts/replay.ts",
     "serve:match": "bun scripts/serve-match.ts",
-    "cf:dev": "bun run build && wrangler dev",
-    "cf:deploy": "bun run build && wrangler deploy"
+    "cf:dev": "bun run build && bun scripts/wrangler.ts dev",
+    "cf:deploy": "bun run build && bun scripts/wrangler.ts deploy"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.18.2",

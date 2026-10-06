@@ -6,7 +6,7 @@ import { compareDigests, type Divergence, type StateDigest } from '../game/State
 import type { Transport } from '../game/Transport'
 import { sanitizeSheet } from '../core/Characters'
 import { MatchHost } from '../sim/MatchHost'
-import { MY_VERSION, versionRefusal } from '../version'
+import { MY_VERSION, SERVER_VOICES, versionRefusal } from '../version'
 import { carriedOut, settlement, winnerOf, type UnitFate } from '../game/MatchEnd'
 import type { MatchStore } from './MatchStore'
 import type { Rosters } from './Rosters'
@@ -209,8 +209,12 @@ export class Referee {
       case 'init': {
         // The gate, before anything else: a client on another build diverges
         // for innocent reasons, and a referee that accused it would be naming
-        // somebody whose browser cached yesterday's bundle.
-        const reason = versionRefusal(params)
+        // somebody whose browser cached yesterday's bundle. Stated in the
+        // server's own voice, because the player who reads this refusal is
+        // the client being turned away and needs to see both hashes: a
+        // Worker deployed without its build id says `dev` here, which is a
+        // server to redeploy rather than a page to reload.
+        const reason = versionRefusal(params, MY_VERSION, SERVER_VOICES)
         if (reason) return this.refuse(client, reason)
         client.build = MY_VERSION.build
         this.relay(client, frame)

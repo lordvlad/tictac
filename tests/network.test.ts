@@ -92,6 +92,37 @@ describe('JSON-RPC framing', () => {
   })
 })
 
+describe('A joiner that arrives after the host opened the match', () => {
+  /**
+   * The refereed case, which differs from peer-to-peer in one way that
+   * matters: a data channel does not exist until a peer has joined it, so the
+   * host's `init` always has a listener, while a socket to a referee exists
+   * from the moment the host opens the match and the opponent connects
+   * whenever they like. The referee relays live and keeps nothing for a
+   * latecomer, so an opening announced into an empty room is gone — and both
+   * sides then sit on their loadout screens waiting for each other. Modelled
+   * with `loopback`, which drops a frame nobody is listening for, exactly as
+   * the relay does.
+   */
+  test('is told the opening, and the squad the host already deployed', async () => {
+    const [hostSide, joinerSide] = loopback()
+    const host = new NetworkManager()
+    host.attach(hostSide)
+    host.hostMatch(4242, 'forty-two')
+
+    const squad = rollSquadSheets().map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! }))
+    host.send({ type: 'ready', squad })
+
+    const joiner = new NetworkManager()
+    joiner.attach(joinerSide)
+    const opening = joiner.joinMatch()
+
+    expect(await opening).toEqual({ seed: 4242, seedLabel: 'forty-two' })
+    const brought = await joiner.waitForPeerReady()
+    expect(brought?.squad.map((unit) => unit.sheet.attributes)).toEqual(squad.map((unit) => unit.sheet.attributes))
+  })
+})
+
 describe('Command transport', () => {
   test('a command survives the round trip unchanged', () => {
     const { net, sent } = peered()

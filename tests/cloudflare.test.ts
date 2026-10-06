@@ -1,6 +1,9 @@
+import type { Subprocess } from 'bun'
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { RpcMethods } from '../src/game/JsonRpc'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { simulateOverWire } from '../src/sim/WireMatch'
+import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
 import { softwareAuthenticator } from './support/authenticator'
 
 /**
@@ -36,7 +39,21 @@ const PORT = 18917
 const BASE = `http://127.0.0.1:${PORT}`
 const ORIGIN = 'http://localhost:5173'
 
-let dev: ReturnType<typeof Bun.spawn>
+let dev: Subprocess
+/**
+ * The build `dist/` was stamped with, which every client in this file speaks.
+ *
+ * A deployed referee recomputes the match, so it states its own build and
+ * refuses any client that differs — and the Worker is built by wrangler, not
+ * by `scripts/build-bundle.ts`, so it only knows its build because
+ * `scripts/wrangler.ts` defines it in. This file drives that real pairing:
+ * `wrangler dev` runs through the wrapper, so the referee carries the commit
+ * rather than `dev`, and the clients here state the same commit instead of
+ * the `dev` this test process was loaded as. Lose the define and every socket
+ * test below is refused at the door, which is the failure the deploy had.
+ */
+let bundled = ''
+const asLoaded = MY_VERSION.build
 
 /** Sleep, only ever used to space out polling a real external process. */
 function sleep(ms: number): Promise<void> {
@@ -57,19 +74,40 @@ function once(target: EventTarget, event: string): Promise<Event> {
  * purpose: `wrangler dev` is a separate OS process with no readiness event
  * this test can await instead, only a port that starts answering once the
  * local Workers runtime has finished booting.
+ *
+ * Each attempt is bounded as well as the loop. A half-dead `workerd` left
+ * behind by an earlier run accepts the connection and then answers nothing,
+ * and an unbounded `fetch` waits on it forever — which turned a readiness
+ * failure into a hung `beforeAll` that only the test runner's own timeout
+ * ended, long after the deadline here had passed.
  */
 async function waitForReady(timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${BASE}/`)
+      const response = await fetch(`${BASE}/`, { signal: AbortSignal.timeout(2000) })
       if (response.ok) return
     } catch {
-      // Not listening yet.
+      // Not listening yet, or listening and not answering.
     }
     await sleep(250)
   }
   throw new Error(`wrangler dev did not answer on ${BASE} within ${timeoutMs}ms`)
+}
+
+/**
+ * Stop everything holding this test's port, whoever started it.
+ *
+ * `wrangler dev` is a tree — the CLI, and the `workerd` it serves through —
+ * and killing only the process this file spawned leaves the rest listening.
+ * The port is this test's alone and appears in every member's command line
+ * (`--port 18917`, `entry=localhost:18917`), so it identifies the tree
+ * exactly; `fuser` then covers anything holding the socket under a command
+ * line that does not mention it.
+ */
+function freePort(): void {
+  Bun.spawnSync(['pkill', '-f', String(PORT)])
+  Bun.spawnSync(['fuser', '-k', `${PORT}/tcp`])
 }
 
 /** Registers a fresh passkey over real HTTP, the way a browser would. */
@@ -100,13 +138,28 @@ describe('The planted Cloudflare deployment', () => {
     const built = Bun.spawnSync(['bun', 'run', 'build'], { cwd: import.meta.dir + '/..' })
     if (!built.success) throw new Error(`bun run build failed: ${built.stderr.toString()}`)
 
+    bundled = (await Bun.file(`${import.meta.dir}/../dist/build-id.txt`).text()).trim()
+    expect(bundled.length).toBeGreaterThan(0)
+    // This process was loaded without the bundler's `--define`, so it is the
+    // `dev` fallback; the deployment it is about to talk to is not. Speaking
+    // the bundle's build is what makes these clients the clients that
+    // deployment serves.
+    MY_VERSION.build = bundled
+
+    // Nothing of this test's should still be listening, but a run that died
+    // without its `afterAll` leaves a `workerd` that accepts connections and
+    // answers nothing, and the next `wrangler dev` then cannot have the port.
+    freePort()
+
+    // Through `scripts/wrangler.ts`, the same wrapper `cf:deploy` uses, so
+    // the Worker is stamped exactly the way a deploy stamps it.
     // `wrangler.jsonc` names the deployed host as the relying party; the
     // passkey ceremony here is spoken from localhost, so this run states the
     // local one instead (what `MatchDurableObject` falls back to when unset).
     dev = Bun.spawn(
       [
-        'bunx',
-        'wrangler',
+        'bun',
+        'scripts/wrangler.ts',
         'dev',
         '--port',
         String(PORT),
@@ -125,12 +178,39 @@ describe('The planted Cloudflare deployment', () => {
   }, 60000)
 
   afterAll(() => {
+    MY_VERSION.build = asLoaded
     dev.kill()
-    // `bunx wrangler dev` spawns `wrangler`, which spawns a `workerd` child
-    // of its own; killing the process this test started does not reliably
-    // reach either descendant. Best-effort net, by the port rather than a
-    // command-line pattern: nothing else on this machine binds it on purpose.
-    Bun.spawnSync(['fuser', '-k', `${PORT}/tcp`])
+    freePort()
+  })
+
+  test('the referee states the build of the client bundle it serves, and names both in a refusal', async () => {
+    // The deploy this file plants shipped a Worker whose `BUILD_ID` had
+    // fallen back to `dev` while `dist/` carried a commit, so the referee
+    // refused every client it had just served: hosting dropped straight back
+    // to the menu and joining never got an opening frame. Two things are
+    // pinned here — that the Worker carries the bundle's id (the wrapper's
+    // `--define` reached it), and that the refusal a player reads quotes
+    // both hashes with a label saying which machine is running which.
+    const socket = new WebSocket(BASE.replace('http', 'ws'))
+    await once(socket, 'open')
+    const refusal = new Promise<string>((resolve) => {
+      socket.addEventListener('message', (event: MessageEvent) => {
+        const frame = JSON.parse(String(event.data)) as { method: string; params: { reason: string } }
+        if (frame.method === RpcMethods.abort) resolve(frame.params.reason)
+      })
+    })
+    socket.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: RpcMethods.hello,
+        params: { protocol: PROTOCOL_VERSION, build: 'c0ffee1' },
+      }),
+    )
+
+    const reason = await refusal
+    expect(reason).toContain(`the match server is running build ${bundled}`)
+    expect(reason).toContain('this page is running build c0ffee1')
+    socket.close()
   })
 
   test('a plain request serves the built client through the Durable Object', async () => {

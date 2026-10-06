@@ -54,6 +54,45 @@ export interface PeerVersion {
 export const MY_VERSION: PeerVersion = { protocol: PROTOCOL_VERSION, build: BUILD_ID }
 
 /**
+ * Who the two sides of a refusal are, in words the player reading it can use.
+ *
+ * The same gate runs in three places and the player is not in the same seat in
+ * each: between two peers, "the other player" is another browser; on a
+ * referee, the refusal is written by the server and read by the client it just
+ * turned away, so "this build" would name the wrong machine. Naming both sides
+ * explicitly is what makes a mismatch diagnosable rather than merely fatal —
+ * `[ITEM-045]`'s deploy shipped a Worker stamped `dev` against a client
+ * stamped with its commit, and the refusal said "this page is running dev",
+ * which is the one thing that was not true.
+ */
+export interface VersionVoices {
+  /** The side doing the refusing, as the reader should think of it. */
+  mine: string
+  /** The side being refused. */
+  theirs: string
+  /** What the reader can do about it. */
+  remedy: string
+}
+
+/** Two browsers, refusing each other directly. */
+export const PEER_VOICES: VersionVoices = {
+  mine: 'this page',
+  theirs: 'the other player',
+  remedy: 'Both of you need to reload to the same version.',
+}
+
+/**
+ * A referee refusing a client. The reader is the client, so `theirs` is the
+ * page they are looking at and `mine` is the server that turned it away.
+ */
+export const SERVER_VOICES: VersionVoices = {
+  mine: 'the match server',
+  theirs: 'this page',
+  remedy:
+    'Reload the page. If it still says this, the server is serving a client it was not deployed with and has to be redeployed.',
+}
+
+/**
  * Why this peer will not play against `theirs`, or `null` when it will.
  *
  * Peer input, so it is checked rather than trusted — and note that a peer
@@ -63,24 +102,28 @@ export const MY_VERSION: PeerVersion = { protocol: PROTOCOL_VERSION, build: BUIL
  *
  * Returns prose because the reason is shown to a player. "Refused" on its own
  * is indistinguishable from a broken connection, and the whole point of
- * refusing here is that the cause is knowable.
+ * refusing here is that the cause is knowable — so every refusal that *has*
+ * two versions to compare quotes both of them, labelled by who is running
+ * which.
  */
-export function versionRefusal(theirs: unknown, mine: PeerVersion = MY_VERSION): string | null {
-  if (!theirs || typeof theirs !== 'object') {
-    return 'The other player is running an older build that does not report its version.'
-  }
+export function versionRefusal(
+  theirs: unknown,
+  mine: PeerVersion = MY_VERSION,
+  voices: VersionVoices = PEER_VOICES,
+): string | null {
+  const subject = voices.theirs.charAt(0).toUpperCase() + voices.theirs.slice(1)
+  const unreported = `${subject} is running an older build that does not report its version. ${voices.remedy}`
+  if (!theirs || typeof theirs !== 'object') return unreported
   const stated = theirs as Partial<PeerVersion>
-  if (typeof stated.protocol !== 'number' || !Number.isFinite(stated.protocol)) {
-    return 'The other player is running an older build that does not report its version.'
-  }
+  if (typeof stated.protocol !== 'number' || !Number.isFinite(stated.protocol)) return unreported
   if (stated.protocol !== mine.protocol) {
-    return `Protocol mismatch: this build speaks ${mine.protocol}, the other player speaks ${stated.protocol}. One of you needs to reload.`
+    return `Protocol mismatch: ${voices.mine} speaks protocol ${mine.protocol}, ${voices.theirs} speaks protocol ${stated.protocol}. ${voices.remedy}`
   }
   if (typeof stated.build !== 'string' || stated.build.length === 0) {
-    return 'The other player did not report which build they are running.'
+    return `${subject} did not report which build it is running. ${voices.remedy}`
   }
   if (stated.build !== mine.build) {
-    return `Build mismatch: this page is running ${mine.build}, the other player is running ${stated.build}. Both of you need to reload to the same version.`
+    return `Build mismatch: ${voices.mine} is running build ${mine.build}, ${voices.theirs} is running build ${stated.build}. ${voices.remedy}`
   }
   return null
 }

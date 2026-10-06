@@ -53,4 +53,11 @@ if (!result.success) {
   process.exit(1)
 }
 
+// Written down as well as compiled in, because the Worker that serves this
+// bundle has to be stamped with the same id and is built by a different tool.
+// `scripts/wrangler.ts` reads this file and defines `__BUILD_ID__` into the
+// Worker from it; without that the referee reports `dev`, refuses every
+// client it just served, and a match cannot start at all (`[ITEM-045]`).
+await Bun.write('dist/build-id.txt', id)
+
 console.info(`[tictac] bundled build ${id} — ${result.outputs.length} outputs`)

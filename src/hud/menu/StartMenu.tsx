@@ -3,6 +3,11 @@ import { Account, type Player } from '../../game/Account'
 import { BUILD_ID } from '../../version'
 
 export interface StartMenuProps {
+  /**
+   * Why the player is looking at this menu, when something sent them back to
+   * it — a referee's refusal, a peer that dropped during the loadout screen.
+   */
+  notice?: string
   onLocalVersus: () => void
   onPlayAi: () => void
   onLoadRecording: (file: File) => Promise<void>
@@ -16,6 +21,7 @@ export interface StartMenuProps {
 type MenuMode = 'main' | 'host' | 'join' | 'server'
 
 export function StartMenu({
+  notice,
   onLocalVersus,
   onPlayAi,
   onLoadRecording,
@@ -26,7 +32,7 @@ export function StartMenu({
   probeOwnOriginServer,
 }: StartMenuProps) {
   const [mode, setMode] = useState<MenuMode>('main')
-  const [mainError, setMainError] = useState<string | null>(null)
+  const [mainError, setMainError] = useState<string | null>(notice ?? null)
 
   // Host mode state
   const [hostId, setHostId] = useState<string | null>(null)

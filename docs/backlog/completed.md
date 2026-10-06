@@ -2378,6 +2378,71 @@ intents serialized as JSON in attributes.
       `AGENTS.md`).
 ---
 
+### [ITEM-056] The Deployed Match Server Refused Every Client It Served
+**Completed Date:** 2026-10-05  
+**Type:** Bug  
+**Milestone:** Unscheduled — infrastructure  
+
+#### Why
+`https://tictac-match-server.waldemar-reusch.workers.dev` could not be played on at all.
+Opening a match dropped straight back to the start menu; joining one failed with a connection
+error. Both were the same cause: under [ADR-0004](../design/adr/0004-full-knowledge-lockstep.md)
+the referee recomputes every intent, so `src/version.ts` applies to it as much as to a peer —
+it states its own build and refuses a client whose build differs. `BUILD_ID` arrives through a
+build-time `--define`, and the client and the Worker are built by two different tools:
+`scripts/build-bundle.ts` for `dist/`, wrangler's own esbuild for `workers/index.ts`. Wrangler
+knew nothing about the first one's define, so the deployed referee reported `dev` and turned
+away the very bundle it had just served.
+
+`tests/cloudflare.test.ts` was green throughout, because it drove `wrangler dev` from a test
+process whose own `BUILD_ID` is the same `dev` fallback the unstamped Worker reported. The two
+agreed; no browser could.
+
+#### Key Changes
+- **`scripts/wrangler.ts`** — a prefix for `cf:dev`/`cf:deploy` that reads
+  `dist/build-id.txt` (now written by `scripts/build-bundle.ts`) and passes
+  `--define __BUILD_ID__:"<id>"` to wrangler. The file rather than a second `git rev-parse`,
+  because what must match is the client *in `dist/`*. It also spawns the installed wrangler
+  binary rather than `bunx wrangler` and forwards `SIGINT`/`SIGTERM`, so `wrangler dev` stops
+  its `workerd` instead of orphaning it.
+- **`VersionVoices` in `src/version.ts`** — a refusal names both machines and both hashes.
+  Between peers: *this page* / *the other player*. From a referee: *the match server is running
+  build X, this page is running build Y*, with the remedy that follows from it (reload a stale
+  tab; redeploy a mis-stamped server). The old text said "this page is running dev", which
+  described the one machine that was not.
+- **A refusal is shown, not swallowed.** An incoming `abort` is taken at `NetworkManager`'s edge
+  and becomes the stated disconnect reason, instead of being forwarded to a controller that does
+  not exist yet during the handshake; `showMenu(notice)` renders it. Previously the host saw the
+  menu reappear with no explanation and the joiner saw whatever the socket said as it closed.
+- **A host answers every `hello`.** Exposed once builds matched: a referee relays live and keeps
+  nothing for a latecomer, so the `init` a host sends when it opens a match is gone by the time
+  an opponent connects, and both sides waited on each other forever. The host now restates its
+  opening — and its `ready`, if it has already deployed — whenever a `hello` arrives. Neither is
+  an event and neither is recorded, so repeating them costs nothing.
+- **`tests/cloudflare.test.ts` drives the real pairing**: `wrangler dev` through
+  `scripts/wrangler.ts`, with its clients speaking `dist/build-id.txt`'s id, so losing the define
+  fails every socket test rather than none. One test asserts the refusal text directly. Its
+  readiness poll now bounds each `fetch`, and it clears the port before and after — a half-dead
+  `workerd` from an earlier run accepted connections, answered nothing, and hung `beforeAll`
+  until the runner's own timeout.
+
+#### Measured
+- Full suite: 708 pass, 0 fail. `bun run lint` clean. `tests/cloudflare.test.ts` run three times
+  consecutively: green each time, no `workerd` left behind.
+- In two real browsers against a locally stamped deployment: host opens, joiner joins, both
+  deploy, turn 1 reached with the referee watching. Against the still-unstamped live deployment,
+  the client now returns to the menu with the refusal printed rather than silently.
+
+#### Acceptance Criteria
+- [x] The Worker reports the build id of the bundle it serves, under `wrangler dev` and `wrangler deploy`.
+- [x] A build refusal names both machines and both hashes.
+- [x] A refusal reaches the player instead of an unexplained return to the menu.
+- [x] A match opened on a server can be joined afterwards and played.
+- [x] A test fails if the Worker's stamp is lost again.
+- [x] Living documentation updated (`docs/architecture/deployment.md` §2.4,
+      `docs/architecture/networking.md` §3/§5).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { BUILD_ID, MY_VERSION, PROTOCOL_VERSION, versionRefusal } from '../src/version'
+import { BUILD_ID, MY_VERSION, PROTOCOL_VERSION, SERVER_VOICES, versionRefusal } from '../src/version'
 import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
 import { RpcMethods, type JsonRpcFrame } from '../src/game/JsonRpc'
 import { loopback } from '../src/game/Transport'
@@ -59,6 +59,20 @@ describe('Refusing a peer this build cannot agree with', () => {
     expect(reason).not.toBeNull()
     expect(reason).toContain('c0ffee1')
     expect(reason).toContain(BUILD_ID)
+  })
+
+  test('a referee names itself and the client, because the reader is the client', () => {
+    // The same mismatch, read from the other seat. A server that said "this
+    // page is running dev" would be describing the browser, which is the one
+    // machine that is not running `dev` — see `docs/architecture/deployment.md`
+    // §2.4, where exactly that sent every player back to the start menu.
+    const reason = versionRefusal(
+      { protocol: PROTOCOL_VERSION, build: 'c0ffee1' },
+      { protocol: PROTOCOL_VERSION, build: 'dec0de5' },
+      SERVER_VOICES,
+    )
+    expect(reason).toContain('the match server is running build dec0de5')
+    expect(reason).toContain('this page is running build c0ffee1')
   })
 
   test('a different protocol is refused, and says so as a protocol problem', () => {

@@ -7,6 +7,9 @@ lastReviewed: "2026-09-30"
 appliesTo:
   - ".github/workflows/deploy.yml"
   - "wrangler.jsonc"
+  - "scripts/wrangler.ts"
+  - "scripts/build-bundle.ts"
+  - "src/version.ts"
   - "workers/**"
   - "src/server/GameServer.ts"
   - "src/server/SocketTransport.ts"
@@ -113,6 +116,42 @@ and it can be evicted like any other idle Durable Object — static-asset and `/
 never needed the hibernation exemption, since both are stateless replies against durable
 storage answered without ever touching `Referee`'s in-memory state.
 
+### 2.4 The Worker is stamped with the build id of the bundle it serves
+
+The referee is not a bystander to the version gate. Under
+[ADR-0004](../design/adr/0004-full-knowledge-lockstep.md) it recomputes every intent itself, so
+`src/version.ts` applies to it exactly as it applies to a peer: it states its own build, and
+refuses any client whose build differs. That makes "which commit is this Worker?" a
+*gameplay* fact, not a diagnostic.
+
+`BUILD_ID` reaches a bundle through a build-time `--define`, and the client and the Worker are
+built by two different tools: `scripts/build-bundle.ts` (`Bun.build`) produces `dist/`, while
+wrangler runs its own esbuild over `workers/index.ts`. Wrangler knows nothing about the first
+one's define, so a plain `wrangler deploy` shipped a referee whose `BUILD_ID` had fallen back to
+`dev` while the bundle beside it in `dist/` carried a commit. The deployment then refused every
+client it had just served, with the two symptoms that look unrelated and are the same bug:
+hosting a match dropped straight back to the start menu (the `abort` arrived before there was a
+controller to show it), and joining one failed with whatever the socket said as it closed.
+
+So the id travels between the two builds as a file:
+
+```
+scripts/build-bundle.ts  ── --define __BUILD_ID__  ──▶ dist/chunk-….js   (the client)
+        └── writes dist/build-id.txt
+                  └── scripts/wrangler.ts reads it
+                        ── --define __BUILD_ID__  ──▶ the Worker          (the referee)
+```
+
+`scripts/wrangler.ts` is a prefix, not a command of its own: everything after it is handed to
+wrangler untouched, and `cf:dev`/`cf:deploy` both go through it. The file rather than a second
+`git rev-parse` because what has to match is *the client in `dist/`*, which a HEAD that moved
+between the two steps would no longer describe.
+
+Both halves of a refusal name their machine — `Build mismatch: the match server is running
+build a1b2c3d, this page is running build e4f5g6h.` — because the reader is the client being
+turned away and the remedy differs: a stale tab reloads, a mis-stamped server redeploys
+(`VersionVoices` in `src/version.ts`).
+
 ## 3. The `Db` adapter: `workers/DoSqliteDb.ts`
 
 `src/server/db/Db.ts` is an async port:
@@ -179,8 +218,11 @@ file the same functions are imported from.
 
 ## 4. Tooling
 
-- **`bun run cf:dev`** — builds the client and runs `wrangler dev` locally.
-- **`bun run cf:deploy`** — builds the client and runs `wrangler deploy`. Deployed for real
+- **`bun run cf:dev`** — builds the client and runs `wrangler dev` locally, through
+  `scripts/wrangler.ts` (§2.4).
+- **`bun run cf:deploy`** — builds the client and runs `wrangler deploy`, through the same
+  wrapper, so the referee is stamped with the build id of the `dist/` it ships beside. Deployed
+  for real
   (`[ITEM-045]`): `https://tictac-match-server.waldemar-reusch.workers.dev`, on the account's
   default `*.workers.dev` subdomain rather than a custom domain — nothing in this item asked
   for one, and `wrangler deploy` assigns `*.workers.dev` for free the moment a Worker exists.
@@ -208,10 +250,20 @@ mock of one. Wrangler ships a newer programmatic API for exactly this, `createTe
 never returned in this project's sandbox, reproduced even with a one-line worker that had no
 Durable Object, no assets binding and no dependency on anything in this repository — a
 sandbox-specific tooling gap, not a fact about this deployment. The test instead spawns
-`wrangler dev` (via `bunx`) as a child process on a fixed port and talks to it with ordinary
-`fetch` and `WebSocket`, which is still wrangler's own local test facility, just reached through
-the CLI rather than the library entry point. It builds `dist` itself in `beforeAll` rather than
+`wrangler dev` as a child process on a fixed port and talks to it with ordinary `fetch` and
+`WebSocket`, which is still wrangler's own local test facility, just reached through the CLI
+rather than the library entry point. It builds `dist` itself in `beforeAll` rather than
 assuming a prior build step, since CI runs `bun test` before `bun run build`.
+
+It spawns `wrangler dev` **through `scripts/wrangler.ts`**, the same wrapper `cf:deploy` uses,
+and then speaks the build id in `dist/build-id.txt` from its clients (`MY_VERSION.build`, put
+back in `afterAll`). That pairing is the point. An earlier version of this file ran wrangler
+directly and drove it from a test process whose own `BUILD_ID` was the `dev` fallback — which
+is exactly what the unstamped Worker reported, so the two agreed and the suite went green
+against a deployment no browser could play on (§2.4). Now the Worker carries the commit and so
+do the clients, so losing the define fails every socket test here rather than none of them,
+and one test asserts the refusal text directly: the server's build is the bundle's, and both
+hashes are named.
 
 `wrangler dev` spawns a `workerd` child of its own; `afterAll` killing only the process this
 test spawned did not reliably reach it, discovered as several orphaned `workerd` processes
@@ -236,7 +288,8 @@ same decisive winner — the proof that needed two real browsers before, now had
 All of the above was repeated against the real deploy, not only `wrangler dev` — a real passkey
 registration, ticket and socket against
 `https://tictac-match-server.waldemar-reusch.workers.dev`, and a whole decisive match driven
-through it anonymously by `src/sim/WireMatch.ts` with no abort. What remains open: the match
+through it anonymously by `src/sim/WireMatch.ts` with no abort (which, at the time, said less
+than it looked: see §2.4). What remains open: the match
 above is anonymous; a *registered* match, whose roster is checked afterward via `GET
 /api/roster`, needs `SimMatch` or its wire harness to deploy a squad sourced from a real
 roster's exact rows rather than its own freshly-rolled sheets (`Referee.verifyRosters` checks
