@@ -33,7 +33,7 @@ export interface GameServerOptions {
   port: number
   party: RelyingParty
   log?: (message: string) => void
-  /** How long a dropped signed-in seat is held; the lobby's default unless a test says otherwise. */
+  /** How long a dropped seat is held; the lobby's default unless a test says otherwise. */
   graceMs?: number
 }
 
@@ -44,6 +44,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   const log = options.log ?? ((message: string) => console.info(`[referee] ${message}`))
   const lobby = new Lobby({
     matches: persistence.matches,
+    rooms: persistence.rooms,
     rosters: persistence.rosters,
     log,
     graceMs: options.graceMs,
@@ -54,6 +55,9 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
       }
     },
   })
+  // Before the port opens: a window reconnecting to its seat the moment this
+  // server is up has to find the room already held for it.
+  await lobby.restore()
 
   const api = apiHandler(persistence, lobby, party, log)
   const sockets = new WeakMap<object, Socket>()
@@ -112,9 +116,9 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   return {
     url: String(server.url),
     lobby,
-    /** Stops serving. The database is the caller's: it opened it, it closes it. */
+    /** Stops serving. Rooms still live stay in the database for the next server to restore; the database is the caller's. */
     stop: async () => {
-      lobby.dispose()
+      await lobby.dispose()
       await server.stop(true)
     },
   }

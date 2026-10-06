@@ -1,6 +1,7 @@
-import { Faction, FACTION_INFO, SQUAD_SIZE } from '../config'
+import { Faction, FACTION_INFO, FACTIONS, SQUAD_SIZE } from '../config'
 import { sanitizeSheet } from '../core/Characters'
 import { isCommand } from '../ecs/systems/CommandSystem'
+import { toBase64Url } from '../game/Base64Url'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../game/JsonRpc'
 import type { LobbyRoom, LobbySeat, RoomPhase } from '../game/Lobby'
 import { carriedOut, settlement, winnerOf, type UnitFate } from '../game/MatchEnd'
@@ -9,8 +10,10 @@ import type { RecordedEvent, RecordingHeader } from '../game/Recording'
 import { compareDigests, type Divergence, type StateDigest } from '../game/StateDigest'
 import type { Transport } from '../game/Transport'
 import { MatchHost } from '../sim/MatchHost'
+import type { PeerVersion } from '../version'
 import type { Player } from './Accounts'
-import type { MatchStore } from './MatchStore'
+import type { MatchStore, StoredMatch } from './MatchStore'
+import type { RoomStore, StoredRoom, StoredSeat, VerifiedSide } from './RoomStore'
 import type { Rosters } from './Rosters'
 
 /**
@@ -40,7 +43,16 @@ import type { Rosters } from './Rosters'
  *
  * Who sits where is settled by the lobby before a socket ever reaches a room,
  * so a room never has to guess: a seat is a socket, and nothing a seat says is
- * accepted from anywhere else.
+ * accepted from anywhere else. A seat that loses its socket is held for the
+ * window that had it, which proves itself with the seat's key.
+ *
+ * **A room outlives its server.** Every transition is written down
+ * (`RoomStore`) behind the match log, so a restarted server — or a new build
+ * of it, deployed while the match was being played — holds the same seats
+ * again (`restore`) and rebuilds its referee by refighting the log. A server
+ * on another build than the room's cannot tell a foul from a rules change, so
+ * it judges such a room only until the first disagreement and witnesses it
+ * from then on (`witness`).
  */
 
 /** What the referee decided about a match, for a caller that wants to watch. */
@@ -65,8 +77,14 @@ export interface RefereeVerdict {
  */
 export interface Client {
   readonly transport: Transport
-  /** The signed-in player behind the socket, or null for an anonymous one. */
-  readonly player: Player | null
+  /**
+   * The signed-in player behind the socket: the one its ticket named, or the
+   * one whose seat it proved its own by presenting that seat's key. Null for
+   * an anonymous socket.
+   */
+  player: Player | null
+  /** What its first `hello` stated, once that passed the gate; null before. */
+  version: PeerVersion | null
   room: Room | null
   /** The seat this socket holds in `room`, or null for a spectator. */
   faction: Faction | null
@@ -76,6 +94,8 @@ export interface Client {
 export interface RoomOptions {
   /** Where matches are written. Already migrated: see `Persistence`. */
   matches: MatchStore
+  /** Where the room itself is written, so that a restarted server can hold it again. */
+  rooms: RoomStore
   /**
    * The rosters to check squads against and write results onto.
    *
@@ -83,11 +103,13 @@ export interface RoomOptions {
    * simply keeps nobody's squad. That is what an anonymous match is.
    */
   rosters?: Rosters
+  /** The build this server runs: a room opened under any other is witnessed rather than judged once it disagrees. */
+  serverVersion: PeerVersion
   /** Called when a match is aborted on the referee's judgement, after everybody in it has been told. */
   onVerdict?: (verdict: RefereeVerdict) => void
   /** Called for anything worth a line in a server log. */
   log: (message: string) => void
-  /** How long a signed-in player's seat is held for them after their socket drops mid-match. */
+  /** How long a seat is held for its window after its socket drops. */
   graceMs: number
   /** Run `fn` after `ms`; the answer cancels it. Injected so a test can be the clock. */
   schedule: (fn: () => void, ms: number) => () => void
@@ -97,10 +119,16 @@ export interface RoomOptions {
 
 interface Seat {
   readonly player: Player | null
-  /** Null while a signed-in player's seat is held open for them to come back to. */
+  /** Null while the seat is held open for its window to come back to. */
   client: Client | null
   /** Cancels the hold, while one is running. */
   grace: (() => void) | null
+  /**
+   * What takes the seat back. The key itself from the moment this server
+   * mints it; for a seat restored from the store only the hash the store
+   * kept, until the window holding the key presents it.
+   */
+  key: { readonly plain: string } | { readonly hash: string }
 }
 
 export class Room {
@@ -112,6 +140,7 @@ export class Room {
   private header: RecordingHeader | null = null
   private aborted = false
   private settled = false
+  private judging = true
 
   /**
    * Every intent the referee accepted, numbered as the store numbers them.
@@ -123,6 +152,7 @@ export class Room {
    * numbers an event by counting the ones before it and the writes drain in
    * the order the events were accepted (`enqueue`); a write that fails ends
    * the match, so a log the store did not keep is never handed out for long.
+   * A restored room starts from the store's own list.
    */
   private readonly events: RecordedEvent[] = []
 
@@ -131,7 +161,7 @@ export class Room {
    * roster this server keeps. Null for a side that is anonymous, or whose
    * squad has not been vouched for.
    */
-  private sides: Record<Faction, { playerId: string; characterIds: string[] } | null> = {
+  private sides: Record<Faction, VerifiedSide | null> = {
     [Faction.Blue]: null,
     [Faction.Red]: null,
   }
@@ -153,6 +183,8 @@ export class Room {
 
   constructor(
     readonly id: string,
+    /** The build and protocol the room was opened under; only a page on the same build plays in it. */
+    readonly version: PeerVersion,
     private readonly options: RoomOptions,
     readonly createdAt: string = new Date().toISOString(),
   ) {}
@@ -173,6 +205,11 @@ export class Room {
     return this.settled || this.aborted
   }
 
+  /** False once a room opened under another build has disagreed with this server's rules (`witness`). */
+  get judged(): boolean {
+    return this.judging
+  }
+
   /** True once no socket is left in the room, seated or watching. */
   get empty(): boolean {
     return !this.seats[Faction.Blue]?.client && !this.seats[Faction.Red]?.client && this.spectators.size === 0
@@ -181,8 +218,21 @@ export class Room {
   /** The seat a signed-in player holds here, while the room is not over. */
   seatOf(playerId: string): Faction | null {
     if (this.over) return null
-    for (const faction of [Faction.Blue, Faction.Red]) {
+    for (const faction of FACTIONS) {
       if (this.seats[faction]?.player?.id === playerId) return faction
+    }
+    return null
+  }
+
+  /**
+   * The seat `key` takes back, or null when it fits neither. `hash` is the
+   * key's own (`hashSeatKey`), which is all a restored seat can be checked
+   * against until its key has been presented once.
+   */
+  seatFor(key: string, hash: string): Faction | null {
+    for (const faction of FACTIONS) {
+      const held = this.seats[faction]?.key
+      if (held && ('plain' in held ? same(held.plain, key) : same(held.hash, hash))) return faction
     }
     return null
   }
@@ -193,13 +243,19 @@ export class Room {
   }
 
   /**
-   * Resolves once everything decided so far has been written.
+   * Resolves once everything decided so far has been written — including
+   * whatever those writes decided in turn, such as the delete a failed write
+   * queues by ending the room.
    *
    * For a caller that wants to read what the referee wrote — a test, or a
    * shutdown — rather than for the referee itself, which never waits.
    */
-  idle(): Promise<void> {
-    return this.work
+  async idle(): Promise<void> {
+    let work: Promise<void>
+    do {
+      work = this.work
+      await work
+    } while (work !== this.work)
   }
 
   /** The room as `GET /api/lobby` shows it. */
@@ -224,13 +280,56 @@ export class Room {
    * the opener is the side that announces the match (`hostMatch`).
    */
   open(client: Client): void {
-    this.take(client, Faction.Blue, false)
+    this.take(client, Faction.Blue, false, mintSeatKey())
+    this.persist()
   }
 
   /** Take the Red seat. The lobby has already checked the room is `waiting`. */
   join(client: Client): void {
     this.phaseNow = 'deploying'
-    this.take(client, Faction.Red, false)
+    this.take(client, Faction.Red, false, mintSeatKey())
+    this.persist()
+  }
+
+  /**
+   * Take up a room a previous server wrote down, with nobody in it yet: every
+   * seat is held from now for the grace period, for its window to come back
+   * to with its key (`reclaim`).
+   *
+   * A match already playing is rebuilt the way a rejoining client rebuilds
+   * it, by refighting the log the store kept — which also becomes the copy a
+   * socket is handed. An intent in that log this server's rules refuse is
+   * judged like one arriving live: a verdict in a room of this server's own
+   * build, the end of judging in a room of another (`foul`).
+   */
+  restore(stored: StoredRoom, match: StoredMatch | null): void {
+    this.judging = stored.judged
+    this.sides = { [Faction.Blue]: stored.sides[Faction.Blue], [Faction.Red]: stored.sides[Faction.Red] }
+    const seat = (held: StoredSeat): Seat => ({
+      player: held.playerId ? { id: held.playerId, name: held.name ?? held.playerId } : null,
+      client: null,
+      grace: null,
+      key: { hash: held.keyHash },
+    })
+    this.seats[Faction.Blue] = seat(stored.blue)
+    this.seats[Faction.Red] = stored.red && seat(stored.red)
+    // The match is written before the row says it is playing, so a match in
+    // the store is the better witness of the two.
+    this.phaseNow = match ? 'playing' : stored.phase
+    if (match) {
+      this.header = match.header
+      this.host = new MatchHost(match.header)
+      this.events.push(...match.events)
+      for (const event of match.events) {
+        this.apply(event.command)
+        if (this.aborted) return
+      }
+    }
+    if (this.over) return
+    for (const faction of FACTIONS) if (this.seats[faction]) this.hold(faction)
+    this.options.log(
+      `room ${this.id}: restored, ${this.phaseNow}, build ${this.version.build}${this.judging ? '' : ', witnessed'}`,
+    )
   }
 
   /**
@@ -241,15 +340,27 @@ export class Room {
     client.room = this
     client.faction = null
     this.spectators.add(client)
-    this.send(client, { type: 'seated', roomId: this.id, faction: null, phase: this.phaseNow, redirected: false })
+    this.send(client, {
+      type: 'seated',
+      roomId: this.id,
+      faction: null,
+      phase: this.phaseNow,
+      redirected: false,
+      seatKey: null,
+    })
     if (this.host) this.send(client, this.logSoFar())
     this.options.log(`room ${this.id}: a spectator arrived (${this.spectators.size} watching)`)
   }
 
   /**
-   * Put a player back in the seat they hold in a match that is playing, from a
-   * new socket — after a dropped connection, from another window, or because
-   * they asked for something else while they still had a match (`redirected`).
+   * Put a signed-in player back in the seat they hold in a match that is
+   * playing, from a new window — after their tab was lost, from another
+   * window, or because they asked for something else while they still had a
+   * match (`redirected`).
+   *
+   * A new window, not a reconnection: the window it replaces is retired, and
+   * so is that window's key. The seat gets a fresh one, so the old window
+   * cannot take the seat back from under the new one.
    *
    * Rejoin is replay: the client rebuilds the match by re-running the log,
    * which is the same thing `src/sim/Replay.ts` does to a file and the same
@@ -260,49 +371,69 @@ export class Room {
   takeBack(client: Client, faction: Faction, redirected: boolean): void {
     const seat = this.seats[faction]
     if (!seat) return
-    seat.grace?.()
-    seat.grace = null
-    this.take(client, faction, redirected)
-    this.send(client, this.logSoFar())
+    this.take(client, faction, redirected, mintSeatKey())
+    this.persist()
     this.options.log(`room ${this.id}: ${seat.player?.name ?? 'a player'} took ${FACTION_INFO[faction].name} back`)
+  }
+
+  /**
+   * Put the window that holds a seat's key back in that seat (`seatFor`), in
+   * any phase.
+   *
+   * A reconnection, not a new window: nothing is abandoned, the key stays the
+   * key, and the socket becomes whoever the seat belongs to. A socket still
+   * sitting in the seat is that window's previous connection, which the
+   * server had not yet noticed was dead; it is retired, and told why in case
+   * something is somehow still listening on it.
+   */
+  reclaim(client: Client, faction: Faction, key: string): void {
+    const seat = this.seats[faction]
+    if (!seat) return
+    const previous = seat.client
+    if (previous && previous !== client) {
+      previous.gone = true
+      previous.room = null
+      this.send(previous, { type: 'abort', reason: 'This seat was taken back by another connection.', side: null })
+      previous.transport.close()
+    }
+    client.player = seat.player
+    this.take(client, faction, false, key)
+    this.options.log(`room ${this.id}: ${seat.player?.name ?? 'a player'} reconnected to ${FACTION_INFO[faction].name}`)
   }
 
   /**
    * A socket stopped being part of this room.
    *
-   * `superseded` is a newer window of the same player taking over: for a seat
-   * in a match that is playing, the lobby hands the seat to that window next,
-   * so there is nothing to hold and nobody to tell.
+   * `superseded` is a newer window of the same player taking over: a seat in
+   * a match that is playing is left for that window to take next, so there
+   * is nothing to hold and nobody to tell; a seat in a room still being set
+   * up ends the room, since a half-equipped loadout lives in the window that
+   * was equipping it.
    *
-   * Otherwise a seat leaving a match nobody has started yet ends the room —
-   * there is nothing to come back to that the other side could wait for — and
-   * a seat leaving a match in progress ends it for an anonymous player, who
-   * cannot prove they are the one coming back, and holds it open for a
-   * signed-in one, who can (`resume`).
+   * Otherwise the socket dropped, and its seat is held, in every phase and
+   * whoever holds it, for the window to come back to with its key (`hold`).
    */
   leave(client: Client, superseded: boolean): void {
     client.room = null
     if (this.spectators.delete(client)) return
-    const seat = client.faction === null ? null : this.seats[client.faction]
-    if (!seat || seat.client !== client) return
+    const faction = client.faction
+    const seat = faction === null ? null : this.seats[faction]
+    if (faction === null || !seat || seat.client !== client) return
     seat.client = null
     if (this.over) return
+    if (!superseded) return this.hold(faction)
+    if (this.phaseNow !== 'playing') this.end(departure(seat, this.phaseNow))
+  }
 
-    const name = seat.player?.name
-    if (this.phaseNow !== 'playing') {
-      this.end(`${name ?? 'The other player'} left before the match began.`)
-      return
-    }
-    if (superseded) return
-    if (!name) {
-      this.end('The other player left the match.')
-      return
-    }
-    this.options.log(`room ${this.id}: holding ${name}'s seat for ${this.options.graceMs} ms`)
-    seat.grace = this.options.schedule(() => {
-      seat.grace = null
-      this.end(`${name} left the match.`)
-    }, this.options.graceMs)
+  /**
+   * A signed-in player opened a new window while their seat here — in a room
+   * still being set up — was held with no socket in it. The room is
+   * abandoned exactly as if that socket had still been open (`leave`).
+   */
+  abandon(faction: Faction): void {
+    const seat = this.seats[faction]
+    if (!seat || this.over || this.phaseNow === 'playing') return
+    this.end(departure(seat, this.phaseNow))
   }
 
   /**
@@ -310,9 +441,10 @@ export class Room {
    *
    * The setup conversation — `hello`, `init`, `ready` — is the two seats'
    * business and goes to the other seat only: it is how a host restates its
-   * opening to a joiner who arrived late, and it means nothing to a spectator,
-   * who is handed the log instead. Intents go to the other seat and to every
-   * spectator. Nothing a spectator sends is acted on or passed on.
+   * opening to a joiner who arrived late, or to either seat after it
+   * reconnected, and it means nothing to a spectator, who is handed the log
+   * instead. Intents go to the other seat and to every spectator. Nothing a
+   * spectator sends is acted on or passed on.
    */
   receive(client: Client, frame: JsonRpcFrame): void {
     if (this.aborted || client.faction === null) return
@@ -357,9 +489,13 @@ export class Room {
     }
   }
 
-  /** Close every socket in the room. For a server shutting down. */
+  /**
+   * Close every socket in the room and let go of its holds, for a server
+   * shutting down. Nothing is written: the room is still live in the store,
+   * for the next server to take up.
+   */
   dispose(): void {
-    for (const faction of [Faction.Blue, Faction.Red]) {
+    for (const faction of FACTIONS) {
       const seat = this.seats[faction]
       seat?.grace?.()
       seat?.client?.transport.close()
@@ -367,13 +503,41 @@ export class Room {
     for (const spectator of this.spectators) spectator.transport.close()
   }
 
-  private take(client: Client, faction: Faction, redirected: boolean): void {
+  /**
+   * Put `client` in a seat — a new one, or one already held — under `key`,
+   * which is what its `seated` tells it to keep. A seat in a match already
+   * playing is handed the log straight after.
+   */
+  private take(client: Client, faction: Faction, redirected: boolean, key: string): void {
     client.room = this
     client.faction = faction
     const seat = this.seats[faction]
-    if (seat) seat.client = client
-    else this.seats[faction] = { player: client.player, client, grace: null }
-    this.send(client, { type: 'seated', roomId: this.id, faction, phase: this.phaseNow, redirected })
+    if (seat) {
+      seat.grace?.()
+      seat.grace = null
+      seat.client = client
+      seat.key = { plain: key }
+    } else {
+      this.seats[faction] = { player: client.player, client, grace: null, key: { plain: key } }
+    }
+    this.send(client, { type: 'seated', roomId: this.id, faction, phase: this.phaseNow, redirected, seatKey: key })
+    if (this.host) this.send(client, this.logSoFar())
+  }
+
+  /**
+   * Hold a seat whose socket dropped, and end the room if its window does not
+   * come back in time — with the reason the phase it ends in calls for.
+   */
+  private hold(faction: Faction): void {
+    const seat = this.seats[faction]
+    if (!seat) return
+    this.options.log(
+      `room ${this.id}: holding ${seat.player?.name ?? 'an anonymous player'}'s seat for ${this.options.graceMs} ms`,
+    )
+    seat.grace = this.options.schedule(() => {
+      seat.grace = null
+      this.end(departure(seat, this.phaseNow))
+    }, this.options.graceMs)
   }
 
   /** The match so far, as a socket arriving now is handed it. */
@@ -383,7 +547,7 @@ export class Room {
 
   /** Every socket in the room, seated or watching. */
   private *sockets(): Iterable<Client> {
-    for (const faction of [Faction.Blue, Faction.Red]) {
+    for (const faction of FACTIONS) {
       const client = this.seats[faction]?.client
       if (client) yield client
     }
@@ -409,6 +573,38 @@ export class Room {
     })
   }
 
+  /** Write the room down as it stands when the write comes up (`RoomStore.save`). */
+  private persist(): void {
+    this.enqueue(async () => {
+      // An ended room has deleted its row, or queued the delete; saving it
+      // again would bring it back for the next server to restore.
+      if (this.over) return
+      await this.options.rooms.save(await this.stored())
+    })
+  }
+
+  private async stored(): Promise<StoredRoom> {
+    const seat = async (faction: Faction): Promise<StoredSeat | null> => {
+      const held = this.seats[faction]
+      if (!held) return null
+      return {
+        playerId: held.player?.id ?? null,
+        name: held.player?.name ?? null,
+        keyHash: 'plain' in held.key ? await hashSeatKey(held.key.plain) : held.key.hash,
+      }
+    }
+    return {
+      id: this.id,
+      version: this.version,
+      phase: this.phaseNow,
+      createdAt: this.createdAt,
+      judged: this.judging,
+      sides: { [Faction.Blue]: this.sides[Faction.Blue], [Faction.Red]: this.sides[Faction.Red] },
+      blue: (await seat(Faction.Blue))!,
+      red: await seat(Faction.Red),
+    }
+  }
+
   private send(client: Client, message: NetworkMessage): void {
     const params = { ...message } as Record<string, unknown>
     delete params.type
@@ -425,9 +621,10 @@ export class Room {
    * Begin watching a match, from the opening position its host states.
    *
    * The header and the world are set here and now, because everything that
-   * judges a frame needs them immediately; only the write is queued. The match
-   * is written under the room's id, so the room a player was in and the match
-   * they can look up afterwards are the same name.
+   * judges a frame needs them immediately; only the writes are queued. The
+   * match is written under the room's id, so the room a player was in and the
+   * match they can look up afterwards are the same name — and before the room
+   * says it is playing, so a room that says so always has a match to restore.
    */
   private start(header: RecordingHeader): void {
     this.host = new MatchHost(header)
@@ -439,6 +636,7 @@ export class Room {
       await this.options.matches.create(header, this.id)
       await this.verifyRosters()
     })
+    this.persist()
     for (const spectator of this.spectators) this.send(spectator, this.logSoFar())
   }
 
@@ -467,7 +665,7 @@ export class Room {
       // dead would be theirs to choose. The lobby's seating already makes
       // this impossible (one match per player, one window per player); the
       // check stays here because this is where a result meets a roster.
-      return this.abort({
+      return this.foul({
         matchId: this.id,
         side: null,
         reason: 'one player cannot play both sides of a kept match',
@@ -486,7 +684,7 @@ export class Room {
       // settle nothing, and a header stating no sheets means the stock squad
       // to `Squads` — somebody nobody enlisted. Recruit first.
       if (members.length === 0) {
-        return this.abort({
+        return this.foul({
           matchId: this.id,
           side: faction,
           reason: `the ${FACTION_INFO[faction].name} player has nobody left on their roster to deploy`,
@@ -494,7 +692,7 @@ export class Room {
         })
       }
       if (!Array.isArray(deployed) || deployed.length < 1 || deployed.length > SQUAD_SIZE) {
-        return this.abort({
+        return this.foul({
           matchId: this.id,
           side: faction,
           reason: `the ${FACTION_INFO[faction].name} squad is not a squad of 1 to ${SQUAD_SIZE}`,
@@ -513,7 +711,7 @@ export class Room {
       for (const unit of deployed) {
         const id = unit.characterId
         if (typeof id !== 'string') {
-          return this.abort({
+          return this.foul({
             matchId: this.id,
             side: faction,
             reason: `the ${FACTION_INFO[faction].name} squad names a character that is not this player's, is not active, or repeats`,
@@ -522,7 +720,7 @@ export class Room {
         }
         const member = byId.get(id)
         if (!member || seen.has(id)) {
-          return this.abort({
+          return this.foul({
             matchId: this.id,
             side: faction,
             reason: `the ${FACTION_INFO[faction].name} squad names a character that is not this player's, is not active, or repeats`,
@@ -534,7 +732,7 @@ export class Room {
         // off the list, the same way every other roster rule refuses rather
         // than assumes.
         if (member.downtime > 0) {
-          return this.abort({
+          return this.foul({
             matchId: this.id,
             side: faction,
             reason: `the ${FACTION_INFO[faction].name} squad deploys a character still in the medical bay`,
@@ -542,7 +740,7 @@ export class Room {
           })
         }
         if (JSON.stringify(sanitizeSheet(unit.sheet)) !== JSON.stringify(member.sheet)) {
-          return this.abort({
+          return this.foul({
             matchId: this.id,
             side: faction,
             reason: `the ${FACTION_INFO[faction].name} squad is not the roster this server keeps for its player`,
@@ -553,7 +751,7 @@ export class Room {
         // that omitted it, or stated a different one, would otherwise deploy
         // a signed-in player's character healthier than the roster says.
         if (unit.state?.hp !== member.hp) {
-          return this.abort({
+          return this.foul({
             matchId: this.id,
             side: faction,
             reason: `the ${FACTION_INFO[faction].name} squad's starting health is not what the roster this server keeps for its player says`,
@@ -564,7 +762,7 @@ export class Room {
         // client cannot deploy rested, or hide how tired it already is, any
         // more than it can deploy healed (`[ITEM-039]`).
         if (unit.state?.fatigue !== member.fatigue) {
-          return this.abort({
+          return this.foul({
             matchId: this.id,
             side: faction,
             reason: `the ${FACTION_INFO[faction].name} squad's stated fatigue is not what the roster this server keeps for its player says`,
@@ -592,20 +790,22 @@ export class Room {
   private apply(command: NetworkMessage): void {
     if (!this.host) return
     const result = this.host.apply(command)
-    if (!result.applied) {
+    // Once a room is only witnessed, the referee's world is a best effort that
+    // may already have parted from the players', and one more intent it
+    // cannot carry out says nothing new.
+    if (!result.applied && this.judging) {
       // The referee could not carry out something a client did. That is a
       // disagreement about what was *possible*, which is larger than any
       // disagreement about a number, so it ends the match rather than being
       // logged and shrugged at.
-      this.abort({
+      this.foul({
         matchId: this.id,
         side: null,
         reason: `a ${command.type} the referee could not carry out: ${result.reason}`,
         found: [],
       })
-      return
     }
-    this.settle()
+    if (!this.aborted) this.settle()
   }
 
   /**
@@ -615,7 +815,8 @@ export class Room {
    * synchronously, because the world keeps moving: a later intent could kill
    * the unit whose survival is being recorded. The write itself goes on the
    * queue behind the verification, which is how a settlement can be sure the
-   * squads it credits were the ones checked against the roster.
+   * squads it credits were the ones checked against the roster. A room that
+   * stopped being judged ends here too, and keeps nobody's squad.
    */
   private settle(): void {
     const host = this.host
@@ -631,7 +832,7 @@ export class Room {
     const rosters = this.options.rosters
 
     this.enqueue(async () => {
-      if (this.aborted || !rosters) return
+      if (this.aborted || !this.judging || !rosters) return
       const side = (faction: Faction) => {
         const known = this.sides[faction]
         return known ? { ...known, fates: fates[faction] as readonly UnitFate[] } : null
@@ -652,17 +853,46 @@ export class Room {
    * with a recomputation neither player controls.
    */
   private check(client: Client, theirs: StateDigest): void {
-    if (!this.host) return
+    if (!this.host || !this.judging) return
     const mine = this.host.digest()
     const found = compareDigests(mine, theirs, (entityId) => `#${entityId}`)
     if (found.length === 0) return
 
-    this.abort({
+    this.foul({
       matchId: this.id,
       side: client.faction,
       reason: `a client's state disagrees with the referee at turn ${theirs.turn}`,
       found,
     })
+  }
+
+  /**
+   * The referee found against the match: a verdict, from a server that runs
+   * the room's own build; from any other, the end of judging it (`witness`).
+   */
+  private foul(verdict: RefereeVerdict): void {
+    if (this.version.build === this.options.serverVersion.build) this.abort(verdict)
+    else this.witness(verdict)
+  }
+
+  /**
+   * Stop judging a room opened under another build, rather than abort it.
+   *
+   * After a deploy, this server refights the match with rules that may not be
+   * the ones its players are running, so a disagreement is as likely a rules
+   * change as a foul and the server cannot tell which. The match carries on,
+   * relayed and recorded exactly as before; the referee says why once, checks
+   * no further digest, and settles nobody's roster — an unwatched match keeps
+   * nobody's squad either (RFC-0001 §8.6).
+   */
+  private witness(verdict: RefereeVerdict): void {
+    if (!this.judging) return
+    this.judging = false
+    this.options.log(
+      `room ${this.id}: opened under build ${this.version.build}, so this server (build ` +
+        `${this.options.serverVersion.build}) stops judging it rather than abort it: ${verdict.reason}`,
+    )
+    this.persist()
   }
 
   /**
@@ -697,15 +927,47 @@ export class Room {
     if (!wasOver) this.closeDoors()
   }
 
-  /** The room has just become over: nobody's seat is held any more, and the lobby is told, once. */
+  /**
+   * The room has just become over: nobody's seat is held any more, its row
+   * goes from the store behind everything it still had to write, and the
+   * lobby is told, once.
+   */
   private closeDoors(): void {
-    for (const faction of [Faction.Blue, Faction.Red]) {
+    for (const faction of FACTIONS) {
       const seat = this.seats[faction]
       seat?.grace?.()
       if (seat) seat.grace = null
     }
+    this.enqueue(() => this.options.rooms.end(this.id))
     this.options.onOver(this)
   }
+}
+
+/**
+ * SHA-256 of a seat key, base64url: the only form of it the store keeps.
+ * Asynchronous because WebCrypto is.
+ */
+export async function hashSeatKey(key: string): Promise<string> {
+  return toBase64Url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key)))
+}
+
+/** 18 random bytes: unguessable, and short enough to sit in a url. */
+function mintSeatKey(): string {
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(18)))
+}
+
+/** Equal strings, compared in a time that does not say where they first differ. */
+function same(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let difference = 0
+  for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return difference === 0
+}
+
+/** Why a room ends when `seat` is gone from it for good, in the phase it ends in. */
+function departure(seat: Seat, phase: RoomPhase): string {
+  const who = seat.player?.name ?? 'The other player'
+  return phase === 'playing' ? `${who} left the match.` : `${who} left before the match began.`
 }
 
 function toMessage(method: string, params: Record<string, unknown>): NetworkMessage | null {

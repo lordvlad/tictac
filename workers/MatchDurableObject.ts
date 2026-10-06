@@ -27,21 +27,20 @@ import type { Env } from './index'
  * (`DoSqliteDb.ts` is that `Db`, over `ctx.storage.sql`) and a transport with
  * `send`/`close` (`socketTransport`, already exported for exactly this).
  *
- * **A match socket does not hibernate.** The lobby keeps every open room —
- * its seats, its spectators, its live `MatchHost` — in memory, with no
- * durable backing; hibernation evicts the whole object, and there is
- * nothing this class could deserialize a live `MatchHost` back out of. So a
- * WebSocket here is accepted with plain `server.accept()`, not
- * `ctx.acceptWebSocket()`: as long as any socket is open, the runtime keeps
- * this instance resident rather than evicting it between messages, the
- * ordinary cost of a stateful connection rather than the hibernatable one
- * this class first shipped with. Once every socket closes, nothing pins the
- * instance and it can be evicted like any other idle Durable Object — taking
- * any room still open with it (a seat held for a player who dropped, say),
- * though never a log: those are already in `ctx.storage.sql`. Static-asset
- * and `/api/…` traffic never needed to be exempt from that, since both are
- * stateless replies against durable storage, or against the room list as it
- * stands.
+ * **A match socket does not hibernate, and a room outlives the instance
+ * anyway.** The lobby keeps its live state — sockets, spectators, each
+ * room's `MatchHost` — in memory, and a WebSocket here is accepted with plain
+ * `server.accept()`, not `ctx.acceptWebSocket()`: as long as any socket is
+ * open, the runtime keeps this instance resident rather than evicting it
+ * between messages. What it cannot keep resident across is a deploy, a
+ * restart or an eviction once every socket has closed — and none of those
+ * loses a room any more. Every room is written to `ctx.storage.sql` as it
+ * changes (`RoomStore`), and the constructor restores them all before the
+ * first request is let in, so a deploy looks to every window like a dropped
+ * connection: it reconnects to its own seat with its key, and the match goes
+ * on (`docs/architecture/deployment.md` §2.3). Static-asset and `/api/…`
+ * traffic never needed any of this, since both are stateless replies against
+ * durable storage, or against the room list as it stands.
  */
 export class MatchDurableObject extends DurableObject<Env> {
   private readonly log = (message: string): void => console.info(`[referee] ${message}`)
@@ -49,7 +48,8 @@ export class MatchDurableObject extends DurableObject<Env> {
   /**
    * Set inside `blockConcurrencyWhile`, which is also what makes every
    * `fetch` wait for it: the runtime does not dispatch a request to this
-   * object until the block's promise has settled.
+   * object until the block's promise has settled — so no socket reaches the
+   * lobby before every room it held before this instance has been restored.
    */
   private persistence!: Persistence
   private lobby!: Lobby
@@ -62,6 +62,7 @@ export class MatchDurableObject extends DurableObject<Env> {
       this.persistence = await persistenceOverDb(dbOverSqlStorage(ctx.storage.sql), party)
       this.lobby = new Lobby({
         matches: this.persistence.matches,
+        rooms: this.persistence.rooms,
         rosters: this.persistence.rosters,
         log: this.log,
         onVerdict: (verdict) => {
@@ -71,6 +72,7 @@ export class MatchDurableObject extends DurableObject<Env> {
           }
         },
       })
+      await this.lobby.restore()
       this.api = apiHandler(this.persistence, this.lobby, party, this.log)
     })
   }

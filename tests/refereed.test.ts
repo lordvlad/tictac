@@ -5,15 +5,15 @@ import { Rng } from '../src/core/rng'
 import { isJsonRpcFrame, type JsonRpcFrame } from '../src/game/JsonRpc'
 import { isCommand } from '../src/ecs/systems/CommandSystem'
 import { defaultLoadout } from '../src/game/Loadout'
-import { parseIntent } from '../src/game/Lobby'
-import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
+import { parseIntent, type Seated } from '../src/game/Lobby'
+import { NetworkManager, type NetworkMessage, type Resync } from '../src/game/NetworkManager'
 import { RECORDING_VERSION, type Deployment, type RecordingHeader } from '../src/game/Recording'
 import { PROTOCOL_VERSION } from '../src/version'
 import type { Transport } from '../src/game/Transport'
 import type { Player } from '../src/server/Accounts'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import { Lobby } from '../src/server/Lobby'
-import type { Room } from '../src/server/Room'
+import type { RefereeVerdict, Room } from '../src/server/Room'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'
@@ -32,64 +32,100 @@ import { simulateOverWire, type WireMatchResult } from '../src/sim/WireMatch'
  * ticket: tickets are the accounts' business and tested there, and this is
  * about what the lobby does with a player once it has one.
  *
- * Port 0 so the test cannot collide with anything, including itself.
+ * Port 0 the first time, so the test cannot collide with anything, including
+ * itself; the same port after a `restart`, because a redeployed server is
+ * found where the old one was.
  */
 async function lobbyOnASocket() {
   const persistence = await openPersistence()
   const store = persistence.matches
-  const lobby = new Lobby({ matches: store, log: () => {} })
-  const sockets = new WeakMap<object, { deliver: (raw: string) => void; closed: () => void }>()
+  const verdicts: RefereeVerdict[] = []
+  const newLobby = () =>
+    new Lobby({ matches: store, rooms: persistence.rooms, log: () => {}, onVerdict: (verdict) => verdicts.push(verdict) })
+  let lobby = newLobby()
 
-  const server = Bun.serve({
-    port: 0,
-    fetch: (request, server) =>
-      server.upgrade(request, { data: { params: new URL(request.url).searchParams } })
-        ? undefined
-        : new Response('no'),
-    websocket: {
-      data: {} as { params: URLSearchParams },
-      open(ws) {
-        const frames: ((frame: JsonRpcFrame) => void)[] = []
-        const closers: ((reason: string) => void)[] = []
-        const transport: Transport = {
-          send: (frame) => ws.send(JSON.stringify(frame)),
-          onFrame: (handler) => frames.push(handler),
-          onClosed: (handler) => closers.push(handler),
-          close: () => ws.close(),
-        }
-        sockets.set(ws, {
-          deliver: (raw) => {
-            const parsed = JSON.parse(raw)
-            if (isJsonRpcFrame(parsed)) for (const handler of frames) handler(parsed)
-          },
-          closed: () => {
-            for (const handler of closers) handler('closed')
-          },
-        })
-        const name = ws.data.params.get('as')
-        const player: Player | null = name ? { id: `id-${name}`, name } : null
-        lobby.attach(transport, player, parseIntent(ws.data.params))
+  const serve = (port: number): Serving => {
+    const sockets = new WeakMap<object, { deliver: (raw: string) => void; closed: () => void }>()
+    const server = Bun.serve({
+      port,
+      fetch: (request, server) =>
+        server.upgrade(request, { data: { params: new URL(request.url).searchParams } })
+          ? undefined
+          : new Response('no'),
+      websocket: {
+        data: {} as { params: URLSearchParams },
+        open(ws) {
+          const frames: ((frame: JsonRpcFrame) => void)[] = []
+          const closers: ((reason: string) => void)[] = []
+          const transport: Transport = {
+            send: (frame) => ws.send(JSON.stringify(frame)),
+            onFrame: (handler) => frames.push(handler),
+            onClosed: (handler) => closers.push(handler),
+            close: () => ws.close(),
+          }
+          sockets.set(ws, {
+            deliver: (raw) => {
+              const parsed = JSON.parse(raw)
+              if (isJsonRpcFrame(parsed)) for (const handler of frames) handler(parsed)
+            },
+            closed: () => {
+              for (const handler of closers) handler('closed')
+            },
+          })
+          const name = ws.data.params.get('as')
+          const player: Player | null = name ? { id: `id-${name}`, name } : null
+          lobby.attach(transport, player, parseIntent(ws.data.params))
+        },
+        message(ws, message) {
+          sockets.get(ws)?.deliver(String(message))
+        },
+        close(ws) {
+          sockets.get(ws)?.closed()
+        },
       },
-      message(ws, message) {
-        sockets.get(ws)?.deliver(String(message))
-      },
-      close(ws) {
-        sockets.get(ws)?.closed()
-      },
+    })
+    return { port: server.port!, stop: () => server.stop(true) }
+  }
+  let server: Serving | null = serve(0)
+  const port = server.port
+
+  const site = {
+    get lobby() {
+      return lobby
     },
-  })
-
-  return {
-    lobby,
     store,
-    url: `ws://127.0.0.1:${server.port}/`,
-    as: (name: string) => `ws://127.0.0.1:${server.port}/?as=${name}`,
+    verdicts,
+    url: `ws://127.0.0.1:${port}/`,
+    as: (name: string) => `ws://127.0.0.1:${port}/?as=${name}`,
+    /** The process going away under a deploy: every socket dropped, nothing said to it. */
+    crash: async () => {
+      await lobby.dispose()
+      server?.stop()
+      server = null
+    },
+    /** The new process: the rooms read back from the same database, on the same port. */
+    boot: async () => {
+      lobby = newLobby()
+      await lobby.restore()
+      server = serve(port)
+    },
+    restart: async () => {
+      await site.crash()
+      await site.boot()
+    },
     stop: async () => {
-      lobby.dispose()
-      server.stop(true)
+      await lobby.dispose()
+      server?.stop()
       await persistence.close()
     },
   }
+  return site
+}
+
+/** A listening `Bun.serve`, as much of it as a restart needs. */
+interface Serving {
+  port: number
+  stop(): void
 }
 
 const SHEETS = {
@@ -156,8 +192,10 @@ describe('Two clients playing through a match server', () => {
 
     // The lobby seated them where they asked, and the seed came from the
     // host, through the server, over a socket.
-    expect(opened).toEqual({ roomId, faction: Faction.Blue, phase: 'waiting', redirected: false })
-    expect(joined).toEqual({ roomId, faction: Faction.Red, phase: 'deploying', redirected: false })
+    expect(opened).toEqual({ roomId, faction: Faction.Blue, phase: 'waiting', redirected: false, seatKey: expect.any(String) })
+    expect(joined).toEqual({ roomId, faction: Faction.Red, phase: 'deploying', redirected: false, seatKey: expect.any(String) })
+    // A secret per seat, so neither can take the other's back.
+    expect(opened.seatKey).not.toBe(joined.seatKey)
     expect(opening.seed).toBe(seed)
     expect([host.mode, joiner.mode]).toEqual(['host', 'join'])
 
@@ -251,7 +289,7 @@ describe('Two clients playing through a match server', () => {
 
     const second = new NetworkManager()
     const seat = await second.connectToServer(as('alice'), { kind: 'resume' })
-    expect(seat).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', redirected: false })
+    expect(seat).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', redirected: false, seatKey: expect.any(String) })
     expect(second.mode).toBe('host')
     expect(await superseded.promise).toContain('another window')
 
@@ -273,7 +311,7 @@ describe('Two clients playing through a match server', () => {
     // in it, and says so.
     const third = new NetworkManager()
     const back = await third.connectToServer(as('alice'), { kind: 'open' })
-    expect(back).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', redirected: true })
+    expect(back).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', redirected: true, seatKey: expect.any(String) })
     expect((await third.waitForLog()).events).toHaveLength(3)
 
     for (const manager of [host, joiner, second, third]) manager.dispose()
@@ -289,7 +327,7 @@ describe('Two clients playing through a match server', () => {
 
     const watcher = new NetworkManager()
     const seat = await watcher.connectToServer(url, { kind: 'watch', roomId })
-    expect(seat).toEqual({ roomId, faction: null, phase: 'playing', redirected: false })
+    expect(seat).toEqual({ roomId, faction: null, phase: 'playing', redirected: false, seatKey: null })
     expect(watcher.mode).toBe('spectate')
     const log = await watcher.waitForLog()
     expect(log.events.map((e) => e.command.type)).toEqual(['moveUnit'])
@@ -350,5 +388,175 @@ describe('Two clients playing through a match server', () => {
     expect(refought.digest.total).toBe(result.digest.total)
 
     await stop()
+  })
+})
+
+/** Resolves the next time `manager` is back in its own seat after a drop. */
+function backInSeat(manager: NetworkManager): Promise<Seated> {
+  const { promise, resolve } = Promise.withResolvers<Seated>()
+  manager.onReconnected = resolve
+  return promise
+}
+
+/** Resolves with what `manager` makes of the log it is handed on the way back. */
+function resynced(manager: NetworkManager): Promise<Resync> {
+  const { promise, resolve } = Promise.withResolvers<Resync>()
+  manager.onResync = resolve
+  return promise
+}
+
+/** Every reason `managers` were told their match was over; a reconnect should leave this empty. */
+function endings(...managers: NetworkManager[]): string[] {
+  const told: string[] = []
+  for (const manager of managers) manager.onDisconnected = (reason) => told.push(reason ?? '')
+  return told
+}
+
+const MOVE: NetworkMessage = { type: 'moveUnit', faction: Faction.Blue, squadIndex: 0, path: [{ x: 20, y: 5 }, { x: 20, y: 6 }] }
+
+describe('A match server that restarts under its matches', () => {
+  test('both players come back to their seats by themselves, and the match carries on, refereed', async () => {
+    const site = await lobbyOnASocket()
+    const seed = 4242
+    const { host, joiner, roomId } = await playing(site.url, site.url, seed)
+    const match = new MatchHost(header(seed))
+    const moved = nextIntent(joiner)
+    host.send(MOVE)
+    await moved
+    match.apply(MOVE)
+
+    const told = endings(host, joiner)
+    const back = Promise.all([backInSeat(host), backInSeat(joiner)])
+    const caught = Promise.all([resynced(host), resynced(joiner)])
+    await site.restart()
+
+    // The same seats, in the same match, with the same keys.
+    const seats = await back
+    expect(seats.map((seat) => [seat.roomId, seat.faction, seat.phase])).toEqual([
+      [roomId, Faction.Blue, 'playing'],
+      [roomId, Faction.Red, 'playing'],
+    ])
+    expect(await caught).toEqual([
+      { kind: 'caughtUp', missed: 0 },
+      { kind: 'caughtUp', missed: 0 },
+    ])
+
+    // The next handover is checked by the server that was not there for the
+    // first move, from the match it read back, and it agrees.
+    const ended = nextIntent(joiner)
+    host.send({ type: 'digest', digest: match.digest() })
+    host.send({ type: 'endTurn', faction: Faction.Blue })
+    expect((await ended).type).toBe('endTurn')
+    match.apply({ type: 'endTurn', faction: Faction.Blue })
+    const covered = nextIntent(host)
+    joiner.send({ type: 'toggleCover', faction: Faction.Red, squadIndex: 1 })
+    expect((await covered).type).toBe('toggleCover')
+    match.apply({ type: 'toggleCover', faction: Faction.Red, squadIndex: 1 })
+
+    await site.lobby.idle()
+    expect(site.verdicts).toEqual([])
+    expect(told).toEqual([])
+    expect(site.lobby.room(roomId)!.digest()).toEqual(match.digest())
+    expect((await site.store.match(roomId))!.events.map((event) => event.command.type)).toEqual([
+      'moveUnit',
+      'endTurn',
+      'toggleCover',
+    ])
+
+    host.dispose()
+    joiner.dispose()
+    await site.stop()
+  })
+
+  test('two players still equipping come back to the room, and their squads still meet', async () => {
+    const site = await lobbyOnASocket()
+    const host = new NetworkManager()
+    const joiner = new NetworkManager()
+    const opened = await host.connectToServer(site.url, { kind: 'open' })
+    await joiner.connectToServer(site.url, { kind: 'join', roomId: opened.roomId })
+    host.hostMatch(31, '31')
+    await joiner.joinMatch()
+
+    const told = endings(host, joiner)
+    const back = Promise.all([backInSeat(host), backInSeat(joiner)])
+    await site.crash()
+    // Both deploy while there is no server to hear it.
+    host.send({ type: 'ready', squad: squadOf(Faction.Blue) })
+    joiner.send({ type: 'ready', squad: squadOf(Faction.Red) })
+    await site.boot()
+
+    expect((await back).map((seat) => seat.phase)).toEqual(['deploying', 'deploying'])
+    const [seenByHost, seenByJoiner] = await Promise.all([host.waitForPeerReady(), joiner.waitForPeerReady()])
+    expect(seenByHost?.squad.map((d) => d.sheet)).toEqual(SHEETS[Faction.Red])
+    expect(seenByJoiner?.squad.map((d) => d.sheet)).toEqual(SHEETS[Faction.Blue])
+
+    // And the match opens and is played on the restarted server.
+    host.send({ type: 'matchHeader', header: header(31) })
+    const moved = nextIntent(joiner)
+    host.send(MOVE)
+    expect((await moved).type).toBe('moveUnit')
+    expect(told).toEqual([])
+
+    host.dispose()
+    joiner.dispose()
+    await site.stop()
+  })
+
+  test('a move played into a dead socket is not lost silently: the window is rebuilt from the log', async () => {
+    const site = await lobbyOnASocket()
+    const { host, joiner } = await playing(site.url, site.url, 4242)
+    const moved = nextIntent(joiner)
+    host.send(MOVE)
+    await moved
+
+    const told = endings(host, joiner)
+    const back = Promise.all([backInSeat(host), backInSeat(joiner)])
+    const rebuilt = resynced(host)
+    await site.crash()
+    host.send({ type: 'endTurn', faction: Faction.Blue })
+    await site.boot()
+    await back
+
+    const resync = await rebuilt
+    expect(resync.kind).toBe('rebuild')
+    if (resync.kind !== 'rebuild') throw new Error('unreachable')
+    expect(resync.log.events.map((event) => event.command.type)).toEqual(['moveUnit'])
+
+    // The rebuilt window hands over again, and this time it arrives.
+    const ended = nextIntent(joiner)
+    host.send({ type: 'endTurn', faction: Faction.Blue })
+    expect((await ended).type).toBe('endTurn')
+    expect(told).toEqual([])
+
+    host.dispose()
+    joiner.dispose()
+    await site.stop()
+  })
+
+  test('a spectator comes back to the room it was watching and follows it on', async () => {
+    const site = await lobbyOnASocket()
+    const { host, joiner, roomId } = await playing(site.url, site.url, 99)
+    const moved = nextIntent(joiner)
+    host.send(MOVE)
+    await moved
+    const watcher = new NetworkManager()
+    await watcher.connectToServer(site.url, { kind: 'watch', roomId })
+    await watcher.waitForLog()
+
+    const told = endings(host, joiner, watcher)
+    const back = Promise.all([host, joiner, watcher].map(backInSeat))
+    const caught = resynced(watcher)
+    await site.restart()
+    const seats = await back
+    expect(seats[2]).toEqual({ roomId, faction: null, phase: 'playing', redirected: false, seatKey: null })
+    expect(await caught).toEqual({ kind: 'caughtUp', missed: 0 })
+
+    const relayed = nextIntent(watcher)
+    host.send({ type: 'endTurn', faction: Faction.Blue })
+    expect((await relayed).type).toBe('endTurn')
+    expect(told).toEqual([])
+
+    for (const manager of [host, joiner, watcher]) manager.dispose()
+    await site.stop()
   })
 })

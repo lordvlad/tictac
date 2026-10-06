@@ -3,7 +3,7 @@ title: "Persistence: Database Port, Migrations, Accounts & Rosters"
 id: "ARCH-PERSISTENCE"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-10-06"
+lastReviewed: "2026-10-07"
 appliesTo:
   - "src/server/**"
   - "scripts/serve-match.ts"
@@ -42,6 +42,7 @@ openPersistence(url, party)
   └── openDb(url) ── dialectOf(url) → 'sqlite' | 'postgres'
         └── migrate(db, MIGRATIONS)
               ├── MatchStore   — matches, events
+              ├── RoomStore    — rooms
               ├── Accounts     — players, credentials, sessions, auth_challenges
               └── Rosters      — roster, match_results
 ```
@@ -59,8 +60,9 @@ Stated in `Db.ts` and obeyed by every query in `src/server/`:
 - A count is `CAST(COUNT(*) AS INTEGER)`; Postgres returns `bigint` as a string.
 - camelCase aliases are double-quoted (`AS "createdAt"`), or Postgres folds them.
 - No generated columns, no JSON operators in SQL, no `rowid`, no `WITHOUT ROWID`.
-- `RETURNING`, partial indexes and `INSERT … VALUES (…, (subselect))` are fair
-  game: both engines have them.
+- `RETURNING`, partial indexes, `INSERT … VALUES (…, (subselect))` and
+  `INSERT … ON CONFLICT (…) DO UPDATE SET … = excluded.…` are fair game: both
+  engines have them.
 
 The claim is kept honest by running the suite against both engines:
 
@@ -104,6 +106,7 @@ Migrations are append-only and never edited once shipped:
 3. **`rosters`** — `roster`, `match_results`.
 4. **`lasting wounds`** — `roster.hp`, `roster.deeds` (`ITEM-038`).
 5. **`fatigue and medical bay`** — `roster.fatigue`, `roster.downtime` (`ITEM-039`).
+6. **`rooms`** — `rooms`, the lobby's live rooms (§3).
 
 > This is the *database* schema. The **recorded command and component
 > shapes** are a separate guard — `bun run schema:catalog`, see
@@ -125,6 +128,35 @@ can be rewritten is not evidence.
 
 `created_at` and `seed_label` are copied out of the header at write time rather
 than derived in SQL — a generated column is SQLite's alone.
+
+### Rooms, so a restart loses none
+
+`RoomStore` keeps one row per room that is not over, with exactly what a
+restarted server needs to hold it again (`Lobby.restore`,
+[ARCH-NETWORKING §8](./networking.md)):
+
+| Column | What it is |
+|---|---|
+| `id` | the room's id, which is also its match's id in `matches` |
+| `build`, `protocol` | what the room was opened under; only a page on that build takes a seat back |
+| `phase` | `waiting`, `deploying` or `playing`. A room whose match `matches` holds is playing whatever this says: the match is written first, and a restart can fall between the two writes |
+| `created_at` | ISO string; restore order, and so listing order |
+| `judged` | 1, or 0 once a room of another build stopped being judged |
+| `sides` | JSON: the squads the referee verified against the rosters, which is who a settlement credits |
+| `blue_player_id`, `blue_name`, `blue_key_hash` | the Blue seat: its player (null for an anonymous one) and the SHA-256 of its key |
+| `red_player_id`, `red_name`, `red_key_hash` | the same for Red, all null while the room waits |
+
+A seat's key is never stored, only its hash — the same reason `sessions` keeps
+no token. There are no foreign keys: an anonymous seat names nobody, and nothing
+reads a player through a room.
+
+Each row is rewritten whole (`save`, an upsert) at every transition the room
+makes — opened, joined, started, squads verified, a seat's key replaced by a new
+window, judging stopped — on the room's own write chain (§6), so the row is
+always one state the room was really in. A room that settles or aborts deletes
+its row (`end`) behind everything else it had to write; what remains of it is
+its match log. The table therefore holds live rooms only and does not grow.
+`live()` reads them back oldest first.
 
 ---
 
@@ -359,7 +391,10 @@ bun run serve:match -- --db=sqlite://matches.sqlite --rp-id=localhost --origins=
 `--db` defaults to `TICTAC_DB` and then `:memory:`; `--rp-id` and `--origins`
 default to `localhost` and `http://localhost:5173`. For a GitHub Pages
 deployment the server runs with `--rp-id=lordvlad.github.io
---origins=https://lordvlad.github.io` behind HTTPS/WSS.
+--origins=https://lordvlad.github.io` behind HTTPS/WSS. The server restores
+every live room from the database before it opens its port, so a server
+restarted over a file or a Postgres keeps its matches; one on `:memory:` has
+nothing to restore.
 
 Each room's referee writes through **one queue** (`Room.enqueue`; `Room.idle`, and
 `Lobby.idle` across every room).

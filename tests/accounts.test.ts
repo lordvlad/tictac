@@ -33,7 +33,7 @@ interface ApiDriver {
 }
 
 function driver(persistence: Persistence): ApiDriver {
-  const lobby = new Lobby({ matches: persistence.matches, log: () => {} })
+  const lobby = new Lobby({ matches: persistence.matches, rooms: persistence.rooms, log: () => {} })
   const handle = apiHandler(persistence, lobby, LOCAL_RELYING_PARTY, () => {})
 
   const call = async (

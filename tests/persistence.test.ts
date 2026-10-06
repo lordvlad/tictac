@@ -23,7 +23,15 @@ import { MatchHost } from '../src/sim/MatchHost'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
 import { DATABASE_URLS, freshPersistence } from './support/db'
-import { connect, decisive, roomOf, seatBoth } from './support/lobby'
+import {
+  connect,
+  decisive,
+  roomOf,
+  seatBoth,
+  sheetsOf,
+  withCharacterIds,
+  withStartingHp,
+} from './support/lobby'
 import { stockSquads } from './support/squads'
 
 const ADA: Player = { id: 'A', name: 'Ada' }
@@ -488,45 +496,6 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   })
 })
 
-/** The people a header's squad states, for tests that only want the sheet. */
-function sheetsOf(header: RecordingHeader, faction: Faction): CharacterSheet[] {
-  return header.squads[faction].map((deployment) => deployment.sheet)
-}
-
-/**
- * The same header, with each side's `state.hp` and `state.fatigue` stamped —
- * what a signed-in client's `ready` actually carries (`[ITEM-039]`: the
- * referee checks fatigue the same strict way it checks hp, so a test cannot
- * leave it implicit). `fatigue` defaults to 0, every fixture roster's own
- * starting level.
- */
-function withStartingHp(
-  header: RecordingHeader,
-  hp: Record<Faction, readonly number[]>,
-  fatigue?: Record<Faction, readonly number[]>,
-): RecordingHeader {
-  const stamp = (faction: Faction): Deployment[] =>
-    header.squads[faction].map((deployment, i) => ({
-      ...deployment,
-      state: { ...deployment.state, hp: hp[faction][i], fatigue: fatigue?.[faction]?.[i] ?? 0 },
-    }))
-  return { ...header, squads: { [Faction.Blue]: stamp(Faction.Blue), [Faction.Red]: stamp(Faction.Red) } }
-}
-
-/**
- * The same header, with each side's `characterId` stamped as given — the
- * referee now checks the *stated id* against the roster (`[ITEM-042]`), not
- * a bare positional sheet compare, so a signed-in test has to name real ones.
- */
-function withCharacterIds(
-  header: RecordingHeader,
-  ids: Record<Faction, readonly string[]>,
-): RecordingHeader {
-  const stamp = (faction: Faction): Deployment[] =>
-    header.squads[faction].map((deployment, i) => ({ ...deployment, characterId: ids[faction][i] }))
-  return { ...header, squads: { [Faction.Blue]: stamp(Faction.Blue), [Faction.Red]: stamp(Faction.Red) } }
-}
-
 describe('A refereed match is kept on the rosters it was played with', () => {
   async function playing(url: string, blueSheets: CharacterSheet[], redSheets: CharacterSheet[]) {
     const persistence = await freshPersistence(url)
@@ -539,6 +508,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     const verdicts: RefereeVerdict[] = []
     const lobby = new Lobby({
       matches: persistence.matches,
+      rooms: persistence.rooms,
       rosters: persistence.rosters,
       onVerdict: (verdict) => verdicts.push(verdict),
       log: () => {},

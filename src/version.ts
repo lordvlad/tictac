@@ -38,6 +38,25 @@
 export const PROTOCOL_VERSION = 6
 
 /**
+ * The oldest protocol a match server still serves — for finishing a match,
+ * never for starting one.
+ *
+ * A deploy replaces the server while browsers keep running yesterday's
+ * bundle. The rooms survive it (they are written down, `src/server/Lobby.ts`),
+ * and each window reconnects to its own seat as if its wifi had dropped for a
+ * moment. So the new server has to admit the old client long enough to finish
+ * the match it was in: it serves this protocol and every one up to its own,
+ * and speaks each socket's dialect back to it. Opening, joining or watching a
+ * room still requires the current protocol and the room's own build.
+ *
+ * `PROTOCOL_VERSION - 1` — the one before — except that nothing before 6 can
+ * reconnect to a room at all, so 6 is the floor. Bumping the protocol means
+ * keeping the server speaking the previous one; `tests/version.test.ts`
+ * holds this constant to that.
+ */
+export const OLDEST_SERVED_PROTOCOL = Math.max(6, PROTOCOL_VERSION - 1)
+
+/**
  * The commit this bundle was built from, or `dev` when it was not built.
  *
  * Injected at build time by `bun build --define:__BUILD_ID__`. `typeof` rather

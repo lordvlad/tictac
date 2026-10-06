@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { NetworkManager, type NetworkMessage, type NetworkMode } from '../src/game/NetworkManager'
+import {
+  CONNECTION_LOST,
+  NetworkManager,
+  RECONNECT_DELAYS_MS,
+  type NetworkMessage,
+  type NetworkMode,
+  type Resync,
+} from '../src/game/NetworkManager'
 import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { CHARACTER, Faction, RULES, SQUAD_SIZE } from '../src/config'
@@ -15,7 +22,7 @@ import { TraitId } from '../src/core/Traits'
 import { Rng } from '../src/core/rng'
 import { HealthComponent, MatchRulesComponent } from '../src/ecs/components'
 import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
-import { loopback } from '../src/game/Transport'
+import { loopback, type Transport } from '../src/game/Transport'
 import { SocketTransport } from '../src/game/SocketTransport'
 import {
   componentUpdateMethod,
@@ -761,7 +768,7 @@ describe('A match over a socket, as a referee would host one', () => {
 const notify = (method: string, params: Record<string, unknown>): JsonRpcFrame => ({ jsonrpc: '2.0', method, params })
 
 describe('Connecting to a match server', () => {
-  const seat: Seated = { roomId: 'r00m', faction: Faction.Red, phase: 'playing', redirected: true }
+  const seat: Seated = { roomId: 'r00m', faction: Faction.Red, phase: 'playing', redirected: true, seatKey: 'k3y' }
   const opening: RecordingHeader = {
     version: RECORDING_VERSION,
     seed: 77,
@@ -911,5 +918,315 @@ describe('A spectator', () => {
     theirs.send(notify(RpcMethods.hello, { ...MY_VERSION }))
 
     expect(sent).toEqual([])
+  })
+})
+
+/**
+ * Timers on a clock the test turns by hand: what a manager waits for between
+ * tries, and how long it keeps trying, without a test that takes two minutes.
+ */
+function handClock() {
+  let now = 0
+  const timers: { at: number; fn: () => void; live: boolean }[] = []
+  return {
+    schedule: (fn: () => void, ms: number) => {
+      const timer = { at: now + ms, fn, live: true }
+      timers.push(timer)
+      return () => {
+        timer.live = false
+      }
+    },
+    /** Run every timer due within `ms`, in the order they fall due. */
+    advance(ms: number) {
+      const until = now + ms
+      for (;;) {
+        const due = timers.filter((t) => t.live && t.at <= until).sort((a, b) => a.at - b.at)[0]
+        if (!due) break
+        now = due.at
+        due.live = false
+        due.fn()
+      }
+      now = until
+    },
+    get now() {
+      return now
+    },
+  }
+}
+
+/**
+ * A match server as the manager meets it: every socket it opens, when, by
+ * which url, and everything said on it — with the far end in the test's hand.
+ * `answer` is how the server greets a socket's `hello`; left unset, nobody
+ * answers, and `down` closes a socket the moment it speaks.
+ */
+function handServer(clock: ReturnType<typeof handClock>) {
+  interface Socket {
+    url: URL
+    at: number
+    heard: JsonRpcNotification[]
+    send(frame: JsonRpcFrame): void
+    drop(): void
+  }
+  const sockets: Socket[] = []
+  const server = {
+    sockets,
+    down: false,
+    answer: null as ((socket: Socket) => void) | null,
+    connect: (url: string): Transport => {
+      const [ours, theirs] = loopback()
+      const socket: Socket = {
+        url: new URL(url),
+        at: clock.now,
+        heard: [],
+        send: (frame) => theirs.send(frame),
+        drop: () => theirs.close(),
+      }
+      theirs.onFrame((frame) => {
+        const said = frame as JsonRpcNotification
+        socket.heard.push(said)
+        if (socket.heard.length > 1 || said.method !== RpcMethods.hello) return
+        if (server.down) socket.drop()
+        else server.answer?.(socket)
+      })
+      sockets.push(socket)
+      return ours
+    },
+    get last(): Socket {
+      return sockets[sockets.length - 1]!
+    },
+  }
+  return server
+}
+
+describe('A window that loses its socket to the match server', () => {
+  const opening: RecordingHeader = {
+    version: RECORDING_VERSION,
+    seed: 77,
+    seedLabel: '77',
+    source: 'live',
+    createdAt: '',
+    turnCap: null,
+    squads: {
+      [Faction.Blue]: rollSquadSheets(new Rng(1)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
+      [Faction.Red]: rollSquadSheets(new Rng(2)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
+    },
+  }
+  const move: NetworkMessage = { type: 'moveUnit', faction: Faction.Blue, squadIndex: 0, path: [{ x: 1, y: 2 }] }
+  const blueEnds: NetworkMessage = { type: 'endTurn', faction: Faction.Blue }
+  const cover: NetworkMessage = { type: 'toggleCover', faction: Faction.Red, squadIndex: 1 }
+  const redEnds: NetworkMessage = { type: 'endTurn', faction: Faction.Red }
+  const seated = (phase: 'waiting' | 'deploying' | 'playing', over: Record<string, unknown> = {}) =>
+    notify(RpcMethods.seated, { roomId: 'r00m', faction: Faction.Blue, phase, redirected: false, seatKey: 'k3y', ...over })
+  const logOf = (commands: NetworkMessage[]) =>
+    notify(RpcMethods.log, {
+      matchId: 'r00m',
+      header: opening,
+      events: commands.map((command, seq) => ({ seq, turn: 1, faction: command.type === 'toggleCover' ? Faction.Red : Faction.Blue, command })),
+    })
+  const wire = (command: NetworkMessage) => {
+    const { type, ...params } = command
+    return notify(RpcMethods[type], params)
+  }
+
+  /** Blue, seated in `phase` by a server it reached with a ticket, and everything it was told. */
+  async function seatedBlue(phase: 'waiting' | 'deploying' | 'playing') {
+    const clock = handClock()
+    const server = handServer(clock)
+    server.answer = (socket) => socket.send(seated(phase))
+    const net = new NetworkManager({ connect: server.connect, schedule: clock.schedule })
+    const told = { attempts: [] as number[], reconnected: [] as Seated[], resyncs: [] as Resync[], disconnects: [] as string[] }
+    net.onReconnecting = (attempt) => told.attempts.push(attempt)
+    net.onReconnected = (seat) => told.reconnected.push(seat)
+    net.onResync = (resync) => told.resyncs.push(resync)
+    net.onDisconnected = (reason) => told.disconnects.push(reason ?? '')
+    await net.connectToServer('ws://tictac.test/?ticket=t1&as=ada', { kind: 'open' })
+    return { clock, server, net, told }
+  }
+
+  test('tries again on a backoff, quick at first, and says which try it is on', async () => {
+    const { clock, server, net, told } = await seatedBlue('playing')
+    server.down = true
+    server.last.drop()
+    // Nothing is reported as over: the window is getting its seat back.
+    expect(told.disconnects).toEqual([])
+    expect(net.isMyTurn(Faction.Blue)).toBe(false)
+
+    clock.advance(30_000)
+    const tries = server.sockets.slice(1).map((socket) => socket.at)
+    // 250, +500, +1000, +2000, +4000, then every 4 s.
+    const gaps = tries.map((at, i) => at - (i === 0 ? 0 : tries[i - 1]!))
+    expect(gaps.slice(0, 7)).toEqual([...RECONNECT_DELAYS_MS, 4000, 4000])
+    expect(told.attempts).toEqual(told.attempts.map((_, i) => i + 1))
+    expect(told.attempts.length).toBe(tries.length + 1)
+
+    // Each try asks for this window's own seat by its key, and not with the
+    // ticket, which was worth one connection; whatever else the url said stays.
+    expect(Object.fromEntries(server.last.url.searchParams)).toEqual({ as: 'ada', intent: 'resume', room: 'r00m', seat: 'k3y' })
+    expect(server.last.heard).toEqual([notify(RpcMethods.hello, { ...MY_VERSION }) as JsonRpcNotification])
+  })
+
+  test('gives up once the seat would be gone, and says the connection was lost', async () => {
+    const { clock, server, told } = await seatedBlue('playing')
+    server.down = true
+    server.last.drop()
+    clock.advance(119_000)
+    expect(told.disconnects).toEqual([])
+    clock.advance(1_000)
+    expect(told.disconnects).toEqual([CONNECTION_LOST])
+    const opened = server.sockets.length
+    clock.advance(60_000)
+    expect(server.sockets.length).toBe(opened)
+  })
+
+  test('a try that is never answered is given up on for the next', async () => {
+    const { clock, server } = await seatedBlue('playing')
+    server.answer = null
+    server.last.drop()
+    clock.advance(250)
+    expect(server.sockets).toHaveLength(2)
+    clock.advance(5_000 + 500)
+    expect(server.sockets).toHaveLength(3)
+  })
+
+  test('an abort on the way back is the reason, and the end of trying', async () => {
+    const { clock, server, told } = await seatedBlue('playing')
+    server.answer = (socket) => socket.send(notify(RpcMethods.abort, { reason: 'That match is gone.', side: null }))
+    server.last.drop()
+    clock.advance(250)
+    expect(told.disconnects).toEqual(['That match is gone.'])
+    clock.advance(60_000)
+    expect(server.sockets).toHaveLength(2)
+    expect(told.disconnects).toHaveLength(1)
+  })
+
+  test('a window dropped after it let go of the match does not come back', async () => {
+    const { clock, server, net, told } = await seatedBlue('playing')
+    net.dispose()
+    server.last.drop()
+    clock.advance(60_000)
+    expect(server.sockets).toHaveLength(1)
+    expect(told.attempts).toEqual([])
+  })
+
+  test('back in a match, it is handed exactly what was relayed while it was away', async () => {
+    const { clock, server, net, told } = await seatedBlue('playing')
+    const heard: NetworkMessage[] = []
+    net.onMessage = (msg) => heard.push(msg)
+    net.send(move)
+    net.send(blueEnds)
+    server.last.send(wire(cover))
+    server.last.drop()
+
+    // Red played on while Blue was away; the server's log says so.
+    server.answer = (socket) => {
+      socket.send(seated('playing'))
+      socket.send(logOf([move, blueEnds, cover, redEnds]))
+    }
+    clock.advance(250)
+
+    expect(told.reconnected).toEqual([{ roomId: 'r00m', faction: Faction.Blue, phase: 'playing', redirected: false, seatKey: 'k3y' }])
+    expect(told.resyncs).toEqual([{ kind: 'caughtUp', missed: 1 }])
+    expect(heard).toEqual([cover, redEnds])
+    expect([net.mode, net.isMyTurn(Faction.Blue)]).toEqual(['host', true])
+    // Nothing but the version went out before the seat; nothing after either,
+    // for a match being played says nothing it has not played.
+    expect(server.last.heard.map((frame) => frame.method)).toEqual([RpcMethods.hello])
+
+    // And the stream goes on: the next drop compares against all of it.
+    server.last.drop()
+    server.answer = (socket) => {
+      socket.send(seated('playing'))
+      socket.send(logOf([move, blueEnds, cover, redEnds]))
+    }
+    clock.advance(250)
+    expect(told.resyncs[1]).toEqual({ kind: 'caughtUp', missed: 0 })
+  })
+
+  test('a command the server never got means the match is rebuilt from its log', async () => {
+    const { clock, server, net, told } = await seatedBlue('playing')
+    net.send(move)
+    server.last.drop()
+    // Played into a socket that was already gone.
+    net.send(blueEnds)
+    const heard: NetworkMessage[] = []
+    server.answer = (socket) => {
+      socket.send(seated('playing'))
+      socket.send(logOf([move]))
+    }
+    clock.advance(250)
+    expect(told.resyncs).toHaveLength(1)
+    const [resync] = told.resyncs
+    expect(resync!.kind).toBe('rebuild')
+    expect(resync!.kind === 'rebuild' && resync!.log.events.map((event) => event.command)).toEqual([move])
+    net.onMessage = (msg) => heard.push(msg)
+    expect(heard).toEqual([])
+  })
+
+  test('a log that disagrees anywhere, not just at the end, is a rebuild too', async () => {
+    const { clock, server, net, told } = await seatedBlue('playing')
+    net.send(move)
+    net.send(blueEnds)
+    server.last.drop()
+    server.answer = (socket) => {
+      socket.send(seated('playing'))
+      socket.send(logOf([{ ...move, path: [{ x: 9, y: 9 }] } as NetworkMessage, blueEnds, cover]))
+    }
+    clock.advance(250)
+    expect(told.resyncs.map((r) => r.kind)).toEqual(['rebuild'])
+  })
+
+  test('back in a room being set up, it says again everything it had said', async () => {
+    const { clock, server, net, told } = await seatedBlue('deploying')
+    net.hostMatch(21, '21')
+    const squad = rollSquadSheets(new Rng(3)).map((sheet) => ({ sheet }))
+    server.last.drop()
+    // Deployed while the socket was gone: kept, and said once it is back.
+    net.send({ type: 'ready', squad })
+    clock.advance(250)
+    expect(told.reconnected).toHaveLength(1)
+    expect(server.last.heard.map((frame) => frame.method)).toEqual([
+      RpcMethods.hello,
+      RpcMethods.hello,
+      RpcMethods.init,
+      RpcMethods.ready,
+    ])
+    expect(server.last.heard[2]!.params).toEqual({ seed: 21, seedLabel: '21', ...MY_VERSION })
+  })
+
+  test('a seat that comes back somewhere else is a lost match, said as one', async () => {
+    const { clock, server, told } = await seatedBlue('playing')
+    server.answer = (socket) => socket.send(seated('playing', { faction: Faction.Red }))
+    server.last.drop()
+    clock.advance(250)
+    expect(told.disconnects).toHaveLength(1)
+    expect(told.disconnects[0]).toContain('another seat')
+  })
+
+  test('a spectator watches again, and catches up on what it missed', async () => {
+    const clock = handClock()
+    const server = handServer(clock)
+    server.answer = (socket) => {
+      socket.send(seated('playing', { faction: null, seatKey: null }))
+      socket.send(logOf([move]))
+    }
+    const net = new NetworkManager({ connect: server.connect, schedule: clock.schedule })
+    const resyncs: Resync[] = []
+    net.onResync = (resync) => resyncs.push(resync)
+    await net.connectToServer('ws://tictac.test/', { kind: 'watch', roomId: 'r00m' })
+    expect((await net.waitForLog()).events).toHaveLength(1)
+    const heard: NetworkMessage[] = []
+    net.onMessage = (msg) => heard.push(msg)
+    server.last.send(wire(blueEnds))
+    server.last.drop()
+
+    server.answer = (socket) => {
+      socket.send(seated('playing', { faction: null, seatKey: null }))
+      socket.send(logOf([move, blueEnds, cover]))
+    }
+    clock.advance(250)
+    expect(Object.fromEntries(server.last.url.searchParams)).toEqual({ intent: 'watch', room: 'r00m' })
+    expect(resyncs).toEqual([{ kind: 'caughtUp', missed: 1 }])
+    expect(heard).toEqual([blueEnds, cover])
   })
 })

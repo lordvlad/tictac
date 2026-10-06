@@ -8,9 +8,9 @@ import type { Migration } from './migrate'
  * of migration 2 disagrees with this file's. Renaming one is therefore a
  * deliberate breaking change, not a tidy-up.
  *
- * The tables here fall into three groups, which is why there are three
- * migrations rather than one: the intent log a referee keeps, the accounts a
- * player signs in with, and the roster those accounts own.
+ * The tables here fall into four groups: the intent log a referee keeps, the
+ * accounts a player signs in with, the roster those accounts own, and the
+ * rooms a lobby holds open across a restart.
  */
 
 /**
@@ -188,6 +188,34 @@ export const MIGRATIONS: readonly Migration[] = [
       // which is exactly what `fatigue = 0, downtime = 0` means.
       'ALTER TABLE roster ADD COLUMN fatigue INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE roster ADD COLUMN downtime INTEGER NOT NULL DEFAULT 0',
+    ],
+  },
+  {
+    id: 6,
+    name: 'rooms',
+    up: [
+      // A room not yet over, as much of it as a restarted server needs to
+      // hold its seats again (`RoomStore`); the match it plays is already in
+      // `matches`/`events` under the same id. A room that ends deletes its
+      // row, so the table holds live rooms only. A seat keeps the hash of
+      // its key, never the key — the same reason `sessions` keeps no token.
+      // No foreign keys: an anonymous seat names nobody, and nothing reads a
+      // player through a room.
+      `CREATE TABLE rooms (
+         id             TEXT    PRIMARY KEY,
+         build          TEXT    NOT NULL,
+         protocol       INTEGER NOT NULL,
+         phase          TEXT    NOT NULL,
+         created_at     TEXT    NOT NULL,
+         judged         INTEGER NOT NULL,
+         sides          TEXT    NOT NULL,
+         blue_player_id TEXT,
+         blue_name      TEXT,
+         blue_key_hash  TEXT    NOT NULL,
+         red_player_id  TEXT,
+         red_name       TEXT,
+         red_key_hash   TEXT
+       )`,
     ],
   },
 ]

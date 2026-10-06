@@ -2,6 +2,7 @@ import { Accounts } from './Accounts'
 import type { Db } from './db/Db'
 import { migrate } from './db/migrate'
 import { MatchStore } from './MatchStore'
+import { RoomStore } from './RoomStore'
 import { Rosters } from './Rosters'
 
 /**
@@ -36,6 +37,7 @@ export const LOCAL_RELYING_PARTY: RelyingParty = {
 export interface Persistence {
   db: Db
   matches: MatchStore
+  rooms: RoomStore
   accounts: Accounts
   rosters: Rosters
   close(): Promise<void>
@@ -62,6 +64,7 @@ export async function persistenceOverDb(
   return {
     db,
     matches: new MatchStore(db),
+    rooms: new RoomStore(db),
     accounts: new Accounts(db, rosters, party),
     rosters,
     close: () => db.close(),

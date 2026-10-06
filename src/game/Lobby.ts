@@ -35,11 +35,16 @@ export type ServerIntent =
   /** Watch a room without a seat. */
   | { kind: 'watch'; roomId: string }
   /**
-   * Take back this player's own seat, from another window or after a dropped
-   * connection. Only meaningful for a signed-in player in a match that is
-   * `playing`; anything else is refused with a reason.
+   * Take a seat back.
+   *
+   * With `roomId` and `seatKey` (from this socket's own earlier `seated`):
+   * the same window reconnecting after a dropped connection or a server
+   * restart, signed in or not — the key is the seat's proof of ownership, so
+   * no ticket is needed. Without them: a signed-in player taking their match
+   * over in a new window, which is only meaningful for a match `playing`.
+   * Anything else is refused with a reason.
    */
-  | { kind: 'resume' }
+  | { kind: 'resume'; roomId?: string; seatKey?: string }
 
 /**
  * Where a room is in its life.
@@ -71,6 +76,13 @@ export interface Seated {
    * say why it is in a match it did not just choose.
    */
   redirected: boolean
+  /**
+   * The secret that takes this seat back (`resume` with `roomId`), or null
+   * for a spectator, who has no seat to take back and simply watches again.
+   * Kept by the window in memory only; a new window proves itself with a
+   * ticket instead.
+   */
+  seatKey: string | null
 }
 
 /** A seat as the lobby shows it. */
@@ -104,6 +116,10 @@ export interface LobbyView {
 export function intentQuery(intent: ServerIntent): string {
   const params = new URLSearchParams({ intent: intent.kind })
   if (intent.kind === 'join' || intent.kind === 'watch') params.set('room', intent.roomId)
+  if (intent.kind === 'resume' && intent.roomId && intent.seatKey) {
+    params.set('room', intent.roomId)
+    params.set('seat', intent.seatKey)
+  }
   return params.toString()
 }
 
@@ -114,13 +130,20 @@ export function intentQuery(intent: ServerIntent): string {
 export function parseIntent(params: URLSearchParams): ServerIntent | null {
   const kind = params.get('intent')
   const roomId = params.get('room')
+  const usable = (value: string | null): value is string => !!value && value.length > 0 && value.length <= 64
   switch (kind) {
     case 'open':
-    case 'resume':
       return { kind }
+    case 'resume': {
+      // Both or neither: a room without its key proves nothing, and a key
+      // without its room names nothing.
+      const seatKey = params.get('seat')
+      if (roomId === null && seatKey === null) return { kind }
+      return usable(roomId) && usable(seatKey) ? { kind, roomId, seatKey } : null
+    }
     case 'join':
     case 'watch':
-      return roomId && roomId.length > 0 && roomId.length <= 64 ? { kind, roomId } : null
+      return usable(roomId) ? { kind, roomId } : null
     default:
       return null
   }

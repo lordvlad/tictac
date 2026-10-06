@@ -914,6 +914,9 @@ export class InteractionController {
     this.debug.dispose()
     this.debugMap.dispose()
     this.effects.dispose()
+    // The bodies too: a match rebuilt in place (`main.tsx`, a resync) would
+    // otherwise stand the new squads among the old ones.
+    this.views.dispose()
   }
   enterShootMode(intent: 'shoot' | 'strike' = 'shoot'): void {
     if (!this.shoot.enter(this.turnManager.selectedSoldier, intent)) return
@@ -1376,6 +1379,7 @@ export class InteractionController {
       carried,
       this.portraits,
     )
+    this.network?.leaveDecidedMatch()
     this.shoot.exit()
     this.grenade.exit()
     this.planner.clear()

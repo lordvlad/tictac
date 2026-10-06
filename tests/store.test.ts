@@ -7,6 +7,7 @@ import { RECORDING_VERSION } from '../src/game/Recording'
 import { openDb, openPersistence } from '../src/server/db/BunSqlDb'
 import { MIGRATIONS } from '../src/server/db/migrations'
 import type { UnsequencedEvent } from '../src/server/MatchStore'
+import type { StoredRoom } from '../src/server/RoomStore'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
 import { replay } from '../src/sim/Replay'
@@ -228,6 +229,54 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
         { id: older, createdAt: '2026-09-17T08:00:00Z', seedLabel: 'older', events: 0 },
       ])
       expect((await store.matches.recent(2)).map((row) => row.id)).toEqual([newest, middle])
+
+      await store.close()
+    })
+  })
+
+  describe('Rooms a lobby holds open', () => {
+    const room = (id: string, createdAt: string): StoredRoom => ({
+      id,
+      version: { protocol: 6, build: 'abc1234' },
+      phase: 'waiting',
+      createdAt,
+      judged: true,
+      sides: { [Faction.Blue]: null, [Faction.Red]: null },
+      blue: { playerId: 'A', name: 'Ada', keyHash: 'hash-of-blue' },
+      red: null,
+    })
+
+    test('a room comes back as it was written, and each transition rewrites its one row', async () => {
+      const store = await freshPersistence(url)
+      const waiting = room('r1', '2026-09-18T10:00:00.000Z')
+      await store.rooms.save(waiting)
+      expect(await store.rooms.live()).toEqual([waiting])
+
+      // Joined by an anonymous player, started, verified, and no longer judged:
+      // every field a restore reads moves, and the row is still one row.
+      const later: StoredRoom = {
+        ...waiting,
+        phase: 'playing',
+        judged: false,
+        sides: { [Faction.Blue]: { playerId: 'A', characterIds: ['c1', 'c2'] }, [Faction.Red]: null },
+        blue: { ...waiting.blue, keyHash: 'rotated' },
+        red: { playerId: null, name: null, keyHash: 'hash-of-red' },
+      }
+      await store.rooms.save(later)
+      expect(await store.rooms.live()).toEqual([later])
+
+      await store.close()
+    })
+
+    test('live rooms come back oldest first, and a room that ended does not come back', async () => {
+      const store = await freshPersistence(url)
+      await store.rooms.save(room('newest', '2026-09-18T12:00:00.000Z'))
+      await store.rooms.save(room('oldest', '2026-09-18T10:00:00.000Z'))
+      await store.rooms.save(room('ended', '2026-09-18T11:00:00.000Z'))
+
+      await store.rooms.end('ended')
+
+      expect((await store.rooms.live()).map((stored) => stored.id)).toEqual(['oldest', 'newest'])
 
       await store.close()
     })

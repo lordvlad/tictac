@@ -38,6 +38,7 @@ async function harness(seed = 4242) {
   const verdicts: RefereeVerdict[] = []
   const lobby = new Lobby({
     matches: persistence.matches,
+    rooms: persistence.rooms,
     onVerdict: (v) => verdicts.push(v),
     log: () => {},
     // A dropped seat is held on a clock nothing here ever runs out.
@@ -222,7 +223,14 @@ describe('Rejoining a match that outlived its tab', () => {
     const returning = connect(lobby, ADA, { kind: 'resume' })
 
     expect(returning.of('seated')).toEqual([
-      { type: 'seated', roomId, faction: Faction.Blue, phase: 'playing', redirected: false },
+      {
+        type: 'seated',
+        roomId,
+        faction: Faction.Blue,
+        phase: 'playing',
+        redirected: false,
+        seatKey: expect.any(String),
+      },
     ])
     // The log follows the seat immediately, without waiting on the database:
     // nothing relayed after it may arrive before it.

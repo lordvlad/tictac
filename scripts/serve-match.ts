@@ -10,6 +10,11 @@
  * `Lobby` and its `Room`s, which know it through `MatchHost` — the same
  * systems a match uses.
  *
+ * Rooms are kept in the database as well as their matches, and taken up again
+ * when the server starts, so restarting it over a file (`--db=sqlite://…`) or
+ * a Postgres costs no match in progress: every window reconnects to its seat.
+ * The default, `:memory:`, has nothing to take up.
+ *
  * Reachability is the honest cost of a WebSocket. A page served over `https`
  * may not open an insecure socket, so a public referee needs a host and a
  * certificate; Chromium's loopback exception makes `ws://localhost` work from

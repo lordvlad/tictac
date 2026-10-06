@@ -39,6 +39,7 @@ import { LoadoutScreen } from './hud/LoadoutScreen'
 import { InterruptedOverlay } from './hud/menu/InterruptedOverlay'
 import { StartMenu } from './hud/menu/StartMenu'
 import { PlaybackControls } from './hud/PlaybackControls'
+import { ReconnectingBanner } from './hud/ReconnectingBanner'
 import { SpectatorBar } from './hud/SpectatorBar'
 import { RosterScreen } from './hud/RosterScreen'
 import { OffscreenPortraits } from './render/Portraits'
@@ -140,6 +141,7 @@ game.resources.on('loaded', () => {
  * no explanation at all.
  */
 function showMenu(notice?: string): void {
+  reconnecting.hide()
   const ui = Game.instance().uiRoot
   const container = document.createElement('div')
   container.id = 'start-menu-overlay'
@@ -287,6 +289,7 @@ interface Picked {
  * whatever they asked for, and is told so.
  */
 async function takeSeat(network: NetworkManager, seat: Seated, squad: Picked, closeMenu: () => void): Promise<void> {
+  followReconnects(network)
   const redirected = seat.redirected
     ? 'You already have a match on this server, so you are back in it.'
     : null
@@ -346,6 +349,20 @@ function flashNotice(text: string): void {
   `
   Game.instance().uiRoot.appendChild(notice)
   setTimeout(() => notice.remove(), 6000)
+}
+
+/** The one window's word that it is getting its seat back; a page plays one match at a time. */
+const reconnecting = new ReconnectingBanner()
+
+/**
+ * Say so while `network` gets its seat back after a drop, whatever is on
+ * screen — the loadout, the match, the watcher's view — and nothing once it
+ * is back. A window that gives up is told why by whatever ends the screen
+ * (`showInterrupted`, `showMenu`), which takes the banner down first.
+ */
+function followReconnects(network: NetworkManager): void {
+  network.onReconnecting = (attempt) => reconnecting.show(attempt)
+  network.onReconnected = () => reconnecting.hide()
 }
 
 /**
@@ -440,6 +457,7 @@ function buildField(
 /** A match on screen: the field, the camera, the HUD and the controller that runs it. */
 interface MatchScene extends Field {
   rig: OrbitRig
+  portraits: OffscreenPortraits
   tracers: Tracers
   turnSystem: TurnSystem
   turnManager: TurnManager
@@ -498,7 +516,36 @@ function buildMatch(
     network,
     recordingHeader,
   )
-  return { ...field, rig, tracers, turnSystem, turnManager, hud, controller }
+  return { ...field, rig, portraits, tracers, turnSystem, turnManager, hud, controller }
+}
+
+/**
+ * Take a match off the screen entirely, for one built again in its place
+ * (a resync that found this window out of step with the server). Whoever
+ * ticks it (`Game.onUpdate`, which has no way to unregister) has to stop on
+ * its own.
+ */
+function disposeScene(scene: MatchScene): void {
+  scene.controller.dispose()
+  scene.hud.dispose()
+  scene.rig.dispose()
+  scene.portraits.dispose()
+  scene.tracers.dispose()
+  scene.battlefield.dispose()
+  scene.squads.dispose()
+}
+
+/** Where the camera was, to put it back after a rebuild. */
+interface CameraView {
+  focus: Vector3
+  zoom: number
+  azimuth: number
+}
+
+function restoreCamera(rig: OrbitRig, view: CameraView): void {
+  rig.snapTo(view.focus)
+  rig.zoom = view.zoom
+  rig.azimuth = view.azimuth
 }
 
 /** The match on `window.tictac`, for the console and the browser tests. */
@@ -515,6 +562,7 @@ function expose(scene: MatchScene, more: Record<string, unknown>): void {
  * `teardown` is whatever the screen behind it needs putting away first.
  */
 function showInterrupted(reason: string | undefined, teardown: () => void): void {
+  reconnecting.hide()
   const ui = Game.instance().uiRoot
   if (document.getElementById('disconnection-overlay')) return
 
@@ -599,14 +647,17 @@ function start(
  * Then it is simply the match: the same side, the same controls.
  *
  * `matchHeader` is not sent again: the referee opened this match long ago.
+ * `camera` is where the window was looking, when this is a match rebuilt in
+ * place after a resync rather than one arrived at from the menu.
  */
-function resumeMatch(network: NetworkManager, log: MatchLog): void {
+function resumeMatch(network: NetworkManager, log: MatchLog, camera?: CameraView): void {
   const { header } = log
   const engine = createEngineContext(Game.instance())
   const field = buildField(engine, header.seed, header.map, header.squads)
   const scene = buildMatch(engine, field, header.seedLabel, matchDice(header.seed), network, header)
   catchUp(scene, log)
   playMatch(scene, network, header)
+  if (camera) restoreCamera(scene.rig, camera)
 }
 
 /**
@@ -631,6 +682,7 @@ function catchUp(scene: MatchScene, log: MatchLog): void {
 function playMatch(scene: MatchScene, network: NetworkManager, header: RecordingHeader): void {
   const { battlefield, squads, rig, tracers, turnManager, hud, controller } = scene
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
+  let replaced = false
 
   // Assigned last thing before play, because it is what releases whatever the
   // other side sent while this one was still being built.
@@ -646,6 +698,19 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
     })
   }
 
+  // Back from a drop to find the server never got something this window
+  // played: the match is the server's log, built again in place exactly as a
+  // window taking it over builds it. What was relayed while it was away
+  // (`caughtUp`) has already gone to `onMessage` and needs nothing here.
+  network.onResync = (resync) => {
+    if (resync.kind !== 'rebuild') return
+    replaced = true
+    const camera = { focus: rig.focusPoint.clone(), zoom: rig.zoom, azimuth: rig.azimuth }
+    disposeScene(scene)
+    resumeMatch(network, resync.log, camera)
+    flashNotice('Your last move never reached the server, so the match has been rebuilt to where the server has it.')
+  }
+
   const commander = squads.getLiving(myFaction)[0]
   if (commander) {
     rig.snapTo(commander.position)
@@ -658,6 +723,7 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
 
   let accumulator = 0
   Game.instance().onUpdate((delta) => {
+    if (replaced) return
     accumulator = Math.min(accumulator + delta, SIM.maxCatchUp)
     while (accumulator >= SIM.step) {
       accumulator -= SIM.step
@@ -702,57 +768,74 @@ function watchMatch(network: NetworkManager, seat: Seated): void {
   // whatever is showing, as a player's interrupted match is.
   network.onDisconnected = (reason) => showInterrupted(reason, leave)
 
+  /** The match as the log has it, then live as it is played. */
+  const show = (log: MatchLog): MatchScene => {
+    const { header } = log
+    const engine = createEngineContext(Game.instance())
+    const field = buildField(engine, header.seed, header.map, header.squads)
+    const built = buildMatch(engine, field, header.seedLabel, matchDice(header.seed), null, null)
+    scene = built
+    const { battlefield, squads, rig, tracers, turnManager, hud, controller } = built
+    controller.spectating = true
+    hud.setHidden(true)
+    turnManager.autoSelectFirst()
+    controller.recomputeVisibility()
+    catchUp(built, log)
+
+    // Held here rather than queued in the rules: a replay applies a command
+    // only once the one before it has finished walking, and so does this.
+    // Assigning the handler releases whatever arrived during the catch-up.
+    const live: NetworkMessage[] = []
+    network.onMessage = (msg) => {
+      if (isCommand(msg)) live.push(msg)
+    }
+
+    const commander = squads.getLiving(turnManager.activeFaction)[0]
+    rig.snapTo(commander ? commander.position : new Vector3(0, 0, 0))
+
+    let accumulator = 0
+    Game.instance().onUpdate((delta) => {
+      // Stops for good once this scene has been left or shown again.
+      if (left || scene !== built) return
+      accumulator = Math.min(accumulator + delta, SIM.maxCatchUp)
+      while (accumulator >= SIM.step) {
+        accumulator -= SIM.step
+        while (live.length > 0 && !controller.busy) controller.applyRecordedCommand(live.shift()!)
+        tracers.update(SIM.step)
+        controller.update(SIM.step)
+      }
+      battlefield.flush()
+      // Decided once everything sent has been played out: the last shot's
+      // walk and reactions are part of how it ended.
+      const winner = live.length === 0 && !controller.busy ? winnerOf(squads) : null
+      bar.render({
+        roomId: seat.roomId,
+        progress:
+          winner !== null
+            ? { kind: 'decided', winner: FACTION_INFO[winner].name }
+            : { kind: 'playing', turn: turnManager.turnNumber, acting: FACTION_INFO[turnManager.activeFaction].name },
+      })
+    })
+
+    expose(built, { seed: header.seed, seedLabel: header.seedLabel, network })
+    console.info(`[tictac] watching ${seat.roomId} — seed ${header.seedLabel}`)
+    return built
+  }
+
+  // Back from a drop to a log that is not the match this window was shown:
+  // shown again from the log, as it was the first time, from where the
+  // watcher was looking. Relays it missed (`caughtUp`) are already queued.
+  network.onResync = (resync) => {
+    if (resync.kind !== 'rebuild' || !scene) return
+    const { rig } = scene
+    const camera = { focus: rig.focusPoint.clone(), zoom: rig.zoom, azimuth: rig.azimuth }
+    disposeScene(scene)
+    restoreCamera(show(resync.log).rig, camera)
+  }
+
   void network.waitForLog().then(
     (log) => {
-      if (left) return
-      const { header } = log
-      const engine = createEngineContext(Game.instance())
-      const field = buildField(engine, header.seed, header.map, header.squads)
-      const built = buildMatch(engine, field, header.seedLabel, matchDice(header.seed), null, null)
-      scene = built
-      const { battlefield, squads, rig, tracers, turnManager, hud, controller } = built
-      controller.spectating = true
-      hud.setHidden(true)
-      turnManager.autoSelectFirst()
-      controller.recomputeVisibility()
-      catchUp(built, log)
-
-      // Held here rather than queued in the rules: a replay applies a command
-      // only once the one before it has finished walking, and so does this.
-      // Assigning the handler releases whatever arrived during the catch-up.
-      const live: NetworkMessage[] = []
-      network.onMessage = (msg) => {
-        if (isCommand(msg)) live.push(msg)
-      }
-
-      const commander = squads.getLiving(turnManager.activeFaction)[0]
-      rig.snapTo(commander ? commander.position : new Vector3(0, 0, 0))
-
-      let accumulator = 0
-      Game.instance().onUpdate((delta) => {
-        if (left) return
-        accumulator = Math.min(accumulator + delta, SIM.maxCatchUp)
-        while (accumulator >= SIM.step) {
-          accumulator -= SIM.step
-          while (live.length > 0 && !controller.busy) controller.applyRecordedCommand(live.shift()!)
-          tracers.update(SIM.step)
-          controller.update(SIM.step)
-        }
-        battlefield.flush()
-        // Decided once everything sent has been played out: the last shot's
-        // walk and reactions are part of how it ended.
-        const winner = live.length === 0 && !controller.busy ? winnerOf(squads) : null
-        bar.render({
-          roomId: seat.roomId,
-          progress:
-            winner !== null
-              ? { kind: 'decided', winner: FACTION_INFO[winner].name }
-              : { kind: 'playing', turn: turnManager.turnNumber, acting: FACTION_INFO[turnManager.activeFaction].name },
-        })
-      })
-
-      expose(built, { seed: header.seed, seedLabel: header.seedLabel, network })
-      console.info(`[tictac] watching ${seat.roomId} — seed ${header.seedLabel}`)
+      if (!left) show(log)
     },
     // The connection ended before the room started; `onDisconnected` has
     // already said why.

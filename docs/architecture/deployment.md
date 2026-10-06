@@ -3,7 +3,7 @@ title: "Deployment: GitHub Pages and the Planted Cloudflare Durable Object"
 id: "ARCH-DEPLOYMENT"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-10-06"
+lastReviewed: "2026-10-07"
 appliesTo:
   - ".github/workflows/deploy.yml"
   - "wrangler.jsonc"
@@ -16,6 +16,8 @@ appliesTo:
   - "src/server/db/Db.ts"
   - "src/server/db/BunSqlDb.ts"
   - "src/server/Persistence.ts"
+  - "src/server/Lobby.ts"
+  - "src/server/RoomStore.ts"
   - "src/sim/WireMatch.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
@@ -95,7 +97,7 @@ Cloudflare's own convention is for the assets layer to answer static requests wi
 reaching a Worker, and this deployment opts out of that specifically because the item asked for
 one Durable Object that does both.
 
-### 2.3 A real referee, not a relay — and why a match socket does not hibernate
+### 2.3 A real referee, not a relay — rooms that survive the instance, and why a socket does not hibernate
 
 `MatchDurableObject` runs the same `Lobby`, `Persistence` (via `persistenceOverDb`) and
 `apiHandler` that `startGameServer` runs behind `Bun.serve`. Nothing about any of the three was
@@ -106,28 +108,56 @@ through the same `Accounts.redeemTicket` the Bun-hosted server uses, reads the i
 url (`parseIntent`), and attaches to the `Lobby` exactly as `GameServer.ts`'s `websocket.open`
 handler does.
 
-This class's first pass accepted sockets with `ctx.acceptWebSocket`, the hibernatable API, on
-the reasoning that the runtime evicting an idle object between messages is the cost model a
-Durable Object is for. That was wrong for *this* socket specifically: the lobby keeps every
-open room — its seats, its spectators, its live `MatchHost`, the grace timer on a seat whose
-player dropped — in memory, with no durable backing, and hibernation evicts the *whole
-object*. There is nothing this class could deserialize a live `MatchHost` back out of on the
-next message, so a hibernated room's referee would simply forget it was refereeing anything.
-Sockets are accepted with plain `server.accept()` instead: as long as any socket is open, the
-runtime keeps this instance resident rather than evicting it, the ordinary cost of any stateful
-connection. Once every socket closes, nothing pins the instance and it can be evicted like any
-other idle Durable Object — and an eviction takes every room still open with it, a seat held
-for a dropped player included, though never a log: each room writes its match to
-`ctx.storage.sql` as it goes. Static-asset and `/api/…` traffic never needed the hibernation
-exemption, since both are stateless replies against durable storage, or against the room list
-as it stands.
+**Rooms are durable.** Every room writes itself to `ctx.storage.sql` as it changes — opened,
+joined, started, its squads verified, judged or only witnessed, ended — through the same
+ordered write chain its match log goes through (`RoomStore`,
+[ARCH-PERSISTENCE §3](persistence.md)). The constructor runs `Lobby.restore()` inside
+`blockConcurrencyWhile`, so no request reaches the object before every room it held is held
+again: each seat with no socket in it and a fresh grace period, each playing room's referee
+rebuilt by refighting its log. A deploy, a runtime restart or an eviction therefore costs a
+room nothing. To the windows in it, it is a dropped connection: each reconnects to its own seat
+with the key its `seated` gave it (`intent=resume&room=…&seat=…`, no ticket), restates what it
+had said if the match had not begun, and plays on — the opponent sees a short stall. A window
+that does not come back within the grace period ends its room exactly as a dropped one always
+did ([ARCH-NETWORKING §8](networking.md)).
+
+**A socket still does not hibernate.** This class's first pass accepted sockets with
+`ctx.acceptWebSocket`, the hibernatable API. Hibernation evicts the *whole object* between
+messages, and the live parts of a room — its sockets, its `MatchHost`, the grace timer on a
+dropped seat — are in memory; restoring them on every message would be refighting every match
+per frame. Sockets are accepted with plain `server.accept()` instead: as long as any socket is
+open, the runtime keeps this instance resident, the ordinary cost of any stateful connection.
+Once every socket closes nothing pins the instance, and an eviction then is simply a restart the
+next request pays for. Static-asset and `/api/…` traffic never needed the exemption, since both
+are stateless replies against durable storage, or against the room list as it stands.
+
+**A rolling update.** `wrangler deploy` replaces the Worker and restarts the object under the
+new build while browsers keep running the previous bundle. The new server serves every protocol
+from `OLDEST_SERVED_PROTOCOL` (the one before its own, never below 6) up to its own, and each
+room keeps the build it was opened under, so:
+
+- the windows of a match in progress reconnect to it on the previous bundle and finish it — a
+  seat is taken back by a page on the *room's* build, not the server's;
+- opening, joining or watching anything takes the server's own build and protocol; a stale
+  page is told to reload (§2.4), and a current page cannot join or watch a room of the previous
+  build (*That match was started on another version of TicTac, and only its own players can
+  finish it.*);
+- a room of the previous build still waiting for an opponent is let go on restore, since no page
+  can join it any more;
+- the new server keeps refereeing the previous build's rooms, but cannot tell a foul from a
+  rules change in them: the first disagreement stops it judging that room instead of aborting
+  it — the match is relayed and recorded to its end, and kept on nobody's roster.
+
+A deploy that changes nothing about the rules therefore finishes every match in progress
+judged and kept, as if nothing had happened.
 
 ### 2.4 The Worker is stamped with the build id of the bundle it serves
 
 The referee is not a bystander to the version gate. Under
 [ADR-0004](../design/adr/0004-full-knowledge-lockstep.md) it recomputes every intent itself, so
 `src/version.ts` applies to it exactly as it applies to a peer: it states its own build, and
-refuses any client whose build differs. That makes "which commit is this Worker?" a
+refuses to open, join or watch anything for a client whose build differs (a seat taken back
+answers to its room's build instead, §2.3). That makes "which commit is this Worker?" a
 *gameplay* fact, not a diagnostic.
 
 `BUILD_ID` reaches a bundle through a build-time `--define`, and the client and the Worker are

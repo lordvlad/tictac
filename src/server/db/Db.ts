@@ -35,8 +35,9 @@
  *   to lower case.
  * - No generated columns, no JSON operators in SQL, no `rowid`, no
  *   `WITHOUT ROWID`. All four are SQLite's alone.
- * - `RETURNING`, partial indexes and `INSERT … VALUES (…, (subselect))` are
- *   fair game: both engines have them.
+ * - `RETURNING`, partial indexes, `INSERT … VALUES (…, (subselect))` and
+ *   `INSERT … ON CONFLICT (…) DO UPDATE SET … = excluded.…` are fair game:
+ *   both engines have them.
  *
  * A Durable Objects deployment means one more implementation of {@link Db},
  * and nothing above it changes: `workers/DoSqliteDb.ts` is that

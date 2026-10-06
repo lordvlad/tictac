@@ -19,22 +19,30 @@ import { softwareAuthenticator } from './support/authenticator'
 
 const ORIGIN = LOCAL_RELYING_PARTY.origins[0]!
 
+interface Seat {
+  socket: WebSocket
+  roomId: string
+  seatKey: string | null
+}
+
 /**
  * Open a socket the way a page does — ticket and intent in the url, `hello`
  * as the first frame — and resolve with the `seated` frame the server answers.
  */
-function seated(base: string, intent: ServerIntent, ticket?: string): Promise<{ socket: WebSocket; roomId: string }> {
+function seated(base: string, intent: ServerIntent, ticket?: string): Promise<Seat> {
   const url = new URL(base.replace('http', 'ws'))
   if (ticket) url.searchParams.set('ticket', ticket)
   for (const [key, value] of new URLSearchParams(intentQuery(intent))) url.searchParams.set(key, value)
   const socket = new WebSocket(url)
-  const { promise, resolve, reject } = Promise.withResolvers<{ socket: WebSocket; roomId: string }>()
+  const { promise, resolve, reject } = Promise.withResolvers<Seat>()
   socket.addEventListener('open', () => {
     socket.send(JSON.stringify({ jsonrpc: '2.0', method: RpcMethods.hello, params: MY_VERSION }))
   })
   socket.addEventListener('message', (event) => {
     const frame = JSON.parse(String(event.data)) as { method: string; params: Record<string, unknown> }
-    if (frame.method === RpcMethods.seated) resolve({ socket, roomId: frame.params.roomId as string })
+    if (frame.method === RpcMethods.seated) {
+      resolve({ socket, roomId: frame.params.roomId as string, seatKey: frame.params.seatKey as string | null })
+    }
     if (frame.method === RpcMethods.abort) reject(new Error(String(frame.params.reason)))
   })
   socket.addEventListener('error', () => reject(new Error('the socket failed')))
@@ -158,6 +166,29 @@ describe('The match server on a real port', () => {
     socket.close()
 
     await server.stop()
+    await persistence.close()
+  })
+
+  test('a room outlives the server: a new one on the same database takes it up, and the window reconnects', async () => {
+    const persistence = await openPersistence()
+    const options = { persistence, port: 0, party: LOCAL_RELYING_PARTY, log: () => {} }
+    const first = await startGameServer(options)
+    const opened = await seated(first.url.replace(/\/$/, ''), { kind: 'open' })
+    const closed = new Promise((resolve) => opened.socket.addEventListener('close', resolve))
+
+    await first.stop()
+    await closed
+
+    const second = await startGameServer(options)
+    const base = second.url.replace(/\/$/, '')
+    const view = (await (await fetch(`${base}/api/lobby`)).json()) as LobbyView
+    expect(view.rooms.map((room) => [room.id, room.blue.connected])).toEqual([[opened.roomId, false]])
+
+    const back = await seated(base, { kind: 'resume', roomId: opened.roomId, seatKey: opened.seatKey! })
+    expect([back.roomId, back.seatKey]).toEqual([opened.roomId, opened.seatKey])
+
+    back.socket.close()
+    await second.stop()
     await persistence.close()
   })
 
