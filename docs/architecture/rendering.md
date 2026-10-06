@@ -126,6 +126,16 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
 - **CSS is unchanged in kind.** `src/game.css` styles the components by the class names the
   templates used; icons are `<Icon file="…" />` (`src/hud/Icon.tsx`), the masked game-icons.net
   glyph.
+- **The start menu is grouped by who is on the other end.** `src/hud/menu/StartMenu.tsx` holds
+  the choice and the remembered match-server address and nothing else; the three groups it
+  draws — a match server, a peer, nobody — are the question that decides whether signing in
+  means anything, whether an id has to be exchanged, and whether a result is kept. Each group's
+  panel owns its own state (`ServerPanel.tsx` for the address, the passkey ceremony and the two
+  ways into a refereed match; `PeerPanel.tsx` for `HostPanel`/`JoinPanel`), and all of them are
+  built from `controls.tsx` — `MenuButton`, `MenuInput`, `MenuGroup`, `StatusLine`, and the
+  tones that colour a group. Before that there was one inline `style` object per element, ten
+  near-copies of the same button, and a flat list of six choices that each hid which kind it
+  was.
 - **Not React:** Tweakpane's panels inside `DebugPanel`, the frame counter's per-frame text
   (`FpsCounter`), the page-corner containers (`CornerStack`) and the Three.js canvas.
 - **Tests** that need a DOM register happy-dom for their own file only

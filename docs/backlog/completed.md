@@ -2443,6 +2443,59 @@ agreed; no browser could.
       `docs/architecture/networking.md` §3/§5).
 ---
 
+### [ITEM-057] Group the Start Menu by Who Is on the Other End
+**Completed Date:** 2026-10-05  
+**Type:** Refactor  
+**Milestone:** Unscheduled  
+
+#### Why
+The first screen was a flat list of six buttons, and nothing on it said that the six were three
+different kinds of thing. A match server keeps an account, watches the match and remembers what
+it did; a peer is another browser and nothing else; offline is nobody at all. That distinction
+decides whether signing in means anything, whether an id has to be exchanged, and whether a
+result is kept — and it was the one thing the menu did not show. `StartMenu.tsx` was also 642
+lines holding every panel's state and one inline `style` object per element: ten near-copies of
+the same button, five of the same text field, each free to drift.
+
+#### Key Changes
+- **Three groups, each with a heading and a sentence**: *Match Server* (sign in with a passkey;
+  your squad is kept), *Peer to Peer* (straight to another browser; nothing is kept), *Offline*
+  (nobody on the other end). Tone follows the group, so a panel reached from one keeps its
+  colour.
+- **`src/hud/menu/controls.tsx`** — `MenuButton` (tone, size, grow), `MenuInput`, `MenuGroup`,
+  `StatusLine`, `PanelTitle`, and the tone/colour tokens. The only inline styles left are the
+  menu card itself and the few one-off lines of prose.
+- **`src/hud/menu/ServerPanel.tsx`** owns the address, the passkey ceremony and both ways into a
+  refereed match. The "who am I on this server" lookup is one `identify(url)` returning a
+  `ServerIdentity`, instead of the same five `setState` calls written twice. Its passkey row is
+  a column now — the name field above the two buttons — because three abreast wrapped both
+  labels onto three lines each.
+- **`src/hud/menu/PeerPanel.tsx`** holds `HostPanel` (the id, and copying it) and `JoinPanel`
+  (the id, and using it), each with its own state and its own focus and copy-reset timers,
+  cleaned up by their effects rather than left running.
+- **`StartMenu.tsx` keeps only** the choice between groups and the remembered match-server
+  address — the one piece of state that is a preference rather than a panel's business — and is
+  under 200 lines. The title lost its `P2P`: peer-to-peer is one of three groups now, not what
+  the game is.
+- Every DOM id is unchanged (`#btn-local`, `#btn-server-mode`, `#server-url`, `#join-status`, …),
+  so anything hooked onto them still works.
+
+#### Measured
+- `bun run lint` and `bun test` green; no behaviour changed.
+- Every path exercised in a real browser against a local Durable Object deployment: the three
+  groups; the server panel (address prefilled by the origin probe, account status, passkey row);
+  Join P2P (autofocus, a bad id reporting *Could not connect to peer …*); Host P2P (broker id and
+  copy); *Play Against the AI*; and a whole refereed match — host opens, joiner joins, both
+  deploy, turn 1 — to prove the extracted panels still drive the same callbacks.
+
+#### Acceptance Criteria
+- [x] The main screen groups its choices by match server, peer-to-peer and offline.
+- [x] Panels own their own state; `StartMenu` keeps only the choice and the remembered address.
+- [x] One set of shared controls; no per-element copies of the same style object.
+- [x] Every flow verified in a browser, including a full refereed match.
+- [x] Living documentation updated (`docs/architecture/rendering.md`).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the
