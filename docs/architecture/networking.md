@@ -505,8 +505,10 @@ Once seated, a manager remembers where it sits: the server's url without its tic
 the room, and the `seatKey` from `seated` (a spectator: just the room). A socket that closes
 after that is not reported — unless the window disposed it, was refused, or was sent an `abort`
 — but taken as a stall: the manager calls `onReconnecting(attempt)` and dials
-`intent=resume&room=<id>&seat=<key>` (a spectator, `watch`) after 250 ms, 500 ms, 1 s, 2 s, 4 s
-and then every 4 s, each try abandoned after 5 s without a seat, until `RECONNECT_GIVE_UP_MS`
+`intent=resume&room=<id>&seat=<key>` (a spectator, `watch`) after 250 ms, 500 ms, then every
+second — never longer, because the stall a player sees is the server's outage *plus* whatever
+wait is running when it comes back — each try abandoned after 2 s without a seat (a proxy can
+hold one open while the server behind it boots), until `RECONNECT_GIVE_UP_MS`
 (two minutes, the server's grace) has passed; then `onDisconnected('Lost the connection to the
 match server.')`. Each try says `hello` and nothing else until it is seated. An `abort` on any
 try ends it with the server's reason, exactly as before. A `seated` in another room or seat is

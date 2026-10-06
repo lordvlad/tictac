@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import {
   CONNECTION_LOST,
   NetworkManager,
-  RECONNECT_DELAYS_MS,
   type NetworkMessage,
   type NetworkMode,
   type Resync,
@@ -1054,9 +1053,11 @@ describe('A window that loses its socket to the match server', () => {
 
     clock.advance(30_000)
     const tries = server.sockets.slice(1).map((socket) => socket.at)
-    // 250, +500, +1000, +2000, +4000, then every 4 s.
+    // 250, +500, +1000, then every second: a try against a server that is
+    // down costs nothing, and a longer wait is stall the player sees after
+    // the server is already back.
     const gaps = tries.map((at, i) => at - (i === 0 ? 0 : tries[i - 1]!))
-    expect(gaps.slice(0, 7)).toEqual([...RECONNECT_DELAYS_MS, 4000, 4000])
+    expect(gaps.slice(0, 5)).toEqual([250, 500, 1000, 1000, 1000])
     expect(told.attempts).toEqual(told.attempts.map((_, i) => i + 1))
     expect(told.attempts.length).toBe(tries.length + 1)
 
@@ -1085,7 +1086,11 @@ describe('A window that loses its socket to the match server', () => {
     server.last.drop()
     clock.advance(250)
     expect(server.sockets).toHaveLength(2)
-    clock.advance(5_000 + 500)
+    // A server still booting can hold a try open; it is let go after two
+    // seconds, not left to add its whole wait to the stall.
+    clock.advance(1_999 + 500)
+    expect(server.sockets).toHaveLength(2)
+    clock.advance(1)
     expect(server.sockets).toHaveLength(3)
   })
 

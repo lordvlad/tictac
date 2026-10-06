@@ -55,8 +55,15 @@ const ROOM_PHASES: readonly RoomPhase[] = ['waiting', 'deploying', 'playing']
  * How long a window waits before each try at getting its seat back, in order;
  * the last is repeated until it gives up. Quick at first, because the usual
  * cause is a server restarting under a deploy, which takes about a second.
+ *
+ * Capped at one second rather than backing off further: the stall a player
+ * sees is however long the server was away *plus* the wait that happens to
+ * be running when it comes back, and a try against a server that is down is
+ * a refused connection that costs nobody anything. A 4 s cap measured as up
+ * to four extra seconds on the reconnecting banner after the server was
+ * already back.
  */
-export const RECONNECT_DELAYS_MS: readonly number[] = [250, 500, 1000, 2000, 4000]
+export const RECONNECT_DELAYS_MS: readonly number[] = [250, 500, 1000]
 
 /**
  * How long a window keeps trying before it calls the match lost: the server's
@@ -68,9 +75,13 @@ export const RECONNECT_GIVE_UP_MS = 120_000
 /**
  * One try that has neither been seated nor closed by now is abandoned for the
  * next. A socket to a host that has gone quiet can sit in `CONNECTING` far
- * longer than the whole backoff.
+ * longer than the whole backoff — and so can one accepted by a proxy while the
+ * server behind it is still booting, which is exactly a deploy. A healthy
+ * server seats a socket in well under a second; at 5 s, a try that happened
+ * to start just before the server came back measured as five extra seconds
+ * of reconnecting banner.
  */
-const ATTEMPT_TIMEOUT_MS = 5000
+const ATTEMPT_TIMEOUT_MS = 2000
 
 /** What the player is told once a window has stopped trying to get back to its match. */
 export const CONNECTION_LOST = 'Lost the connection to the match server.'

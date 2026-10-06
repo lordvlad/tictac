@@ -2562,6 +2562,66 @@ watch, and nothing stopping a signed-in player from being in two places at once.
       `docs/architecture/rendering.md`).
 ---
 
+### [ITEM-059] Matches Survive Restarts and Deploys; Windows Reconnect to Their Seats
+**Completed Date:** 2026-10-07  
+**Type:** Infrastructure  
+**Milestone:** Unscheduled — infrastructure  
+
+#### Why
+`ITEM-058`'s rooms lived only in memory: a restart, a Durable Object eviction or a deploy lost
+every open match, and every player in one saw the match end. A deploy is also a version change,
+and the browsers in those matches keep running yesterday's bundle — which the version gate turned
+away at the door. A deploy has to be something a player in a match barely notices.
+
+#### Key Changes
+- **Durable rooms.** `src/server/RoomStore.ts` (migration 6, `rooms`) holds each live room —
+  seats, phase, build, roster sides, whether it is still judged — written through the room's
+  ordered write chain; `Lobby.restore()` brings every one back before the first socket is
+  accepted, rebuilding a playing room's referee world from its stored header and events.
+- **Seat keys and grace for every seat.** `seated.seatKey` (only its hash is stored) lets the
+  same window take its seat back with no ticket, signed in or not; it is not a new window. Every
+  dropped seat in every phase is held for two minutes rather than aborting the room at once.
+- **Rolling updates.** `OLDEST_SERVED_PROTOCOL` (the previous protocol; 6 is the floor, since
+  nothing older can reconnect at all) and the room's own build admit the old bundle back into the
+  match it was in; opening, joining and watching still need the current build. A room from another
+  build is witnessed rather than judged: it relays, records and recomputes, and if the new rules
+  ever disagree it stops judging instead of aborting, and keeps nobody's roster. A ratchet in
+  `tests/version.test.ts` keeps the server serving the previous protocol on every bump.
+- **Reconnect in the browser.** `NetworkManager` redials its seat after 250 ms, 500 ms, then every
+  second, each try abandoned after 2 s, for up to two minutes, behind a small "reconnecting…"
+  banner with the seat's input suspended. In a match being played it replays only what it missed,
+  or rebuilds from the referee's log if one of its own intents never arrived; on the loadout
+  screen it restates hello/init/ready. A decided server match lets its seat go, so a restart under
+  the end screen does not lay "That match is gone." over the result.
+
+#### Measured
+- `bun test`: 765 pass, 0 fail. New: `tests/restart.test.ts` (waiting, deploying and playing
+  rooms surviving a restart and settling; grace expiry after restore; a rolling update finished by
+  the old build; cross-build divergence witnessed; protocol floor), keyed-reclaim tests in
+  `tests/lobby.test.ts`, the backoff/give-up/resync decisions in `tests/network.test.ts`, and real
+  server restarts mid-match, mid-deploy, with a lost intent and with a spectator in
+  `tests/refereed.test.ts`. Store tests also run on Postgres.
+- A rolling update under `wrangler dev` with persisted storage: two browsers on build `3713528`
+  played a turn; the server was replaced by build `c3df148` over the same storage; both windows
+  reconnected by themselves, played two more handovers whose digests the new server accepted, and
+  agreed on every unit. A page on the new build saw the old match listed and was refused watching
+  it; the old build was refused opening a new one; protocol 5 was refused outright.
+- Reconnect timing, two headless seats across a `wrangler dev` restart: the server answered again
+  3.1 s after it went down, and both seats were back in the same 50 ms poll — the client adds no
+  stall of its own. The first browser measurement exposed two client waits that did (a 4 s backoff
+  cap and a 5 s per-try timeout, each adding seconds after the server was back); both were cut to
+  what is now shipped. Background browser tabs reconnect later than foreground ones, because the
+  browser throttles their timers.
+
+#### Acceptance Criteria
+- [x] Open matches — waiting, deploying and playing — survive a server restart or redeploy.
+- [x] A match in progress can be finished by the previous build across a deploy, with a stall
+      and nothing else.
+- [x] The server keeps serving the previous protocol, and a test fails if a bump forgets to.
+- [x] Living documentation updated (`docs/architecture/networking.md` §8,
+      `docs/architecture/deployment.md` §2.3, `docs/architecture/persistence.md`).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the
