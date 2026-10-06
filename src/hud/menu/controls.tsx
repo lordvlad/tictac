@@ -26,9 +26,9 @@ const TONES = {
   serverDeep: '#0d9488',
   /** Peer to peer: hosting, and joining. */
   peerHost: '#0ea5e9',
-  peerJoin: '#6366f1',
+  peerJoin: '#3b82f6',
   /** Nothing on the other end: local, the AI, a recording. */
-  offline: '#3b82f6',
+  offline: '#6366f1',
   offlineAi: '#8b5cf6',
   /** Back, copy, sign out — anything that is not a way into a match. */
   neutral: '#475569',

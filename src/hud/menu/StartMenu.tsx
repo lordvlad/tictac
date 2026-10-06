@@ -134,7 +134,7 @@ export function StartMenu({
             tone="offline"
           >
             <MenuButton id="btn-local" tone="offline" size="lg" onClick={onLocalVersus}>
-              Local Versus (Same Screen)
+              Local Versus
             </MenuButton>
             <MenuButton id="btn-ai" tone="offlineAi" size="lg" onClick={onPlayAi}>
               Play Against the AI
@@ -145,7 +145,7 @@ export function StartMenu({
               size="lg"
               onClick={() => fileInput.current?.click()}
             >
-              Load Recording (Spectate)
+              Load Recording
             </MenuButton>
           </MenuGroup>
 
