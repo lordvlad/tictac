@@ -68,7 +68,7 @@ bun run build
 - When modifying architectural seams, ECS components, network messages, or combat formulas, **update the corresponding living documentation in `docs/` in the same commit**.
 
 ### Kanban & Backlog Standards
-- **Hobby-First Governance**: Planning uses a pull-based Kanban workflow (`Backlog` → `Ready` → `In Progress` → `Completed`) organized around capability milestones (`M1` to `M4`).
+- **Hobby-First Governance**: Planning uses a pull-based Kanban workflow (`Backlog` → `Ready` → `In Progress` → `Completed`) organized around capability milestones (`M1` to `M5`).
 - **No Time Estimates or Sprints**: Work is prioritized by technical elegance, dependency ordering, and player value without artificial deadlines or time estimates.
 - **Single Backlog Sequence**: All tasks use a single, unified ID sequence (`ITEM-001`, `ITEM-002`, `ITEM-003`, ...) tracked in `docs/backlog/active-backlog.md` and archived in `docs/backlog/completed.md`.
 - **No `owner` Field**: Backlog items, ADRs, RFCs, and document frontmatter do not track individual owner fields.

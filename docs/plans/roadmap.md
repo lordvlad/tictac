@@ -3,7 +3,7 @@ title: "Multi-Milestone Capability Roadmap"
 id: "PLAN-ROADMAP"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-30"
+lastReviewed: "2026-10-07"
 appliesTo:
   - "docs/plans/**"
 relatedDocs:
@@ -22,6 +22,7 @@ graph TD
     M1[Milestone 1: Headless Foundation & ECS Split] --> M2[Milestone 2: Tactical Depth]
     M2 --> M3[Milestone 3: Reconnaissance & Morale]
     M3 --> M4[Milestone 4: Competitive Meta & Campaign]
+    M4 --> M5[Milestone 5: The Shared World]
 ```
 
 ---
@@ -72,6 +73,23 @@ graph TD
 
 ---
 
+### Milestone 5: The Shared World
+**Status:** Ready  
+**Focus:** A squad that is somewhere on the real Earth, and travels there in real time.
+- Goal: everything the GDD calls the shared world ([GDD-WORLD](../design/gdd/world-and-travel.md))
+  rests on a squad having a position. M5 gives it one, on a real planet map, with travel on the
+  wall clock — and first makes one socket per window carry everything the client says to its
+  match server, so the map has a push channel.
+- Items: `[ITEM-060]` one connection per window (the API over JSON-RPC), `[ITEM-061]` a
+  low-zoom planet served from R2, `[ITEM-062]` travel maths in the headless core, `[ITEM-063]`
+  a squad's position and start, `[ITEM-064]` orders, pace and the travel scheduler,
+  `[ITEM-065]` the map screen, then `[ITEM-066]` the decisions encounters need (a design task;
+  blocks `[ITEM-048]`). Split from `[ITEM-050]` on 2026-10-07.
+- **Definition of done:** a signed-in player sees their squad on a real planet map near where
+  they registered, sends it travelling, closes the tab, and finds it where the clock says; one
+  socket per window.
+---
+
 ### Unscheduled: Infrastructure
 Cross-cutting work that is not a milestone deliverable — nothing in the mermaid dependency
 chain above depends on it, and no milestone's Definition of Done names it.
@@ -84,5 +102,8 @@ chain above depends on it, and no milestone's Definition of Done names it.
 - Backlog, not yet startable: `[ITEM-046]` Region-sharded Durable Objects — the plan
   ([RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md)) for replacing `[ITEM-045]`'s
   single instance once the shared world exists and needs more than one Durable Object to hold
-  it. Gated on the shared world itself, which no milestone above has built yet.
+  it. Gated on the shared world itself; M5 builds its first piece (a squad's durable position
+  and the `ownerOf(squad)` seam), but leaves nothing to shard until there is load.
+- Backlog, deferred: `[ITEM-067]` Closer zooms on demand — high-zoom tiles built the first time
+  an area is looked at, beyond M5's low-zoom planet.
 

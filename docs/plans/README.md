@@ -3,7 +3,7 @@ title: "Planning & Milestones Overview (Kanban)"
 id: "PLAN-INDEX"
 type: "plan"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-10-07"
 appliesTo:
   - "docs/plans/**"
 relatedDocs:
@@ -30,5 +30,5 @@ graph LR
 
 ## Planning Documents
 
-- **[Milestone Roadmap](./roadmap.md)**: Sequential capability milestones (M1 to M4) ordered strictly by dependency.
+- **[Milestone Roadmap](./roadmap.md)**: Sequential capability milestones (M1 to M5) ordered strictly by dependency.
 - **[Active Focus Board](./active-focus.md)**: Current work-in-progress (WIP) and next items in the pull queue.

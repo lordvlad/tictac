@@ -1,9 +1,9 @@
 ---
-title: "Active Kanban Focus: M4 Competitive & Meta Roster"
+title: "Active Kanban Focus: M5 The Shared World"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-10-01"
+lastReviewed: "2026-10-07"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -11,10 +11,10 @@ relatedDocs:
   - "docs/backlog/completed.md"
   - "docs/plans/roadmap.md"
   - "docs/architecture/deployment.md"
-tags: ["kanban", "active", "focus", "m4"]
+tags: ["kanban", "active", "focus", "m5"]
 ---
 
-# Active Kanban Focus: M4 Competitive & Meta Roster
+# Active Kanban Focus: M5 The Shared World
 
 **What is in flight, what gets pulled next and in what order, and what finished work left
 open.** One line per item, no specifications: each item's why, change and acceptance
@@ -27,19 +27,38 @@ meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]
 2026-09-30. `[ITEM-045]` (Cloudflare Durable Object deployment) closed on 2026-10-01 — see the
 [archive](../backlog/completed.md). Retreat (`[ITEM-051]`, `[ITEM-052]`) closed on 2026-10-02;
 React HUD & menus (`[ITEM-055]`) closed on 2026-10-04.
-Next is the shared world: a squad that is somewhere (the world map and travel), then the fights
-met on the road ([GDD-WORLD](../design/gdd/world-and-travel.md)).
+Next is M5 — The Shared World ([roadmap](roadmap.md)): a squad that is somewhere on a real planet
+map and travels in real time, over one socket per window. `[ITEM-050]` was split into the slices
+below on 2026-10-07; the fights met on the road
+([GDD-WORLD](../design/gdd/world-and-travel.md)) come after it.
 
 ---
 ## 📋 Ready — pull in this order
-1. `[ITEM-050]` The world map and travel — real-Earth tiles from the existing R2 archive,
-   waypoint position, wall-clock travel on alarms, the start location (absorbs `[ITEM-049]`).
+1. `[ITEM-060]` One connection per window — the API over JSON-RPC on the session socket;
+   lobby pushes, no tickets, no `/api` routes; protocol 7.
+2. `[ITEM-061]` Serve the map — a low-zoom planet from R2 at `/tiles/{z}/{x}/{y}.mvt` (zoom cap
+   z0–8 or z0–10 still to choose).
+3. `[ITEM-062]` Travel maths in the headless core — the waypoint maths ported, clock injected,
+   stable trip/checkpoint keys.
+4. `[ITEM-063]` A squad has a position, and a place to start — the `squads` table and the
+   start drawn near `request.cf`.
+5. `[ITEM-064]` Orders, pace and the travel scheduler — RPC orders, one alarm for the earliest
+   due moment.
+6. `[ITEM-065]` The map screen — MapLibre, the squad drawn moving, orders on right-click.
+
+`[ITEM-061]` and `[ITEM-062]` depend on nothing in `[ITEM-060]` and can run in parallel with it.
+
+**Next after these:** `[ITEM-066]` Before encounters — the design decisions `[ITEM-048]` needs
+(a GDD task, no code).
 
 ## 🧊 Backlog — not yet queued
-- `[ITEM-048]` Wild alien encounters on the road — after `[ITEM-050]`; seats the AI for the
-  aliens and for absent players, with a join window.
-- `[ITEM-053]` Player encounters on the road — after `[ITEM-050]` and `[ITEM-048]`; offline
+- `[ITEM-048]` Wild alien encounters on the road — after `[ITEM-064]` (the travel scheduler) and
+  `[ITEM-066]`'s decisions; seats the AI for the aliens and for absent players, with a join
+  window.
+- `[ITEM-053]` Player encounters on the road — after `[ITEM-064]` and `[ITEM-048]`; offline
   squads engageable, on trial.
+- `[ITEM-067]` Closer zooms on demand — deferred: high-zoom tiles built the first time an area
+  is looked at.
 - `[ITEM-046]` Region-sharded Durable Objects — depends on the shared world having load to
   shard.
 - `[ITEM-047]` Uncap the roster (bench grows with bases/vehicles, squad cap set per combat) —
@@ -82,6 +101,13 @@ met on the road ([GDD-WORLD](../design/gdd/world-and-travel.md)).
   Rifleman — unrestricted, no trait — and measures none of the three specialisations.
 
 ---
+
+## Definition of Done for M5
+1. A signed-in player sees their squad on a real planet map near where they registered
+   (`ITEM-061`, `ITEM-063`, `ITEM-065`).
+2. They send it travelling, close the tab, and find it where the clock says (`ITEM-062`,
+   `ITEM-064`, `ITEM-065`).
+3. One socket per window carries everything the client says to its match server (`ITEM-060`).
 
 ## Definition of Done for M4 — met
 1. A squad's composition is a decision with consequences beyond its kit (`ITEM-010`).

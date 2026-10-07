@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-10-01"
+lastReviewed: "2026-10-07"
 appliesTo:
   - "src/**"
   - "workers/**"
@@ -47,6 +47,9 @@ cross a boundary or as a split moves the boundary through them.
 coordinate space bigger than one battlefield, a reason a character keeps existing somewhere
 between matches — none of which the current game has. It is filed now, at Backlog rather than
 Ready, so the dependency is visible rather than the plan being reinvented later under pressure.
+M5 — The Shared World (`ITEM-060`–`ITEM-065`) builds the first of these: a squad position as
+its own durable row (`ITEM-063`) and the one routing seam, `ownerOf(squad)` (`ITEM-064`), that
+this item later replaces. It still leaves nothing to shard until there is load.
 
 #### Change
 See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; summarised:
@@ -98,12 +101,12 @@ See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; su
 #### Affected Files
 - `workers/index.ts` (routing; a baked-in table at first, a Workers KV namespace later once DO
   count outgrows it — RFC-0002 §6.3)
-- Whatever the shared world's own persistent squad-position and presence system turns out to be,
-  once it exists — not yet a file in this repository
+- The `squads` table (`ITEM-063`) and the travel scheduler's `ownerOf(squad)` (`ITEM-064`) —
+  the one seam the directory replaces
 
 #### Acceptance Criteria
 - [ ] The shared world exists as at least one partition with a squad's position tracked as its
-      own durable property — tracked by whatever items eventually build it, not this one.
+      own durable property — built by `ITEM-063` (the `squads` table) and `ITEM-064`, not this one.
 - [ ] A connection routes to the Durable Object currently owning a squad's position, through
       whichever directory mechanism is in force (baked-in table, or Workers KV once DO count
       outgrows it).
@@ -142,7 +145,7 @@ ambush, an open-field assault each stating their own cap), not a flat four every
 **This item cannot be started today.** Capacity and cap depend on systems that do not exist in
 code: bench capacity depends on the base/vehicle economy (`GDD-ECONOMY`, currently prose only — no
 `Base`/`Vehicle` exists anywhere under `src/`), and a per-combat squad cap depends on a
-scenario/mission system that states one (nothing today hands `Referee`/`Squads` a cap other than
+scenario/mission system that states one (nothing today hands `Room`/`Squads` a cap other than
 the flat constant). Dealing two at registration needs neither, but on its own it changes nothing:
 recruiting is free (`ITEM-037`), so a player would recruit straight back to six. It ships with
 capacity, not before. Filed at Backlog rather than Ready so the dependency is visible rather than
@@ -157,7 +160,7 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
    whatever each held base/vehicle contributes) instead of the constant. Depends on the
    base/vehicle economy shipping a capacity number per holding first.
 3. **Squad deploy cap becomes situational, not constant.** `SQUAD_SIZE` (`src/config.ts`) stops
-   being a flat 4; `Referee.verifyRosters`, `deploymentsFrom` (`src/game/Recording.ts`), the
+   being a flat 4; `Room.verifyRosters`, `deploymentsFrom` (`src/game/Recording.ts`), the
    default count of `rollSquadSheets` (`src/core/Characters.ts`), and `RosterScreen`'s toggle need a
    per-match cap supplied by whatever starts the combat (a scenario, a mission, a PvP queue),
    defaulting to *something* when nothing states one. Depends on a scenario/mission system that
@@ -220,8 +223,8 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
 **Type:** Feature
 **Priority:** P2
 **Status:** Backlog — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5,
-[GDD-OVERVIEW](../design/gdd/overview.md) §2); not startable until `ITEM-050` (the world map and
-travel) ships
+[GDD-OVERVIEW](../design/gdd/overview.md) §2); not startable until the travel scheduler
+(`ITEM-064`) ships and `ITEM-066` has settled the decisions it needs
 **Milestone:** Unscheduled
 
 #### Why
@@ -233,7 +236,8 @@ game at all from a live client against the referee; every refereed match needs t
 This item first argued it could ship before the world existed, with "a random place" meaning
 only a freshly generated battlefield. That sequencing was overruled (2026-10-02): an encounter
 is something that happens *somewhere on the map*, to a squad that was going somewhere, so it
-waits for `ITEM-050`. The battlefield is still `generateMap(seed)`; the world map adds where
+waits for the world map (`ITEM-050`, split into `ITEM-060`–`ITEM-065`) and for the decisions in
+`ITEM-066`. The battlefield is still `generateMap(seed)`; the world map adds where
 the squad was and what happens to its journey afterwards.
 
 #### Change
@@ -266,7 +270,8 @@ the squad was and what happens to its journey afterwards.
 - `src/server/Room.ts` (an AI-controlled side; settling a side with no roster)
 - `src/sim/Policy.ts`, `src/game/AiOpponent.ts` (the policy seated by the referee)
 - `src/game/Recording.ts` (controller per side in the header)
-- Travel's alarm/checkpoint scheduler from `ITEM-050`
+- Travel's alarm/checkpoint scheduler from `ITEM-064`; the stable (squad, trip, checkpoint) keys
+  from `ITEM-062`
 - `src/hud/` (the join window, the return feed)
 - `docs/architecture/networking.md`, `docs/architecture/persistence.md`
 
@@ -311,95 +316,22 @@ the squad was and what happens to its journey afterwards.
 **Status:** Merged into `ITEM-050` (2026-10-02): the start location and the world map need the
 same primitive, a squad's position, and ship together. The design is in
 [GDD-WORLD](../design/gdd/world-and-travel.md) §4 and GDD-OVERVIEW §3; the change list moved
-into `ITEM-050`'s.
+into `ITEM-050`'s, and from there into `ITEM-063` when `ITEM-050` was split (2026-10-07).
 
 ---
 
-### [ITEM-050] The World Map and Travel
+### [ITEM-050] The World Map and Travel — split into ITEM-060–ITEM-065
 **Type:** Feature
-**Priority:** P2
-**Status:** Ready — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §1–4); absorbs
-`ITEM-049`
-**Milestone:** Unscheduled
-
-#### Why
-Everything the GDD calls the shared world (GDD-OVERVIEW §3, §4) rests on one missing thing: a
-squad has no position. Encounters on the road (`ITEM-048`, `ITEM-053`), where a player starts
-(`ITEM-049`, merged here) and region sharding (`ITEM-046`) all wait on it.
-
-Prior art exists in `../no-way-home`, the project this one grew out of: a real-Earth PMTiles
-basemap served from R2, waypoint travel on Durable Object alarms, path-based fog of war. Its
-waypoint maths (`packages/shared/src/waypoint-utils.ts`, 16 passing tests, no dependencies) is
-sound and ports almost as-is. Its server orchestration is not proven: its integration suite is
-disabled, its unit test is a placeholder and its E2E ran 4/7. And its basemap,
-`map-tiles/world.pmtiles` (33 MB), is already in this account's R2 bucket `map-tiles`.
-
-#### Change
-1. **Serve the map.** Bind the existing R2 bucket `map-tiles` to `tictac-match-server`; serve
-   `GET /api/tiles/{z}/{x}/{y}.mvt` by range-reading `world.pmtiles` (the prior art's ~70-line
-   R2 `Source` adapter plus its tile route, with abort handling fixed). A client served from
-   GitHub Pages fetches tiles from its match server, across origins.
-2. **A squad has a position**, as a list of waypoints (GDD-WORLD §2), stored with the squad in
-   `Persistence`. Port the waypoint maths into the headless core with the clock injected rather
-   than read (`Date.now()` inside it today) and returning new lists rather than mutating; bring
-   its tests along.
-3. **Wall-clock travel on alarms** (GDD-WORLD §3). The match server's Durable Object holds one
-   alarm, so a scheduler keeps every squad's next due moment and arms the alarm for the
-   earliest. Alarms are at most an hour apart; an arrival is recorded at its expected time, not
-   the time the alarm fired. One mechanism for every scale of movement.
-4. **Orders on the map**: go here, go here now, go here first, go here next, stop (GDD-WORLD §3),
-   as requests to the match server, which validates and updates the waypoint list. Pace
-   (cautious, normal, flat out) sets the speed of a leg.
-5. **Where a player starts** (ex-`ITEM-049`): on registration, read
-   `request.cf.latitude`/`longitude` (absent off Cloudflare); draw a point uniformly over the
-   50 km disc (radius `R·√u`); redraw while within a minimum distance of an existing start;
-   store only the drawn point; fall back to a default anchor when nothing is reported.
-6. **The map in the client**: MapLibre GL with a Protomaps style over the served tiles, the
-   player's squad drawn where it is, moving between frames by the same position function the
-   server uses, and the order verbs on right-click. Written fresh against this project's state,
-   not ported from the prior art's 888-line view.
-
-#### Affected Files
-- `wrangler.jsonc` (R2 binding), `workers/index.ts`, `workers/MatchDurableObject.ts` (tiles,
-  alarm, `request.cf` through to registration)
-- `src/core/` (waypoint maths, headless), `src/server/` (travel orders, the scheduler, the
-  squad's position in `Persistence`), `src/server/db/migrate.ts` (a migration for it)
-- `src/server/Accounts.ts` (`register`: the start location)
-- `src/hud/` or a new map view; `src/main.ts` (getting to it)
-- `package.json` (`pmtiles`, `maplibre-gl`, `protomaps-themes-base`)
-- `docs/architecture/` (a world/travel section), `docs/design/gdd/world-and-travel.md`
-
-#### P2P / Simulation Impact
-- None on matches. Travel has no randomness; its position function is a pure function of the
-  waypoints and the time, so it needs no match stream and does not touch `matchDice`.
-- Travel orders are not match commands and do not go on the match wire; the wire-shape catalogue
-  is untouched unless travel later moves onto the socket.
-
-#### Acceptance Criteria
-- [ ] A freshly registered player through Cloudflare sees their squad on a real map within 50 km
-      of the reported point, which is stored nowhere; starts from one anchor spread uniformly over
-      the disc (statistical test) and respect the minimum distance; registration off Cloudflare
-      still works through the fallback.
-- [ ] Tiles are served from the existing `map-tiles/world.pmtiles` through the match server, to a
-      client on the match server's own origin and to one on GitHub Pages.
-- [ ] All five orders work and the waypoint maths is unit-tested with an injected clock.
-- [ ] A squad sent on a long trip keeps travelling with the tab closed; on return it is where the
-      clock says it should be, and an arrival that happened while away is recorded at its
-      expected time.
-- [ ] A refresh mid-journey resumes without a jump.
-- [ ] Living documentation updated.
-
-#### Risks & Mitigations
-- **Risk:** a drawn start can land in the sea; the basemap knows where land is, the server does
-  not yet.
-- **Mitigation:** accept sea starts for now, or redraw against a coarse land mask; decide when
-  it is built, not before.
-- **Risk:** the 33 MB extract may not cover the whole world; a player from outside it starts on
-  a blank map.
-- **Mitigation:** check the extract's bounds first; the prior art's download script can fetch a
-  larger build if needed (rewrite it to stream: it buffers the whole file in memory).
-- **Risk:** IP geolocation can be far off (mobile carriers, VPNs).
-- **Mitigation:** accepted. The start is meant to be roughly local, not exact.
+**Status:** Split into `ITEM-060`–`ITEM-065` on 2026-10-07 (milestone M5 — The Shared World);
+the decisions encounters need before they are built are `ITEM-066`, and on-demand closer zooms
+are `ITEM-067` (deferred). It had absorbed `ITEM-049`; the start location is now `ITEM-063`.
+The design is still
+[GDD-WORLD](../design/gdd/world-and-travel.md) §1–4. The prior art it pointed at, in
+`../no-way-home`: the waypoint maths `packages/shared/src/waypoint-utils.ts` and its 16 tests
+(ported by `ITEM-062`) and the R2 PMTiles `Source`, `packages/workers/src/lib/r2-pmtiles-source.ts`
+(ported by `ITEM-061`). Its other assumption did not survive the split: the archive already in
+R2, `map-tiles/world.pmtiles`, is not a world map but Stuttgart only (lon 8.9–9.5, lat
+48.55–49.0, z0–14, 1,259 tiles), so serving the planet is `ITEM-061`'s job.
 
 ---
 
@@ -407,7 +339,7 @@ disabled, its unit test is a placeholder and its E2E ran 4/7. And its basemap,
 **Type:** Feature
 **Priority:** P3
 **Status:** Backlog — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5); waits for
-`ITEM-050` and `ITEM-048`
+the travel scheduler (`ITEM-064`) and `ITEM-048`
 **Milestone:** Unscheduled
 
 #### Why
@@ -428,7 +360,8 @@ are away, so most crossings will involve at least one absent player.
    zones.
 
 #### Affected Files
-- Travel's scheduler (`ITEM-050`), the referee's AI seating (`ITEM-048`), `src/server/Room.ts`
+- Travel's scheduler (`ITEM-064`, which keeps a due moment of any kind so a planned meeting
+  fits), the referee's AI seating (`ITEM-048`), `src/server/Room.ts`
 
 #### P2P / Simulation Impact
 - None on match rules. The meeting check is geometry over waypoints, outside any match.
@@ -459,9 +392,469 @@ reason to go somewhere.
 
 #### Change
 To be designed. Likely a `captured` roster status alongside `dead`, a place on the map where the
-captive is held (`ITEM-050`), and a fight that frees them. Until then the left-behind are removed
+captive is held (a row of `ITEM-063`'s `squads` table, which is its own table partly so captives
+can have positions), and a fight that frees them. Until then the left-behind are removed
 from the roster the way the dead are; whether that row is deleted or kept makes no difference
 to this item.
 
 #### Acceptance Criteria
 - [ ] Designed in the GDD before any of it is built.
+
+---
+
+### [ITEM-060] One Connection per Window: the API Over JSON-RPC
+**Type:** Infrastructure
+**Priority:** P2
+**Status:** Ready
+**Milestone:** M5 — The Shared World
+
+#### Why
+A signed-in window today talks to its match server two ways: HTTP `fetch` to `/api/*`
+(`src/server/Api.ts`: passkey ceremonies, sign-out, `me`, the roster, recruiting, the lobby,
+socket tickets) and a WebSocket for the room it sits in. The user's decision (2026-10-07) is
+that the socket is reused for everything: one connection per window. It also pays for itself:
+
+- The lobby panel polls `GET /api/lobby` every two seconds (`LOBBY_POLL_MS` in
+  `src/hud/menu/ServerPanel.tsx`); over a socket the server pushes changes instead.
+- Socket tickets (`POST /api/ticket`, held in memory by `Accounts`) exist only because a
+  session token must not go in a socket url; an RPC carrying the token over an open socket
+  needs no ticket.
+- The API's CORS (`Access-Control-Allow-*` in `Api.ts`) exists only because a page on GitHub
+  Pages `fetch`es another origin; a WebSocket needs none.
+- The world map (`ITEM-064`, `ITEM-065`) and, later, an encounter's join window (`ITEM-048`) need
+  a channel the server can push down. The socket already governed by the one-live-window-per-player
+  rule (`ITEM-058`) is that channel, rather than a second one to reconcile with it.
+
+Only static content stays HTTP: the built client, and map tiles, which MapLibre fetches by url
+(`ITEM-061` moves them to `/tiles/{z}/{x}/{y}.mvt`, off `/api`).
+
+#### Change
+1. **A session socket per window**, opened as soon as a match server is chosen (not when a
+   room is entered), and kept for the life of the window. Rooms are entered and left over it.
+2. **Requests with ids, and notifications for pushes.** `src/game/JsonRpc.ts` already declares
+   `JsonRpcRequest`, `JsonRpcSuccessResponse` and `JsonRpcErrorResponse`; only notifications are
+   used today. Requests carry ids and get exactly one response; the server pushes with
+   notifications. Match traffic stays the notifications it is.
+3. **A method for every route in `Api.ts`**: passkey register options/verify, login
+   options/verify, sign out, `me`, roster list, recruit. The lobby becomes a **subscription**:
+   one call answers the current `LobbyView` and later changes arrive as notifications.
+4. **Room intents become methods.** `open`, `join`, `watch` and `resume`, which ride the socket
+   url today (`intentQuery`), are RPC calls answered by `seated`, with the same refusal texts.
+5. **Identity is bound by an RPC carrying the session token**, never in a url. `/api/ticket`
+   and the ticket store in `Accounts` are removed. Signing in or out over the socket rebinds or
+   unbinds the session in place.
+6. **The session rules carry over at session level**: one live window per player (`ITEM-058`)
+   applies to the session socket, and seat keys and reconnect (`ITEM-059`) keep working — a
+   reconnecting window resumes its seat by key over the new socket.
+7. **`request.cf` is captured on the upgrade** and kept on the session, so registration can read
+   the connection's latitude/longitude (`ITEM-063`).
+8. **The HTTP `/api` handler and its CORS are removed** from `GameServer.ts` and
+   `workers/MatchDurableObject.ts`; only static assets and `/tiles/` stay HTTP.
+9. **Protocol bump to 7.** `OLDEST_SERVED_PROTOCOL` (`Math.max(6, PROTOCOL_VERSION - 1)`) then
+   becomes 6, so the server keeps admitting a protocol-6 socket that resumes an existing room by
+   seat key (url intent `resume{room, seat}`), and a match in progress finishes across the
+   deploy. Every other protocol-6 request is refused with the reload text.
+
+#### Affected Files
+- `src/server/Api.ts` (removed; its handlers move behind RPC methods)
+- `src/server/Lobby.ts` (session sockets, lobby subscription, intents as methods)
+- `src/server/Room.ts`, `src/server/Accounts.ts` (tickets removed), `src/server/GameServer.ts`
+- `workers/MatchDurableObject.ts` (`request.cf` on the upgrade; no `/api`)
+- `src/game/Account.ts`, `src/game/NetworkManager.ts`, `src/game/JsonRpc.ts`
+- `src/hud/menu/ServerPanel.tsx` (no polling), `src/main.tsx`
+- `src/version.ts` (protocol 7)
+- `docs/architecture/networking.md`, `docs/architecture/persistence.md`,
+  `docs/architecture/deployment.md`
+
+#### P2P / Simulation Impact
+- Wire protocol 7: new request/response and notification methods on the match-server socket;
+  the wire-shape catalogue gains them. Peer-to-peer matches are untouched.
+- Match commands, the match stream and determinism are unchanged.
+
+#### Acceptance Criteria
+- [ ] No `/api/` HTTP routes remain on either host (Bun server, Worker).
+- [ ] One socket per window, observed in a browser through sign-in, the lobby, a match and back.
+- [ ] Lobby changes arrive as pushes; nothing polls.
+- [ ] Passkey registration and sign-in work over RPC on the deployed Worker.
+- [ ] A protocol-6 window in a match finishes it across the deploy; any other protocol-6 request
+      is refused with the reload text.
+- [ ] Tests updated (`bun test`).
+- [ ] Living documentation updated: networking, persistence, deployment.
+
+#### Risks & Mitigations
+- **Risk:** WebAuthn ceremonies were built around request/response HTTP and its error paths.
+- **Mitigation:** the RPC methods keep the same inputs and outputs; verify on the deployed
+  Worker, not only locally (an acceptance criterion).
+- **Risk:** a socket that is now long-lived keeps a Durable Object awake where a page with no
+  room used to cost nothing.
+- **Mitigation:** accepted for now; Cloudflare's Hibernation API for the session socket is the
+  later fix if the bill shows it.
+
+---
+
+### [ITEM-061] Serve the Map: a Low-Zoom Planet From R2
+**Type:** Infrastructure
+**Priority:** P2
+**Status:** Ready — the zoom cap is still to be chosen (see Change 1)
+**Milestone:** M5 — The Shared World
+
+#### Why
+The world is the real Earth (GDD-WORLD §1), and the only archive in R2,
+`map-tiles/world.pmtiles`, is Stuttgart: its header says lon 8.9–9.5, lat 48.55–49.0, z0–14,
+1,259 tiles. The user's decision (2026-10-07, D1): host the whole planet at the most zoomed-out
+levels now; closer zooms are built on demand later (`ITEM-067`, deferred).
+
+Measured against Protomaps build `20261007.pmtiles` (the full planet, z0–15, is 138.7 GB) with
+`pmtiles extract --dry-run`:
+
+| Zooms | Size |
+| --- | --- |
+| z0–6 | 45 MB |
+| z0–7 | 189 MB |
+| z0–8 | 558 MB |
+| z0–9 | 1.6 GB |
+| z0–10 | 3.8 GB |
+| z0–11 | 8.0 GB |
+| z0–12 | 18 GB |
+
+R2's free tier is 10 GB-month; standard storage beyond it is $0.015/GB-month.
+
+#### Change
+1. **Choose the zoom cap.** The candidates are **z0–8** (558 MB: countries, regions and large
+   towns) and **z0–10** (3.8 GB: town streets begin to show), both inside the free tier. The
+   choice is open and made when this item is pulled.
+2. **Produce the archive** with `pmtiles extract https://build.protomaps.com/<date>.pmtiles
+   <out> --maxzoom=N`, which streams by range requests (no 138 GB download).
+3. **Upload it through the R2 S3 API** (multipart). `wrangler r2 object put` does not handle
+   multi-GB objects. The credentials are in `.env` by name (`R2_S3_API`, `R2_ACCESS_KEY_ID`,
+   `R2_SECRET_ACCESS_KEY`).
+4. **Bind `map-tiles` to `tictac-match-server`** in `wrangler.jsonc`.
+5. **Port the reference's R2 `Source`** (`../no-way-home/packages/workers/src/lib/r2-pmtiles-source.ts`)
+   with its abort handling fixed.
+6. **Answer `/tiles/{z}/{x}/{y}.mvt` in `workers/index.ts`**, before the request reaches the
+   Durable Object: tiles need no game state, and a tile request should not wake or queue on it.
+   The response carries CORS for any origin (a static asset, read by GitHub Pages).
+7. **The Bun server answers the same route** from a local `.pmtiles` file, for development and
+   tests.
+8. **Self-host the style's glyphs and sprites.** The reference loads them from
+   `protomaps.github.io`; they become static assets of this project.
+9. **Retire the Stuttgart-only `world.pmtiles`**, unless the deferred pipeline (`ITEM-067`)
+   wants it.
+
+#### Affected Files
+- `wrangler.jsonc` (R2 binding), `workers/index.ts` (the tile route)
+- `src/server/GameServer.ts` (the same route from a local file)
+- A new tile-source module beside them (the ported R2 `Source`)
+- `public/` (glyphs, sprites, style)
+- `package.json` (`pmtiles`)
+- `docs/architecture/deployment.md`
+
+#### P2P / Simulation Impact
+- None. Tiles are static content, not on the match wire.
+
+#### Acceptance Criteria
+- [ ] A tile is served to the match server's own origin and to a page on GitHub Pages.
+- [ ] A bare MapLibre page shows the whole planet down to the chosen cap.
+- [ ] No third-party origin is contacted at runtime (tiles, glyphs, sprites all self-hosted).
+- [ ] The Bun server serves the same route from a local file.
+- [ ] Living documentation updated (deployment: the binding, the archive, how it was produced).
+
+#### Risks & Mitigations
+- **Risk:** a player zooms past the cap and sees nothing finer.
+- **Mitigation:** MapLibre overzooms the last level; `ITEM-067` is the real answer.
+- **Risk:** a multi-GB upload fails part-way.
+- **Mitigation:** multipart through the S3 API, which retries a part rather than the whole.
+
+---
+
+### [ITEM-062] Travel Maths in the Headless Core
+**Type:** Feature
+**Priority:** P2
+**Status:** Ready
+**Milestone:** M5 — The Shared World
+
+#### Why
+A squad's position is a list of waypoints, and where it is now is a pure function of that list
+and the clock (GDD-WORLD §2). The server's scheduler (`ITEM-064`) and the client's map
+(`ITEM-065`) must compute it with the same function. The prior art's
+`../no-way-home/packages/shared/src/waypoint-utils.ts` (16 passing tests, no dependencies) is
+sound maths with the wrong signatures for this project.
+
+#### Change
+1. **Tests first:** port its 16 tests into `tests/`, then the code into `src/core/`.
+2. **Signatures:** the clock is injected (it reads `Date.now()` today); functions return new
+   lists rather than mutating; no inline speed default — each leg's speed comes from mode and
+   pace (on foot: cautious 3 km/h, normal 5 km/h, flat out 7 km/h, GDD-WORLD §3).
+3. **Stable keys from day one:** every trip has a stable id and every checkpoint an
+   index/expected-time key, because `ITEM-048` needs the encounter roll for (squad, trip,
+   checkpoint) to be reproducible after the fact.
+4. **Say what the maths is.** It interpolates linearly in latitude/longitude. That is fine at
+   these scales but it is not a great-circle path; document it in the code and in GDD-WORLD
+   rather than claiming great-circle.
+
+#### Affected Files
+- `src/core/` (a new travel module)
+- `tests/` (the ported tests)
+- `docs/design/gdd/world-and-travel.md`
+
+#### P2P / Simulation Impact
+- Headless and deterministic: no randomness, no DOM; the match stream is untouched.
+
+#### Acceptance Criteria
+- [ ] The 16 ported tests pass against an injected clock.
+- [ ] No function mutates its input list or reads the wall clock.
+- [ ] Every leg's speed is stated by mode and pace; there is no default speed.
+- [ ] Trips and checkpoints carry stable keys.
+- [ ] The linear lat/lng interpolation is documented as such.
+
+#### Risks & Mitigations
+- **Risk:** linear lat/lng drifts from the true path over long legs and near the poles.
+- **Mitigation:** accepted at the distances travelled on foot; revisit if vehicles make
+  continental legs common.
+
+---
+
+### [ITEM-063] A Squad Has a Position, and a Place to Start
+**Type:** Feature
+**Priority:** P2
+**Status:** Ready — after `ITEM-060` (`request.cf` on the session) and `ITEM-062` (the waypoint
+shape)
+**Milestone:** M5 — The Shared World
+
+#### Why
+Nothing in the database says where a squad is. The user's decision (D2): a squad's position
+lives in a new `squads` table — one row per player for now — not a column on `players`, so that
+captives (`ITEM-054`), alien squads and several squads per player can have positions later.
+Where a new player starts is GDD-WORLD §4 (ex-`ITEM-049`).
+
+#### Change
+1. **A migration for `squads`**: the squad's id, its player, and its waypoint list (the
+   `ITEM-062` shape).
+2. **Registration places the squad**: draw a point uniformly over the 50 km disc around the
+   session's `request.cf` latitude/longitude (radius `R·√u`); redraw if it lands within 1 km of
+   another player's start (D4); store only the drawn point, never the reported one.
+3. **The fallback anchor** is Stuttgart centre, 48.7775, 9.18 (D3), used when Cloudflare reports
+   no location and always on the Bun server.
+4. **The draw uses system randomness**, never the match stream (AGENTS.md §2.3).
+5. **An RPC method reads the squad** (position as waypoints), over `ITEM-060`'s socket.
+
+#### Affected Files
+- `src/server/db/migrations.ts` (the `squads` table)
+- `src/server/Accounts.ts` (`register`: the start), `src/server/Persistence.ts`
+- `src/server/Lobby.ts` (the read method)
+- `docs/architecture/persistence.md`
+
+#### P2P / Simulation Impact
+- None on matches. The draw is setup randomness outside any match.
+
+#### Acceptance Criteria
+- [ ] A registration through Cloudflare stores a start within 50 km of the reported point, and
+      the reported point is stored nowhere.
+- [ ] A statistical test shows starts from one anchor spread uniformly over the disc, and no two
+      starts within 1 km.
+- [ ] Registration off Cloudflare (and on the Bun server) works through the Stuttgart anchor.
+- [ ] The squad is readable over RPC.
+- [ ] Living documentation updated (persistence: the table).
+
+#### Risks & Mitigations
+- **Risk:** a drawn start lands in the sea; the server has no land mask (D6, open).
+- **Mitigation:** decided later, not here: accept sea starts or redraw against a coarse mask.
+- **Risk:** every off-Cloudflare player starts near Stuttgart, so the 1 km redraw runs more often
+  there as players accumulate.
+- **Mitigation:** the 50 km disc holds thousands of 1 km-separated starts; cap the redraws and
+  log if it is ever hit.
+- **Risk:** IP geolocation can be far off (mobile carriers, VPNs).
+- **Mitigation:** accepted. The start is meant to be roughly local, not exact.
+
+---
+
+### [ITEM-064] Orders, Pace and the Travel Scheduler
+**Type:** Feature
+**Priority:** P2
+**Status:** Ready — after `ITEM-062` and `ITEM-063`
+**Milestone:** M5 — The Shared World
+
+#### Why
+Travel runs on the wall clock and carries on while the player is away (GDD-WORLD §3). The match
+server's Durable Object has one alarm, so something must keep every squad's next due moment and
+arm the alarm for the earliest.
+
+#### Change
+1. **The five orders and three paces as RPC methods**: go here, go here now, go here first, go
+   here next, stop; cautious, normal, flat out. The server validates and returns the new
+   waypoint list.
+2. **A scheduler of due moments**: it keeps "the next due moment per entity, of some kind" —
+   not only arrivals, so `ITEM-053`'s planned meetings and `ITEM-048`'s checkpoints fit without
+   a second mechanism. It arms the Durable Object's single alarm for the earliest, never more
+   than an hour away; an arrival is recorded at its expected time, not when the alarm fired.
+3. **Restart:** the schedule is rebuilt from `squads` and the alarm re-armed at startup, beside
+   `lobby.restore()`.
+4. **The Bun server's twin** drives the same scheduler with timers, through an injectable clock
+   so tests drive time.
+5. **Squad requests route through `ownerOf(squad)`**, which returns the single instance today.
+   RFC-0002 §5 (point 1) calls the hard-coded singleton debt; this is the one seam `ITEM-046`
+   replaces.
+6. **Position changes are pushed** to the owner's socket (`ITEM-060`).
+
+#### Affected Files
+- `src/server/` (orders, a scheduler module, `ownerOf`), `src/server/Lobby.ts` (methods)
+- `workers/MatchDurableObject.ts` (the alarm handler, re-arming at startup)
+- `src/server/GameServer.ts` (the timer-driven twin)
+- `docs/architecture/` (a world/travel section), `docs/architecture/deployment.md`
+
+#### P2P / Simulation Impact
+- None on matches. Travel orders are not match commands; they are RPC methods on the session
+  socket, outside any room.
+
+#### Acceptance Criteria
+- [ ] All five orders and three paces change the waypoint list as GDD-WORLD §3 says.
+- [ ] With a driven clock, a multi-hour trip arms alarms at most an hour apart and records the
+      arrival at its expected time.
+- [ ] After a restart the schedule is rebuilt and the alarm armed for the earliest due moment.
+- [ ] The owner's socket receives a push when its squad's route changes or it arrives.
+- [ ] Living documentation updated.
+
+#### Risks & Mitigations
+- **Risk:** the alarm handler and a socket request race on the same squad.
+- **Mitigation:** a Durable Object runs one event at a time; the Bun twin serialises through the
+  same scheduler.
+
+---
+
+### [ITEM-065] The Map Screen
+**Type:** Feature
+**Priority:** P2
+**Status:** Ready — after `ITEM-061` and `ITEM-064`
+**Milestone:** M5 — The Shared World
+
+#### Why
+The player has to see the squad on the map and give it orders. This is where M5's definition of
+done is observed.
+
+#### Change
+1. **A new screen for signed-in players**, reached from the Match Server group; the lobby stays
+   as it is.
+2. **MapLibre loaded by dynamic import** only when the map opens, so the game's first load does
+   not carry it.
+3. **Mounted like the loadout root**: on `body`, outside `#ui`'s pointer rules, with the
+   Three.js update loop paused behind it.
+4. **The squad drawn by the same position function the server uses** (`ITEM-062`), moving
+   between frames without asking the server.
+5. **Orders on right-click** (the five verbs) and a pace control.
+6. Written fresh against this project's state, not ported from the prior art's 888-line view.
+
+#### Affected Files
+- `src/hud/` (the map screen), `src/hud/menu/ServerPanel.tsx` (the way in), `src/main.tsx`
+- `package.json` (`maplibre-gl`, `@protomaps/basemaps` or `protomaps-themes-base`)
+- `docs/architecture/rendering.md`
+
+#### P2P / Simulation Impact
+- None. The map reads the squad over RPC and draws it with the shared position function.
+
+#### Acceptance Criteria
+- [ ] A squad sent on a long trip keeps travelling with the tab closed; on return it is where
+      the clock says, and an arrival that happened while away is recorded at its expected time.
+- [ ] A refresh mid-journey resumes without a jump.
+- [ ] Tiles load cross-origin on GitHub Pages.
+- [ ] MapLibre is not in the initial bundle.
+- [ ] Living documentation updated.
+
+#### Risks & Mitigations
+- **Risk:** two render loops (Three.js and MapLibre) compete for the GPU.
+- **Mitigation:** the Three.js update loop pauses while the map is open.
+
+---
+
+### [ITEM-066] Before Encounters: the Decisions ITEM-048 Needs
+**Type:** Feature
+**Priority:** P2
+**Status:** Backlog — a design task (GDD edits, no code); next after the M5 build items; blocks
+`ITEM-048`
+**Milestone:** M5 — The Shared World
+
+#### Why
+`ITEM-048` assumes the server can start a fight on its own. Everything built for rooms so far
+(`ITEM-058`, `ITEM-059`) assumes a human opens it, a human joins it and humans hold the seats.
+These clashes have to be decided in the GDD before encounters are built, not discovered while
+building them.
+
+#### Change
+Settle each in [GDD-WORLD](../design/gdd/world-and-travel.md) §5 (and the networking doc where
+it is a protocol rule):
+1. **Is an encounter the player's one match?** And what does the lobby panel's auto-resume do
+   with a fight the player did not start?
+2. **The join window vs the two-minute seat grace** (`GRACE_MS`): an encounter at 03:00 must not
+   abort itself because nobody took the seat.
+3. **A server-side way to create a room** for known players, with pre-seated seats and a
+   header the server composes.
+4. **An AI seat attached server-side** over a loopback transport, as `AiOpponent` does in the
+   browser.
+5. **Rosters marking travellers as away.** Today `Rosters.rest()` heals every non-deployed member
+   after any settlement.
+6. **`verifyRosters` is byte-exact**: if travel ever changes character state, it must still
+   verify.
+7. **Build pinning** of a room created before a deploy and joined after.
+8. **The unreconciled seam** between RFC-0002 §2/§6.2 (crossing a boundary is a deliberate act)
+   and GDD-WORLD's free straight-line travel: record it, and either reconcile it or state which
+   one gives way.
+
+#### Affected Files
+- `docs/design/gdd/world-and-travel.md`
+- `docs/design/rfc/0002-region-sharded-durable-objects.md` (the seam)
+- `docs/architecture/networking.md` (where a decision is a protocol rule)
+
+#### P2P / Simulation Impact
+- None directly; it decides what `ITEM-048` may assume about the referee and the rosters.
+
+#### Acceptance Criteria
+- [ ] Each of the eight points has a recorded decision (or an explicit "not needed for the first
+      encounter, because …") in the GDD.
+- [ ] `ITEM-048`'s Change and Affected Files are updated to match.
+
+#### Risks & Mitigations
+- **Risk:** decisions made on paper miss what the code forces.
+- **Mitigation:** each decision names the file and function it touches (`Room`, `Lobby`,
+  `Rosters.rest`, `verifyRosters`), as this item's Change does.
+
+---
+
+### [ITEM-067] Closer Zooms on Demand
+**Type:** Infrastructure
+**Priority:** P3
+**Status:** Backlog — deferred by the user's decision (2026-10-07)
+**Milestone:** Unscheduled
+
+#### Why
+`ITEM-061` hosts the planet only at low zooms. Hosting it all is 138.7 GB (z0–15); most of it
+would never be looked at. Building the closer zooms for an area the first time someone looks
+there keeps storage to the places players are.
+
+#### Change
+Build high-zoom tiles for an area on its first request, from the Protomaps planet build by range
+reads, cache them in R2, and deduplicate — likely a separate Worker, so that concurrent first
+requests for the same area build it once.
+
+Cost, from `ITEM-061`'s measurements: z0–11 alone is 8.0 GB and z0–12 18 GB for the whole
+planet; R2 storage is $0.015/GB-month past the 10 GB-month free tier, so only populated regions
+should ever be built.
+
+Open questions:
+- Which zooms are built on demand (to z15, the build's maximum?).
+- Region granularity: what one build covers.
+- Eviction: whether unvisited regions are ever removed.
+- Addressing: how the low-zoom archive and the on-demand tiles are served under one MapLibre
+  source.
+
+#### Affected Files
+- `workers/` (a tile-building Worker, or the tile route in `workers/index.ts`), `wrangler.jsonc`
+
+#### P2P / Simulation Impact
+- None.
+
+#### Acceptance Criteria
+- [ ] Designed (the open questions answered) before it is built.
+- [ ] A first request for an unbuilt area builds and caches it once, under concurrent requests.
+
+#### Risks & Mitigations
+- **Risk:** the Protomaps build url is dated and rotates.
+- **Mitigation:** pin a build per region, recorded beside the cached tiles.

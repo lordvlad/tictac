@@ -3,7 +3,7 @@ title: "GDD: The World Map, Travel and Encounters on the Road"
 id: "GDD-WORLD"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-10-02"
+lastReviewed: "2026-10-07"
 appliesTo:
   - "src/game/**"
   - "src/server/**"
@@ -18,25 +18,30 @@ tags: ["world", "map", "travel", "encounters", "design"]
 
 # GDD: The World Map, Travel and Encounters on the Road
 
-**Status: designed, not built** (`ITEM-050`, `ITEM-048`, `ITEM-053`). This is where a squad
-is between fights. Combat ([Combat Mechanics](combat-mechanics.md)) is what happens once two
-squads meet. The overview's shared world ([Overview](overview.md) §3, §4) assumes this layer
-exists; this document says what it is.
+**Status: designed, not built** (M5: `ITEM-060`–`ITEM-065`; then `ITEM-048`, `ITEM-053`). This
+is where a squad is between fights. Combat ([Combat Mechanics](combat-mechanics.md)) is what
+happens once two squads meet. The overview's shared world ([Overview](overview.md) §3, §4)
+assumes this layer exists; this document says what it is.
 
 **Prior art.** `../no-way-home`, the project this one grew out of, built a working version of
 the map and travel half: a real-Earth basemap, waypoint travel driven by Durable Object alarms,
 and path-based fog of war. Its design document never specified the map (its own §9 lists
 "World Map design" as a TODO). What it shipped is a set of implementation decisions, and the
-ones adopted here are named as such. Its tile archive, `map-tiles/world.pmtiles` (a 33 MB
-regional extract), is already in this account's R2.
+ones adopted here are named as such. Its tile archive, `map-tiles/world.pmtiles`, is already in
+this account's R2, but it covers Stuttgart only (lon 8.9–9.5, lat 48.55–49.0), not the world.
 
 ## 1. The map is the real Earth
 
 The world is laid over the real one ([Overview](overview.md) §3): a player in Lyon starts
-around Lyon. The map is an OpenStreetMap-derived vector basemap (Protomaps), stored as one
-PMTiles archive in R2 and served by the match server one tile at a time. A position is
-latitude and longitude. There is no grid, no projection and no region system at this layer;
-distance is great-circle distance.
+around Lyon. The map is an OpenStreetMap-derived vector basemap (Protomaps), stored as PMTiles
+in R2 and served by the match server one tile at a time, as static content at
+`/tiles/{z}/{x}/{y}.mvt`. A position is latitude and longitude. There is no grid, no
+projection and no region system at this layer; distance is great-circle distance.
+
+**The whole planet, coarse first.** The full planet is 138.7 GB at z0–15. The match server
+hosts the whole planet only at the most zoomed-out levels (z0–8 at 558 MB or z0–10 at 3.8 GB;
+the cap is still to be chosen, `ITEM-061`). Closer zooms will be built for an area the first
+time someone looks there (`ITEM-067`, deferred).
 
 ## 2. A squad has a position
 
@@ -52,6 +57,13 @@ Where the squad is *now* is computed from that list and the clock, never stored:
 it left its last waypoint times its speed, along the leg it is on. Server and client compute
 it with the same function, so they cannot disagree. A refresh mid-journey resumes where the
 squad actually is, and the client can draw it moving without asking the server anything.
+Along a leg the squad's latitude and longitude are interpolated linearly, not along the great
+circle: indistinguishable at the distances a squad covers on foot, and stated so nobody relies
+on it being a true geodesic.
+
+**Where it is stored.** A squad is a row of its own, in a `squads` table holding its waypoint
+list — one row per player for now — not a column on the player. Captives (`ITEM-054`), alien
+squads and a player with several squads can then have positions without reshaping players.
 
 **There is one movement mechanism.** A walk across a town and a drive across a country are both
 a list of waypoints.
@@ -78,6 +90,8 @@ not the time the alarm fired, so lateness never accumulates over a long trip.
 **Speed** comes from how the squad travels: on foot, or in a vehicle once vehicles exist
 ([Economy & Bases](economy-and-bases.md)). The pace is the player's choice: cautious (slow,
 fewer encounters), normal, or flat out (fast, more encounters, more fuel once fuel exists).
+On foot the three paces are **3 km/h, 5 km/h and 7 km/h**. Every leg states its own speed from
+how the squad travels and its pace; there is no default speed.
 
 **Orders on the map** are four verbs, given by pointing at a place:
 
@@ -94,9 +108,14 @@ Stopping where the squad is is the fifth.
 
 On registration a player's squad is placed at a random point within **50 km** of the
 latitude and longitude Cloudflare reports for the connection ([Overview](overview.md) §3).
-The point is drawn uniformly over the disc, redrawn if it lands too close to another
-player's start, and only the drawn point is stored. A connection with no reported location
-falls back to a default anchor.
+The point is drawn uniformly over the disc (radius `R·√u`), from system randomness rather than
+any match's dice, and redrawn if it lands within **1 km** of another player's start. Only the
+drawn point is stored; the reported one is kept nowhere. A connection with no reported
+location — and every registration on the Bun server, which is not behind Cloudflare — falls
+back to the default anchor, **Stuttgart centre (48.7775, 9.18)**. (`ITEM-063`.)
+
+**Not decided: sea starts.** A drawn point can land in the sea; the server has no land mask.
+Whether to accept that or redraw against a coarse mask is decided later.
 
 ## 5. Encounters on the road
 
@@ -167,3 +186,4 @@ sleeping squad is a target. What stands between a squad and that risk:
 - **Roads and terrain.** A leg is a straight line; nothing slows a squad crossing a mountain.
 - **Fuel** and vehicles.
 - **Capture and rescue** of characters left behind (`ITEM-054`).
+- **Sea starts** (§4).

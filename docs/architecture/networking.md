@@ -315,6 +315,13 @@ the version gate, roster verification, recording, settlement and attribution tha
 a single-use `Referee` watching one match for the life of the process. The shapes both sides
 share are in `src/game/Lobby.ts`.
 
+> **Direction (`ITEM-060`, M5).** The HTTP API (`src/server/Api.ts`: passkeys, `me`, roster,
+> recruit, lobby, tickets) is being replaced by JSON-RPC requests and pushed notifications over
+> one session socket per window, with room intents as methods instead of url parameters and no
+> tickets. Only static content stays HTTP: the built client and map tiles (`/tiles/{z}/{x}/{y}.mvt`,
+> `ITEM-061`). Until it lands, **do not add a new `/api` route**; add the capability to
+> `ITEM-060`'s method list instead. This section describes the system as it is today.
+
 ### Connecting
 
 A socket says what it wants in its url, not in a frame: `ticket` (signed-in players, from
