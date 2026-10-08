@@ -39,10 +39,13 @@ bun run dev
 
 The game server will boot on `http://localhost:5173`.
 
-The menu's *Play on a Match Server* always plays on the production server (`MATCH_SERVER_URL` in
-`src/config.ts`), whatever served the page: there is no address to type, so testing against a
-server of your own is done with `bun test` and the scripts, which dial one directly
-(`bun run serve:match`).
+The menu's *Play on a Match Server* plays on the production server (`MATCH_SERVER_URL` in
+`src/config.ts`); there is no address to type. To play against a server of your own, run one
+(`bun run serve:match`, or `bun scripts/wrangler.ts dev --port 8787`) and open the client at
+`http://localhost:5173/?server=ws://localhost:8787/`. `?server=` is honoured only on a page served
+from this machine (`localhost`, `127.0.0.1`, `[::1]`; `matchServerFor`), so a link elsewhere
+cannot choose anyone's server. The server's own `RELYING_PARTY_ORIGINS` must list the page's
+origin for passkeys to work (`serve:match --origins=http://localhost:5173`).
 
 ---
 

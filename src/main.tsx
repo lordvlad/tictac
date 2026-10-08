@@ -3,7 +3,7 @@ import type { Asset } from '@mavonengine/core/Types/Asset'
 import { createRoot } from 'react-dom/client'
 import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
-import { Faction, FACTION_INFO, MATCH_SERVER_URL, SIM } from './config'
+import { Faction, FACTION_INFO, matchServerFor, SIM } from './config'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
 import { hashSeed, matchDice, Rng, type Roll } from './core/rng'
@@ -87,7 +87,7 @@ let server: ServerConnection | null = null
 function connectionToServer(): ServerConnection {
   if (server && server.state.kind !== 'closed') return server
   server?.close()
-  server = new ServerConnection(MATCH_SERVER_URL)
+  server = new ServerConnection(matchServerFor(new URL(window.location.href)))
   return server
 }
 

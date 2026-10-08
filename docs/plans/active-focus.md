@@ -40,8 +40,9 @@ The fights met on the road ([GDD-WORLD](../design/gdd/world-and-travel.md) §5) 
 next, as `[ITEM-048]`.
 
 **How the client reaches its server.** One address, `MATCH_SERVER_URL` in `src/config.ts` (the
-Cloudflare Worker); the menu has no address to type. A client served from anywhere, including a
-developer's machine, plays on the production server.
+Cloudflare Worker); the menu has no address to type. A page served from this machine may add
+`?server=ws://…` to use a server of its own (`matchServerFor`); on any other host the parameter is
+ignored.
 
 ---
 ## 📋 Ready — pull in this order
@@ -67,20 +68,29 @@ developer's machine, plays on the production server.
   (`squad/get`) of a player who registered before migration 7 — its session was revoked, so it
   needs a fresh sign-in. The other two can go; there is no request to delete an account, so it
   means editing the Durable Object's storage.
-- **Local development**: with the address hardcoded, a client served from `bun run cf:dev` or
-  `wrangler dev` talks to production, not to itself. There is no `?server=` override; add one if
-  testing against a local server in the browser is wanted. `serve:match` and the tests dial a
-  server directly and are unaffected.
 - **ITEM-063**: a squad's start near the *reported* location (rather than the Stuttgart fallback)
   has not been seen on production: the machine used was itself in Stuttgart. The draw is covered
   by tests with a place on the socket.
 - **ITEM-065**: the map screen has no automated test (the controller and map need a DOM and
   WebGL); it was checked in Chromium, locally and on Pages. The code under it is covered by the
   `Travel`, `Journeys` and `ServerConnection` tests. Safari is untested.
-- **ITEM-064 / ITEM-059**: protocol 6's keyed-resume path (`Sessions.resume6`) is kept for one
-  release so a match in progress finishes across the deploy; delete it when
-  `OLDEST_SERVED_PROTOCOL` reaches 7 (the next protocol bump).
-- **ITEM-066** (decisions, built in `[ITEM-048]`): a 60 s join window and no taking a fight back
+- **ITEM-064 / ITEM-059**: protocol 6's keyed-resume path (`Sessions.resume6`, `resumeOf6`,
+  `Upgrade.url`, the gate branch and the protocol-6 branch of `Lobby.replace`; the list is in
+  `Session.ts`) is kept for one release so a match in progress finishes across the deploy; delete
+  it when `OLDEST_SERVED_PROTOCOL` reaches 7 — it is still 6.
+- **ITEM-045 / ITEM-063**: on the Durable Object, `Db.transaction` does not roll back when its
+  body throws (`workers/DoSqliteDb.ts`; Cloudflare's synchronous transaction cannot wrap an
+  `await`ing body). A migration that fails partway leaves its rows for a human to fix, and so
+  could a registration that fails after its player row (player, roster and squad are one
+  transaction). Not seen in practice.
+- **ITEM-061**: the old Stuttgart-only `world.pmtiles` is still in the `map-tiles` R2 bucket,
+  unserved, for `[ITEM-067]` to keep or delete.
+- **ITEM-063**: `squads` is one row per player *for now* (`squads_player`); captives, alien squads
+  and a player with several squads widen it, and `[ITEM-048]`/`[ITEM-053]` lean on that.
+- **ITEM-066** (decisions, built in `[ITEM-048]`): `Rosters.rest` is unchanged until bases exist
+  (`[ITEM-047]`), so travel heals nothing; and an encounter's party is "the first `SQUAD_SIZE`
+  fit members by slot" until a travelling party can be chosen — a placeholder rule, with nobody
+  fit meaning the encounter is passed by. Also: a 60 s join window and no taking a fight back
   from the AI mid-match are design calls, not forced ones — revisit once they can be played. A
   fight a deploy interrupts is witnessed, not refereed to the end.
 - **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
@@ -97,19 +107,18 @@ developer's machine, plays on the production server.
   shot. The sweep barely measures fire and smoke.
 - **ITEM-017**: the policy walks through shut doors but never shuts, unlocks or forces one; keys
   open every lock (where a key comes from is a campaign question).
-- **ITEM-004**: Strength and Intelligence barely grow in the sweep because the policy carries no
-  plate, swings no knife and uses no kit. (Growth is no longer lost: `ITEM-012` keeps it.)
+- **ITEM-004**: Strength and Intelligence barely grow in the sweep: the stock plan carries no
+  plate, knife or kit, and the policy never uses an item even when a sweep flag hands it one.
+  (Growth is no longer lost: `ITEM-012` keeps it.)
 - **ITEM-036**: the policy never treats a bleed, and bleeding costs a side only 3–4 HP a match
   in the sweep's short fights; it tilts the mirror ~1.7 points toward Blue and cuts draws.
 - **ITEM-012**: a dead character's slot stayed empty until `[ITEM-037]`, which fills it with a
   free server-rolled recruit — no cost and no pool, since no economy exists to price either
-  yet. Durable Objects would still need one more `Db` adapter; none is written.
-- **ITEM-038**: a bug caught in its own testing — `derive(sheet).maxHp` ignores a character's
-  own maxHp trait (Juggernaut's +25); fixed with `maxHpOf`, which every roster ceiling now uses
-  instead. Fatigue and medical-bay downtime split to `[ITEM-039]`, which shipped on 2026-09-30.
-- **ITEM-004 / ITEM-014 / ITEM-017 / ITEM-024 / ITEM-034**: nobody has played peer-to-peer in two
-  live browsers since the transport cutover (the online end screen included). Agreement is
-  covered by the network, digest and rewind tests only.
+  yet.
+- **ITEM-024 / ITEM-034**: nobody has played peer-to-peer (broker and data channel) in two live
+  browsers since the transport cutover; agreement there is covered by the network, digest and
+  rewind tests only. The refereed online path, end screen included, was played in two Chromium
+  windows under `[ITEM-060]`.
 - **ITEM-040**: a knife shares the punch clip with fists by decision, not by accident — the
   source pack has no thrust. Working a door turns the unit for the eye only (`targetYaw`): the
   rules' `heading`, which decides attacks from behind, is deliberately left where it was, so a

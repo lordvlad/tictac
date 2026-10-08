@@ -39,6 +39,29 @@ export const PLAYBACK = {
  */
 export const MATCH_SERVER_URL = 'wss://tictac-match-server.waldemar-reusch.workers.dev/'
 
+/**
+ * The match server a page plays on: `MATCH_SERVER_URL`, or — on a page served
+ * from this machine only — the `ws:`/`wss:` address in its `?server=`, so a
+ * developer can point a client at a server of their own
+ * (`bun run serve:match`, `wrangler dev`).
+ *
+ * Only for a loopback page, by construction rather than by trust: a link on
+ * the internet cannot send anyone's client to a server of its choosing. An
+ * address that is not a socket address is ignored, as is the parameter
+ * anywhere else.
+ */
+export function matchServerFor(page: URL): string {
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(page.hostname)
+  const asked = page.searchParams.get('server')
+  if (!loopback || !asked) return MATCH_SERVER_URL
+  try {
+    const address = new URL(asked)
+    return address.protocol === 'ws:' || address.protocol === 'wss:' ? address.href : MATCH_SERVER_URL
+  } catch {
+    return MATCH_SERVER_URL
+  }
+}
+
 /** Grid is GRID_SIZE x GRID_SIZE tiles. */
 export const GRID_SIZE = 36
 

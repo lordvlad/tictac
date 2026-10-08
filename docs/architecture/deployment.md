@@ -43,8 +43,9 @@ developer's own machine, not reachable by anyone else's browser; or a single Clo
 Object running the same real referee, deployed for real at
 `https://tictac-match-server.waldemar-reusch.workers.dev` (`[ITEM-045]`). The client plays on the
 second only: its address is `MATCH_SERVER_URL` in `src/config.ts`, and the menu has no address to
-type — a page served from anywhere (Pages, the Worker, a developer's machine) reaches the same
-server. `serve:match` stays for the headless tests and scripts, which dial it directly. This document covers
+type — a page served from anywhere (Pages, the Worker) reaches the same server. A page served from
+the developer's own machine may add `?server=ws://…` to use another (`matchServerFor`; ignored on
+every other host, so a link cannot pick anyone's server). This document covers
 both.
 
 ---
