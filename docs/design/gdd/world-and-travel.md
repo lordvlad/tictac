@@ -3,8 +3,9 @@ title: "GDD: The World Map, Travel and Encounters on the Road"
 id: "GDD-WORLD"
 type: "gdd"
 status: "active"
-lastReviewed: "2026-10-07"
+lastReviewed: "2026-10-08"
 appliesTo:
+  - "src/core/Travel.ts"
   - "src/game/**"
   - "src/server/**"
   - "workers/**"
@@ -18,7 +19,8 @@ tags: ["world", "map", "travel", "encounters", "design"]
 
 # GDD: The World Map, Travel and Encounters on the Road
 
-**Status: designed, not built** (M5: `ITEM-060`–`ITEM-065`; then `ITEM-048`, `ITEM-053`). This
+**Status: designed; partly built** (M5: `ITEM-060`–`ITEM-065`, of which the map tiles and the
+travel maths exist; then `ITEM-048`, `ITEM-053`). This
 is where a squad is between fights. Combat ([Combat Mechanics](combat-mechanics.md)) is what
 happens once two squads meet. The overview's shared world ([Overview](overview.md) §3, §4)
 assumes this layer exists; this document says what it is.
@@ -39,8 +41,8 @@ in R2 and served by the match server one tile at a time, as static content at
 projection and no region system at this layer; distance is great-circle distance.
 
 **The whole planet, coarse first.** The full planet is 138.7 GB at z0–15. The match server
-hosts the whole planet only at the most zoomed-out levels (z0–8 at 558 MB or z0–10 at 3.8 GB;
-the cap is still to be chosen, `ITEM-061`). Closer zooms will be built for an area the first
+hosts the whole planet only at the most zoomed-out levels: z0–8, 558 MB (`ITEM-061`; z0–10
+would have been 3.8 GB). Closer zooms will be built for an area the first
 time someone looks there (`ITEM-067`, deferred).
 
 ## 2. A squad has a position
@@ -49,17 +51,20 @@ time someone looks there (`ITEM-067`, deferred).
 ([RFC-0002](../rfc/0002-region-sharded-durable-objects.md) §4). It is not stored as a point.
 It is a list of waypoints:
 
-- **Past waypoints** are where the squad has been: where, when it arrived, when it left, and
-  how fast it was going on the leg that followed.
+- **Past waypoints** are where the squad has been: where, when it arrived, and, if it left,
+  when, on which trip and at which gait (mode and pace) it took the leg that followed.
 - **Future waypoints** are where it has been told to go: just a place.
 
 Where the squad is *now* is computed from that list and the clock, never stored: time since
 it left its last waypoint times its speed, along the leg it is on. Server and client compute
-it with the same function, so they cannot disagree. A refresh mid-journey resumes where the
-squad actually is, and the client can draw it moving without asking the server anything.
-Along a leg the squad's latitude and longitude are interpolated linearly, not along the great
-circle: indistinguishable at the distances a squad covers on foot, and stated so nobody relies
-on it being a true geodesic.
+it with the same function, so a refresh mid-journey resumes where the squad actually is, and
+the client can draw it moving without asking the server anything. They agree to within the last
+bits of a float (JavaScript trigonometry is not correctly rounded, so two engines may differ
+there); whatever must agree exactly is the server's figure written into the list, such as an
+arrival time once recorded. Along a leg the squad's latitude and longitude are interpolated
+linearly, not along the great circle: indistinguishable at the distances a squad covers on
+foot, and stated so nobody relies on it being a true geodesic. A leg across the antimeridian
+goes the short way round.
 
 **Where it is stored.** A squad is a row of its own, in a `squads` table holding its waypoint
 list — one row per player for now — not a column on the player. Captives (`ITEM-054`), alien
@@ -100,9 +105,19 @@ how the squad travels and its pace; there is no default speed.
 | Go here | at rest | set off |
 | Go here now | travelling | abandon the route and head here from where the squad is |
 | Go here first | travelling | detour here, then carry on |
-| Go here next | travelling | add a stop after the current destination |
+| Go here next | travelling | add a stop at the end of the route |
 
 Stopping where the squad is is the fifth.
+
+**Trips and checkpoints.** Setting off from rest and "go here now" start a *trip*, with an id
+the server mints; arriving somewhere on the way and "go here first" carry it on. A trip's
+*checkpoints* are every whole hour since it set off and the moment it ended, keyed by trip and
+index. The end counts even when it comes early (a stop, a turn elsewhere): otherwise stopping
+every 59 minutes would never be weighed for an encounter (§5.1). A checkpoint that has passed
+depends only on waypoints that have passed, so no later order renumbers it.
+
+The maths is `src/core/Travel.ts` (`ITEM-062`): pure, no clock of its own (every moment is an
+argument), and every order returns a new list.
 
 ## 4. Where a player starts
 

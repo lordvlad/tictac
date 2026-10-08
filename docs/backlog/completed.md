@@ -2766,6 +2766,55 @@ later (`ITEM-067`, deferred). Measured with `pmtiles extract --dry-run` against 
 - [x] Living documentation updated (`docs/architecture/deployment.md` §6).
 ---
 
+### [ITEM-062] Travel Maths in the Headless Core
+**Completed Date:** 2026-10-08  
+**Type:** Feature  
+**Milestone:** M5 — The Shared World  
+
+#### Why
+A squad's position is a list of waypoints, and where it is now is a pure function of that list
+and the clock (GDD-WORLD §2). The server's scheduler (`ITEM-064`) and the client's map
+(`ITEM-065`) compute it with the same function. The prior art's
+`../no-way-home/packages/shared/src/waypoint-utils.ts` had sound maths with the wrong
+signatures: it read `Date.now()`, mutated its input and fell back to a 3 km/h default.
+
+#### Key Changes
+- **`src/core/Travel.ts`**: `positionAt`, `plannedArrivals`, `settle`, the five orders
+  (`setOff` "go here", `redirect` "go here now", `detour` "go here first", `addStop` "go here
+  next", `stop`) and `checkpoints`. Every moment is an argument; every order returns a new list.
+- **Speed by gait**: a departure states `{ mode, pace }`, read from `SPEED_KMH` (on foot 3/5/7
+  km/h); there is no default.
+- **Stable keys**: a departure carries a trip id minted by the caller. Setting off and "go here
+  now" start a trip; arriving on the way and "go here first" carry it on. A trip's checkpoints
+  are every whole hour since it set off plus the moment it ended (arrival, stop or turn), keyed
+  by `(trip, index)`; a passed checkpoint depends only on passed waypoints. The end counts so
+  that stopping every 59 minutes is still weighed for an encounter.
+- **Arrivals recorded when due** (`settle`): an intermediate arrival departs at once on the
+  same trip at the same gait, so the projected position and the recorded history never
+  disagree, and a late alarm never lengthens a trip. Orders settle first, so passed waypoints
+  stay in the history.
+- **What the maths is**: great-circle distance, linear lat/lng interpolation along a leg (the
+  short way across the antimeridian), documented in the module and GDD-WORLD §2. JavaScript
+  trigonometry is not correctly rounded, so two engines agree to within the last bits; what
+  must agree exactly is the server's figure written into the list. `tests/determinism.test.ts`
+  exempts this file from its `Math.atan2` ban for that reason: travel never feeds a match.
+
+#### Measured
+- `tests/travel.test.ts` (26): the 16 ported tests, then multi-stop projection (settling never
+  moves the squad), speed by pace, the antimeridian, a zero-length leg, "go here next" after
+  arrival, and checkpoints (hourly and end; a turn or stop ending a trip early keeps its passed
+  checkpoints; a detour stays on the trip). Every fixture is frozen and `Date.now` throws for the
+  whole file.
+
+#### Acceptance Criteria
+- [x] The 16 ported tests pass against an injected clock.
+- [x] No function mutates its input list or reads the wall clock (frozen fixtures; `Date.now`
+      throws in the test file).
+- [x] Every leg's speed is stated by mode and pace; there is no default speed.
+- [x] Trips and checkpoints carry stable keys.
+- [x] The linear lat/lng interpolation is documented as such (module comment, GDD-WORLD §2).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

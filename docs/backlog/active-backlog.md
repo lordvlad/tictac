@@ -402,58 +402,11 @@ to this item.
 
 ---
 
-### [ITEM-062] Travel Maths in the Headless Core
-**Type:** Feature
-**Priority:** P2
-**Status:** Ready
-**Milestone:** M5 — The Shared World
-
-#### Why
-A squad's position is a list of waypoints, and where it is now is a pure function of that list
-and the clock (GDD-WORLD §2). The server's scheduler (`ITEM-064`) and the client's map
-(`ITEM-065`) must compute it with the same function. The prior art's
-`../no-way-home/packages/shared/src/waypoint-utils.ts` (16 passing tests, no dependencies) is
-sound maths with the wrong signatures for this project.
-
-#### Change
-1. **Tests first:** port its 16 tests into `tests/`, then the code into `src/core/`.
-2. **Signatures:** the clock is injected (it reads `Date.now()` today); functions return new
-   lists rather than mutating; no inline speed default — each leg's speed comes from mode and
-   pace (on foot: cautious 3 km/h, normal 5 km/h, flat out 7 km/h, GDD-WORLD §3).
-3. **Stable keys from day one:** every trip has a stable id and every checkpoint an
-   index/expected-time key, because `ITEM-048` needs the encounter roll for (squad, trip,
-   checkpoint) to be reproducible after the fact.
-4. **Say what the maths is.** It interpolates linearly in latitude/longitude. That is fine at
-   these scales but it is not a great-circle path; document it in the code and in GDD-WORLD
-   rather than claiming great-circle.
-
-#### Affected Files
-- `src/core/` (a new travel module)
-- `tests/` (the ported tests)
-- `docs/design/gdd/world-and-travel.md`
-
-#### P2P / Simulation Impact
-- Headless and deterministic: no randomness, no DOM; the match stream is untouched.
-
-#### Acceptance Criteria
-- [ ] The 16 ported tests pass against an injected clock.
-- [ ] No function mutates its input list or reads the wall clock.
-- [ ] Every leg's speed is stated by mode and pace; there is no default speed.
-- [ ] Trips and checkpoints carry stable keys.
-- [ ] The linear lat/lng interpolation is documented as such.
-
-#### Risks & Mitigations
-- **Risk:** linear lat/lng drifts from the true path over long legs and near the poles.
-- **Mitigation:** accepted at the distances travelled on foot; revisit if vehicles make
-  continental legs common.
-
----
-
 ### [ITEM-063] A Squad Has a Position, and a Place to Start
 **Type:** Feature
 **Priority:** P2
-**Status:** Ready — after `ITEM-062` (the waypoint shape); `request.cf` is already on the session
-(`ITEM-060`, shipped)
+**Status:** Ready — the waypoint shape (`ITEM-062`) and `request.cf` on the session (`ITEM-060`)
+both shipped
 **Milestone:** M5 — The Shared World
 
 #### Why
@@ -506,7 +459,7 @@ Where a new player starts is GDD-WORLD §4 (ex-`ITEM-049`).
 ### [ITEM-064] Orders, Pace and the Travel Scheduler
 **Type:** Feature
 **Priority:** P2
-**Status:** Ready — after `ITEM-062` and `ITEM-063`
+**Status:** Ready — after `ITEM-063`
 **Milestone:** M5 — The Shared World
 
 #### Why

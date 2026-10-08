@@ -105,7 +105,10 @@ describe('Nothing in the rules branches on a number two engines may disagree abo
     // implementation-defined, and it fed every range check in the game;
     // `Math.atan2` fed a facing that is replicated and digested.
     const offenders = (await rulesSources())
-      .filter(({ path, text }) => path !== 'src/core/math.ts')
+      // The world map needs great-circle trigonometry. It never feeds a
+      // match or a digest: the server's figures are the ones recorded, and a
+      // client's own only draw the squad (`src/core/Travel.ts`).
+      .filter(({ path }) => path !== 'src/core/math.ts' && path !== 'src/core/Travel.ts')
       .filter(({ text }) => code(text).includes('Math.hypot') || code(text).includes('Math.atan2'))
       .map(({ path }) => path)
 
