@@ -211,6 +211,7 @@ refused `401` *sign in first* on a socket nobody signed in on.
 | `roster/list` | `{}` | `{ roster }` |
 | `roster/recruit` | `{}` | `{ member }` — `400` if the roster is already full |
 | `squad/get` | `{}` | `{ squad }` — its id and waypoint list (§5a) |
+| `squad/order` | `{ order }` | `{ squad }` — the new route ([ARCH-WORLD](world.md)) |
 
 A ceremony is checked against the configured origins (`--origins`); there is no
 CORS, because nothing but the built client and the map's tiles is HTTP. Every

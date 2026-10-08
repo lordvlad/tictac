@@ -1,3 +1,4 @@
+import { MATCH_SERVER } from '../src/server/Owner'
 import { r2Source, type TileHandler, tileHandler } from '../src/server/Tiles'
 import type { MatchDurableObject } from './MatchDurableObject'
 
@@ -28,8 +29,8 @@ let tiles: TileHandler | undefined
  * Durable Object nor queue behind its sockets.
  *
  * Everything else — a page load, an asset, a WebSocket upgrade — is forwarded
- * to the same Durable Object instance, addressed by a fixed name rather than
- * one derived from the request. `[ITEM-045]` plants a single DO on purpose:
+ * to the same Durable Object instance (`MATCH_SERVER`, `src/server/Owner.ts`)
+ * rather than one derived from the request. `[ITEM-045]` plants a single DO on purpose:
  * a match server is one lobby of rooms, so there is one of it, the same way
  * `startGameServer` binds one port to one `Lobby` today.
  */
@@ -38,7 +39,7 @@ export default {
     tiles ??= tileHandler(r2Source(env.MAP_TILES, env.MAP_TILES_KEY))
     const tile = await tiles(request)
     if (tile) return tile
-    const id = env.MATCH.idFromName('singleton')
+    const id = env.MATCH.idFromName(MATCH_SERVER)
     const stub = env.MATCH.get(id)
     return stub.fetch(request)
   },

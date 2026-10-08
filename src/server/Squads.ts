@@ -84,6 +84,29 @@ export class Squads {
     return row ? { id: row.id, waypoints: JSON.parse(row.waypoints) as Squad['waypoints'] } : null
   }
 
+  /** A squad by its id, with the player it belongs to; null for one that does not exist. */
+  async byId(id: string): Promise<{ playerId: string; squad: Squad } | null> {
+    const rows = await this.db.query<{ player_id: string; waypoints: string }>`
+      SELECT player_id, waypoints FROM squads WHERE id = ${id}`
+    const row = rows[0]
+    return row ? { playerId: row.player_id, squad: { id, waypoints: JSON.parse(row.waypoints) as Squad['waypoints'] } } : null
+  }
+
+  /** Every squad, for a starting server to schedule what each has due. */
+  async all(): Promise<{ playerId: string; squad: Squad }[]> {
+    const rows = await this.db.query<{ id: string; player_id: string; waypoints: string }>`
+      SELECT id, player_id, waypoints FROM squads`
+    return rows.map((row) => ({
+      playerId: row.player_id,
+      squad: { id: row.id, waypoints: JSON.parse(row.waypoints) as Squad['waypoints'] },
+    }))
+  }
+
+  /** Write `squad`'s route. The start columns never change: a start is where it began. */
+  async save(squad: Squad): Promise<void> {
+    await this.db.query`UPDATE squads SET waypoints = ${JSON.stringify(squad.waypoints)} WHERE id = ${squad.id}`
+  }
+
   /**
    * Give `playerId` a squad at a start drawn around `anchor` (or
    * `DEFAULT_ANCHOR`), inside `tx` — registration's transaction, so a player

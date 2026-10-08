@@ -357,18 +357,21 @@ On a fresh socket, in this order:
 | `roster/list` | `{}` | `{ roster: RosterEntry[] }` | `401` |
 | `roster/recruit` | `{}` | `{ member }` | `401`; `400` *the roster is already full* |
 | `squad/get` | `{}` | `{ squad: { id, waypoints } }` — a player from before squads is placed on first asking | `401` |
+| `squad/order` | `{ order }` (`SquadOrder`, [ARCH-WORLD §2](world.md)) | `{ squad }`, and `squad/changed` to the player's window | `401`; `-32602` a malformed order; `409` a verb that does not fit (*already on the move*, *not on the move*) |
 | `lobby/subscribe` | `{}` | the `LobbyView` now, then `lobby/changed` pushes | — |
 | `lobby/unsubscribe` | `{}` | `null` | — |
 | `room/enter` | `{ intent }` (`ServerIntent`) | `Seated` | *Entering a room* below |
 | `room/leave` | `{}` | `null` | — |
 
-Two pushes are sent unasked:
+Three pushes are sent unasked:
 
 - **`tictac/api/lobby/changed`**: the whole `LobbyView`, to each subscriber whose view changed,
   once per burst of changes — one window replacing another retires a socket, holds a seat and
   ends a room, and that is one push rather than three.
 - **`tictac/api/session/replaced`**: `{ reason }` (`SESSION_REPLACED`), just before the server
   closes the socket of a window its player has replaced. That window does not reconnect.
+- **`tictac/api/squad/changed`**: `{ squad }`, to the player's window whenever its squad's route
+  changes — an order, or an arrival recorded by the travel schedule ([ARCH-WORLD](world.md)).
 
 **A refusal is an answer, not an ending.** It is an error response with a code (`RPC_ERRORS`:
 the JSON-RPC codes for a malformed exchange, HTTP-shaped ones for everything else) and a message

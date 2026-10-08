@@ -68,10 +68,11 @@ per match — and that one instance hosts every room:
 ```
 workers/index.ts (Worker)
   ├── /tiles/{z}/{x}/{y}.mvt  ── answered here from R2 (§6), never reaching the object
-  └── env.MATCH.idFromName('singleton')  ── always the same id
+  └── env.MATCH.idFromName(MATCH_SERVER)  ── always the same id ('singleton', src/server/Owner.ts)
         └── workers/MatchDurableObject.ts (the one instance)
               ├── fetch(): a WebSocket upgrade (→ Sessions → Lobby → a Room),
               │            or env.ASSETS.fetch(request)
+              ├── alarm(): the travel schedule's one alarm (ARCH-WORLD §3)
               └── ctx.storage.sql, behind workers/DoSqliteDb.ts (the Db adapter)
 ```
 
@@ -88,7 +89,15 @@ a single Durable Object is one thread, and cannot be scaled up, only replaced.
 it — sharding by *region* of the game's shared world rather than by match — once that world
 exists and the player base needs more than one instance. Nothing about that plan is built; it
 is written down so the single instance here stays easy to retire rather than becoming an
-assumption other code quietly depends on.
+assumption other code quietly depends on: the Worker addresses the instance through
+`MATCH_SERVER`, and squad requests go through `ownerOf(squad)` (`src/server/Owner.ts`,
+[ARCH-WORLD §4](world.md)), the two lookups a split replaces.
+
+**The object's one alarm is the travel schedule's** ([ARCH-WORLD §3](world.md)): set with
+`ctx.storage.setAlarm` for the earliest moment any squad has due, never more than an hour ahead,
+and cleared when nothing is. The alarm is kept in storage, so it wakes an evicted instance; the
+constructor restores rooms and rebuilds the schedule from `squads` before `alarm()` or any request
+runs.
 
 ### 2.2 The single instance serves both websocket and static assets
 
@@ -322,7 +331,9 @@ line across an unknown process tree shape.
 What it proves, concretely — mirroring `tests/server.test.ts`'s scenarios against the `Bun.serve`
 referee: a plain request serves the built client through the Durable Object (not around it); a
 passkey registered over RPC on one socket signs in another with its token, and that socket reads
-the roster (`roster/list`), with nothing over HTTP; a token nobody issued is a `401` error and
+the roster (`roster/list`) and its squad near Stuttgart (`squad/get`; `wrangler dev` reports no
+location), with nothing over HTTP; a squad sent two metres arrives by the object's own storage
+alarm, read back from the stored route; a token nobody issued is a `401` error and
 the socket stays open; an anonymous socket is still welcome; and a frame that is not JSON-RPC is
 silently dropped rather than crashing the connection or being relayed — the specific
 behaviour that distinguishes the current, real referee from this deployment's first-pass bare

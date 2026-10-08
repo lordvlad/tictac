@@ -1,5 +1,5 @@
 import type { CharacterSheet } from '../core/Characters'
-import type { Waypoint } from '../core/Travel'
+import type { LatLng, Pace, Waypoint } from '../core/Travel'
 import type { LobbyView, Seated, ServerIntent } from './Lobby'
 
 /**
@@ -49,6 +49,19 @@ export interface Squad {
   id: string
   waypoints: Waypoint[]
 }
+
+/**
+ * An order on the world map (GDD-WORLD §3), by the verb the player chose.
+ * "Go here" and "go here now" set the pace of the trip they start; "go here
+ * first" and "go here next" carry on at the pace already set. What carries
+ * the squad is the server's to say: on foot, until vehicles exist.
+ */
+export type SquadOrder =
+  | { kind: 'goHere'; to: LatLng; pace: Pace }
+  | { kind: 'goHereNow'; to: LatLng; pace: Pace }
+  | { kind: 'goHereFirst'; to: LatLng }
+  | { kind: 'goHereNext'; to: LatLng }
+  | { kind: 'stop' }
 
 /**
  * One character on a kept roster, as a window sees it: enough to show and to
@@ -143,6 +156,13 @@ export interface RpcApi {
    */
   'tictac/api/squad/get': { params: Record<string, never>; result: { squad: Squad } }
   /**
+   * Give this player's squad an order. The answer is the new route; the same
+   * route is pushed as `squad/changed` to the player's window. Refused
+   * `RPC_ERRORS.conflict` for a verb that does not fit — "go here" to a squad
+   * already on the move, anything but "go here" to one at rest.
+   */
+  'tictac/api/squad/order': { params: { order: SquadOrder }; result: { squad: Squad } }
+  /**
    * The lobby now, and `tictac/api/lobby/changed` with the whole view
    * whenever it changes until `lobby/unsubscribe` (or the socket closes).
    * `you` is this socket's player's own seat. Open to anonymous sockets.
@@ -181,6 +201,12 @@ export interface RpcPushes {
    * playing somewhere else now.
    */
   'tictac/api/session/replaced': { reason: string }
+  /**
+   * This player's squad has a new route: an order was given (from any of the
+   * player's windows), or it arrived somewhere. The whole route, as
+   * `squad/get` answers it.
+   */
+  'tictac/api/squad/changed': { squad: Squad }
 }
 
 export type RpcPush = keyof RpcPushes

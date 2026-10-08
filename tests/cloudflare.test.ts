@@ -258,6 +258,27 @@ describe('The planted Cloudflare deployment', () => {
     second.socket.close()
   })
 
+  test('a squad sent a couple of metres arrives by the Durable Object\'s own alarm', async () => {
+    const window = await rpcSocket()
+    await registered(window)
+    const home = ((await window.call('tictac/api/squad/get')).result!.squad as { waypoints: LatLng[] }).waypoints[0]!
+    const to = { lat: home.lat + 0.00002, lng: home.lng }
+    const sent = await window.call('tictac/api/squad/order', { order: { kind: 'goHere', to, pace: 'flatOut' } })
+    expect(sent.error).toBeUndefined()
+
+    // About a second at 7 km/h. Polled, because the alarm is the separate
+    // workerd process's to fire and there is no event to await from here.
+    let arrived = false
+    for (let i = 0; i < 40 && !arrived; i++) {
+      await sleep(250)
+      const now = (await window.call('tictac/api/squad/get')).result!.squad as { waypoints: { kind: string; departed?: unknown }[] }
+      const last = now.waypoints.at(-1)!
+      arrived = last.kind === 'past' && last.departed === null && now.waypoints.length === 2
+    }
+    expect(arrived).toBe(true)
+    window.socket.close()
+  })
+
   test('a token nobody issued signs nobody in, and the socket stays', async () => {
     const window = await rpcSocket()
     const refused = await window.call('tictac/api/account/signIn', { token: 'nope' })

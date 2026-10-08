@@ -20,7 +20,8 @@ tags: ["world", "map", "travel", "encounters", "design"]
 # GDD: The World Map, Travel and Encounters on the Road
 
 **Status: designed; partly built** (M5: `ITEM-060`–`ITEM-065`, of which the map tiles, the
-travel maths and the squads table with its starts exist; then `ITEM-048`, `ITEM-053`). This
+travel maths, the squads table with its starts, and orders with the travel schedule exist
+([ARCH-WORLD](../../architecture/world.md)); then `ITEM-048`, `ITEM-053`). This
 is where a squad is between fights. Combat ([Combat Mechanics](combat-mechanics.md)) is what
 happens once two squads meet. The overview's shared world ([Overview](overview.md) §3, §4)
 assumes this layer exists; this document says what it is.

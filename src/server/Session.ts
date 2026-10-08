@@ -1,11 +1,12 @@
-import type { LatLng } from '../core/Travel'
+import { SPEED_KMH, type LatLng, type Pace } from '../core/Travel'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification, type JsonRpcRequest } from '../game/JsonRpc'
 import type { ServerIntent } from '../game/Lobby'
-import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type SignedIn } from '../game/Rpc'
+import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type SignedIn, type SquadOrder } from '../game/Rpc'
 import type { Transport } from '../game/Transport'
 import { OLDEST_SERVED_PROTOCOL, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
 import { Refusal, type Lobby } from './Lobby'
 import type { Persistence } from './Persistence'
+import type { Journeys } from './Journeys'
 import type { Client } from './Room'
 import type { RosterMember } from './Rosters'
 import { AuthError } from './WebAuthn'
@@ -44,6 +45,8 @@ export interface SessionsOptions {
   lobby: Lobby
   /** The accounts and rosters asked about over a socket. */
   persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads'>
+  /** Squads on the move: the orders a window gives. */
+  journeys: Journeys
   /** Called for anything worth a line in a server log. */
   log?: (message: string) => void
 }
@@ -83,11 +86,13 @@ const FAILED = 'the server failed'
 export class Sessions {
   private readonly lobby: Lobby
   private readonly persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads'>
+  private readonly journeys: Journeys
   private readonly log: (message: string) => void
 
   constructor(options: SessionsOptions) {
     this.lobby = options.lobby
     this.persistence = options.persistence
+    this.journeys = options.journeys
     this.log = options.log ?? ((message) => console.info(`[session] ${message}`))
   }
 
@@ -288,6 +293,10 @@ export class Sessions {
     'tictac/api/squad/get': async (session, _params, reply) => {
       reply({ squad: await this.persistence.squads.ensure(signedIn(session).player.id, session.place) })
     },
+    'tictac/api/squad/order': async (session, params, reply) => {
+      const player = signedIn(session).player
+      reply({ squad: await this.journeys.order(player.id, session.place, orderOf(params.order)) })
+    },
     'tictac/api/lobby/subscribe': (session, _params, reply) => {
       reply(this.lobby.subscribe(session.client))
     },
@@ -391,4 +400,36 @@ function resumeOf6(url: string): { roomId: string; seatKey: string } | null {
   const roomId = params.get('room')
   const seatKey = params.get('seat')
   return usable(roomId) && usable(seatKey) ? { roomId, seatKey } : null
+}
+
+/** The order a `squad/order` states. Peer input: checked, not trusted. */
+function orderOf(value: unknown): SquadOrder {
+  const order = (typeof value === 'object' && value !== null ? value : {}) as Fields
+  switch (order.kind) {
+    case 'goHere':
+    case 'goHereNow':
+      return { kind: order.kind, to: placeIn(order.to), pace: paceOf(order.pace) }
+    case 'goHereFirst':
+    case 'goHereNext':
+      return { kind: order.kind, to: placeIn(order.to) }
+    case 'stop':
+      return { kind: 'stop' }
+    default:
+      throw new Refusal(RPC_ERRORS.invalidParams, 'That order is not one a squad takes.')
+  }
+}
+
+/** A point on the map: finite, latitude within ±90, longitude within ±180. */
+function placeIn(value: unknown): LatLng {
+  const point = (typeof value === 'object' && value !== null ? value : {}) as Fields
+  const { lat, lng } = point
+  const usable =
+    typeof lat === 'number' && typeof lng === 'number' && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+  if (!usable) throw new Refusal(RPC_ERRORS.invalidParams, 'That order does not say where on the map.')
+  return { lat, lng }
+}
+
+function paceOf(value: unknown): Pace {
+  if (typeof value === 'string' && Object.hasOwn(SPEED_KMH.foot, value)) return value as Pace
+  throw new Refusal(RPC_ERRORS.invalidParams, 'That order does not say how fast: cautious, normal or flat out.')
 }

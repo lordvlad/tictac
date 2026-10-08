@@ -30,16 +30,14 @@ React HUD & menus (`[ITEM-055]`) closed on 2026-10-04.
 M5 — The Shared World ([roadmap](roadmap.md)) is under way: a squad that is somewhere on a real
 planet map and travels in real time, over one socket per window. `[ITEM-050]` was split into
 slices on 2026-10-07; one connection per window (`[ITEM-060]`) and the z0–8 planet basemap
-(`[ITEM-061]`) closed on 2026-10-07, the travel maths (`[ITEM-062]`) and the squads table with its starts (`[ITEM-063]`) on
-2026-10-08. The fights
+(`[ITEM-061]`) closed on 2026-10-07, the travel maths (`[ITEM-062]`) and the squads table with its starts (`[ITEM-063]`) and
+orders with the travel scheduler (`[ITEM-064]`) on 2026-10-08. The fights
 met on the road
 ([GDD-WORLD](../design/gdd/world-and-travel.md)) come after it.
 
 ---
 ## 📋 Ready — pull in this order
-1. `[ITEM-064]` Orders, pace and the travel scheduler — RPC orders, one alarm for the earliest
-   due moment.
-2. `[ITEM-065]` The map screen — MapLibre, the squad drawn moving, orders on right-click.
+1. `[ITEM-065]` The map screen — MapLibre, the squad drawn moving, orders on right-click.
 
 **Next after these:** `[ITEM-066]` Before encounters — the design decisions `[ITEM-048]` needs
 (a GDD task, no code).

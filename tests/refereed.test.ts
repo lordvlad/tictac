@@ -16,6 +16,7 @@ import { openPersistence } from '../src/server/db/BunSqlDb'
 import { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
 import type { RefereeVerdict, Room } from '../src/server/Room'
+import type { Journeys } from '../src/server/Journeys'
 import { Sessions } from '../src/server/Session'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { MatchHost } from '../src/sim/MatchHost'
@@ -57,6 +58,8 @@ async function lobbyOnASocket() {
     new Sessions({
       lobby: over,
       persistence: { accounts, rosters: {}, squads: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters' | 'squads'>,
+      // Nothing here travels.
+      journeys: {} as Journeys,
       log: () => {},
     })
   let sessions = sessionsOver(lobby)

@@ -1,6 +1,8 @@
 import { BUILD_ID, PROTOCOL_VERSION } from '../version'
+import { Journeys } from './Journeys'
 import { Lobby } from './Lobby'
 import type { Persistence } from './Persistence'
+import { Schedule } from './Schedule'
 import { Sessions } from './Session'
 import { socketTransport, type ServerSocket } from './SocketTransport'
 import type { TileHandler } from './Tiles'
@@ -25,6 +27,7 @@ import type { TileHandler } from './Tiles'
 export interface GameServer {
   url: string
   lobby: Lobby
+  journeys: Journeys
   stop(): Promise<void>
 }
 
@@ -36,6 +39,23 @@ export interface GameServerOptions {
   graceMs?: number
   /** Map tiles at `/tiles/{z}/{x}/{y}.mvt` (`ITEM-061`); none when unset. */
   tiles?: TileHandler
+  /** The clock squads travel by; the wall clock and `setTimeout` unless a test turns it. */
+  clock?: ServerClock
+}
+
+/** Time, and a way to be woken at one: what the Durable Object's alarm is here. */
+export interface ServerClock {
+  now(): number
+  /** Run `fn` in `ms`; returns what cancels it. */
+  schedule(fn: () => void, ms: number): () => void
+}
+
+const WALL_CLOCK: ServerClock = {
+  now: () => Date.now(),
+  schedule: (fn, ms) => {
+    const timer = setTimeout(fn, ms)
+    return () => clearTimeout(timer)
+  },
 }
 
 export async function startGameServer(options: GameServerOptions): Promise<GameServer> {
@@ -58,7 +78,31 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   // server is up has to find the room already held for it.
   await lobby.restore()
 
-  const sessions = new Sessions({ lobby, persistence, log })
+  // The Durable Object's one alarm, as a timer: the schedule asks for one
+  // moment at a time, and each new ask replaces the last.
+  const clock = options.clock ?? WALL_CLOCK
+  let cancelAlarm: (() => void) | null = null
+  const schedule: Schedule = new Schedule({
+    now: () => clock.now(),
+    arm: (at) => {
+      cancelAlarm?.()
+      cancelAlarm =
+        at === null
+          ? null
+          : clock.schedule(() => {
+              schedule.fire().catch((error: unknown) => log(`the travel schedule failed: ${String(error)}`))
+            }, Math.max(0, at - clock.now()))
+    },
+  })
+  const journeys = new Journeys({
+    squads: persistence.squads,
+    schedule,
+    now: () => clock.now(),
+    tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
+  })
+  await journeys.restore()
+
+  const sessions = new Sessions({ lobby, persistence, journeys, log })
   const sockets = new WeakMap<object, ServerSocket>()
 
   const server = Bun.serve<{ url: string }, never>({
@@ -101,8 +145,10 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   return {
     url: String(server.url),
     lobby,
+    journeys,
     /** Stops serving. Rooms still live stay in the database for the next server to restore; the database is the caller's. */
     stop: async () => {
+      cancelAlarm?.()
       await lobby.dispose()
       await server.stop(true)
     },

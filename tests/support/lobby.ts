@@ -8,6 +8,7 @@ import type { Player, RpcMethod, RpcParams, RpcResult } from '../../src/game/Rpc
 import { loopback } from '../../src/game/Transport'
 import type { Lobby } from '../../src/server/Lobby'
 import type { Persistence } from '../../src/server/Persistence'
+import type { Journeys } from '../../src/server/Journeys'
 import { Sessions } from '../../src/server/Session'
 import { STOCK_PLAN } from '../../src/sim/Balance'
 import { SimMatch } from '../../src/sim/SimMatch'
@@ -70,6 +71,8 @@ function layerOf(lobby: Lobby): Layer {
     const sessions = new Sessions({
       lobby,
       persistence: { accounts, rosters: {}, squads: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters' | 'squads'>,
+      // Nothing here travels.
+      journeys: {} as Journeys,
       log: () => {},
     })
     layer = { sessions, known }

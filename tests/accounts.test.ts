@@ -1,18 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { ROSTER } from '../src/config'
 import { fromBase64Url, toBase64Url } from '../src/game/Base64Url'
-import { RpcMethods, type JsonRpcFrame } from '../src/game/JsonRpc'
 import { RPC_ERRORS, type RosterEntry } from '../src/game/Rpc'
-import { loopback } from '../src/game/Transport'
-import { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
-import { Sessions } from '../src/server/Session'
-import { MY_VERSION } from '../src/version'
 import { distanceKm, type LatLng } from '../src/core/Travel'
 import type { Squad } from '../src/game/Rpc'
 import { DEFAULT_ANCHOR, START_RADIUS_KM } from '../src/server/Squads'
 import { softwareAuthenticator, type SoftwareAuthenticator } from './support/authenticator'
 import { DATABASE_URLS, freshPersistence } from './support/db'
+import { register, rpcServer, type Window } from './support/rpcServer'
 
 /**
  * The whole sign-in path, driven as JSON-RPC over an in-process socket.
@@ -22,56 +18,13 @@ import { DATABASE_URLS, freshPersistence } from './support/db'
  * being sure about.
  */
 
-interface Answer {
-  /** The error code (`RPC_ERRORS`), or null for a result. */
-  code: number | null
-  result: Record<string, unknown>
-  message: string | null
-}
-
-interface Window {
-  call(method: string, params?: Record<string, unknown>): Promise<Answer>
-}
-
 /**
- * A page's socket to the server behind `persistence`, past the version gate —
- * connected from `place` when its host can tell (Cloudflare's `request.cf`).
+ * A page's socket to its own server behind `persistence`, past the version
+ * gate — connected from `place` when its host can tell (Cloudflare's
+ * `request.cf`).
  */
 function windowOn(persistence: Persistence, place: LatLng | null = null): Window {
-  const lobby = new Lobby({ matches: persistence.matches, rooms: persistence.rooms, log: () => {} })
-  const sessions = new Sessions({ lobby, persistence, log: () => {} })
-  const [page, server] = loopback()
-  sessions.attach(server, { url: 'ws://accounts.test/', place })
-  const pending = new Map<number, (answer: Answer) => void>()
-  let lastId = 0
-  page.onFrame((frame) => {
-    if ('method' in frame || typeof frame.id !== 'number') return
-    const settle = pending.get(frame.id)
-    pending.delete(frame.id)
-    if ('error' in frame) settle?.({ code: frame.error.code, result: {}, message: frame.error.message })
-    else settle?.({ code: null, result: (frame.result ?? {}) as Record<string, unknown>, message: null })
-  })
-  page.send({ jsonrpc: '2.0', method: RpcMethods.hello, params: { ...MY_VERSION } } as JsonRpcFrame)
-  return {
-    call: (method, params = {}) => {
-      const { promise, resolve } = Promise.withResolvers<Answer>()
-      const id = ++lastId
-      pending.set(id, resolve)
-      page.send({ jsonrpc: '2.0', id, method, params })
-      return promise
-    },
-  }
-}
-
-/** Register `name`, all the way through, on `window`, and hand back the session token. */
-async function register(window: Window, key: SoftwareAuthenticator, name = 'Tester'): Promise<string> {
-  const options = await window.call('tictac/api/account/registerOptions', { name })
-  expect(options.code).toBeNull()
-  const publicKey = options.result.publicKey as { challenge: string }
-  const created = await key.create({ challengeId: options.result.challengeId as string, challenge: publicKey.challenge })
-  const verified = await window.call('tictac/api/account/registerVerify', { ...created })
-  expect(verified.code).toBeNull()
-  return verified.result.token as string
+  return rpcServer(persistence).window(place)
 }
 
 /** A passkey assertion over a fresh login challenge, ready to verify (or tamper with). */

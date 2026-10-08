@@ -402,63 +402,11 @@ to this item.
 
 ---
 
-### [ITEM-064] Orders, Pace and the Travel Scheduler
-**Type:** Feature
-**Priority:** P2
-**Status:** Ready — the travel maths (`ITEM-062`) and the squads table (`ITEM-063`) are built
-**Milestone:** M5 — The Shared World
-
-#### Why
-Travel runs on the wall clock and carries on while the player is away (GDD-WORLD §3). The match
-server's Durable Object has one alarm, so something must keep every squad's next due moment and
-arm the alarm for the earliest.
-
-#### Change
-1. **The five orders and three paces as RPC methods**: go here, go here now, go here first, go
-   here next, stop; cautious, normal, flat out. The server validates and returns the new
-   waypoint list.
-2. **A scheduler of due moments**: it keeps "the next due moment per entity, of some kind" —
-   not only arrivals, so `ITEM-053`'s planned meetings and `ITEM-048`'s checkpoints fit without
-   a second mechanism. It arms the Durable Object's single alarm for the earliest, never more
-   than an hour away; an arrival is recorded at its expected time, not when the alarm fired.
-3. **Restart:** the schedule is rebuilt from `squads` and the alarm re-armed at startup, beside
-   `lobby.restore()`.
-4. **The Bun server's twin** drives the same scheduler with timers, through an injectable clock
-   so tests drive time.
-5. **Squad requests route through `ownerOf(squad)`**, which returns the single instance today.
-   RFC-0002 §5 (point 1) calls the hard-coded singleton debt; this is the one seam `ITEM-046`
-   replaces.
-6. **Position changes are pushed** to the owner's socket (`ITEM-060`).
-
-#### Affected Files
-- `src/server/` (orders, a scheduler module, `ownerOf`), `src/server/Lobby.ts` (methods)
-- `workers/MatchDurableObject.ts` (the alarm handler, re-arming at startup)
-- `src/server/GameServer.ts` (the timer-driven twin)
-- `docs/architecture/` (a world/travel section), `docs/architecture/deployment.md`
-
-#### P2P / Simulation Impact
-- None on matches. Travel orders are not match commands; they are RPC methods on the session
-  socket, outside any room.
-
-#### Acceptance Criteria
-- [ ] All five orders and three paces change the waypoint list as GDD-WORLD §3 says.
-- [ ] With a driven clock, a multi-hour trip arms alarms at most an hour apart and records the
-      arrival at its expected time.
-- [ ] After a restart the schedule is rebuilt and the alarm armed for the earliest due moment.
-- [ ] The owner's socket receives a push when its squad's route changes or it arrives.
-- [ ] Living documentation updated.
-
-#### Risks & Mitigations
-- **Risk:** the alarm handler and a socket request race on the same squad.
-- **Mitigation:** a Durable Object runs one event at a time; the Bun twin serialises through the
-  same scheduler.
-
----
-
 ### [ITEM-065] The Map Screen
 **Type:** Feature
 **Priority:** P2
-**Status:** Ready — after `ITEM-064` (the tiles it draws are served, `ITEM-061`)
+**Status:** Ready — the tiles (`ITEM-061`), the squad (`ITEM-063`) and its orders and pushes
+(`ITEM-064`) are all served
 **Milestone:** M5 — The Shared World
 
 #### Why

@@ -2,7 +2,14 @@ import { Faction } from '../config'
 import { toBase64Url } from '../game/Base64Url'
 import { RpcMethods, type JsonRpcNotification } from '../game/JsonRpc'
 import type { LobbyRoom, LobbyView, Seated, ServerIntent } from '../game/Lobby'
-import { RPC_ERRORS, SESSION_REPLACED, type Player, type RpcErrorCode, type RpcPush } from '../game/Rpc'
+import {
+  RPC_ERRORS,
+  SESSION_REPLACED,
+  type Player,
+  type RpcErrorCode,
+  type RpcPush,
+  type RpcPushes,
+} from '../game/Rpc'
 import { MY_VERSION, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
 import type { MatchStore } from './MatchStore'
 import { hashSeatKey, Room, type Client, type RefereeVerdict, type RoomOptions } from './Room'
@@ -240,6 +247,16 @@ export class Lobby {
     if (this.windows.get(player.id) === client) this.windows.delete(player.id)
     client.player = null
     this.changed()
+  }
+
+  /**
+   * Push `params` to `playerId`'s window, if one is bound to them: the one
+   * window a player has (`replace`), which is where their squad is shown.
+   */
+  tell<P extends RpcPush>(playerId: string, method: P, params: RpcPushes[P]): void {
+    const window = this.windows.get(playerId)
+    if (!window || window.gone) return
+    window.transport.send({ jsonrpc: '2.0', method, params: { ...params } })
   }
 
   /** The lobby as `player` (or nobody) sees it: open rooms newest first, and their own seat. */

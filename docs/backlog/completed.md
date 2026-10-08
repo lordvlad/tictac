@@ -2867,6 +2867,60 @@ player can have positions later. Where a new player starts is GDD-WORLD §4.
       `docs/architecture/networking.md` §8, GDD-WORLD §4).
 ---
 
+### [ITEM-064] Orders, Pace and the Travel Scheduler
+**Completed Date:** 2026-10-08  
+**Type:** Feature  
+**Milestone:** M5 — The Shared World  
+
+#### Why
+Travel runs on the wall clock and carries on while the player is away (GDD-WORLD §3). The match
+server's Durable Object has one alarm, so something has to keep every squad's next due moment and
+arm that alarm for the earliest.
+
+#### Key Changes
+- **`tictac/api/squad/order { order }`** takes the five verbs as a `SquadOrder` (`goHere` and
+  `goHereNow` with a pace; `goHereFirst`, `goHereNext`; `stop`). `Session.ts` checks the shape
+  (`invalidParams`), `Journeys` the fit (`conflict`: *already on the move*, *not on the move*);
+  the answer is the new route. Every squad walks; the server, not the order, says so.
+- **`src/server/Schedule.ts`**: the next due moment per `(kind, entity)`, the host's one alarm
+  armed for the earliest and never more than an hour ahead, nothing armed when nothing is due.
+  Handlers are given the moment their work was due. `ITEM-048`'s checkpoints and `ITEM-053`'s
+  meetings are further kinds, not another mechanism.
+- **`src/server/Journeys.ts`**: orders in, arrivals out, all through one queue so an alarm and a
+  request never both write a route. An arrival records every waypoint due by now at its due time
+  (`settle`), writes, pushes and schedules the next. `restore()` rebuilds the schedule from
+  `squads` beside `lobby.restore()`.
+- **Hosts**: the Durable Object arms `ctx.storage.setAlarm` and fires the schedule from
+  `alarm()`; the Bun server arms a timer through an injectable `ServerClock`.
+- **`ownerOf(squad)` and `MATCH_SERVER`** (`src/server/Owner.ts`): the Worker routes through
+  `MATCH_SERVER` and `Journeys` checks `ownerOf` before acting — the two lookups `ITEM-046`
+  replaces. The name stays `singleton`, which addresses the existing object and its storage.
+- **`tictac/api/squad/changed { squad }`** is pushed to the player's window (`Lobby.tell`) on
+  every order and every recorded arrival.
+
+#### Measured
+- `tests/journeys.test.ts` (11) over the socket with a hand-turned clock: each verb's route,
+  refusals for verbs that do not fit and for malformed orders (nothing written), anonymous
+  refused; an 11 km cautious trip woken with every alarm ten minutes late is armed at most an
+  hour ahead each time and records its arrival at the due time, then disarms; an intermediate
+  stop moves the alarm to the next; pushes on order and on arrival; a restart long after an
+  arrival arms for the earliest due moment across two squads and records the overdue arrival at
+  its due time; a trip's checkpoints read off the route the server wrote equal the planned ones.
+- `tests/cloudflare.test.ts`: under `workerd`, a squad sent two metres is read back arrived —
+  written by the Durable Object's own storage alarm.
+- A throwaway script against `startGameServer` with real timers: a two-metre trip arrived within
+  2.5 s and the window received two `squad/changed` pushes.
+
+#### Acceptance Criteria
+- [x] All five orders and three paces change the waypoint list as GDD-WORLD §3 says.
+- [x] With a driven clock, a multi-hour trip arms alarms at most an hour apart and records the
+      arrival at its expected time.
+- [x] After a restart the schedule is rebuilt and the alarm armed for the earliest due moment.
+- [x] The owner's socket receives a push when its squad's route changes or it arrives.
+- [x] Living documentation updated (`docs/architecture/world.md`, new; `deployment.md` §2.1 and
+      §5; `networking.md` §8; `persistence.md` §4; GDD-WORLD status).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import { Journeys } from '../src/server/Journeys'
 import { Lobby } from '../src/server/Lobby'
 import {
   LOCAL_RELYING_PARTY,
@@ -7,6 +8,7 @@ import {
   type RelyingParty,
 } from '../src/server/Persistence'
 import type { LatLng } from '../src/core/Travel'
+import { Schedule } from '../src/server/Schedule'
 import { Sessions } from '../src/server/Session'
 import { socketTransport } from '../src/server/SocketTransport'
 import { dbOverSqlStorage } from './DoSqliteDb'
@@ -55,6 +57,7 @@ export class MatchDurableObject extends DurableObject<Env> {
   private persistence!: Persistence
   private lobby!: Lobby
   private sessions!: Sessions
+  private schedule!: Schedule
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -73,8 +76,30 @@ export class MatchDurableObject extends DurableObject<Env> {
         },
       })
       await this.lobby.restore()
-      this.sessions = new Sessions({ lobby: this.lobby, persistence: this.persistence, log: this.log })
+      // The object's one alarm is the travel schedule's: armed for the
+      // earliest moment any squad has due, and kept in storage, so it fires
+      // even if this instance was evicted in between.
+      this.schedule = new Schedule({
+        now: () => Date.now(),
+        arm: (at) => {
+          if (at === null) void ctx.storage.deleteAlarm()
+          else void ctx.storage.setAlarm(at)
+        },
+      })
+      const journeys = new Journeys({
+        squads: this.persistence.squads,
+        schedule: this.schedule,
+        now: () => Date.now(),
+        tell: (playerId, squad) => this.lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
+      })
+      await journeys.restore()
+      this.sessions = new Sessions({ lobby: this.lobby, persistence: this.persistence, journeys, log: this.log })
     })
+  }
+
+  /** The alarm the travel schedule armed: whatever is due runs, and the next moment is armed. */
+  override async alarm(): Promise<void> {
+    await this.schedule.fire()
   }
 
   override async fetch(request: Request): Promise<Response> {
