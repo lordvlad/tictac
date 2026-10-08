@@ -2724,3 +2724,102 @@ canvas {
   font-size: 13px;
   padding: 10px 18px;
 }
+
+/* ── World map (src/hud/MapScreen.tsx) ──────────────────────────────────────
+   Mounted on <body>, not #ui: the map is all drag, wheel and right-click,
+   and #ui lets nothing but buttons take the pointer. Above the start menu,
+   which it is opened from and returns to. */
+.map-root {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  background: #0e1218;
+  font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+  color: var(--hud-text);
+}
+
+/* Two classes: MapLibre marks its container `.maplibregl-map { position:
+   relative }` from a stylesheet linked after this one. */
+.map-root .map-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.map-panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px 16px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.map-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hud-accent);
+}
+
+.map-status {
+  font-size: 14px;
+}
+
+.map-hint {
+  font-size: 12px;
+  color: var(--hud-dim);
+}
+
+.map-problem {
+  font-size: 12px;
+  color: var(--hud-danger);
+}
+
+.map-paces,
+.map-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.map-panel button,
+.map-orders button {
+  flex: 1;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--hud-text);
+  background: #1b2330;
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.map-panel button:disabled,
+.map-orders button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.map-pace.chosen {
+  border-color: var(--hud-accent);
+  color: var(--hud-accent);
+}
+
+.map-orders {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  padding: 6px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  transform: translate(8px, 8px);
+}

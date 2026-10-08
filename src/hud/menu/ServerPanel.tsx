@@ -98,6 +98,7 @@ export function ServerPanel({
   onUrlChange,
   connectionFor,
   onServerConnect,
+  onOpenMap,
   onBack,
 }: {
   url: string
@@ -110,6 +111,8 @@ export function ServerPanel({
    * reason.
    */
   onServerConnect: (url: string, intent: ServerIntent) => Promise<void>
+  /** Open the world map on the server at `url`; resolves once the player closes it. */
+  onOpenMap: (url: string) => Promise<void>
   onBack: () => void
 }) {
   const [connection, setConnection] = useState<ServerConnection | null>(null)
@@ -243,14 +246,26 @@ export function ServerPanel({
           style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}
         >
           {identity.signedIn ? (
-            <MenuButton
-              id="btn-passkey-signout"
-              tone="neutralDark"
-              size="sm"
-              onClick={() => void ceremony((it) => it.signOut())}
-            >
-              Sign out
-            </MenuButton>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <MenuButton
+                id="btn-open-map"
+                tone="serverDeep"
+                size="sm"
+                grow
+                disabled={busy}
+                onClick={() => void onOpenMap(trimmed)}
+              >
+                Open the Map
+              </MenuButton>
+              <MenuButton
+                id="btn-passkey-signout"
+                tone="neutralDark"
+                size="sm"
+                onClick={() => void ceremony((it) => it.signOut())}
+              >
+                Sign out
+              </MenuButton>
+            </div>
           ) : (
             <>
               <MenuInput

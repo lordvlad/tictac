@@ -3,10 +3,12 @@ title: "Rendering Engine & View Pipeline"
 id: "ARCH-RENDERING"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-09-27"
+lastReviewed: "2026-10-08"
 appliesTo:
   - "src/render/**"
   - "src/ecs/systems/RenderSystem.ts"
+  - "src/hud/MapScreen.tsx"
+  - "src/hud/map/WorldMap.ts"
 relatedDocs:
   - "docs/design/adr/0001-ecs-render-decoupling.md"
   - "docs/architecture/overview.md"
@@ -146,6 +148,30 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   one `onServerConnect(url, intent)` prop; the server decides where the window lands. When the
   lobby reports this player's own match as `playing`, the panel takes it over once (`resume`);
   when it is still being set up elsewhere, a warning says that acting here abandons it.
+- **The world map** (`src/hud/MapScreen.tsx`, `ITEM-065`) is opened from the match-server panel
+  by a signed-in player (**Open the Map**) and closed back to it. Its React panel holds the
+  squad's status, the pace (cautious, normal, flat out) and Stop; a right-click on the map offers
+  the verbs that fit (*Go here* at rest; *Go here now / first / next* travelling), sent as
+  `squad/order` ([ARCH-WORLD](world.md)). It is mounted on `<body>` like the loadout screen,
+  because `#ui` lets only buttons take the pointer, and while it is open `main.tsx` sets the
+  engine's per-frame `renderer.update` aside (`pauseRendering` in `src/engine.ts`) so the game's
+  canvas and MapLibre do not both draw.
+  - **MapLibre is loaded only when the map opens.** Everything that imports it is
+    `src/hud/map/WorldMap.ts`, reached by a dynamic `import()`; the build has `splitting: true`,
+    so it is its own chunk (about 1 MB). Two of MapLibre's files are imported
+    `with { type: 'file' }` and so emitted as assets rather than bundled: its stylesheet, linked
+    when the first map is built — imported as CSS, Bun hoists it into the first load's stylesheet —
+    and its tile worker (`maplibre-gl-worker.mjs`), handed to `setWorkerUrl`, because MapLibre
+    otherwise looks for it beside its own script, where no bundle puts it.
+  - **The style** is Protomaps' dark flavour (`@protomaps/basemaps`) over the connected match
+    server's `/tiles/{z}/{x}/{y}.mvt` (z0–8, stretched to z12), with glyphs and sprites from the
+    client's own `map/` assets ([ARCH-DEPLOYMENT §6](deployment.md)): the tiles are the one
+    cross-origin request, and nothing third-party is fetched.
+  - **The squad is drawn, never polled.** The route comes from `squad/get` (again whenever the
+    socket comes back) and every `squad/changed` push; ten times a second the screen draws
+    `positionAt(route, Date.now())` — the server's own function — as a dot, the trail behind it,
+    the route ahead and its stops. A refresh mid-journey lands where the squad was drawn before
+    it, to the accuracy of the machine's clock.
 - **Not React:** Tweakpane's panels inside `DebugPanel`, the frame counter's per-frame text
   (`FpsCounter`), the page-corner containers (`CornerStack`) and the Three.js canvas.
 - **Tests** that need a DOM register happy-dom for their own file only

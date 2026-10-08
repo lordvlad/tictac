@@ -2921,6 +2921,60 @@ arm that alarm for the earliest.
       §5; `networking.md` §8; `persistence.md` §4; GDD-WORLD status).
 ---
 
+### [ITEM-065] The Map Screen
+**Completed Date:** 2026-10-08  
+**Type:** Feature  
+**Milestone:** M5 — The Shared World  
+
+#### Why
+The player has to see the squad on the map and give it orders; this is where M5's definition of
+done is observed.
+
+#### Key Changes
+- **`src/hud/MapScreen.tsx`**: opened by **Open the Map** in the match-server panel for a
+  signed-in player and closed back to it. Its panel shows the squad's status (resting, or pace
+  and arrival time), the pace (cautious, normal, flat out), Stop and Find squad. A right-click
+  offers the verbs that fit: *Go here* at rest; *Go here now / first / next* travelling.
+- **The squad is drawn, never polled**: the route from `squad/get` (read again whenever the
+  socket comes back) and `squad/changed` (`ServerConnection.watchSquad`); ten times a second,
+  `positionAt(route, Date.now())` as a dot, the trail behind it, the route ahead and its stops.
+- **`src/hud/map/WorldMap.ts`** is the only file that imports MapLibre, reached by dynamic
+  `import()`; `scripts/build-bundle.ts` now sets `splitting: true`. MapLibre's stylesheet and its
+  tile worker are imported `with { type: 'file' }` — the stylesheet because Bun hoists a lazy
+  chunk's CSS into the first load's, the worker because MapLibre 6 otherwise looks for
+  `maplibre-gl-worker.mjs` beside its script, which no bundle emits (found as a 404 in the
+  browser: the map drew its background and no tiles).
+- **Style**: Protomaps' dark flavour (`@protomaps/basemaps`) over the connected server's
+  `/tiles`, z0–8 stretched to z12, glyphs and sprites from the client's own `map/` assets.
+- **Mounted on `<body>`** above the start menu, and `main.tsx` sets the engine's per-frame
+  `renderer.update` aside while it is open (`pauseRendering`, `src/engine.ts`).
+
+#### Measured
+- Build: the first load is a 4.32 MB JS chunk and a 35 KB stylesheet with no MapLibre in either;
+  opening the map fetches a 1.07 MB chunk, MapLibre's 83 KB stylesheet and its 508 KB worker.
+- In Chromium, with the built client served from `localhost:18950` and `wrangler dev` (local R2
+  seeded with the planet archive) on `localhost:18931` — the GitHub Pages arrangement:
+  a passkey registered with a virtual authenticator; the map drew the planet around the squad's
+  start near Stuttgart from cross-origin tiles, glyphs and sprites from the page's origin, and no
+  third-party request. A right-click *Go here* flat out set off a 37 km trip (5 h 18 min); a page
+  reload resumed with the dot in the same place and the same arrival time. A *Go here now* then
+  turned it on the way.
+- With no window connected (the tab closed, a script's socket disconnected), a 500 m trip
+  arrived by the Durable Object's alarm: the stored route's last waypoint has
+  `arrival === plannedArrivals(...)` (17:24:19.228Z) and rests; a fresh tab's map then showed it
+  resting there.
+
+#### Acceptance Criteria
+- [x] A squad sent on a long trip keeps travelling with the tab closed; on return it is where
+      the clock says, and an arrival that happened while away is recorded at its expected time.
+- [x] A refresh mid-journey resumes without a jump.
+- [ ] Tiles load cross-origin on GitHub Pages — shown with the client on another origin than the
+      match server under `wrangler dev`; on the real Pages site after a deploy.
+- [x] MapLibre is not in the initial bundle.
+- [x] Living documentation updated (`docs/architecture/rendering.md` §4,
+      `docs/architecture/world.md` §5).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

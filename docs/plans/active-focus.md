@@ -31,16 +31,15 @@ M5 — The Shared World ([roadmap](roadmap.md)) is under way: a squad that is so
 planet map and travels in real time, over one socket per window. `[ITEM-050]` was split into
 slices on 2026-10-07; one connection per window (`[ITEM-060]`) and the z0–8 planet basemap
 (`[ITEM-061]`) closed on 2026-10-07, the travel maths (`[ITEM-062]`) and the squads table with its starts (`[ITEM-063]`) and
-orders with the travel scheduler (`[ITEM-064]`) on 2026-10-08. The fights
+orders with the travel scheduler (`[ITEM-064]`) and the map screen (`[ITEM-065]`) on
+2026-10-08. The fights
 met on the road
 ([GDD-WORLD](../design/gdd/world-and-travel.md)) come after it.
 
 ---
 ## 📋 Ready — pull in this order
-1. `[ITEM-065]` The map screen — MapLibre, the squad drawn moving, orders on right-click.
-
-**Next after these:** `[ITEM-066]` Before encounters — the design decisions `[ITEM-048]` needs
-(a GDD task, no code).
+1. `[ITEM-066]` Before encounters — the design decisions `[ITEM-048]` needs (a GDD task, no
+   code).
 
 ## 🧊 Backlog — not yet queued
 - `[ITEM-048]` Wild alien encounters on the road — after `[ITEM-064]` (the travel scheduler) and
@@ -57,6 +56,8 @@ met on the road
 - `[ITEM-054]` Capture and rescue — an idea; the left-behind of a retreat are lost until then.
 
 ## ⚠️ Left open by finished work
+- **ITEM-065**: tiles cross-origin on the real GitHub Pages site, after a deploy. The map's
+  clock is the browser's: a machine whose clock is off draws the squad off by as much.
 - **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
   socket is not tested end to end (settlement is tested at the function the referee calls, and
   `Rosters` is unchanged). The live AI opponent stays on `stand`; which order an AI squad fights
@@ -93,7 +94,7 @@ met on the road
 
 ---
 
-## Definition of Done for M5
+## Definition of Done for M5 — met under `wrangler dev`; the deploy confirms it
 1. A signed-in player sees their squad on a real planet map near where they registered
    (`ITEM-061`, `ITEM-063`, `ITEM-065`).
 2. They send it travelling, close the tab, and find it where the clock says (`ITEM-062`,

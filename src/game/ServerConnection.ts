@@ -214,6 +214,7 @@ export class ServerConnection {
   private cancelGiveUp: (() => void) | null = null
   private room: Room | null = null
   private readonly lobbyListeners = new Set<(view: LobbyView) => void>()
+  private readonly squadListeners = new Set<(pushed: RpcPushes['tictac/api/squad/changed']) => void>()
   private lobbyView: LobbyView | null = null
   private readonly listeners = new Set<() => void>()
 
@@ -305,6 +306,17 @@ export class ServerConnection {
         this.ask(socket, 'tictac/api/lobby/unsubscribe', {}, () => {})
       }
     }
+  }
+
+  /**
+   * Every new route the server pushes for this player's squad
+   * (`squad/changed`): an order from any of their windows, or an arrival.
+   * Returns what stops it. Nothing to subscribe to: the server pushes to the
+   * player's window regardless.
+   */
+  watchSquad(listener: (pushed: RpcPushes['tictac/api/squad/changed']) => void): () => void {
+    this.squadListeners.add(listener)
+    return () => this.squadListeners.delete(listener)
   }
 
   /**
@@ -593,6 +605,9 @@ export class ServerConnection {
       }
       case 'tictac/api/lobby/changed':
         if (socket.lobby && this.lobbyListeners.size > 0) this.showLobby(params as unknown as LobbyView)
+        return
+      case 'tictac/api/squad/changed':
+        for (const listener of this.squadListeners) listener(params as unknown as RpcPushes['tictac/api/squad/changed'])
         return
     }
     if (frame.method === RpcMethods.abort && !socket.entered) {

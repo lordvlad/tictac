@@ -402,51 +402,6 @@ to this item.
 
 ---
 
-### [ITEM-065] The Map Screen
-**Type:** Feature
-**Priority:** P2
-**Status:** Ready — the tiles (`ITEM-061`), the squad (`ITEM-063`) and its orders and pushes
-(`ITEM-064`) are all served
-**Milestone:** M5 — The Shared World
-
-#### Why
-The player has to see the squad on the map and give it orders. This is where M5's definition of
-done is observed.
-
-#### Change
-1. **A new screen for signed-in players**, reached from the Match Server group; the lobby stays
-   as it is.
-2. **MapLibre loaded by dynamic import** only when the map opens, so the game's first load does
-   not carry it.
-3. **Mounted like the loadout root**: on `body`, outside `#ui`'s pointer rules, with the
-   Three.js update loop paused behind it.
-4. **The squad drawn by the same position function the server uses** (`ITEM-062`), moving
-   between frames without asking the server.
-5. **Orders on right-click** (the five verbs) and a pace control.
-6. Written fresh against this project's state, not ported from the prior art's 888-line view.
-
-#### Affected Files
-- `src/hud/` (the map screen), `src/hud/menu/ServerPanel.tsx` (the way in), `src/main.tsx`
-- `package.json` (`maplibre-gl`, `@protomaps/basemaps` or `protomaps-themes-base`)
-- `docs/architecture/rendering.md`
-
-#### P2P / Simulation Impact
-- None. The map reads the squad over RPC and draws it with the shared position function.
-
-#### Acceptance Criteria
-- [ ] A squad sent on a long trip keeps travelling with the tab closed; on return it is where
-      the clock says, and an arrival that happened while away is recorded at its expected time.
-- [ ] A refresh mid-journey resumes without a jump.
-- [ ] Tiles load cross-origin on GitHub Pages.
-- [ ] MapLibre is not in the initial bundle.
-- [ ] Living documentation updated.
-
-#### Risks & Mitigations
-- **Risk:** two render loops (Three.js and MapLibre) compete for the GPU.
-- **Mitigation:** the Three.js update loop pauses while the map is open.
-
----
-
 ### [ITEM-066] Before Encounters: the Decisions ITEM-048 Needs
 **Type:** Feature
 **Priority:** P2

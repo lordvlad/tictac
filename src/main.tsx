@@ -12,7 +12,7 @@ import { createGlobalRules } from './ecs/globals'
 import { TurnSystem } from './ecs/systems'
 import { isCommand } from './ecs/systems/CommandSystem'
 import { World } from './ecs/World'
-import { createEngineContext, type EngineContext } from './engine'
+import { createEngineContext, type EngineContext, pauseRendering } from './engine'
 import './game.css'
 import { Account } from './game/Account'
 import { ServerConnection } from './game/ServerConnection'
@@ -37,6 +37,7 @@ import { FpsCounter } from './hud/FpsCounter'
 import { FullscreenPrompt } from './hud/FullscreenPrompt'
 import { Hud } from './hud/Hud'
 import { LoadoutScreen } from './hud/LoadoutScreen'
+import { openMap } from './hud/MapScreen'
 import { InterruptedOverlay } from './hud/menu/InterruptedOverlay'
 import { StartMenu } from './hud/menu/StartMenu'
 import { PlaybackControls } from './hud/PlaybackControls'
@@ -278,6 +279,16 @@ function showMenu(notice?: string): void {
           // and the panel shows the reason on it.
           network.dispose()
           throw err
+        }
+      }}
+      onOpenMap={async (typed) => {
+        // The game's own canvas is covered by the map, which draws its own
+        // frames: two render loops would share the GPU for nothing.
+        const resume = pauseRendering(Game.instance())
+        try {
+          await openMap(connectionFor(typed), baseUrl)
+        } finally {
+          resume()
         }
       }}
       probeOwnOriginServer={probeOwnOriginServer}

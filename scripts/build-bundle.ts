@@ -38,6 +38,9 @@ const result = await Bun.build({
   target: 'browser',
   sourcemap: 'linked',
   minify: true,
+  // So a dynamic `import()` is its own chunk, fetched when it runs: the world
+  // map's MapLibre (`src/hud/MapScreen.tsx`) stays out of the first load.
+  splitting: true,
   publicPath: './',
   loader: {
     '.glsl': 'text',

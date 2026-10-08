@@ -49,6 +49,8 @@ export interface StartMenuProps {
    * player can read.
    */
   onServerConnect: (url: string, intent: ServerIntent) => Promise<void>
+  /** Open the world map on the match server at `url`; resolves once it is closed. */
+  onOpenMap: (url: string) => Promise<void>
   probeOwnOriginServer: () => Promise<string | null>
 }
 
@@ -64,6 +66,7 @@ export function StartMenu({
   connectionFor,
   leaveServer,
   onServerConnect,
+  onOpenMap,
   probeOwnOriginServer,
 }: StartMenuProps) {
   const [mode, setMode] = useState<MenuMode>('main')
@@ -202,6 +205,7 @@ export function StartMenu({
           onUrlChange={setServerUrl}
           connectionFor={connectionFor}
           onServerConnect={onServerConnect}
+          onOpenMap={onOpenMap}
           onBack={() => {
             leaveServer()
             setMode('main')

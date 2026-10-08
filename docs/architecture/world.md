@@ -13,6 +13,7 @@ appliesTo:
   - "src/server/GameServer.ts"
   - "workers/MatchDurableObject.ts"
   - "workers/index.ts"
+  - "src/hud/MapScreen.tsx"
 relatedDocs:
   - "docs/design/gdd/world-and-travel.md"
   - "docs/design/rfc/0002-region-sharded-durable-objects.md"
@@ -102,7 +103,14 @@ server. Both answer the same instance today. Splitting the world (`ITEM-046`) ch
 and nothing that calls them. The name itself stays `singleton`: it is what addresses the existing
 Durable Object and its storage, and renaming it would address a new, empty one.
 
-## 5. Pushes
+## 5. The client
+
+`src/hud/MapScreen.tsx` reads the route with `squad/get`, keeps it current from `squad/changed`
+(and reads it again when its socket comes back, since a push sent while it was away reached
+nobody), and draws `positionAt(route, Date.now())` ten times a second. It never asks where the
+squad is. Orders are a right-click on the map; [ARCH-RENDERING §4](rendering.md) has the screen.
+
+## 6. Pushes
 
 `tictac/api/squad/changed { squad }` goes to the player's bound window (`Lobby.tell`) whenever the
 route changes: an order from any of their windows, or an arrival. It carries the whole route, as

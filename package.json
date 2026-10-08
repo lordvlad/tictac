@@ -29,8 +29,10 @@
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.18.2",
     "@mavonengine/core": "^0.0.20",
+    "@protomaps/basemaps": "^5.7.2",
     "@tweakpane/plugin-essentials": "^0.2.1",
     "@use-gesture/vanilla": "^10.3.1",
+    "maplibre-gl": "^6.13.0",
     "peerjs": "^1.5.5",
     "pmtiles": "^4.5.0",
     "react": "^19.3.0",
@@ -46,6 +48,7 @@
     "@gltf-transform/functions": "^4.4.2",
     "@happy-dom/global-registrator": "^20.14.5",
     "@types/bun": "latest",
+    "@types/geojson": "^7946.0.16",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/three": "~0.184.0",
