@@ -3130,8 +3130,13 @@ Hosting every zoom is 138.7 GB (z0–15), so closer zooms are built for the plac
 - [~] A first request for an unbuilt tile builds and caches it. Under concurrent requests each
       may read the planet and write the same bytes under one key: nothing is stored twice, but
       the read is not shared (above). Not "once".
-- [ ] On the deployed Worker: a tile built and kept in the real bucket, and the map at street
-      zoom — after the deploy.
+- [x] On the deployed Worker (`b48f3d1`): `tiles.json` says z0–14; a z12 tile built in 2.0 s,
+      was kept at `demand/20261007/12/2144/1408.mvt` in the real bucket and answered again in
+      0.26 s; z15 is `204`. In Chromium on `https://lordvlad.github.io/tictac/`, a passkey
+      registered and the map zoomed from the planet to street level (tiles z8–14, no failed
+      request): streets, house blocks, street names and a shop in Ostelsheim. The rate-limit
+      binding is attached (`env.TILE_BUILDS (300 requests/60s)` in the deploy); its limit was
+      exercised only under `wrangler dev`.
 ---
 
 ## Rejected — kept for the reasoning

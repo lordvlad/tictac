@@ -62,10 +62,10 @@ ignored.
 ## ⚠️ Left open by finished work
 - **ITEM-068**: Firefox does not support related origins, so a Firefox player cannot sign in from
   the GitHub Pages client — only on the Worker's own origin. Safari and Edge are untested.
-- **Production holds test accounts**: `LiveCheck`, `SquadCheck` and `PagesCheck`, each with a
+- **Production holds test accounts**: `LiveCheck`, `SquadCheck`, `PagesCheck` and `ZoomCheck`, each with a
   roster and a squad. `LiveCheck` is kept on purpose, to exercise the first-ask squad placement
   (`squad/get`) of a player who registered before migration 7 — its session was revoked, so it
-  needs a fresh sign-in. The other two can go; there is no request to delete an account, so it
+  needs a fresh sign-in. The others can go; there is no request to delete an account, so it
   means editing the Durable Object's storage.
 - **ITEM-063**: a squad's start near the *reported* location (rather than the Stuttgart fallback)
   has not been seen on production: the machine used was itself in Stuttgart. The draw is covered
