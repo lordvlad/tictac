@@ -61,8 +61,6 @@ slices on 2026-10-07; one connection per window (`[ITEM-060]`) and the z0–8 pl
 - `[ITEM-054]` Capture and rescue — an idea; the left-behind of a retreat are lost until then.
 
 ## ⚠️ Left open by finished work
-- **ITEM-060 / ITEM-061**: passkeys over RPC and tiles served to the Worker's own origin and to
-  GitHub Pages are checked under `wrangler dev` only; both need the deploy.
 - **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
   socket is not tested end to end (settlement is tested at the function the referee calls, and
   `Rosters` is unchanged). The live AI opponent stays on `stand`; which order an AI squad fights

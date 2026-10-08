@@ -2695,16 +2695,17 @@ one connection per window, reused for everything.
   other side's turn the end screen's buttons did nothing. `endScreenNext` and `backToMenu` are
   now answered on any side, spectators included (`END_SCREEN_INTENTS`); observed in Chromium,
   Red leaving for the menu after Blue retreated on Blue's turn.
-- Not verified on the deployed Worker.
+- On the deployed Worker (`66ca213`): passkey registration, roster, lobby and a refusal over
+  the socket; tiles to the Pages origin (see the criteria below).
 
 #### Acceptance Criteria
 - [x] No `/api/` HTTP routes remain on either host (Bun server, Worker).
 - [x] One session socket per window, observed in a browser through sign-in, the lobby, a match
       and its end (the menu's probe and the post-match reload are separate, older behaviour).
 - [x] Lobby changes arrive as pushes; nothing polls.
-- [ ] Passkey registration and sign-in work over RPC on the deployed Worker (covered under
-      `wrangler dev`, in `tests/cloudflare.test.ts` and in Chromium with a virtual
-      authenticator).
+- [x] Passkey registration and sign-in work over RPC on the deployed Worker: on `66ca213`,
+      a software authenticator registered over the socket, then read the roster, subscribed to
+      the lobby and signed out; a join to a missing room was a `410` with the socket kept open.
 - [x] A protocol-6 window in a match finishes it across the deploy (observed across a
       `81ec4a7` → this build swap); any other protocol-6 request is refused with the reload text
       (`tests/session.test.ts`).
@@ -2755,8 +2756,9 @@ later (`ITEM-067`, deferred). Measured with `pmtiles extract --dry-run` against 
 - Glyphs 11.5 MB in the repository, 17.7 MB in `dist/`; sprites 52 KB.
 
 #### Acceptance Criteria
-- [ ] A tile is served to the match server's own origin and to a page on GitHub Pages (needs the
-      deploy; shown under `wrangler dev` and from another origin only).
+- [x] A tile is served to the match server's own origin and to a page on GitHub Pages: on the
+      deployed Worker (`66ca213`), z0 and z8 `200` and z9 `204`, each with
+      `access-control-allow-origin: *` to a request from the Pages origin.
 - [x] A bare MapLibre page shows the whole planet down to the chosen cap.
 - [x] No third-party origin is contacted at runtime (tiles, glyphs, sprites all self-hosted).
 - [x] The Bun server serves the same route from a local file: `serve:match --tiles=` answered
