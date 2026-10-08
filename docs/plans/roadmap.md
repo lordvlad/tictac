@@ -74,7 +74,7 @@ graph TD
 ---
 
 ### Milestone 5: The Shared World
-**Status:** In progress  
+**Status:** Complete  
 **Focus:** A squad that is somewhere on the real Earth, and travels there in real time.
 - Goal: everything the GDD calls the shared world ([GDD-WORLD](../design/gdd/world-and-travel.md))
   rests on a squad having a position. M5 gives it one, on a real planet map, with travel on the
@@ -84,8 +84,11 @@ graph TD
   low-zoom planet served from R2, `[ITEM-062]` travel maths in the headless core, `[ITEM-063]`
   a squad's position and start, `[ITEM-064]` orders, pace and the travel scheduler,
   `[ITEM-065]` the map screen, then `[ITEM-066]` the decisions encounters need (a design task;
-  blocks `[ITEM-048]`). Split from `[ITEM-050]` on 2026-10-07.
-- Done: `[ITEM-060]` and `[ITEM-061]` (2026-10-07), `[ITEM-062]`–`[ITEM-066]` (2026-10-08). M5's definition of done is met.
+  unblocks `[ITEM-048]`), and `[ITEM-068]` signing in from the GitHub Pages client (found on the
+  way: passkeys are bound to the Worker's domain). Split from `[ITEM-050]` on 2026-10-07.
+- Done: `[ITEM-060]` and `[ITEM-061]` (2026-10-07), `[ITEM-062]`–`[ITEM-066]` and `[ITEM-068]`
+  (2026-10-08). M5's definition of done is met, in production, from both the Worker's own origin
+  and the GitHub Pages client.
 - **Definition of done:** a signed-in player sees their squad on a real planet map near where
   they registered, sends it travelling, closes the tab, and finds it where the clock says; one
   socket per window.

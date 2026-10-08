@@ -29,12 +29,19 @@ meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]
 React HUD & menus (`[ITEM-055]`) closed on 2026-10-04.
 M5 — The Shared World ([roadmap](roadmap.md)) is under way: a squad that is somewhere on a real
 planet map and travels in real time, over one socket per window. `[ITEM-050]` was split into
-slices on 2026-10-07; one connection per window (`[ITEM-060]`) and the z0–8 planet basemap
-(`[ITEM-061]`) closed on 2026-10-07, the travel maths (`[ITEM-062]`) and the squads table with its starts (`[ITEM-063]`) and
-orders with the travel scheduler (`[ITEM-064]`) and the map screen (`[ITEM-065]`) on
-2026-10-08. The fights
-met on the road
-([GDD-WORLD](../design/gdd/world-and-travel.md)) come after it.
+slices on 2026-10-07. Closed on 2026-10-07: one connection per window (`[ITEM-060]`) and the
+z0–8 planet basemap (`[ITEM-061]`). Closed on 2026-10-08: the travel maths (`[ITEM-062]`), the
+squads table with its starts (`[ITEM-063]`), orders with the travel scheduler (`[ITEM-064]`), the
+map screen (`[ITEM-065]`), the decisions encounters need (`[ITEM-066]`, GDD-WORLD §5.4) and
+signing in from the GitHub Pages client (`[ITEM-068]`). **M5's definition of done is met in
+production** (build `b677bcc`): a passkey registered on `https://lordvlad.github.io` opens the
+map on the deployed Worker.
+The fights met on the road ([GDD-WORLD](../design/gdd/world-and-travel.md) §5) are what comes
+next, as `[ITEM-048]`.
+
+**How the client reaches its server.** One address, `MATCH_SERVER_URL` in `src/config.ts` (the
+Cloudflare Worker); the menu has no address to type. A client served from anywhere, including a
+developer's machine, plays on the production server.
 
 ---
 ## 📋 Ready — pull in this order
@@ -55,6 +62,27 @@ met on the road
 ## ⚠️ Left open by finished work
 - **ITEM-068**: Firefox does not support related origins, so a Firefox player cannot sign in from
   the GitHub Pages client — only on the Worker's own origin. Safari and Edge are untested.
+- **Production holds test accounts**: `LiveCheck`, `SquadCheck` and `PagesCheck`, each with a
+  roster and a squad. `LiveCheck` is kept on purpose, to exercise the first-ask squad placement
+  (`squad/get`) of a player who registered before migration 7 — its session was revoked, so it
+  needs a fresh sign-in. The other two can go; there is no request to delete an account, so it
+  means editing the Durable Object's storage.
+- **Local development**: with the address hardcoded, a client served from `bun run cf:dev` or
+  `wrangler dev` talks to production, not to itself. There is no `?server=` override; add one if
+  testing against a local server in the browser is wanted. `serve:match` and the tests dial a
+  server directly and are unaffected.
+- **ITEM-063**: a squad's start near the *reported* location (rather than the Stuttgart fallback)
+  has not been seen on production: the machine used was itself in Stuttgart. The draw is covered
+  by tests with a place on the socket.
+- **ITEM-065**: the map screen has no automated test (the controller and map need a DOM and
+  WebGL); it was checked in Chromium, locally and on Pages. The code under it is covered by the
+  `Travel`, `Journeys` and `ServerConnection` tests. Safari is untested.
+- **ITEM-064 / ITEM-059**: protocol 6's keyed-resume path (`Sessions.resume6`) is kept for one
+  release so a match in progress finishes across the deploy; delete it when
+  `OLDEST_SERVED_PROTOCOL` reaches 7 (the next protocol bump).
+- **ITEM-066** (decisions, built in `[ITEM-048]`): a 60 s join window and no taking a fight back
+  from the AI mid-match are design calls, not forced ones — revisit once they can be played. A
+  fight a deploy interrupts is witnessed, not refereed to the end.
 - **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
   socket is not tested end to end (settlement is tested at the function the referee calls, and
   `Rosters` is unchanged). The live AI opponent stays on `stand`; which order an AI squad fights
@@ -91,12 +119,15 @@ met on the road
 
 ---
 
-## Definition of Done for M5 — met (on the Worker's origin; see ITEM-065 above for Pages)
+## Definition of Done for M5 — met, in production
 1. A signed-in player sees their squad on a real planet map near where they registered
    (`ITEM-061`, `ITEM-063`, `ITEM-065`).
 2. They send it travelling, close the tab, and find it where the clock says (`ITEM-062`,
    `ITEM-064`, `ITEM-065`).
 3. One socket per window carries everything the client says to its match server (`ITEM-060`).
+4. All of it works from the GitHub Pages client as well as the Worker's own origin
+   (`ITEM-068`): a passkey registered at `lordvlad.github.io`, and its map open, were seen on
+   `b677bcc`. Firefox is the exception (below).
 
 ## Definition of Done for M4 — met
 1. A squad's composition is a decision with consequences beyond its kit (`ITEM-010`).

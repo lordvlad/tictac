@@ -39,6 +39,11 @@ bun run dev
 
 The game server will boot on `http://localhost:5173`.
 
+The menu's *Play on a Match Server* always plays on the production server (`MATCH_SERVER_URL` in
+`src/config.ts`), whatever served the page: there is no address to type, so testing against a
+server of your own is done with `bun test` and the scripts, which dial one directly
+(`bun run serve:match`).
+
 ---
 
 ## 3. NPM Scripts & Tooling
