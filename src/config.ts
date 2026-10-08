@@ -29,6 +29,16 @@ export const PLAYBACK = {
   eventDwell: 0.35,
 } as const
 
+/**
+ * The match server every window plays on: the Cloudflare Worker that serves
+ * the client, the referee, the accounts and the map's tiles. One address, so
+ * nobody types one; a client on GitHub Pages reaches it cross-origin
+ * (`docs/architecture/deployment.md`). Passkeys belong to this host
+ * (`RELYING_PARTY_ID` in `wrangler.jsonc`), so it is also the one place
+ * anybody can sign in.
+ */
+export const MATCH_SERVER_URL = 'wss://tictac-match-server.waldemar-reusch.workers.dev/'
+
 /** Grid is GRID_SIZE x GRID_SIZE tiles. */
 export const GRID_SIZE = 36
 

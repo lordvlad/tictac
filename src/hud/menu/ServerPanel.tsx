@@ -23,15 +23,9 @@ import { LobbyList } from './LobbyList'
  * Everything on it travels over the window's one connection to the server
  * (`ServerConnection`): who this window is, the room list — pushed by the
  * server as it changes, never polled — and every way in, which is one
- * `onServerConnect(url, intent)`; the server decides where the window
+ * `onServerConnect(intent)`; the server decides where the window
  * actually lands, and says so.
  */
-
-/**
- * How long a typed address has to stand still before a connection is opened
- * to it: every keystroke is an address, and only the last one is meant.
- */
-const ADDRESS_SETTLE_MS = 400
 
 /** What the status line says while each kind of connection is in flight. */
 const WAITING: Record<ServerIntent['kind'], string> = {
@@ -94,25 +88,21 @@ function identify(connection: ServerConnection | null): ServerIdentity {
 }
 
 export function ServerPanel({
-  url,
-  onUrlChange,
-  connectionFor,
+  connectionToServer,
   onServerConnect,
   onOpenMap,
   onBack,
 }: {
-  url: string
-  onUrlChange: (url: string) => void
-  /** The window's connection to the server at an address (`main.tsx`). */
-  connectionFor: (url: string) => ServerConnection
+  /** The window's one connection to the match server (`main.tsx`). */
+  connectionToServer: () => ServerConnection
   /**
-   * Connect to the server at `url` with `intent`. Resolves once the match,
+   * Go into a room with `intent`. Resolves once the match,
    * loadout or spectator view has taken over; rejects with a player-readable
    * reason.
    */
-  onServerConnect: (url: string, intent: ServerIntent) => Promise<void>
-  /** Open the world map on the server at `url`; resolves once the player closes it. */
-  onOpenMap: (url: string) => Promise<void>
+  onServerConnect: (intent: ServerIntent) => Promise<void>
+  /** Open the world map; resolves once the player closes it. */
+  onOpenMap: () => Promise<void>
   onBack: () => void
 }) {
   const [connection, setConnection] = useState<ServerConnection | null>(null)
@@ -127,22 +117,12 @@ export function ServerPanel({
   /** The takeover has been tried in this panel; a failed one is not retried on every push. */
   const resumed = useRef(false)
 
-  const trimmed = url.trim()
-
   /**
-   * The connection to the address in the box, once it has stood still. The
-   * window keeps one connection (`connectionFor`): coming back to this panel
-   * without a page load — a room refused, a match aborted — finds it still
-   * open, and only a different address replaces it.
+   * The window's connection, taken when the panel opens. The window keeps
+   * one (`connectionToServer`): coming back to this panel without a page
+   * load — a room refused, a match aborted — finds it still open.
    */
-  useEffect(() => {
-    if (!trimmed) {
-      setConnection(null)
-      return
-    }
-    const timer = window.setTimeout(() => setConnection(connectionFor(trimmed)), ADDRESS_SETTLE_MS)
-    return () => window.clearTimeout(timer)
-  }, [trimmed, connectionFor])
+  useEffect(() => setConnection(connectionToServer()), [connectionToServer])
 
   useEffect(() => connection?.onChange(redraw), [connection])
 
@@ -177,20 +157,12 @@ export function ServerPanel({
     }
   }
 
-  /**
-   * Every way into a room. The address is remembered on the way in rather
-   * than as it is typed, so a half-typed one is never what comes back.
-   */
+  /** Every way into a room. */
   const connect = async (intent: ServerIntent) => {
-    if (!trimmed) {
-      setStatus({ text: 'Type a match server address first.', colour: MENU_COLOURS.danger })
-      return
-    }
-    localStorage.setItem('tictac.server', trimmed)
     setBusy(true)
     setStatus({ text: WAITING[intent.kind], colour: MENU_COLOURS.accent })
     try {
-      await onServerConnect(trimmed, intent)
+      await onServerConnect(intent)
     } catch (err) {
       setStatus({
         text: err instanceof Error && err.message.length > 0 ? err.message : FAILURE[intent.kind],
@@ -221,18 +193,12 @@ export function ServerPanel({
   let line: { text: string; colour?: string } = { text: 'Looking for matches…' }
   if (busy && status) line = status
   else if (status) line = status
-  else if (!identity.reachable) line = { text: 'Run one with bun run serve:match.' }
+  else if (!identity.reachable) line = { text: 'The match server cannot be reached.' }
   else if (view) line = { text: 'Open a match, or join or watch one below.' }
 
   return (
     <div id="menu-details" style={{ marginTop: 20 }}>
       <PanelTitle text="Play on a Match Server" tone="server" />
-      <MenuInput
-        id="server-url"
-        value={url}
-        onChange={onUrlChange}
-        placeholder="wss://your-match-server/ — leave blank to look for one at this address"
-      />
       <p id="account-status" style={{ fontSize: 12, color: identity.colour, margin: '8px 0' }}>
         {identity.text}
       </p>
@@ -253,7 +219,7 @@ export function ServerPanel({
                 size="sm"
                 grow
                 disabled={busy}
-                onClick={() => void onOpenMap(trimmed)}
+                onClick={() => void onOpenMap()}
               >
                 Open the Map
               </MenuButton>

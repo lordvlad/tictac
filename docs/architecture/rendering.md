@@ -129,7 +129,8 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   templates used; icons are `<Icon file="…" />` (`src/hud/Icon.tsx`), the masked game-icons.net
   glyph.
 - **The start menu is grouped by who is on the other end.** `src/hud/menu/StartMenu.tsx` holds
-  the choice and the remembered match-server address and nothing else; the three groups it
+  the choice and nothing else (the match server's address is `MATCH_SERVER_URL` in
+  `src/config.ts`: one address, never typed); the three groups it
   draws — a match server, a peer, nobody — are the question that decides whether signing in
   means anything, whether an id has to be exchanged, and whether a result is kept. Each group's
   panel owns its own state (`PeerPanel.tsx` for `HostPanel`/`JoinPanel`; `ServerPanel.tsx` for
@@ -137,9 +138,9 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   `MenuGroup`, `StatusLine`, and the tones that colour a group. Before that there was one inline
   `style` object per element, ten near-copies of the same button, and a flat list of six choices
   that each hid which kind it was.
-- **The match-server panel is the lobby.** `ServerPanel.tsx` keeps the address, the account
-  line and the passkey ceremony over the window's one `ServerConnection` (`connectionFor(url)`,
-  opened once the typed address has stood still for 400 ms), and below them the room list,
+- **The match-server panel is the lobby.** `ServerPanel.tsx` keeps the account
+  line and the passkey ceremony over the window's one `ServerConnection` (`connectionToServer()`,
+  taken when the panel opens), and below them the room list,
   pushed by the server through `ServerConnection.watchLobby` (`src/game/Lobby.ts`) and never
   polled; the subscription ends when the panel unmounts. `LobbyList.tsx` draws the rooms in two
   sections by what a visitor can do with them — *waiting for an opponent* (Join) and *in

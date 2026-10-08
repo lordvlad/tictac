@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ServerIntent } from '../../game/Lobby'
 import type { ServerConnection } from '../../game/ServerConnection'
 import { BUILD_ID } from '../../version'
@@ -35,23 +35,19 @@ export interface StartMenuProps {
   onLoadRecording: (file: File) => Promise<void>
   onInitHost: () => Promise<string>
   onJoinP2p: (hostId: string) => Promise<void>
-  /**
-   * The window's connection to the match server at `url` (`ServerConnection`):
-   * the one it already has if it is to that server, a new one otherwise.
-   */
-  connectionFor: (url: string) => ServerConnection
+  /** The window's one connection to the match server (`ServerConnection`): the one it has while it is alive. */
+  connectionToServer: () => ServerConnection
   /** Leave the match server: the window's connection closes and is not dialled again. */
   leaveServer: () => void
   /**
-   * Into a room on the match server at `url` — open one, join one, watch one,
+   * Into a room on the match server — open one, join one, watch one,
    * or take back this player's own (`src/game/Lobby.ts`). Resolves once the
    * match, loadout or spectator view has taken over; rejects with a reason a
    * player can read.
    */
-  onServerConnect: (url: string, intent: ServerIntent) => Promise<void>
-  /** Open the world map on the match server at `url`; resolves once it is closed. */
-  onOpenMap: (url: string) => Promise<void>
-  probeOwnOriginServer: () => Promise<string | null>
+  onServerConnect: (intent: ServerIntent) => Promise<void>
+  /** Open the world map; resolves once it is closed. */
+  onOpenMap: () => Promise<void>
 }
 
 type MenuMode = 'main' | 'host' | 'join' | 'server'
@@ -63,32 +59,15 @@ export function StartMenu({
   onLoadRecording,
   onInitHost,
   onJoinP2p,
-  connectionFor,
+  connectionToServer,
   leaveServer,
   onServerConnect,
   onOpenMap,
-  probeOwnOriginServer,
 }: StartMenuProps) {
   const [mode, setMode] = useState<MenuMode>('main')
   const [mainError, setMainError] = useState<string | null>(notice ?? null)
   const [hostId, setHostId] = useState<string | null>(null)
-  const [serverUrl, setServerUrl] = useState(() => localStorage.getItem('tictac.server') ?? '')
   const fileInput = useRef<HTMLInputElement | null>(null)
-
-  /**
-   * Offer this page's own origin when nothing has been chosen before.
-   *
-   * The Cloudflare deployment serves the client and its referee from one
-   * origin, so the right answer is usually "here"; GitHub Pages serves no
-   * backend, so there is usually no answer at all. Probed rather than named,
-   * so neither host is hardcoded.
-   */
-  useEffect(() => {
-    if (localStorage.getItem('tictac.server')) return
-    void probeOwnOriginServer().then((found) => {
-      if (found) setServerUrl((current) => current || found)
-    })
-  }, [probeOwnOriginServer])
 
   return (
     <div
@@ -201,9 +180,7 @@ export function StartMenu({
 
       {mode === 'server' && (
         <ServerPanel
-          url={serverUrl}
-          onUrlChange={setServerUrl}
-          connectionFor={connectionFor}
+          connectionToServer={connectionToServer}
           onServerConnect={onServerConnect}
           onOpenMap={onOpenMap}
           onBack={() => {

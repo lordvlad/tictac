@@ -41,7 +41,10 @@ There are two deployment paths in this repository, and they answer two different
 does a match server live**, if anyone wants one, has two answers now — `bun run serve:match` on a
 developer's own machine, not reachable by anyone else's browser; or a single Cloudflare Durable
 Object running the same real referee, deployed for real at
-`https://tictac-match-server.waldemar-reusch.workers.dev` (`[ITEM-045]`). This document covers
+`https://tictac-match-server.waldemar-reusch.workers.dev` (`[ITEM-045]`). The client plays on the
+second only: its address is `MATCH_SERVER_URL` in `src/config.ts`, and the menu has no address to
+type — a page served from anywhere (Pages, the Worker, a developer's machine) reaches the same
+server. `serve:match` stays for the headless tests and scripts, which dial it directly. This document covers
 both.
 
 ---

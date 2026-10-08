@@ -3,7 +3,7 @@ import type { Asset } from '@mavonengine/core/Types/Asset'
 import { createRoot } from 'react-dom/client'
 import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
-import { Faction, FACTION_INFO, SIM } from './config'
+import { Faction, FACTION_INFO, MATCH_SERVER_URL, SIM } from './config'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
 import { hashSeed, matchDice, Rng, type Roll } from './core/rng'
@@ -72,55 +72,22 @@ function resolveSeed(): { seed: number; label: string } {
 }
 
 /**
- * Whether a match server answers a WebSocket upgrade at this page's own
- * origin, and what url that is.
- *
- * GitHub Pages serves no backend at all, so this resolves `null` there; the
- * Cloudflare Durable Object deployment (`[ITEM-045]`) serves its referee
- * from the exact origin the page itself loaded from, so this resolves that
- * origin's own `wss://` url there. Nothing about either host is named here
- * — the same probe answers correctly wherever the client is served from,
- * including a developer's own machine if `bun run cf:dev` happens to be
- * what served this page.
- */
-function probeOwnOriginServer(): Promise<string | null> {
-  const guess = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/`
-  return new Promise((resolve) => {
-    let settled = false
-    const settle = (value: string | null): void => {
-      if (settled) return
-      settled = true
-      resolve(value)
-    }
-    const probe = new WebSocket(guess)
-    probe.addEventListener('open', () => {
-      probe.close()
-      settle(guess)
-    })
-    probe.addEventListener('error', () => settle(null))
-    // A probe that neither opens nor errors within a couple of seconds is
-    // not one worth waiting on further; the menu does not block on this.
-    setTimeout(() => settle(null), 2000)
-  })
-}
-
-/**
  * The window's one connection to a match server, while it is on one
  * (`ITEM-060`, `src/game/ServerConnection.ts`).
  *
  * Held here, outside every screen, because it outlives them: the server
  * panel opens it and a match plays over it, so the lobby, the sign-in and the
  * room are one socket rather than one each. Leaving the server (Back from its
- * panel) or typing another address ends it; so does the page reload that
+ * panel) ends it; so does the page reload that
  * takes a finished match back to the menu (`backToMenu`).
  */
 let server: ServerConnection | null = null
 
-/** The connection to `url`: this window's existing one if it is to that server and still alive. */
-function connectionFor(url: string): ServerConnection {
-  if (server && server.url === url && server.state.kind !== 'closed') return server
+/** The window's connection to the match server: the existing one if it is still alive. */
+function connectionToServer(): ServerConnection {
+  if (server && server.state.kind !== 'closed') return server
   server?.close()
-  server = new ServerConnection(url)
+  server = new ServerConnection(MATCH_SERVER_URL)
   return server
 }
 
@@ -263,10 +230,10 @@ function showMenu(notice?: string): void {
         closeMenu()
         equipThenStart(initData.seed, initData.seedLabel, network)
       }}
-      connectionFor={connectionFor}
+      connectionToServer={connectionToServer}
       leaveServer={leaveServer}
-      onServerConnect={async (typed, intent) => {
-        const connection = connectionFor(typed)
+      onServerConnect={async (intent) => {
+        const connection = connectionToServer()
         const account = connection.player ? new Account(connection) : null
         // Only a seat in a room still being set up deploys anybody. Watching
         // brings nobody, and a match taken back already has its squad.
@@ -281,17 +248,16 @@ function showMenu(notice?: string): void {
           throw err
         }
       }}
-      onOpenMap={async (typed) => {
+      onOpenMap={async () => {
         // The game's own canvas is covered by the map, which draws its own
         // frames: two render loops would share the GPU for nothing.
         const resume = pauseRendering(Game.instance())
         try {
-          await openMap(connectionFor(typed), baseUrl)
+          await openMap(connectionToServer(), baseUrl)
         } finally {
           resume()
         }
       }}
-      probeOwnOriginServer={probeOwnOriginServer}
     />,
   )
 }
