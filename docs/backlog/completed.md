@@ -3057,14 +3057,18 @@ nobody could register or sign in from `https://lordvlad.github.io`, and the worl
   registration failed with Chrome's `SecurityError` (*…an attempt to fetch the
   .well-known/webauthn resource of the claimed RP ID failed*). A `.test` domain did not work
   for this: Chrome needs a registrable domain on a known suffix.
-- Not verified: the real Pages site against the deployed Worker (needs a deploy), Safari, and
-  Firefox (unsupported).
+- On the real site, build `b677bcc`: in Chromium at `https://lordvlad.github.io/tictac/` with a
+  virtual authenticator, a passkey registered against the deployed Worker, the account line read
+  *Signed in as PagesCheck*, and **Open the Map** drew the planet around the squad's start near
+  Stuttgart with cross-origin tiles.
+- Not verified: Safari. Firefox is unsupported.
 
 #### Acceptance Criteria
 - [x] The Worker serves `/.well-known/webauthn` with the configured origins
       (`tests/cloudflare.test.ts`, `tests/relatedOrigins.test.ts`).
 - [x] `RELYING_PARTY_ORIGINS` includes the GitHub Pages origin.
 - [x] A page on another site registers and signs in with the server's passkeys in Chromium.
+- [x] The same on the real GitHub Pages site against the deployed Worker, and its map opens.
 - [x] Living documentation updated (`docs/architecture/deployment.md` §4,
       `docs/architecture/persistence.md` §4 and §6).
 ---
