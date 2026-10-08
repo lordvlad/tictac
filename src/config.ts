@@ -62,6 +62,14 @@ export function matchServerFor(page: URL): string {
   }
 }
 
+/**
+ * The deepest zoom the match server builds map tiles for (`[ITEM-067]`): one
+ * tile there is about 1.5 km across at Stuttgart's latitude. The planet goes
+ * to 15, but a squad on foot covers a tile in under half an hour, and every
+ * zoom is four times the storage of the last.
+ */
+export const MAP_TILE_MAX_ZOOM = 14
+
 /** Grid is GRID_SIZE x GRID_SIZE tiles. */
 export const GRID_SIZE = 36
 

@@ -345,7 +345,7 @@ into `ITEM-050`'s, and from there into `ITEM-063` when `ITEM-050` was split (202
 **Type:** Feature
 **Status:** Split into `ITEM-060`–`ITEM-065` on 2026-10-07 (milestone M5 — The Shared World);
 the decisions encounters need before they are built are `ITEM-066`, and on-demand closer zooms
-are `ITEM-067` (deferred). It had absorbed `ITEM-049`; the start location is now `ITEM-063`.
+are `ITEM-067` (built 2026-10-09). It had absorbed `ITEM-049`; the start location is now `ITEM-063`.
 The design is still
 [GDD-WORLD](../design/gdd/world-and-travel.md) §1–4. The prior art it pointed at, in
 `../no-way-home`: the waypoint maths `packages/shared/src/waypoint-utils.ts` and its 16 tests
@@ -423,43 +423,3 @@ to this item.
 
 ---
 
-### [ITEM-067] Closer Zooms on Demand
-**Type:** Infrastructure
-**Priority:** P3
-**Status:** Backlog — deferred by the user's decision (2026-10-07)
-**Milestone:** Unscheduled
-
-#### Why
-`ITEM-061` hosts the planet only at low zooms. Hosting it all is 138.7 GB (z0–15); most of it
-would never be looked at. Building the closer zooms for an area the first time someone looks
-there keeps storage to the places players are.
-
-#### Change
-Build high-zoom tiles for an area on its first request, from the Protomaps planet build by range
-reads, cache them in R2, and deduplicate — likely a separate Worker, so that concurrent first
-requests for the same area build it once.
-
-Cost, from `ITEM-061`'s measurements: z0–11 alone is 8.0 GB and z0–12 18 GB for the whole
-planet; R2 storage is $0.015/GB-month past the 10 GB-month free tier, so only populated regions
-should ever be built.
-
-Open questions:
-- Which zooms are built on demand (to z15, the build's maximum?).
-- Region granularity: what one build covers.
-- Eviction: whether unvisited regions are ever removed.
-- Addressing: how the low-zoom archive and the on-demand tiles are served under one MapLibre
-  source.
-
-#### Affected Files
-- `workers/` (a tile-building Worker, or the tile route in `workers/index.ts`), `wrangler.jsonc`
-
-#### P2P / Simulation Impact
-- None.
-
-#### Acceptance Criteria
-- [ ] Designed (the open questions answered) before it is built.
-- [ ] A first request for an unbuilt area builds and caches it once, under concurrent requests.
-
-#### Risks & Mitigations
-- **Risk:** the Protomaps build url is dated and rotates.
-- **Mitigation:** pin a build per region, recorded beside the cached tiles.

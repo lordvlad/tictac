@@ -3,7 +3,7 @@ title: "Deployment: GitHub Pages and the Planted Cloudflare Durable Object"
 id: "ARCH-DEPLOYMENT"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-10-08"
+lastReviewed: "2026-10-09"
 appliesTo:
   - ".github/workflows/deploy.yml"
   - "wrangler.jsonc"
@@ -381,8 +381,8 @@ same bytes for everyone.
 One PMTiles archive holds every tile: **the whole planet at zooms 0–8** (countries, regions,
 large towns), cut from Protomaps' daily OpenStreetMap build `20261007` — 557,631,269 bytes,
 87,381 tiles, gzip-compressed MVT, basemap schema v4. Hosting the planet at every zoom would be
-138.7 GB; past z8 MapLibre overzooms the last level, and closer zooms built on demand are
-`ITEM-067`.
+138.7 GB; past z8 the tiles are built on demand (§6.4, `ITEM-067`) and the map stretches
+whatever is still missing.
 
 It is produced and uploaded by **`bun scripts/build-planet-tiles.ts`** (`--build=<date>`,
 `--maxzoom=<n>`, `--pmtiles=<path to the go-pmtiles CLI>`):
@@ -400,7 +400,7 @@ The object is **`map-tiles/planet-z8-20261007.pmtiles`** (etag
 script refuses to overwrite a different object under it: a new build or cap is a new key, and
 switching to it is a change to `MAP_TILES_KEY` in `wrangler.jsonc`, not to code. The bucket
 still holds the Stuttgart-only `world.pmtiles` (z0–14 of lon 8.9–9.5, lat 48.55–49.0), which
-nothing serves; it stays until `ITEM-067` decides whether its pipeline wants it.
+nothing serves and the on-demand tiles (§6.4) make redundant; it can be deleted.
 
 ### 6.2 Serving it
 
@@ -417,8 +417,8 @@ nothing serves; it stays until `ITEM-067` decides whether its pipeline wants it.
 
 A tile is sent **as stored**: gzip bytes with `Content-Encoding: gzip`, never inflated and
 deflated again (the Worker needs `encodeBody: 'manual'` for that, or it would gzip the gzip).
-Every tile response — `200`, or `204` for a tile the archive does not have, including every
-tile past z8 — carries `Access-Control-Allow-Origin: *`, because the client on GitHub Pages
+Every tile response — `200`, `204` for a tile that does not exist (or past the deepest zoom
+built), `429`, `503` — carries `Access-Control-Allow-Origin: *`, because the client on GitHub Pages
 reads tiles from the match server's origin; this is the only CORS the deployment has. `OPTIONS`
 is answered for any origin; `/tiles/` paths that are not a tile are `404`, and a tile outside
 the world (`x` or `y` ≥ 2^z) is `400`.
@@ -461,3 +461,63 @@ since static assets carry no CORS — and at the tiles of the match server it is
 Verified with a bare MapLibre page served from a different origin than `wrangler dev`: the whole
 planet at z1, Stuttgart at z8.5 and northern India at z6.5 (Devanagari labels) rendered with no
 failed request and no origin contacted besides the page's own and the tile server.
+
+### 6.4 Closer zooms, built on demand (`[ITEM-067]`)
+
+The archive stops at z8. Past it the Worker builds a tile **the first time anyone looks at it**
+and keeps it, up to **z14** (`MAP_TILE_MAX_ZOOM`, `src/config.ts`: a tile there is about 1.5 km
+across at Stuttgart's latitude, and every zoom is four times the storage of the last; the planet
+itself goes to z15). The client stretches z14 two zooms further.
+
+**How a tile is built.** A request for z9–14 is looked up in R2 under
+`demand/<build>/{z}/{x}/{y}.mvt`. On a miss the Worker reads the tile out of the full planet,
+`MAP_SOURCE_URL` (`https://build.protomaps.com/20261007.pmtiles`, 138.7 GB), by range request
+(`httpSource`), writes the bytes it got — still gzip, with their `Content-Encoding` as object
+metadata — and serves them. Measured against the real planet from a developer's machine, one tile
+is one to three range reads (the tile, and a directory or two the first time) and 0.4–1.8 s;
+every later look is one R2 read, about 10 ms. Tiles are 0.1–0.3 MB in a city, a few bytes at
+sea. A tile the planet does not have is stored empty, so the question is not asked twice.
+
+The decisions the item left open, and why:
+
+1. **Zooms: 9–14.** See above.
+2. **Granularity: one tile, not a region.** "The area looked at" is exactly the tiles the map
+   asked for. A region build needs an extraction, which is the Go CLI's job and cannot run in a
+   Worker (128 MB, no process to spawn); a tile is two range reads and fits in one request. It
+   also means no region table, no coordination, nothing half-built.
+3. **Addressing: one url scheme and one source.** `/tiles/{z}/{x}/{y}.mvt` answers z0–8 from the
+   archive and z9–14 from the cache or the planet. The server publishes what it has at
+   **`/tiles/tiles.json`** (TileJSON: the url template at the origin asked, `minzoom`, `maxzoom`),
+   and MapLibre's source is that url: the deepest zoom is the server's to say, so a server with
+   no planet to build from (the Bun server, or `MAP_SOURCE_URL` unset) says 8 and the map
+   stretches the rest as it always did.
+4. **Eviction: none.** Storage is what has been looked at. At R2's $0.015/GB-month the whole
+   planet at every zoom would be about $2 a month, so there is nothing worth the complexity of
+   removing; the key names the build, so a new build starts a new set and the old one can be
+   deleted by prefix.
+
+**Many looking at once.** Concurrent first requests for one tile may each read the planet and
+each write the same bytes under the same key: storage is not duplicated, one extra range read is
+the whole cost. Sharing one in-flight build between requests is not possible on a Worker (a
+promise cannot be awaited by a request other than the one whose I/O it holds), and a Durable
+Object to coordinate it would put the tile route behind a queue for no gain.
+
+**Abuse.** The tile route is public, and a miss costs a read from Protomaps' server and an R2
+write. `TILE_BUILDS` (`wrangler.jsonc` `ratelimits`) allows each client address 300 builds a
+minute; it is asked only on a miss, so a pan over ground already built is free, and past it the
+answer is `429` with `Retry-After`. Unset (local dev), nothing is limited.
+
+**When the planet is unavailable** — down, slow past 8 s, or the dated build removed from
+`build.protomaps.com` — the answer is `503` with `Cache-Control: no-store` (never `204`, which a
+browser would keep for a week), nothing is stored, and MapLibre draws the stretched parent until
+the next look succeeds. Tiles already built keep being served from R2. A build removed from
+Protomaps' server means new areas stop being built until `MAP_SOURCE_URL`, the archive and the
+prefix move to a newer build together (`scripts/build-planet-tiles.ts` for the archive).
+
+**Pinned together.** `MAP_SOURCE_URL` must be the build the z0–8 archive was cut from
+(`20261007` in both), or a map would mix two builds' roads at different zooms.
+
+**Where it does not run.** The Bun server has the archive only (`--tiles=`): there is no R2 to
+keep tiles in. Its TileJSON says z8. Developing the on-demand path means `wrangler dev`, which
+simulates the bucket locally and reads the real planet over the network.
+

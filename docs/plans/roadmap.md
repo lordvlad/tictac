@@ -88,7 +88,8 @@ graph TD
   way: passkeys are bound to the Worker's domain). Split from `[ITEM-050]` on 2026-10-07.
 - Done: `[ITEM-060]` and `[ITEM-061]` (2026-10-07), `[ITEM-062]`–`[ITEM-066]` and `[ITEM-068]`
   (2026-10-08). M5's definition of done is met, in production, from both the Worker's own origin
-  and the GitHub Pages client.
+  and the GitHub Pages client. Unscheduled and built afterwards: `[ITEM-067]` closer zooms on
+  demand (2026-10-09).
 - **Definition of done:** a signed-in player sees their squad on a real planet map near where
   they registered, sends it travelling, closes the tab, and finds it where the clock says; one
   socket per window.
@@ -108,6 +109,4 @@ chain above depends on it, and no milestone's Definition of Done names it.
   single instance once the shared world exists and needs more than one Durable Object to hold
   it. Gated on the shared world itself; M5 builds its first piece (a squad's durable position
   and the `ownerOf(squad)` seam), but leaves nothing to shard until there is load.
-- Backlog, deferred: `[ITEM-067]` Closer zooms on demand — high-zoom tiles built the first time
-  an area is looked at, beyond M5's low-zoom planet.
 

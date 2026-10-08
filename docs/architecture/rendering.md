@@ -165,7 +165,9 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
     and its tile worker (`maplibre-gl-worker.mjs`), handed to `setWorkerUrl`, because MapLibre
     otherwise looks for it beside its own script, where no bundle puts it.
   - **The style** is Protomaps' dark flavour (`@protomaps/basemaps`) over the connected match
-    server's `/tiles/{z}/{x}/{y}.mvt` (z0–8, stretched to z12), with glyphs and sprites from the
+    server's `/tiles/{z}/{x}/{y}.mvt` (z0–8 from its archive, z9–14 built on demand; which zooms a
+    server has is its `/tiles/tiles.json`'s to say, and the map stretches two zooms past the
+    deepest), with glyphs and sprites from the
     client's own `map/` assets ([ARCH-DEPLOYMENT §6](deployment.md)): the tiles are the one
     cross-origin request, and nothing third-party is fetched.
   - **The squad is drawn, never polled.** The route comes from `squad/get` (again whenever the

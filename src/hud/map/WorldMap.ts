@@ -17,16 +17,16 @@ import { type LatLng, positionAt, type Waypoint } from '../../core/Travel'
  * of the game, and most players never open the map.
  *
  * The basemap is Protomaps' dark flavour over the match server's own tiles
- * (`/tiles/{z}/{x}/{y}.mvt`, z0–8, overzoomed past that), with glyphs and
- * sprites served beside the client, so the map contacts no third party
- * (`docs/architecture/deployment.md` §6).
+ * (`/tiles/{z}/{x}/{y}.mvt`), with glyphs and sprites served beside the
+ * client, so the map contacts no third party
+ * (`docs/architecture/deployment.md` §6). What zooms the server has — z0–8
+ * from its archive, closer ones built on demand (`ITEM-067`), or only the
+ * archive's on a server with no planet to build from — is its TileJSON's to
+ * say, so no zoom is named here but how far a player may look.
  */
 
-/** The deepest zoom the tiles have; MapLibre stretches them past it. */
-const TILE_MAX_ZOOM = 8
-
-/** How close a player may look: past this, z8 tiles are too stretched to read. */
-const MAX_ZOOM = 12
+/** How close a player may look: two zooms past the deepest tile any server builds, stretched. */
+const MAX_ZOOM = 16
 
 const SQUAD_COLOUR = '#79d98b'
 const ROUTE_COLOUR = '#f5c451'
@@ -66,17 +66,12 @@ export class WorldMap {
         glyphs: `${options.assetsUrl}map/fonts/{fontstack}/{range}.pbf`,
         sprite: `${options.assetsUrl}map/sprites/dark`,
         sources: {
-          protomaps: {
-            type: 'vector',
-            tiles: [tileUrl(options.serverUrl)],
-            maxzoom: TILE_MAX_ZOOM,
-            attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>, Protomaps',
-          },
+          protomaps: { type: 'vector', url: tileJsonUrl(options.serverUrl) },
         },
         layers: layers('protomaps', namedFlavor('dark'), { lang: 'en' }),
       },
       center: toLngLat(options.center),
-      zoom: TILE_MAX_ZOOM,
+      zoom: 8,
       maxZoom: MAX_ZOOM,
       attributionControl: { compact: true },
     })
@@ -151,11 +146,11 @@ export class WorldMap {
   }
 }
 
-/** The tiles' url template on the match server at `serverUrl`: the same host, over HTTP. */
-function tileUrl(serverUrl: string): string {
+/** The TileJSON of the match server at `serverUrl`: the same host, over HTTP. */
+function tileJsonUrl(serverUrl: string): string {
   const url = new URL(serverUrl)
   url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:'
-  return `${url.origin}/tiles/{z}/{x}/{y}.mvt`
+  return `${url.origin}/tiles/tiles.json`
 }
 
 function toLngLat(at: LatLng): [number, number] & LngLatLike {

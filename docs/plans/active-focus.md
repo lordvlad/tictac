@@ -36,8 +36,9 @@ map screen (`[ITEM-065]`), the decisions encounters need (`[ITEM-066]`, GDD-WORL
 signing in from the GitHub Pages client (`[ITEM-068]`). **M5's definition of done is met in
 production** (build `b677bcc`): a passkey registered on `https://lordvlad.github.io` opens the
 map on the deployed Worker.
-The fights met on the road ([GDD-WORLD](../design/gdd/world-and-travel.md) §5) are what comes
-next, as `[ITEM-048]`.
+On 2026-10-09 the map's closer zooms were built (`[ITEM-067]`: tiles to z14 pulled from the planet
+the first time they are looked at). The fights met on the road
+([GDD-WORLD](../design/gdd/world-and-travel.md) §5) are what comes next, as `[ITEM-048]`.
 
 **How the client reaches its server.** One address, `MATCH_SERVER_URL` in `src/config.ts` (the
 Cloudflare Worker); the menu has no address to type. A page served from this machine may add
@@ -52,8 +53,6 @@ ignored.
 ## 🧊 Backlog — not yet queued
 - `[ITEM-053]` Player encounters on the road — after `[ITEM-064]` and `[ITEM-048]`; offline
   squads engageable, on trial.
-- `[ITEM-067]` Closer zooms on demand — deferred: high-zoom tiles built the first time an area
-  is looked at.
 - `[ITEM-046]` Region-sharded Durable Objects — depends on the shared world having load to
   shard.
 - `[ITEM-047]` Uncap the roster (bench grows with bases/vehicles, squad cap set per combat) —
@@ -83,8 +82,15 @@ ignored.
   `await`ing body). A migration that fails partway leaves its rows for a human to fix, and so
   could a registration that fails after its player row (player, roster and squad are one
   transaction). Not seen in practice.
-- **ITEM-061**: the old Stuttgart-only `world.pmtiles` is still in the `map-tiles` R2 bucket,
-  unserved, for `[ITEM-067]` to keep or delete.
+- **ITEM-061 / ITEM-067**: the old Stuttgart-only `world.pmtiles` is still in the `map-tiles` R2
+  bucket, unserved and now redundant; delete it.
+- **ITEM-067**: on-demand tiles depend on `build.protomaps.com` keeping the dated build
+  `20261007` (and being willing to be read by range from a Worker; its terms for this were not
+  found, only that the builds are free to use). If it is removed, new areas stop being built
+  (the map falls back to stretched z8) until `MAP_SOURCE_URL`, the archive and the key prefix
+  move to a newer build together. Nothing evicts built tiles: storage is what has been looked at
+  (about $2 a month if everything were). The Bun server has no on-demand path (the map stretches
+  its z8 archive).
 - **ITEM-063**: `squads` is one row per player *for now* (`squads_player`); captives, alien squads
   and a player with several squads widen it, and `[ITEM-048]`/`[ITEM-053]` lean on that.
 - **ITEM-066** (decisions, built in `[ITEM-048]`): `Rosters.rest` is unchanged until bases exist

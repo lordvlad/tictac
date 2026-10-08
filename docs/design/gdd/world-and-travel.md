@@ -43,8 +43,8 @@ projection and no region system at this layer; distance is great-circle distance
 
 **The whole planet, coarse first.** The full planet is 138.7 GB at z0–15. The match server
 hosts the whole planet only at the most zoomed-out levels: z0–8, 558 MB (`ITEM-061`; z0–10
-would have been 3.8 GB). Closer zooms will be built for an area the first
-time someone looks there (`ITEM-067`, deferred).
+would have been 3.8 GB). Closer zooms, to z14, are built tile by tile the first time someone
+looks there and kept (`ITEM-067`, [ARCH-DEPLOYMENT §6.4](../../architecture/deployment.md)).
 
 ## 2. A squad has a position
 

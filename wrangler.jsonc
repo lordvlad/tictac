@@ -31,8 +31,18 @@
     // The map archive in `MAP_TILES`, named for what it holds; a new build is
     // uploaded under a new key (`scripts/build-planet-tiles.ts`) and swapped in
     // here (`[ITEM-061]`, docs/architecture/deployment.md §6).
-    "MAP_TILES_KEY": "planet-z8-20261007.pmtiles"
+    "MAP_TILES_KEY": "planet-z8-20261007.pmtiles",
+    // The same dated build as the archive above, read by range for the zooms
+    // it stops short of; each tile is built once and kept in `MAP_TILES` under
+    // `demand/20261007/` (`[ITEM-067]`, deployment.md §6.4). Change both
+    // together: a different build's tiles would not match the archive's.
+    "MAP_SOURCE_URL": "https://build.protomaps.com/20261007.pmtiles"
   },
+  // How many tiles one client may make the server build per minute: a pan
+  // over ground already built is free. `namespace_id` is any number you pick.
+  "ratelimits": [
+    { "name": "TILE_BUILDS", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } }
+  ],
   // Map tiles, answered by `workers/index.ts` before the Durable Object.
   // `wrangler dev` simulates the bucket locally and empty unless seeded.
   "r2_buckets": [

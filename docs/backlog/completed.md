@@ -3073,6 +3073,67 @@ nobody could register or sign in from `https://lordvlad.github.io`, and the worl
       `docs/architecture/persistence.md` §4 and §6).
 ---
 
+### [ITEM-067] Closer Zooms on Demand
+**Completed Date:** 2026-10-09  
+**Type:** Infrastructure  
+**Milestone:** Unscheduled (taken up after M5)  
+
+#### Why
+`ITEM-061` hosts the planet only at z0–8; past that the map stretches the last level into blocks.
+Hosting every zoom is 138.7 GB (z0–15), so closer zooms are built for the places players look.
+
+#### Design (the open questions, answered — deployment.md §6.4)
+- **Zooms**: z9–14 (`MAP_TILE_MAX_ZOOM`); the planet's z15 is four times the storage for a
+  tile a squad on foot crosses in under half an hour.
+- **Granularity**: one tile, pulled through, not a region. A region build is an extraction, which
+  is the Go CLI's job and cannot run in a Worker; a tile is one to three range reads.
+- **Eviction**: none. At R2's $0.015/GB-month the whole planet at every zoom would be about $2 a
+  month; the key names the build, so a new build is a new prefix to delete by.
+- **Addressing**: one url scheme; `/tiles/tiles.json` (TileJSON) tells the client the deepest
+  zoom, so a server with no planet (Bun, or `MAP_SOURCE_URL` unset) says 8 and nothing is
+  hardcoded in the client.
+- **Not a separate Worker**, and not coordinated: sharing an in-flight build between requests is
+  not possible on a Worker, and concurrent first requests write identical bytes under one key.
+
+#### Key Changes
+- **`src/server/Tiles.ts`**: the archive reader is shared by the stored archive and the remote
+  planet; `DemandTiles` (`source`, `store`, `prefix`, `maxZoom`, `allow`) adds the pull-through;
+  `httpSource` reads the planet by `Range` (not `pmtiles`' `FetchSource`, whose
+  `cache: 'no-store'` the Worker runtime refuses); `r2TileStore` keeps each tile with its
+  `Content-Encoding`; `/tiles/tiles.json`.
+- **`workers/index.ts`, `wrangler.jsonc`**: `MAP_SOURCE_URL` (the same dated build as the
+  archive) and a `TILE_BUILDS` rate limit, 300 builds a minute per client, asked on a miss only;
+  `429` past it.
+- **Failure is not cached**: a planet that is down, slow past 8 s or gone answers `503` with
+  `no-store` and stores nothing; a browser would keep a `204` for a week.
+- **`src/hud/map/WorldMap.ts`**: the source is the server's TileJSON; no zoom is named but how far
+  a player may look (16).
+
+#### Measured
+- Against the real planet (`build.protomaps.com/20261007.pmtiles`, 138,664,957,457 bytes) from a
+  developer's machine: one tile is 1–3 range reads, 0.4–1.5 s; Stuttgart and Tokyo tiles are
+  110–330 KB, an ocean tile 73 bytes.
+- Under `wrangler dev` against that planet: a z12 tile built in 1.8 s and served again in 10 ms;
+  four z14 builds took 0.4–0.9 s each; with the limit set to 5, the sixth build in a minute was
+  `429` with `Retry-After: 30` and already-built tiles kept being served.
+- In Chromium on the same server: zooming from the planet into the squad's start drew streets,
+  buildings and street names at z14 from tiles z8–14 and no failed request; with the planet made
+  unreachable, 47 tile requests answered `503` and the map drew the stretched z8 tiles (coarse,
+  not blank).
+- `tests/demandTiles.test.ts` (18), over a planet written in memory
+  (`tests/support/pmtilesWriter.ts`): built once and kept, served from the store without the
+  planet, empty tiles remembered, past the deepest zoom free, limit and failure paths,
+  `tiles.json`, `httpSource`'s range and etag handling, the store's keys.
+
+#### Acceptance Criteria
+- [x] Designed (the open questions answered) before it was built.
+- [~] A first request for an unbuilt tile builds and caches it. Under concurrent requests each
+      may read the planet and write the same bytes under one key: nothing is stored twice, but
+      the read is not shared (above). Not "once".
+- [ ] On the deployed Worker: a tile built and kept in the real bucket, and the map at street
+      zoom — after the deploy.
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the
