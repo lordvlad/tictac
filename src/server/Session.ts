@@ -1,3 +1,4 @@
+import type { LatLng } from '../core/Travel'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification, type JsonRpcRequest } from '../game/JsonRpc'
 import type { ServerIntent } from '../game/Lobby'
 import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type SignedIn } from '../game/Rpc'
@@ -31,24 +32,18 @@ import { AuthError } from './WebAuthn'
  * Object attach their sockets to the same thing.
  */
 
-/** Where a connection came from, as far as its host can tell (`request.cf` on Cloudflare). */
-export interface SocketPlace {
-  latitude: number
-  longitude: number
-}
-
 /** What a host knows about a socket from the request that opened it. */
 export interface Upgrade {
   /** The url it was opened at. Read for nothing but a protocol-6 page's keyed resume (`resumeOf6`). */
   url: string
-  /** Where it came from, when the host can say. */
-  place?: SocketPlace | null
+  /** Where it came from, when the host can say (`request.cf` on Cloudflare); never on the Bun server. */
+  place?: LatLng | null
 }
 
 export interface SessionsOptions {
   lobby: Lobby
   /** The accounts and rosters asked about over a socket. */
-  persistence: Pick<Persistence, 'accounts' | 'rosters'>
+  persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads'>
   /** Called for anything worth a line in a server log. */
   log?: (message: string) => void
 }
@@ -59,11 +54,11 @@ interface Session {
   /** The account this socket signed in as, and the token that proved it — what `signOut` revokes. */
   account: SignedIn | null
   /**
-   * Where the connection came from, when its host could tell: for
-   * registration to record where a new player starts (`ITEM-063`), read off
-   * the socket rather than off anything the page says.
+   * Where the connection came from, when its host could tell: what a new
+   * player's squad is placed near (`Squads`), read off the socket rather than
+   * off anything the page says, and written down nowhere.
    */
-  readonly place: SocketPlace | null
+  readonly place: LatLng | null
   /** The seat a protocol-6 page's url takes back. Goes with protocol 6 (`resume6`). */
   readonly resume6: { roomId: string; seatKey: string } | null
   /** Every request not yet answered, one after another: each starts when the one before it is done. */
@@ -87,7 +82,7 @@ const FAILED = 'the server failed'
 
 export class Sessions {
   private readonly lobby: Lobby
-  private readonly persistence: Pick<Persistence, 'accounts' | 'rosters'>
+  private readonly persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads'>
   private readonly log: (message: string) => void
 
   constructor(options: SessionsOptions) {
@@ -249,7 +244,7 @@ export class Sessions {
         authenticatorData: text(params, 'authenticatorData'),
         publicKey: text(params, 'publicKey'),
         publicKeyAlgorithm: number(params, 'publicKeyAlgorithm'),
-      })
+      }, session.place)
       reply(await this.adopt(session, minted))
     },
     'tictac/api/account/loginOptions': async (_session, _params, reply) => {
@@ -289,6 +284,9 @@ export class Sessions {
     },
     'tictac/api/roster/recruit': async (session, _params, reply) => {
       reply({ member: entry(await this.persistence.rosters.recruit(signedIn(session).player.id)) })
+    },
+    'tictac/api/squad/get': async (session, _params, reply) => {
+      reply({ squad: await this.persistence.squads.ensure(signedIn(session).player.id, session.place) })
     },
     'tictac/api/lobby/subscribe': (session, _params, reply) => {
       reply(this.lobby.subscribe(session.client))

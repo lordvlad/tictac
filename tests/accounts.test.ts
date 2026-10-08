@@ -8,6 +8,9 @@ import { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
 import { Sessions } from '../src/server/Session'
 import { MY_VERSION } from '../src/version'
+import { distanceKm, type LatLng } from '../src/core/Travel'
+import type { Squad } from '../src/game/Rpc'
+import { DEFAULT_ANCHOR, START_RADIUS_KM } from '../src/server/Squads'
 import { softwareAuthenticator, type SoftwareAuthenticator } from './support/authenticator'
 import { DATABASE_URLS, freshPersistence } from './support/db'
 
@@ -30,12 +33,15 @@ interface Window {
   call(method: string, params?: Record<string, unknown>): Promise<Answer>
 }
 
-/** A page's socket to the server behind `persistence`, past the version gate. */
-function windowOn(persistence: Persistence): Window {
+/**
+ * A page's socket to the server behind `persistence`, past the version gate —
+ * connected from `place` when its host can tell (Cloudflare's `request.cf`).
+ */
+function windowOn(persistence: Persistence, place: LatLng | null = null): Window {
   const lobby = new Lobby({ matches: persistence.matches, rooms: persistence.rooms, log: () => {} })
   const sessions = new Sessions({ lobby, persistence, log: () => {} })
   const [page, server] = loopback()
-  sessions.attach(server, { url: 'ws://accounts.test/' })
+  sessions.attach(server, { url: 'ws://accounts.test/', place })
   const pending = new Map<number, (answer: Answer) => void>()
   let lastId = 0
   page.onFrame((frame) => {
@@ -276,6 +282,62 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
     const missing = await windowOn(persistence).call('tictac/api/nothing')
     expect(missing.code).toBe(RPC_ERRORS.noSuchMethod)
     expect(missing.message).toMatch(/does not answer/)
+
+    await persistence.close()
+  })
+
+  test('a registration through Cloudflare starts the squad near where it came from, and keeps only the start', async () => {
+    const persistence = await freshPersistence(url)
+    const tokyo: LatLng = { lat: 35.6895, lng: 139.6917 }
+    const window = windowOn(persistence, tokyo)
+    await register(window, await softwareAuthenticator())
+
+    const read = await window.call('tictac/api/squad/get')
+    const [start] = (read.result.squad as Squad).waypoints
+    expect(start).toMatchObject({ kind: 'past', departed: null })
+    expect(distanceKm(tokyo, start!)).toBeLessThanOrEqual(START_RADIUS_KM)
+
+    // What is written down is the drawn start and nothing else: no column
+    // holds where the connection was.
+    const rows = await persistence.db.query<Record<string, unknown>>`SELECT * FROM squads`
+    expect(Object.keys(rows[0]!).sort()).toEqual(['created_at', 'id', 'player_id', 'start_lat_e6', 'start_lng_e6', 'waypoints'])
+    expect(JSON.stringify(rows)).not.toContain('35.6895')
+    expect(JSON.stringify(rows)).not.toContain('139.6917')
+
+    await persistence.close()
+  })
+
+  test('a registration from nowhere in particular starts near Stuttgart', async () => {
+    const persistence = await freshPersistence(url)
+    const window = windowOn(persistence)
+    await register(window, await softwareAuthenticator())
+
+    const [start] = ((await window.call('tictac/api/squad/get')).result.squad as Squad).waypoints
+    expect(distanceKm(DEFAULT_ANCHOR, start!)).toBeLessThanOrEqual(START_RADIUS_KM)
+
+    await persistence.close()
+  })
+
+  test('a squad is its player\'s alone to read', async () => {
+    const persistence = await freshPersistence(url)
+    const anonymous = await windowOn(persistence).call('tictac/api/squad/get')
+    expect(anonymous.code).toBe(RPC_ERRORS.signInFirst)
+
+    await persistence.close()
+  })
+
+  test('a player from before squads existed is placed the first time anybody asks, and stays there', async () => {
+    const persistence = await freshPersistence(url)
+    const lyon: LatLng = { lat: 45.764, lng: 4.8357 }
+    const token = await register(windowOn(persistence), await softwareAuthenticator())
+    // As every account registered before migration 7 is: a player with no row.
+    await persistence.db.query`DELETE FROM squads`
+
+    const window = windowOn(persistence, lyon)
+    await window.call('tictac/api/account/signIn', { token })
+    const first = (await window.call('tictac/api/squad/get')).result.squad as Squad
+    expect(distanceKm(lyon, first.waypoints[0]!)).toBeLessThanOrEqual(START_RADIUS_KM)
+    expect((await window.call('tictac/api/squad/get')).result.squad).toEqual(first)
 
     await persistence.close()
   })

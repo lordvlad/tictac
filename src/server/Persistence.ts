@@ -4,6 +4,7 @@ import { migrate } from './db/migrate'
 import { MatchStore } from './MatchStore'
 import { RoomStore } from './RoomStore'
 import { Rosters } from './Rosters'
+import { Squads } from './Squads'
 
 /**
  * One open database, migrated, with every store that reads it.
@@ -40,6 +41,7 @@ export interface Persistence {
   rooms: RoomStore
   accounts: Accounts
   rosters: Rosters
+  squads: Squads
   close(): Promise<void>
 }
 
@@ -61,12 +63,14 @@ export async function persistenceOverDb(
   // build, and it means there is no separate deploy step to forget.
   await migrate(db)
   const rosters = new Rosters(db)
+  const squads = new Squads(db)
   return {
     db,
     matches: new MatchStore(db),
     rooms: new RoomStore(db),
-    accounts: new Accounts(db, rosters, party),
+    accounts: new Accounts(db, rosters, squads, party),
     rosters,
+    squads,
     close: () => db.close(),
   }
 }

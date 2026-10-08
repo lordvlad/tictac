@@ -2815,6 +2815,58 @@ signatures: it read `Date.now()`, mutated its input and fell back to a 3 km/h de
 - [x] The linear lat/lng interpolation is documented as such (module comment, GDD-WORLD §2).
 ---
 
+### [ITEM-063] A Squad Has a Position, and a Place to Start
+**Completed Date:** 2026-10-08  
+**Type:** Feature  
+**Milestone:** M5 — The Shared World  
+
+#### Why
+Nothing in the database said where a squad is. Decision D2: a squad's position lives in its own
+`squads` table, one row per player for now, so captives, alien squads and several squads per
+player can have positions later. Where a new player starts is GDD-WORLD §4.
+
+#### Key Changes
+- **Migration 7, `squads`**: id, player, the waypoint list as JSON (`src/core/Travel.ts`), and
+  the start in integer millionths of a degree (the `Db` port takes TEXT and INTEGER only),
+  indexed for the separation check; `squads_player` keeps one per player.
+- **`src/server/Squads.ts`**: `drawAround` draws a start uniform over the 50 km disc (radius
+  `R·√u`, uniform bearing, walked along the great circle) from system randomness; a draw within
+  1 km of another start is redrawn, up to 100 times, then the last is taken and a line logged.
+  The drawn point is rounded to the stored precision so the waypoint and the columns agree.
+- **Registration places the squad** in the same transaction as the player and the roster
+  (`Accounts.register(answer, near)`), near `Upgrade.place`, which the Durable Object reads off
+  `request.cf`; Stuttgart centre (48.7775, 9.18) when there is none, which on the Bun server is
+  always. The reported location is written nowhere. `SocketPlace` became the shared `LatLng`.
+- **`tictac/api/squad/get`** returns `{ squad: { id, waypoints } }` to a signed-in socket. A
+  player registered before migration 7 is placed on first asking (`Squads.ensure`, with
+  `ON CONFLICT (player_id) DO NOTHING` for two windows at once), so the migration needs no
+  random backfill in SQL.
+
+#### Measured
+- `tests/squads.test.ts`: 4,000 seeded draws all inside the disc; a χ² over five equal-area rings
+  under the 1% critical value (a radius drawn without the square root fails it); each quadrant
+  within 3% of a quarter; antimeridian draws stay on the map. On each test database, 300
+  players from one anchor are all inside the disc and at least 1 km apart; a crowded anchor
+  takes the last draw and logs once.
+- `tests/accounts.test.ts`: a registration from Tokyo starts within 50 km of it and the
+  `squads` row holds no trace of the reported point; one from nowhere starts near Stuttgart;
+  `squad/get` is refused anonymously; a player with no row is placed near the asking socket's
+  place and stays there.
+- `tests/cloudflare.test.ts`: registered under `workerd`, the squad is read back near Stuttgart
+  (`wrangler dev` reports no location).
+
+#### Acceptance Criteria
+- [x] A registration through Cloudflare stores a start within 50 km of the reported point, and
+      the reported point is stored nowhere (`tests/accounts.test.ts` with a place on the socket;
+      not yet observed on the deployed Worker, where `request.cf` is real).
+- [x] A statistical test shows starts from one anchor spread uniformly over the disc, and no two
+      starts within 1 km.
+- [x] Registration off Cloudflare (and on the Bun server) works through the Stuttgart anchor.
+- [x] The squad is readable over RPC.
+- [x] Living documentation updated (`docs/architecture/persistence.md` §2 and §5a,
+      `docs/architecture/networking.md` §8, GDD-WORLD §4).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

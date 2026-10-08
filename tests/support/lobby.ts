@@ -69,7 +69,7 @@ function layerOf(lobby: Lobby): Layer {
     const accounts = { playerFor: async (token: string) => known.get(token) ?? null }
     const sessions = new Sessions({
       lobby,
-      persistence: { accounts, rosters: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters'>,
+      persistence: { accounts, rosters: {}, squads: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters' | 'squads'>,
       log: () => {},
     })
     layer = { sessions, known }

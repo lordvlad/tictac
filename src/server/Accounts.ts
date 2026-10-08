@@ -1,11 +1,13 @@
 import { rollSquadSheets } from '../core/Characters'
 import { ROSTER } from '../config'
 import { Rng } from '../core/rng'
+import type { LatLng } from '../core/Travel'
 import { fromBase64Url, toBase64Url } from '../game/Base64Url'
 import type { PasskeyAsserted, PasskeyCreated, PasskeyOptions, Player, SignedIn } from '../game/Rpc'
 import type { Db } from './db/Db'
 import type { RelyingParty } from './Persistence'
 import type { Rosters } from './Rosters'
+import type { Squads } from './Squads'
 import {
   ALGORITHMS,
   AuthError,
@@ -24,9 +26,10 @@ import {
  * name they chose and a public key their device holds, and the server never
  * sees a secret it could lose.
  *
- * The one thing an account is *for*, in this game, is owning a roster — so a
- * registration that created a player without a squad would be a half-made
- * account, and both happen in one transaction below.
+ * The one thing an account is *for*, in this game, is owning a roster that is
+ * somewhere on the map — so a registration that created a player without a
+ * roster or a squad would be a half-made account, and all of it happens in one
+ * transaction below.
  */
 
 /** How long a challenge is worth answering. Long enough for a human, short enough to be useless later. */
@@ -55,6 +58,7 @@ export class Accounts {
   constructor(
     private readonly db: Db,
     private readonly rosters: Rosters,
+    private readonly squads: Squads,
     private readonly party: RelyingParty,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -87,8 +91,13 @@ export class Accounts {
     }
   }
 
-  /** Take a created passkey, and with it make a player, a squad and a session. */
-  async register(answer: PasskeyCreated): Promise<SignedIn> {
+  /**
+   * Take a created passkey, and with it make a player, a roster, a squad on
+   * the map and a session. The squad starts near `near` — where the
+   * connection was placed, if it was — which is used for the draw and kept
+   * nowhere (`Squads`).
+   */
+  async register(answer: PasskeyCreated, near: LatLng | null): Promise<SignedIn> {
     const challenge = await this.takeChallenge(answer.challengeId, 'register')
     readClientData(fromBase64Url(answer.clientDataJSON), {
       type: 'webauthn.create',
@@ -126,6 +135,7 @@ export class Accounts {
       // not a squad — the bench exists so resting anyone is a choice.
       const seed = crypto.getRandomValues(new Uint32Array(1))[0]!
       await this.rosters.enlist(tx, playerId, rollSquadSheets(new Rng(seed), ROSTER.size))
+      await this.squads.place(tx, playerId, near)
       return this.startSession(tx, playerId)
     })
     return { token, player: { id: playerId, name } }

@@ -356,6 +356,7 @@ On a fresh socket, in this order:
 | `account/me` | `{}` | `{ player }`, null when anonymous | — |
 | `roster/list` | `{}` | `{ roster: RosterEntry[] }` | `401` |
 | `roster/recruit` | `{}` | `{ member }` | `401`; `400` *the roster is already full* |
+| `squad/get` | `{}` | `{ squad: { id, waypoints } }` — a player from before squads is placed on first asking | `401` |
 | `lobby/subscribe` | `{}` | the `LobbyView` now, then `lobby/changed` pushes | — |
 | `lobby/unsubscribe` | `{}` | `null` | — |
 | `room/enter` | `{ intent }` (`ServerIntent`) | `Seated` | *Entering a room* below |

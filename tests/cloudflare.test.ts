@@ -5,6 +5,8 @@ import { STOCK_PLAN } from '../src/sim/Balance'
 import { simulateOverWire } from '../src/sim/WireMatch'
 import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
 import { softwareAuthenticator } from './support/authenticator'
+import { distanceKm, type LatLng } from '../src/core/Travel'
+import { DEFAULT_ANCHOR, START_RADIUS_KM } from '../src/server/Squads'
 
 /**
  * The planted Cloudflare deployment (`[ITEM-045]`), against a real local
@@ -249,6 +251,10 @@ describe('The planted Cloudflare deployment', () => {
     const signed = await second.call('tictac/api/account/signIn', { token })
     expect((signed.result?.player as { name: string }).name).toBe('Tester')
     expect((await second.call('tictac/api/roster/list')).result?.roster).toHaveLength(6)
+    // The squad was placed at registration, on the Durable Object's own
+    // SQLite; `wrangler dev` reports no location, so near Stuttgart.
+    const squad = (await second.call('tictac/api/squad/get')).result?.squad as { waypoints: LatLng[] }
+    expect(distanceKm(DEFAULT_ANCHOR, squad.waypoints[0]!)).toBeLessThanOrEqual(START_RADIUS_KM)
     second.socket.close()
   })
 

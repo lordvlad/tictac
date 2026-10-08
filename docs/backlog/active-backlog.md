@@ -402,64 +402,10 @@ to this item.
 
 ---
 
-### [ITEM-063] A Squad Has a Position, and a Place to Start
-**Type:** Feature
-**Priority:** P2
-**Status:** Ready — the waypoint shape (`ITEM-062`) and `request.cf` on the session (`ITEM-060`)
-both shipped
-**Milestone:** M5 — The Shared World
-
-#### Why
-Nothing in the database says where a squad is. The user's decision (D2): a squad's position
-lives in a new `squads` table — one row per player for now — not a column on `players`, so that
-captives (`ITEM-054`), alien squads and several squads per player can have positions later.
-Where a new player starts is GDD-WORLD §4 (ex-`ITEM-049`).
-
-#### Change
-1. **A migration for `squads`**: the squad's id, its player, and its waypoint list (the
-   `ITEM-062` shape).
-2. **Registration places the squad**: draw a point uniformly over the 50 km disc around the
-   session's `request.cf` latitude/longitude (radius `R·√u`); redraw if it lands within 1 km of
-   another player's start (D4); store only the drawn point, never the reported one.
-3. **The fallback anchor** is Stuttgart centre, 48.7775, 9.18 (D3), used when Cloudflare reports
-   no location and always on the Bun server.
-4. **The draw uses system randomness**, never the match stream (AGENTS.md §2.3).
-5. **An RPC method reads the squad** (position as waypoints), over `ITEM-060`'s socket.
-
-#### Affected Files
-- `src/server/db/migrations.ts` (the `squads` table)
-- `src/server/Accounts.ts` (`register`: the start), `src/server/Persistence.ts`
-- `src/server/Lobby.ts` (the read method)
-- `docs/architecture/persistence.md`
-
-#### P2P / Simulation Impact
-- None on matches. The draw is setup randomness outside any match.
-
-#### Acceptance Criteria
-- [ ] A registration through Cloudflare stores a start within 50 km of the reported point, and
-      the reported point is stored nowhere.
-- [ ] A statistical test shows starts from one anchor spread uniformly over the disc, and no two
-      starts within 1 km.
-- [ ] Registration off Cloudflare (and on the Bun server) works through the Stuttgart anchor.
-- [ ] The squad is readable over RPC.
-- [ ] Living documentation updated (persistence: the table).
-
-#### Risks & Mitigations
-- **Risk:** a drawn start lands in the sea; the server has no land mask (D6, open).
-- **Mitigation:** decided later, not here: accept sea starts or redraw against a coarse mask.
-- **Risk:** every off-Cloudflare player starts near Stuttgart, so the 1 km redraw runs more often
-  there as players accumulate.
-- **Mitigation:** the 50 km disc holds thousands of 1 km-separated starts; cap the redraws and
-  log if it is ever hit.
-- **Risk:** IP geolocation can be far off (mobile carriers, VPNs).
-- **Mitigation:** accepted. The start is meant to be roughly local, not exact.
-
----
-
 ### [ITEM-064] Orders, Pace and the Travel Scheduler
 **Type:** Feature
 **Priority:** P2
-**Status:** Ready — after `ITEM-063`
+**Status:** Ready — the travel maths (`ITEM-062`) and the squads table (`ITEM-063`) are built
 **Milestone:** M5 — The Shared World
 
 #### Why

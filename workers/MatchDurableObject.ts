@@ -6,7 +6,8 @@ import {
   type Persistence,
   type RelyingParty,
 } from '../src/server/Persistence'
-import { Sessions, type SocketPlace } from '../src/server/Session'
+import type { LatLng } from '../src/core/Travel'
+import { Sessions } from '../src/server/Session'
 import { socketTransport } from '../src/server/SocketTransport'
 import { dbOverSqlStorage } from './DoSqliteDb'
 import type { Env } from './index'
@@ -110,12 +111,12 @@ export class MatchDurableObject extends DurableObject<Env> {
  * say — `wrangler dev`, or a zone without geolocation. Its coordinates are
  * decimal strings.
  */
-function placeOf(cf: unknown): SocketPlace | null {
+function placeOf(cf: unknown): LatLng | null {
   if (typeof cf !== 'object' || cf === null) return null
   const { latitude, longitude } = cf as { latitude?: unknown; longitude?: unknown }
-  const place = { latitude: Number(latitude), longitude: Number(longitude) }
+  const place = { lat: Number(latitude), lng: Number(longitude) }
   const known = typeof latitude === 'string' && typeof longitude === 'string'
-  return known && Number.isFinite(place.latitude) && Number.isFinite(place.longitude) ? place : null
+  return known && Number.isFinite(place.lat) && Number.isFinite(place.lng) ? place : null
 }
 
 /**

@@ -85,7 +85,7 @@ graph TD
   a squad's position and start, `[ITEM-064]` orders, pace and the travel scheduler,
   `[ITEM-065]` the map screen, then `[ITEM-066]` the decisions encounters need (a design task;
   blocks `[ITEM-048]`). Split from `[ITEM-050]` on 2026-10-07.
-- Done: `[ITEM-060]` and `[ITEM-061]` (2026-10-07), `[ITEM-062]` (2026-10-08).
+- Done: `[ITEM-060]` and `[ITEM-061]` (2026-10-07), `[ITEM-062]` and `[ITEM-063]` (2026-10-08).
 - **Definition of done:** a signed-in player sees their squad on a real planet map near where
   they registered, sends it travelling, closes the tab, and finds it where the clock says; one
   socket per window.

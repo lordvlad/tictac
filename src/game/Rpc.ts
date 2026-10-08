@@ -1,4 +1,5 @@
 import type { CharacterSheet } from '../core/Characters'
+import type { Waypoint } from '../core/Travel'
 import type { LobbyView, Seated, ServerIntent } from './Lobby'
 
 /**
@@ -6,7 +7,7 @@ import type { LobbyView, Seated, ServerIntent } from './Lobby'
  * (`ITEM-060`).
  *
  * A window opens one WebSocket to its match server and keeps it: signing in,
- * the roster, the lobby, taking a seat, and later the map, all travel over it
+ * the roster, the lobby, taking a seat and the squad's place on the map travel over it
  * as JSON-RPC 2.0. A *request* (`id` set) is answered by exactly one response;
  * a *notification* (no `id`) is the server telling the window something it did
  * not ask for — the lobby changed, the window was replaced. The match itself
@@ -41,6 +42,12 @@ import type { LobbyView, Seated, ServerIntent } from './Lobby'
 export interface Player {
   id: string
   name: string
+}
+
+/** A squad on the world map, as a window is shown it (GDD-WORLD §2). */
+export interface Squad {
+  id: string
+  waypoints: Waypoint[]
 }
 
 /**
@@ -128,6 +135,13 @@ export interface RpcApi {
   'tictac/api/account/me': { params: Record<string, never>; result: { player: Player | null } }
   'tictac/api/roster/list': { params: Record<string, never>; result: { roster: RosterEntry[] } }
   'tictac/api/roster/recruit': { params: Record<string, never>; result: { member: RosterEntry } }
+  /**
+   * This player's squad on the world map: its waypoint list, from which
+   * `positionAt` (`src/core/Travel.ts`) gives where it is at any moment. A
+   * player registered before squads existed is placed on first asking, near
+   * where this socket's connection was placed.
+   */
+  'tictac/api/squad/get': { params: Record<string, never>; result: { squad: Squad } }
   /**
    * The lobby now, and `tictac/api/lobby/changed` with the whole view
    * whenever it changes until `lobby/unsubscribe` (or the socket closes).

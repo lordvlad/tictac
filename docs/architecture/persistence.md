@@ -3,7 +3,7 @@ title: "Persistence: Database Port, Migrations, Accounts & Rosters"
 id: "ARCH-PERSISTENCE"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-10-07"
+lastReviewed: "2026-10-08"
 appliesTo:
   - "src/server/**"
   - "scripts/serve-match.ts"
@@ -19,7 +19,7 @@ relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
   - "docs/architecture/networking.md"
   - "docs/backlog/active-backlog.md"
-tags: ["persistence", "database", "sqlite", "postgres", "webauthn", "passkeys", "roster"]
+tags: ["persistence", "database", "sqlite", "postgres", "webauthn", "passkeys", "roster", "squads"]
 ---
 
 # Persistence: Database Port, Migrations, Accounts & Rosters
@@ -108,6 +108,7 @@ Migrations are append-only and never edited once shipped:
 4. **`lasting wounds`** — `roster.hp`, `roster.deeds` (`ITEM-038`).
 5. **`fatigue and medical bay`** — `roster.fatigue`, `roster.downtime` (`ITEM-039`).
 6. **`rooms`** — `rooms`, the lobby's live rooms (§3).
+7. **`squads`** — `squads`, where each squad is on the world map (§5a).
 
 > This is the *database* schema. The **recorded command and component
 > shapes** are a separate guard — `bun run schema:catalog`, see
@@ -209,6 +210,7 @@ refused `401` *sign in first* on a socket nobody signed in on.
 | `account/me` | `{}` | `{ player }`, null when anonymous |
 | `roster/list` | `{}` | `{ roster }` |
 | `roster/recruit` | `{}` | `{ member }` — `400` if the roster is already full |
+| `squad/get` | `{}` | `{ squad }` — its id and waypoint list (§5a) |
 
 A ceremony is checked against the configured origins (`--origins`); there is no
 CORS, because nothing but the built client and the map's tiles is HTTP. Every
@@ -377,6 +379,32 @@ type.
 > since `[ITEM-042]` shipped would have named nobody and been aborted by a
 > real referee — caught only once `[ITEM-039]`'s own regression test built a
 > `Squads` and read `deploymentsOf` back, which no earlier test had done.
+
+---
+
+## 5a. Squads on the Map
+
+`src/server/Squads.ts`, migration 7 (`ITEM-063`, GDD-WORLD §2 and §4). A squad is a row of its
+own, not a column on `players`, so captives, alien squads and several squads per player can have
+positions later; `squads_player` keeps it to one per player for now.
+
+| Column | What |
+|---|---|
+| `waypoints` | the waypoint list as JSON (`src/core/Travel.ts`): where it has been and is going. The position now is computed from it and the clock, never stored. |
+| `start_lat_e6`, `start_lng_e6` | the start, in integer millionths of a degree (the port takes TEXT and INTEGER only), indexed so the separation check is a range query |
+
+**The start.** Registration places the squad in the same transaction as the player and the
+roster, so no player exists without one. The point is drawn from system randomness, uniform over
+the 50 km disc around where Cloudflare placed the connection (`request.cf`, carried on the socket
+as `Upgrade.place`) or around Stuttgart centre when there is no such place, which on the Bun
+server is always. A draw within 1 km of another start is redrawn, up to 100 times; past that the
+last draw is taken and a line is logged. The drawn point is rounded to the stored precision so the
+waypoint and the columns agree, and the reported location is written down nowhere.
+
+**Players from before squads.** Migration 7 adds no rows: a random draw is not something SQL
+should do. `Squads.ensure` places a player who has no squad the first time `squad/get` asks,
+near the asking socket's place, with `ON CONFLICT (player_id) DO NOTHING` so two windows asking
+at once end up with one squad.
 
 ---
 

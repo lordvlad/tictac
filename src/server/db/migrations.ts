@@ -8,9 +8,9 @@ import type { Migration } from './migrate'
  * of migration 2 disagrees with this file's. Renaming one is therefore a
  * deliberate breaking change, not a tidy-up.
  *
- * The tables here fall into four groups: the intent log a referee keeps, the
- * accounts a player signs in with, the roster those accounts own, and the
- * rooms a lobby holds open across a restart.
+ * The tables here fall into five groups: the intent log a referee keeps, the
+ * accounts a player signs in with, the roster those accounts own, the rooms a
+ * lobby holds open across a restart, and where each squad is on the map.
  */
 
 /**
@@ -216,6 +216,29 @@ export const MIGRATIONS: readonly Migration[] = [
          red_name       TEXT,
          red_key_hash   TEXT
        )`,
+    ],
+  },
+  {
+    id: 7,
+    name: 'squads',
+    up: [
+      // Where a squad is: its waypoint list as JSON (`src/core/Travel.ts`),
+      // never a stored point — the position now is computed from the list
+      // and the clock. The start is kept beside it, in integer millionths of
+      // a degree, so the 1 km separation between starts is a range query
+      // rather than a scan of every list. No player who registered before
+      // this has a row; `Squads.ensure` places them when first asked.
+      `CREATE TABLE squads (
+         id           TEXT    PRIMARY KEY,
+         player_id    TEXT    NOT NULL REFERENCES players(id),
+         waypoints    TEXT    NOT NULL,
+         start_lat_e6 INTEGER NOT NULL,
+         start_lng_e6 INTEGER NOT NULL,
+         created_at   TEXT    NOT NULL
+       )`,
+      // One squad per player for now. Dropped when a player may have several.
+      'CREATE UNIQUE INDEX squads_player ON squads (player_id)',
+      'CREATE INDEX squads_start ON squads (start_lat_e6, start_lng_e6)',
     ],
   },
 ]

@@ -19,8 +19,8 @@ tags: ["world", "map", "travel", "encounters", "design"]
 
 # GDD: The World Map, Travel and Encounters on the Road
 
-**Status: designed; partly built** (M5: `ITEM-060`–`ITEM-065`, of which the map tiles and the
-travel maths exist; then `ITEM-048`, `ITEM-053`). This
+**Status: designed; partly built** (M5: `ITEM-060`–`ITEM-065`, of which the map tiles, the
+travel maths and the squads table with its starts exist; then `ITEM-048`, `ITEM-053`). This
 is where a squad is between fights. Combat ([Combat Mechanics](combat-mechanics.md)) is what
 happens once two squads meet. The overview's shared world ([Overview](overview.md) §3, §4)
 assumes this layer exists; this document says what it is.
@@ -127,7 +127,10 @@ The point is drawn uniformly over the disc (radius `R·√u`), from system rando
 any match's dice, and redrawn if it lands within **1 km** of another player's start. Only the
 drawn point is stored; the reported one is kept nowhere. A connection with no reported
 location — and every registration on the Bun server, which is not behind Cloudflare — falls
-back to the default anchor, **Stuttgart centre (48.7775, 9.18)**. (`ITEM-063`.)
+back to the default anchor, **Stuttgart centre (48.7775, 9.18)**. If 100 draws in a row land
+too close to others, the last is taken and the server logs it rather than refusing the
+player. A player who registered before squads existed is placed the same way the first time
+their squad is asked for. (`ITEM-063`, built: `src/server/Squads.ts`.)
 
 **Not decided: sea starts.** A drawn point can land in the sea; the server has no land mask.
 Whether to accept that or redraw against a coarse mask is decided later.
