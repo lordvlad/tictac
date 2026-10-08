@@ -136,13 +136,14 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   `style` object per element, ten near-copies of the same button, and a flat list of six choices
   that each hid which kind it was.
 - **The match-server panel is the lobby.** `ServerPanel.tsx` keeps the address, the account
-  line and the passkey ceremony, and below them polls `Account.lobby()` (`GET /api/lobby`,
-  `src/game/Lobby.ts`) every two seconds while it is mounted, dropping answers for an address
-  no longer in the box. `LobbyList.tsx` draws the rooms in two sections by what a visitor can
-  do with them — *waiting for an opponent* (Join) and *in progress* (Watch; a seat held for a
-  dropped player reads "reconnecting…") — inside a scrolling box so a busy server never pushes
-  the card off-screen. **Open a Match**, Join and Watch are all one
-  `onServerConnect(url, intent)` prop; the server decides where the socket lands. When the
+  line and the passkey ceremony over the window's one `ServerConnection` (`connectionFor(url)`,
+  opened once the typed address has stood still for 400 ms), and below them the room list,
+  pushed by the server through `ServerConnection.watchLobby` (`src/game/Lobby.ts`) and never
+  polled; the subscription ends when the panel unmounts. `LobbyList.tsx` draws the rooms in two
+  sections by what a visitor can do with them — *waiting for an opponent* (Join) and *in
+  progress* (Watch; a seat held for a dropped player reads "reconnecting…") — inside a scrolling
+  box so a busy server never pushes the card off-screen. **Open a Match**, Join and Watch are all
+  one `onServerConnect(url, intent)` prop; the server decides where the window lands. When the
   lobby reports this player's own match as `playing`, the panel takes it over once (`resume`);
   when it is still being set up elsewhere, a warning says that acting here abandons it.
 - **Not React:** Tweakpane's panels inside `DebugPanel`, the frame counter's per-frame text

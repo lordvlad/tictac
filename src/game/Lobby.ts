@@ -4,21 +4,23 @@ import type { Faction } from '../config'
  * The lobby contract, shared by the match server and the browser.
  *
  * A match server holds many rooms. A room is one match: two seats (Blue opens
- * it, Red joins it) and any number of spectators. Which room a socket belongs
- * to, and in what role, is decided once, when it connects — by the intent in
- * its url — and stated back to it in one `seated` frame. Everything after that
- * is the same JSON-RPC conversation a match always had, scoped to the room.
+ * it, Red joins it) and any number of spectators. Which room a window is in,
+ * and in what role, is decided when it asks (`room/enter`, `src/game/Rpc.ts`)
+ * and stated back in the answer (`Seated`). Everything after that is the same
+ * JSON-RPC conversation a match always had, scoped to the room, on the same
+ * socket — which outlives the room: leaving one is not hanging up.
  *
  * Three rules hold the whole thing together:
  *
  * - **One match per player.** A signed-in player who holds a seat in a room
  *   that is not over cannot open, join or watch anything else: whatever they
  *   asked for, they are put back in their own seat (`redirected`).
- * - **One live window per player.** A signed-in player's newest socket wins.
- *   Their previous socket, wherever it was, is told why and closed. A match
- *   already `playing` carries on in the new window, rebuilt from the log; a
- *   match still being set up (`waiting` or `deploying`) is abandoned instead,
- *   and the new window starts from the lobby. Moving a half-equipped loadout
+ * - **One live window per player.** A signed-in player's newest socket wins:
+ *   signing in on it replaces the previous one, which is told why and closed,
+ *   and whose seat is held for the grace. A match already `playing` carries
+ *   on in the new window, rebuilt from the log; a match still being set up
+ *   (`waiting` or `deploying`) is abandoned once the new window enters
+ *   anywhere other than by that seat's key. Moving a half-equipped loadout
  *   between windows is not worth what it would cost.
  * - **A seat is a socket.** Nothing a seat sends is accepted from anywhere
  *   else; a spectator sends nothing that is acted on.
@@ -26,7 +28,7 @@ import type { Faction } from '../config'
  * Kept free of anything that runs only on one side, so both import it.
  */
 
-/** What a socket asks for when it connects. Encoded into its url (`intentQuery`). */
+/** What a window asks for when it enters a room (`room/enter`). */
 export type ServerIntent =
   /** Open a new room and take its Blue seat. */
   | { kind: 'open' }
@@ -37,12 +39,12 @@ export type ServerIntent =
   /**
    * Take a seat back.
    *
-   * With `roomId` and `seatKey` (from this socket's own earlier `seated`):
-   * the same window reconnecting after a dropped connection or a server
-   * restart, signed in or not — the key is the seat's proof of ownership, so
-   * no ticket is needed. Without them: a signed-in player taking their match
-   * over in a new window, which is only meaningful for a match `playing`.
-   * Anything else is refused with a reason.
+   * With `roomId` and `seatKey` (from this window's own earlier seat): the
+   * same window reconnecting after a dropped connection or a server restart,
+   * signed in or not — the key is the seat's proof of ownership. Without
+   * them: a signed-in player taking their match over in a new window, which
+   * is only meaningful for a match `playing`. Anything else is refused with
+   * a reason.
    */
   | { kind: 'resume'; roomId?: string; seatKey?: string }
 
@@ -57,14 +59,15 @@ export type ServerIntent =
 export type RoomPhase = 'waiting' | 'deploying' | 'playing'
 
 /**
- * The first frame a server sends a socket, once its `hello` has passed the
- * version gate: which room it is in and as whom.
+ * Where the server put a window (`room/enter`): which room it is in and as
+ * whom.
  *
  * `faction` is null for a spectator. A seat in a room that is `playing`, and
  * every spectator of one, is sent the match's `log` (header and every intent
- * so far) straight after; a spectator of a room that starts later is sent it
- * when the room starts. A seat in a room that is still being set up proceeds
- * exactly as before: Blue announces the match (`init`), Red waits for it.
+ * so far) straight after the answer; a spectator of a room that starts later
+ * is sent it when the room starts. A seat in a room that is still being set
+ * up proceeds exactly as before: Blue announces the match (`init`), Red
+ * waits for it.
  */
 export interface Seated {
   roomId: string
@@ -79,8 +82,8 @@ export interface Seated {
   /**
    * The secret that takes this seat back (`resume` with `roomId`), or null
    * for a spectator, who has no seat to take back and simply watches again.
-   * Kept by the window in memory only; a new window proves itself with a
-   * ticket instead.
+   * Kept by the window in memory only; a new window proves itself by
+   * signing in instead.
    */
   seatKey: string | null
 }
@@ -105,46 +108,9 @@ export interface LobbyRoom {
   createdAt: string
 }
 
-/** `GET /api/lobby`. The bearer token is optional; without one `you` is null. */
+/** The rooms as a window is shown them (`lobby/subscribe`, then every `lobby/changed`); `you` is null for an anonymous socket. */
 export interface LobbyView {
   rooms: LobbyRoom[]
   /** The seat the asking player holds, if any. A client seeing one takes it over (`resume`). */
   you: { roomId: string; faction: Faction; phase: RoomPhase } | null
-}
-
-/** The query string a socket url carries for `intent`, without the leading `?`/`&`. */
-export function intentQuery(intent: ServerIntent): string {
-  const params = new URLSearchParams({ intent: intent.kind })
-  if (intent.kind === 'join' || intent.kind === 'watch') params.set('room', intent.roomId)
-  if (intent.kind === 'resume' && intent.roomId && intent.seatKey) {
-    params.set('room', intent.roomId)
-    params.set('seat', intent.seatKey)
-  }
-  return params.toString()
-}
-
-/**
- * The intent a socket url states, or null for one that states none or states
- * one badly. Peer input: checked, not trusted.
- */
-export function parseIntent(params: URLSearchParams): ServerIntent | null {
-  const kind = params.get('intent')
-  const roomId = params.get('room')
-  const usable = (value: string | null): value is string => !!value && value.length > 0 && value.length <= 64
-  switch (kind) {
-    case 'open':
-      return { kind }
-    case 'resume': {
-      // Both or neither: a room without its key proves nothing, and a key
-      // without its room names nothing.
-      const seatKey = params.get('seat')
-      if (roomId === null && seatKey === null) return { kind }
-      return usable(roomId) && usable(seatKey) ? { kind, roomId, seatKey } : null
-    }
-    case 'join':
-    case 'watch':
-      return usable(roomId) ? { kind, roomId } : null
-    default:
-      return null
-  }
 }

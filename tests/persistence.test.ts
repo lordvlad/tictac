@@ -14,7 +14,7 @@ import { carriedOut, settlement, winnerOf, type UnitFate } from '../src/game/Mat
 import type { CombatRecording, Deployment, RecordingHeader } from '../src/game/Recording'
 import { Squads } from '../src/game/Squads'
 import { TurnManager } from '../src/game/TurnManager'
-import type { Player } from '../src/server/Accounts'
+import type { Player } from '../src/game/Rpc'
 import { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
 import type { RefereeVerdict } from '../src/server/Room'
@@ -535,7 +535,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
 
-    const { blue } = seatBoth(lobby, ADA, BO)
+    const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(recording.header, characterIds), startingHp),
@@ -594,7 +594,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     )
     const before = await persistence.rosters.active('A')
 
-    const { blue } = seatBoth(lobby, ADA, BO)
+    const { blue } = await seatBoth(lobby, ADA, BO)
     // A real id of A's, a sheet that is not that character's.
     blue.send({
       type: 'matchHeader',
@@ -628,7 +628,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const { blue } = seatBoth(lobby, ADA, BO)
+    const { blue } = await seatBoth(lobby, ADA, BO)
     // No `startingHp` at all — exactly what an old client, or one that
     // simply left it out, would send.
     blue.send({ type: 'matchHeader', header: withCharacterIds(recording.header, characterIds) })
@@ -657,7 +657,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const { blue } = seatBoth(lobby, ADA, BO)
+    const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(recording.header, characterIds), wrongHp),
@@ -691,7 +691,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const { blue } = seatBoth(lobby, ADA, BO)
+    const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(recording.header, characterIds), startingHp, wrongFatigue),
@@ -726,7 +726,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: enlisted.map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const { blue } = seatBoth(lobby, ADA, BO)
+    const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(recording.header, characterIds), startingHp),
@@ -752,9 +752,9 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     )
     const before = await persistence.rosters.active('A')
 
-    const first = connect(lobby, ADA, { kind: 'open' })
+    const first = await connect(lobby, ADA, { kind: 'open' })
     const roomId = roomOf(first)
-    const second = connect(lobby, ADA, { kind: 'join', roomId })
+    const second = await connect(lobby, ADA, { kind: 'join', roomId })
     first.send({ type: 'matchHeader', header: recording.header })
     await lobby.idle()
 
@@ -777,7 +777,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     )
     const before = await persistence.rosters.active('A')
 
-    const { blue, roomId } = seatBoth(lobby, null, null)
+    const { blue, roomId } = await seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
     for (const event of recording.events) blue.send(event.command)
     await lobby.idle()
@@ -822,7 +822,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Blue]: living.map((member) => member.characterId),
       [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
     }
-    const { blue } = seatBoth(lobby, ADA, BO)
+    const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: withStartingHp(withCharacterIds(header, characterIds), startingHp),
@@ -850,7 +850,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     )
     await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE player_id = ${'A'}`
 
-    const { blue } = seatBoth(lobby, ADA, BO)
+    const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
       type: 'matchHeader',
       header: { ...recording.header, squads: { ...recording.header.squads, [Faction.Blue]: [] } },

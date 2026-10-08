@@ -1,11 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  CONNECTION_LOST,
-  NetworkManager,
-  type NetworkMessage,
-  type NetworkMode,
-  type Resync,
-} from '../src/game/NetworkManager'
+import { NetworkManager, type NetworkMessage, type NetworkMode, type Resync } from '../src/game/NetworkManager'
+import { CONNECTION_LOST, heldTokens, ServerConnection } from '../src/game/ServerConnection'
+import { handClock, handServer, type HandClock, type HandServer, type HandSocket } from './support/handServer'
 import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { CHARACTER, Faction, RULES, SQUAD_SIZE } from '../src/config'
@@ -28,6 +24,7 @@ import {
   isJsonRpcFrame,
   type JsonRpcFrame,
   type JsonRpcNotification,
+  type JsonRpcRequest,
   parseComponentUpdateMethod,
   RpcMethods,
 } from '../src/game/JsonRpc'
@@ -607,14 +604,11 @@ describe('A match over a linked pair, with no broker', () => {
  */
 function refereeSocket(onOpen: (client: SocketClient) => void) {
   const heard: string[] = []
-  const asked: URL[] = []
   const waiting: (() => void)[] = []
   const server = Bun.serve({
     port: 0,
-    fetch: (request, self) => {
-      asked.push(new URL(request.url))
-      return self.upgrade(request) ? undefined : new Response('expected a websocket', { status: 400 })
-    },
+    fetch: (request, self) =>
+      self.upgrade(request) ? undefined : new Response('expected a websocket', { status: 400 }),
     websocket: {
       open: (ws) =>
         onOpen({
@@ -634,8 +628,6 @@ function refereeSocket(onOpen: (client: SocketClient) => void) {
   })
   return {
     heard,
-    /** The url every socket connected with, in order. */
-    asked,
     url: `ws://localhost:${server.port}`,
     /** Resolves on the next frame this server is told. */
     nextHeard: () => new Promise<void>((resolve) => waiting.push(resolve)),
@@ -766,79 +758,78 @@ describe('A match over a socket, as a referee would host one', () => {
 
 const notify = (method: string, params: Record<string, unknown>): JsonRpcFrame => ({ jsonrpc: '2.0', method, params })
 
-describe('Connecting to a match server', () => {
+const opening: RecordingHeader = {
+  version: RECORDING_VERSION,
+  seed: 77,
+  seedLabel: '77',
+  source: 'live',
+  createdAt: '',
+  turnCap: null,
+  squads: {
+    [Faction.Blue]: rollSquadSheets(new Rng(1)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
+    [Faction.Red]: rollSquadSheets(new Rng(2)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
+  },
+}
+
+/** A window's connection to a `handServer`, signed in as nobody. */
+function windowOn(server: HandServer, clock: HandClock): ServerConnection {
+  return new ServerConnection('ws://tictac.test/', { connect: server.connect, schedule: clock.schedule, tokens: heldTokens() })
+}
+
+describe('Entering a room on a match server', () => {
   const seat: Seated = { roomId: 'r00m', faction: Faction.Red, phase: 'playing', redirected: true, seatKey: 'k3y' }
-  const opening: RecordingHeader = {
-    version: RECORDING_VERSION,
-    seed: 77,
-    seedLabel: '77',
-    source: 'live',
-    createdAt: '',
-    turnCap: null,
-    squads: {
-      [Faction.Blue]: rollSquadSheets(new Rng(1)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
-      [Faction.Red]: rollSquadSheets(new Rng(2)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
-    },
-  }
   const logged = [{ seq: 0, turn: 1, faction: Faction.Blue, command: { type: 'endTurn', faction: Faction.Blue } }]
 
-  test('asks by url, says hello, and is told its seat and the match so far', async () => {
-    const server = refereeSocket((client) => {
-      client.send(notify(RpcMethods.seated, { ...seat }))
-      client.send(notify(RpcMethods.log, { matchId: 'r00m', header: opening, events: logged }))
-    })
+  test('asks for its place after hello, and is told its seat and then the match so far', async () => {
+    const clock = handClock()
+    const server = handServer(clock)
+    server.answer = (socket, request) => {
+      socket.reply(request.id as number, seat)
+      socket.send(notify(RpcMethods.log, { matchId: 'r00m', header: opening, events: logged }))
+    }
     const net = new NetworkManager()
     const seen: NetworkMessage[] = []
     net.onMessage = (msg) => seen.push(msg)
-    try {
-      const hello = server.nextHeard()
-      // A ticket already on the url stays there: the intent is added beside it.
-      const seated = await net.connectToServer(`${server.url}/?ticket=t1`, { kind: 'watch', roomId: 'r00m' })
-      expect(seated).toEqual(seat)
-      expect(Object.fromEntries(server.asked[0]!.searchParams)).toEqual({ ticket: 't1', intent: 'watch', room: 'r00m' })
-      await hello
-      expect(server.heard).toEqual([JSON.stringify({ jsonrpc: '2.0', method: RpcMethods.hello, params: { ...MY_VERSION } })])
 
-      // The seat decides who this side is; the frame that said so is never
-      // mistaken for a move.
-      expect([net.mode, net.myFaction]).toEqual(['join', Faction.Red])
+    expect(await net.enterRoom(windowOn(server, clock), { kind: 'watch', roomId: 'r00m' })).toEqual(seat)
+    // Nothing about the room rides in the url; it is asked for.
+    expect(server.last.url.search).toBe('')
+    expect(server.last.heard).toEqual([
+      notify(RpcMethods.hello, { ...MY_VERSION }),
+      { jsonrpc: '2.0', id: 1, method: 'tictac/api/room/enter', params: { intent: { kind: 'watch', roomId: 'r00m' } } },
+    ])
 
-      // Asked for after it arrived, and still there.
-      const log = await net.waitForLog()
-      expect(log.matchId).toBe('r00m')
-      expect(log.header.seed).toBe(77)
-      expect(log.events.map((event) => event.command)).toEqual([{ type: 'endTurn', faction: Faction.Blue }])
-      expect(seen).toEqual([])
-    } finally {
-      net.dispose()
-      server.stop()
-    }
+    // The seat decides who this side is; the answer that said so is never
+    // mistaken for a move.
+    expect([net.mode, net.myFaction]).toEqual(['join', Faction.Red])
+
+    // Sent straight after the answer, and still there when asked for.
+    const log = await net.waitForLog()
+    expect(log.matchId).toBe('r00m')
+    expect(log.header.seed).toBe(77)
+    expect(log.events.map((event) => event.command)).toEqual([{ type: 'endTurn', faction: Faction.Blue }])
+    expect(seen).toEqual([])
   })
 
-  test('an abort before the seat is the reason the connection failed, and the log will not come either', async () => {
-    const server = refereeSocket((client) =>
-      client.send(notify(RpcMethods.abort, { reason: 'That match is gone.', side: null })),
-    )
+  test('a refusal is the reason entering failed, the log will not come either, and the server stays', async () => {
+    const clock = handClock()
+    const server = handServer(clock)
+    server.answer = (socket, request) => socket.refuse(request.id as number, 410, 'That match is gone.')
+    const connection = windowOn(server, clock)
     const net = new NetworkManager()
-    try {
-      const log = net.waitForLog()
-      await expect(net.connectToServer(server.url, { kind: 'join', roomId: 'nowhere' })).rejects.toThrow('That match is gone.')
-      await expect(log).rejects.toThrow('That match is gone.')
-    } finally {
-      net.dispose()
-      server.stop()
-    }
+    const log = net.waitForLog()
+
+    await expect(net.enterRoom(connection, { kind: 'join', roomId: 'nowhere' })).rejects.toThrow('That match is gone.')
+    await expect(log).rejects.toThrow('That match is gone.')
+    expect(connection.state).toEqual({ kind: 'open' })
   })
 
-  test('a socket that closes before the seat says so rather than waiting forever', async () => {
-    const server = refereeSocket((client) => client.close(4000, 'the server is shutting down'))
+  test('a socket that goes before the seat says so rather than waiting forever', async () => {
+    const clock = handClock()
+    const server = handServer(clock)
+    server.answer = (socket) => socket.drop()
     const net = new NetworkManager()
-    try {
-      await expect(net.connectToServer(server.url, { kind: 'open' })).rejects.toThrow('the server is shutting down')
-    } finally {
-      net.dispose()
-      server.stop()
-    }
+    await expect(net.enterRoom(windowOn(server, clock), { kind: 'open' })).rejects.toThrow('dropped')
   })
 
   test('a log this build cannot read is refused, not built from', async () => {
@@ -892,13 +883,15 @@ describe('A side that arrives in the middle of a match', () => {
 })
 
 describe('A spectator', () => {
-  test('says nothing after hello: no commands, no digests, no replicated state', () => {
+  test('says nothing after entering: no commands, no digests, no replicated state', async () => {
+    const clock = handClock()
+    const server = handServer(clock)
+    server.answer = (socket, request) =>
+      socket.reply(request.id as number, { roomId: 'r00m', faction: null, phase: 'playing', redirected: false, seatKey: null })
     const net = new NetworkManager()
-    const [ours, theirs] = loopback()
-    net.attach(ours)
-    const sent: JsonRpcFrame[] = []
-    theirs.onFrame((frame) => sent.push(frame))
-    theirs.send(notify(RpcMethods.seated, { roomId: 'r00m', faction: null, phase: 'playing', redirected: false }))
+    await net.enterRoom(windowOn(server, clock), { kind: 'watch', roomId: 'r00m' })
+    const socket = server.last
+    const before = socket.heard.length
     expect(net.mode).toBe('spectate')
     expect(net.isMyTurn(Faction.Blue)).toBe(false)
     expect(net.isMyTurn(Faction.Red)).toBe(false)
@@ -914,109 +907,25 @@ describe('A spectator', () => {
     net.sendRpc(notify(RpcMethods.digest, { digest: {} }))
     // A hello relayed to it would make a seat restate its opening; a
     // spectator has none to restate, and would not say it if it had.
-    theirs.send(notify(RpcMethods.hello, { ...MY_VERSION }))
+    socket.send(notify(RpcMethods.hello, { ...MY_VERSION }))
 
-    expect(sent).toEqual([])
+    expect(socket.heard.slice(before)).toEqual([])
   })
 })
 
-/**
- * Timers on a clock the test turns by hand: what a manager waits for between
- * tries, and how long it keeps trying, without a test that takes two minutes.
- */
-function handClock() {
-  let now = 0
-  const timers: { at: number; fn: () => void; live: boolean }[] = []
-  return {
-    schedule: (fn: () => void, ms: number) => {
-      const timer = { at: now + ms, fn, live: true }
-      timers.push(timer)
-      return () => {
-        timer.live = false
-      }
-    },
-    /** Run every timer due within `ms`, in the order they fall due. */
-    advance(ms: number) {
-      const until = now + ms
-      for (;;) {
-        const due = timers.filter((t) => t.live && t.at <= until).sort((a, b) => a.at - b.at)[0]
-        if (!due) break
-        now = due.at
-        due.live = false
-        due.fn()
-      }
-      now = until
-    },
-    get now() {
-      return now
-    },
-  }
-}
-
-/**
- * A match server as the manager meets it: every socket it opens, when, by
- * which url, and everything said on it — with the far end in the test's hand.
- * `answer` is how the server greets a socket's `hello`; left unset, nobody
- * answers, and `down` closes a socket the moment it speaks.
- */
-function handServer(clock: ReturnType<typeof handClock>) {
-  interface Socket {
-    url: URL
-    at: number
-    heard: JsonRpcNotification[]
-    send(frame: JsonRpcFrame): void
-    drop(): void
-  }
-  const sockets: Socket[] = []
-  const server = {
-    sockets,
-    down: false,
-    answer: null as ((socket: Socket) => void) | null,
-    connect: (url: string): Transport => {
-      const [ours, theirs] = loopback()
-      const socket: Socket = {
-        url: new URL(url),
-        at: clock.now,
-        heard: [],
-        send: (frame) => theirs.send(frame),
-        drop: () => theirs.close(),
-      }
-      theirs.onFrame((frame) => {
-        const said = frame as JsonRpcNotification
-        socket.heard.push(said)
-        if (socket.heard.length > 1 || said.method !== RpcMethods.hello) return
-        if (server.down) socket.drop()
-        else server.answer?.(socket)
-      })
-      sockets.push(socket)
-      return ours
-    },
-    get last(): Socket {
-      return sockets[sockets.length - 1]!
-    },
-  }
-  return server
-}
-
 describe('A window that loses its socket to the match server', () => {
-  const opening: RecordingHeader = {
-    version: RECORDING_VERSION,
-    seed: 77,
-    seedLabel: '77',
-    source: 'live',
-    createdAt: '',
-    turnCap: null,
-    squads: {
-      [Faction.Blue]: rollSquadSheets(new Rng(1)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
-      [Faction.Red]: rollSquadSheets(new Rng(2)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! })),
-    },
-  }
   const move: NetworkMessage = { type: 'moveUnit', faction: Faction.Blue, squadIndex: 0, path: [{ x: 1, y: 2 }] }
   const blueEnds: NetworkMessage = { type: 'endTurn', faction: Faction.Blue }
   const cover: NetworkMessage = { type: 'toggleCover', faction: Faction.Red, squadIndex: 1 }
   const redEnds: NetworkMessage = { type: 'endTurn', faction: Faction.Red }
-  const seated = (phase: 'waiting' | 'deploying' | 'playing', over: Record<string, unknown> = {}) =>
-    notify(RpcMethods.seated, { roomId: 'r00m', faction: Faction.Blue, phase, redirected: false, seatKey: 'k3y', ...over })
+  const seatIn = (phase: 'waiting' | 'deploying' | 'playing', over: Partial<Seated> = {}): Seated => ({
+    roomId: 'r00m',
+    faction: Faction.Blue,
+    phase,
+    redirected: false,
+    seatKey: 'k3y',
+    ...over,
+  })
   const logOf = (commands: NetworkMessage[]) =>
     notify(RpcMethods.log, {
       matchId: 'r00m',
@@ -1027,20 +936,34 @@ describe('A window that loses its socket to the match server', () => {
     const { type, ...params } = command
     return notify(RpcMethods[type], params)
   }
+  /** A server that seats every `room/enter` at `seat`, and follows it with `then` (a match's log). */
+  const seating = (seat: Seated, then?: JsonRpcFrame) => (socket: HandSocket, request: JsonRpcRequest) => {
+    if (request.method !== 'tictac/api/room/enter') return
+    socket.reply(request.id as number, seat)
+    if (then) socket.send(then)
+  }
+  /** What each `room/enter` on `sockets` asked for. */
+  const intentsOn = (sockets: HandSocket[]) =>
+    sockets.flatMap((socket) =>
+      socket.heard.flatMap((frame) =>
+        'method' in frame && frame.method === 'tictac/api/room/enter' ? [(frame.params as { intent: unknown }).intent] : [],
+      ),
+    )
 
-  /** Blue, seated in `phase` by a server it reached with a ticket, and everything it was told. */
+  /** Blue, seated in `phase`, and everything it was told. */
   async function seatedBlue(phase: 'waiting' | 'deploying' | 'playing') {
     const clock = handClock()
     const server = handServer(clock)
-    server.answer = (socket) => socket.send(seated(phase))
-    const net = new NetworkManager({ connect: server.connect, schedule: clock.schedule })
+    server.answer = seating(seatIn(phase))
+    const net = new NetworkManager()
     const told = { attempts: [] as number[], reconnected: [] as Seated[], resyncs: [] as Resync[], disconnects: [] as string[] }
     net.onReconnecting = (attempt) => told.attempts.push(attempt)
     net.onReconnected = (seat) => told.reconnected.push(seat)
     net.onResync = (resync) => told.resyncs.push(resync)
     net.onDisconnected = (reason) => told.disconnects.push(reason ?? '')
-    await net.connectToServer('ws://tictac.test/?ticket=t1&as=ada', { kind: 'open' })
-    return { clock, server, net, told }
+    const connection = windowOn(server, clock)
+    await net.enterRoom(connection, { kind: 'open' })
+    return { clock, server, net, connection, told }
   }
 
   test('tries again on a backoff, quick at first, and says which try it is on', async () => {
@@ -1051,7 +974,7 @@ describe('A window that loses its socket to the match server', () => {
     expect(told.disconnects).toEqual([])
     expect(net.isMyTurn(Faction.Blue)).toBe(false)
 
-    clock.advance(30_000)
+    await clock.advance(30_000)
     const tries = server.sockets.slice(1).map((socket) => socket.at)
     // 250, +500, +1000, then every second: a try against a server that is
     // down costs nothing, and a longer wait is stall the player sees after
@@ -1060,23 +983,22 @@ describe('A window that loses its socket to the match server', () => {
     expect(gaps.slice(0, 5)).toEqual([250, 500, 1000, 1000, 1000])
     expect(told.attempts).toEqual(told.attempts.map((_, i) => i + 1))
     expect(told.attempts.length).toBe(tries.length + 1)
-
-    // Each try asks for this window's own seat by its key, and not with the
-    // ticket, which was worth one connection; whatever else the url said stays.
-    expect(Object.fromEntries(server.last.url.searchParams)).toEqual({ as: 'ada', intent: 'resume', room: 'r00m', seat: 'k3y' })
-    expect(server.last.heard).toEqual([notify(RpcMethods.hello, { ...MY_VERSION }) as JsonRpcNotification])
+    // Every try dials the server's own url and says hello first.
+    expect(server.sockets.every((socket) => socket.url.href === 'ws://tictac.test/')).toBe(true)
+    expect(server.last.methods[0]).toBe(RpcMethods.hello)
   })
 
   test('gives up once the seat would be gone, and says the connection was lost', async () => {
-    const { clock, server, told } = await seatedBlue('playing')
+    const { clock, server, connection, told } = await seatedBlue('playing')
     server.down = true
     server.last.drop()
-    clock.advance(119_000)
+    await clock.advance(119_000)
     expect(told.disconnects).toEqual([])
-    clock.advance(1_000)
+    await clock.advance(1_000)
     expect(told.disconnects).toEqual([CONNECTION_LOST])
+    expect(connection.state).toEqual({ kind: 'closed', reason: CONNECTION_LOST })
     const opened = server.sockets.length
-    clock.advance(60_000)
+    await clock.advance(60_000)
     expect(server.sockets.length).toBe(opened)
   })
 
@@ -1084,33 +1006,36 @@ describe('A window that loses its socket to the match server', () => {
     const { clock, server } = await seatedBlue('playing')
     server.answer = null
     server.last.drop()
-    clock.advance(250)
+    await clock.advance(250)
     expect(server.sockets).toHaveLength(2)
     // A server still booting can hold a try open; it is let go after two
     // seconds, not left to add its whole wait to the stall.
-    clock.advance(1_999 + 500)
+    await clock.advance(1_999 + 500)
     expect(server.sockets).toHaveLength(2)
-    clock.advance(1)
+    await clock.advance(1)
     expect(server.sockets).toHaveLength(3)
   })
 
-  test('an abort on the way back is the reason, and the end of trying', async () => {
-    const { clock, server, told } = await seatedBlue('playing')
-    server.answer = (socket) => socket.send(notify(RpcMethods.abort, { reason: 'That match is gone.', side: null }))
+  test('a seat refused on the way back is the reason the match ended — and the window stays on the server', async () => {
+    const { clock, server, connection, told } = await seatedBlue('playing')
+    server.answer = (socket, request) => socket.refuse(request.id as number, 410, 'That match is gone.')
     server.last.drop()
-    clock.advance(250)
+    await clock.advance(250)
     expect(told.disconnects).toEqual(['That match is gone.'])
-    clock.advance(60_000)
+    expect(connection.state).toEqual({ kind: 'open' })
+    await clock.advance(60_000)
     expect(server.sockets).toHaveLength(2)
     expect(told.disconnects).toHaveLength(1)
   })
 
-  test('a window dropped after it let go of the match does not come back', async () => {
+  test('a window that let go of its match comes back to the server, not to the match', async () => {
     const { clock, server, net, told } = await seatedBlue('playing')
     net.dispose()
+    expect(server.last.methods.at(-1)).toBe('tictac/api/room/leave')
     server.last.drop()
-    clock.advance(60_000)
-    expect(server.sockets).toHaveLength(1)
+    await clock.advance(60_000)
+    expect(server.sockets).toHaveLength(2)
+    expect(intentsOn(server.sockets.slice(1))).toEqual([])
     expect(told.attempts).toEqual([])
   })
 
@@ -1124,27 +1049,21 @@ describe('A window that loses its socket to the match server', () => {
     server.last.drop()
 
     // Red played on while Blue was away; the server's log says so.
-    server.answer = (socket) => {
-      socket.send(seated('playing'))
-      socket.send(logOf([move, blueEnds, cover, redEnds]))
-    }
-    clock.advance(250)
+    server.answer = seating(seatIn('playing'), logOf([move, blueEnds, cover, redEnds]))
+    await clock.advance(250)
 
-    expect(told.reconnected).toEqual([{ roomId: 'r00m', faction: Faction.Blue, phase: 'playing', redirected: false, seatKey: 'k3y' }])
+    expect(told.reconnected).toEqual([seatIn('playing')])
     expect(told.resyncs).toEqual([{ kind: 'caughtUp', missed: 1 }])
     expect(heard).toEqual([cover, redEnds])
     expect([net.mode, net.isMyTurn(Faction.Blue)]).toEqual(['host', true])
-    // Nothing but the version went out before the seat; nothing after either,
-    // for a match being played says nothing it has not played.
-    expect(server.last.heard.map((frame) => frame.method)).toEqual([RpcMethods.hello])
+    // Its own seat, by the key it came with; and nothing else on the way —
+    // a match being played says nothing it has not played.
+    expect(intentsOn([server.last])).toEqual([{ kind: 'resume', roomId: 'r00m', seatKey: 'k3y' }])
+    expect(server.last.methods).toEqual([RpcMethods.hello, 'tictac/api/room/enter'])
 
     // And the stream goes on: the next drop compares against all of it.
     server.last.drop()
-    server.answer = (socket) => {
-      socket.send(seated('playing'))
-      socket.send(logOf([move, blueEnds, cover, redEnds]))
-    }
-    clock.advance(250)
+    await clock.advance(250)
     expect(told.resyncs[1]).toEqual({ kind: 'caughtUp', missed: 0 })
   })
 
@@ -1155,11 +1074,8 @@ describe('A window that loses its socket to the match server', () => {
     // Played into a socket that was already gone.
     net.send(blueEnds)
     const heard: NetworkMessage[] = []
-    server.answer = (socket) => {
-      socket.send(seated('playing'))
-      socket.send(logOf([move]))
-    }
-    clock.advance(250)
+    server.answer = seating(seatIn('playing'), logOf([move]))
+    await clock.advance(250)
     expect(told.resyncs).toHaveLength(1)
     const [resync] = told.resyncs
     expect(resync!.kind).toBe('rebuild')
@@ -1173,11 +1089,8 @@ describe('A window that loses its socket to the match server', () => {
     net.send(move)
     net.send(blueEnds)
     server.last.drop()
-    server.answer = (socket) => {
-      socket.send(seated('playing'))
-      socket.send(logOf([{ ...move, path: [{ x: 9, y: 9 }] } as NetworkMessage, blueEnds, cover]))
-    }
-    clock.advance(250)
+    server.answer = seating(seatIn('playing'), logOf([{ ...move, path: [{ x: 9, y: 9 }] } as NetworkMessage, blueEnds, cover]))
+    await clock.advance(250)
     expect(told.resyncs.map((r) => r.kind)).toEqual(['rebuild'])
   })
 
@@ -1188,22 +1101,23 @@ describe('A window that loses its socket to the match server', () => {
     server.last.drop()
     // Deployed while the socket was gone: kept, and said once it is back.
     net.send({ type: 'ready', squad })
-    clock.advance(250)
+    await clock.advance(250)
     expect(told.reconnected).toHaveLength(1)
-    expect(server.last.heard.map((frame) => frame.method)).toEqual([
+    expect(server.last.methods).toEqual([
       RpcMethods.hello,
+      'tictac/api/room/enter',
       RpcMethods.hello,
       RpcMethods.init,
       RpcMethods.ready,
     ])
-    expect(server.last.heard[2]!.params).toEqual({ seed: 21, seedLabel: '21', ...MY_VERSION })
+    expect((server.last.heard[3] as JsonRpcNotification).params).toEqual({ seed: 21, seedLabel: '21', ...MY_VERSION })
   })
 
   test('a seat that comes back somewhere else is a lost match, said as one', async () => {
     const { clock, server, told } = await seatedBlue('playing')
-    server.answer = (socket) => socket.send(seated('playing', { faction: Faction.Red }))
+    server.answer = seating(seatIn('playing', { faction: Faction.Red }))
     server.last.drop()
-    clock.advance(250)
+    await clock.advance(250)
     expect(told.disconnects).toHaveLength(1)
     expect(told.disconnects[0]).toContain('another seat')
   })
@@ -1211,26 +1125,21 @@ describe('A window that loses its socket to the match server', () => {
   test('a spectator watches again, and catches up on what it missed', async () => {
     const clock = handClock()
     const server = handServer(clock)
-    server.answer = (socket) => {
-      socket.send(seated('playing', { faction: null, seatKey: null }))
-      socket.send(logOf([move]))
-    }
-    const net = new NetworkManager({ connect: server.connect, schedule: clock.schedule })
+    const watching = seatIn('playing', { faction: null, seatKey: null })
+    server.answer = seating(watching, logOf([move]))
+    const net = new NetworkManager()
     const resyncs: Resync[] = []
     net.onResync = (resync) => resyncs.push(resync)
-    await net.connectToServer('ws://tictac.test/', { kind: 'watch', roomId: 'r00m' })
+    await net.enterRoom(windowOn(server, clock), { kind: 'watch', roomId: 'r00m' })
     expect((await net.waitForLog()).events).toHaveLength(1)
     const heard: NetworkMessage[] = []
     net.onMessage = (msg) => heard.push(msg)
     server.last.send(wire(blueEnds))
     server.last.drop()
 
-    server.answer = (socket) => {
-      socket.send(seated('playing', { faction: null, seatKey: null }))
-      socket.send(logOf([move, blueEnds, cover]))
-    }
-    clock.advance(250)
-    expect(Object.fromEntries(server.last.url.searchParams)).toEqual({ intent: 'watch', room: 'r00m' })
+    server.answer = seating(watching, logOf([move, blueEnds, cover]))
+    await clock.advance(250)
+    expect(intentsOn([server.last])).toEqual([{ kind: 'watch', roomId: 'r00m' }])
     expect(resyncs).toEqual([{ kind: 'caughtUp', missed: 1 }])
     expect(heard).toEqual([blueEnds, cover])
   })

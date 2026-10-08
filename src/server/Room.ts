@@ -3,15 +3,15 @@ import { sanitizeSheet } from '../core/Characters'
 import { isCommand } from '../ecs/systems/CommandSystem'
 import { toBase64Url } from '../game/Base64Url'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../game/JsonRpc'
-import type { LobbyRoom, LobbySeat, RoomPhase } from '../game/Lobby'
+import type { LobbyRoom, LobbySeat, RoomPhase, Seated } from '../game/Lobby'
 import { carriedOut, settlement, winnerOf, type UnitFate } from '../game/MatchEnd'
 import type { NetworkMessage } from '../game/NetworkManager'
 import type { RecordedEvent, RecordingHeader } from '../game/Recording'
+import type { Player } from '../game/Rpc'
 import { compareDigests, type Divergence, type StateDigest } from '../game/StateDigest'
 import type { Transport } from '../game/Transport'
 import { MatchHost } from '../sim/MatchHost'
 import type { PeerVersion } from '../version'
-import type { Player } from './Accounts'
 import type { MatchStore, StoredMatch } from './MatchStore'
 import type { RoomStore, StoredRoom, StoredSeat, VerifiedSide } from './RoomStore'
 import type { Rosters } from './Rosters'
@@ -68,19 +68,20 @@ export interface RefereeVerdict {
 /**
  * One socket, as the server sees it.
  *
- * Made by the lobby when the socket connects, and placed in at most one room,
- * once, when its intent has been resolved. `gone` latches the moment the server
- * stops listening to it — it closed, it was turned away, or a newer window of
- * the same player replaced it — because a socket the server closed itself may
- * still report closing afterwards, and that late report must not be read as the
- * player walking out of their match.
+ * Made by the session layer when the socket connects (`Session.ts`), and in
+ * at most one room at a time: it can sit in the lobby, take a seat or watch,
+ * stand up again and stay connected. `gone` latches the moment the server
+ * stops listening to it — it closed, it was turned away at the version gate,
+ * or a newer window of the same player replaced it — because a socket the
+ * server closed itself may still report closing afterwards, and that late
+ * report must not be read as the player walking out of their match.
  */
 export interface Client {
   readonly transport: Transport
   /**
-   * The signed-in player behind the socket: the one its ticket named, or the
-   * one whose seat it proved its own by presenting that seat's key. Null for
-   * an anonymous socket.
+   * The player behind the socket: the one it signed in as, or the one whose
+   * seat it proved its own by presenting that seat's key. Null for an
+   * anonymous socket.
    */
   player: Player | null
   /** What its first `hello` stated, once that passed the gate; null before. */
@@ -113,7 +114,10 @@ export interface RoomOptions {
   graceMs: number
   /** Run `fn` after `ms`; the answer cancels it. Injected so a test can be the clock. */
   schedule: (fn: () => void, ms: number) => () => void
-  /** Called once, the moment the room is over (settled or aborted). */
+  /**
+   * Called the moment the room is over (settled or aborted), and once more
+   * if a settled room is then aborted — which sends its sockets out of it.
+   */
   onOver: (room: Room) => void
 }
 
@@ -258,7 +262,12 @@ export class Room {
     } while (work !== this.work)
   }
 
-  /** The room as `GET /api/lobby` shows it. */
+  /** The turn in force, once the match is playing. */
+  get turn(): number | null {
+    return this.host ? this.host.turnNumber : null
+  }
+
+  /** The room as the lobby lists it. */
   listing(): LobbyRoom {
     const seat = (faction: Faction): LobbySeat | null => {
       const held = this.seats[faction]
@@ -270,7 +279,7 @@ export class Room {
       blue: seat(Faction.Blue)!,
       red: seat(Faction.Red),
       spectators: this.spectators.size,
-      turn: this.host ? this.host.turnNumber : null,
+      turn: this.turn,
       createdAt: this.createdAt,
     }
   }
@@ -279,16 +288,18 @@ export class Room {
    * Seat the player who opened the room. The opener is always Blue, because
    * the opener is the side that announces the match (`hostMatch`).
    */
-  open(client: Client): void {
-    this.take(client, Faction.Blue, false, mintSeatKey())
+  open(client: Client): Seated {
+    const seated = this.take(client, Faction.Blue, false, mintSeatKey())
     this.persist()
+    return seated
   }
 
   /** Take the Red seat. The lobby has already checked the room is `waiting`. */
-  join(client: Client): void {
+  join(client: Client): Seated {
     this.phaseNow = 'deploying'
-    this.take(client, Faction.Red, false, mintSeatKey())
+    const seated = this.take(client, Faction.Red, false, mintSeatKey())
     this.persist()
+    return seated
   }
 
   /**
@@ -333,23 +344,16 @@ export class Room {
   }
 
   /**
-   * Watch. A spectator of a match already playing is handed the log so far;
-   * one who arrives earlier is handed it the moment the match starts (`start`).
+   * Watch. A spectator of a match already playing is handed the log so far
+   * (`catchUp`); one who arrives earlier is handed it the moment the match
+   * starts (`start`).
    */
-  watch(client: Client): void {
+  watch(client: Client): Seated {
     client.room = this
     client.faction = null
     this.spectators.add(client)
-    this.send(client, {
-      type: 'seated',
-      roomId: this.id,
-      faction: null,
-      phase: this.phaseNow,
-      redirected: false,
-      seatKey: null,
-    })
-    if (this.host) this.send(client, this.logSoFar())
     this.options.log(`room ${this.id}: a spectator arrived (${this.spectators.size} watching)`)
+    return { roomId: this.id, faction: null, phase: this.phaseNow, redirected: false, seatKey: null }
   }
 
   /**
@@ -368,12 +372,12 @@ export class Room {
    * work is load-bearing rather than tidy — a client that cannot reproduce the
    * log cannot come back.
    */
-  takeBack(client: Client, faction: Faction, redirected: boolean): void {
-    const seat = this.seats[faction]
-    if (!seat) return
-    this.take(client, faction, redirected, mintSeatKey())
+  takeBack(client: Client, faction: Faction, redirected: boolean): Seated {
+    const seated = this.take(client, faction, redirected, mintSeatKey())
     this.persist()
-    this.options.log(`room ${this.id}: ${seat.player?.name ?? 'a player'} took ${FACTION_INFO[faction].name} back`)
+    const name = this.seats[faction]!.player?.name ?? 'a player'
+    this.options.log(`room ${this.id}: ${name} took ${FACTION_INFO[faction].name} back`)
+    return seated
   }
 
   /**
@@ -381,54 +385,53 @@ export class Room {
    * any phase.
    *
    * A reconnection, not a new window: nothing is abandoned, the key stays the
-   * key, and the socket becomes whoever the seat belongs to. A socket still
-   * sitting in the seat is that window's previous connection, which the
-   * server had not yet noticed was dead; it is retired, and told why in case
-   * something is somehow still listening on it.
+   * key, and the socket becomes whoever the seat belongs to.
    */
-  reclaim(client: Client, faction: Faction, key: string): void {
-    const seat = this.seats[faction]
-    if (!seat) return
-    const previous = seat.client
-    if (previous && previous !== client) {
-      previous.gone = true
-      previous.room = null
-      this.send(previous, { type: 'abort', reason: 'This seat was taken back by another connection.', side: null })
-      previous.transport.close()
-    }
+  reclaim(client: Client, faction: Faction, key: string): Seated {
+    const seat = this.seats[faction]!
     client.player = seat.player
-    this.take(client, faction, false, key)
+    const seated = this.take(client, faction, false, key)
     this.options.log(`room ${this.id}: ${seat.player?.name ?? 'a player'} reconnected to ${FACTION_INFO[faction].name}`)
+    return seated
   }
 
   /**
-   * A socket stopped being part of this room.
-   *
-   * `superseded` is a newer window of the same player taking over: a seat in
-   * a match that is playing is left for that window to take next, so there
-   * is nothing to hold and nobody to tell; a seat in a room still being set
-   * up ends the room, since a half-equipped loadout lives in the window that
-   * was equipping it.
-   *
-   * Otherwise the socket dropped, and its seat is held, in every phase and
-   * whoever holds it, for the window to come back to with its key (`hold`).
+   * Hand a socket just seated or watching here the match so far, if there is
+   * one yet. Called straight after it has been told where it sits, before
+   * anything else is relayed to it, so the log is always the first thing of
+   * the match it hears.
    */
-  leave(client: Client, superseded: boolean): void {
+  catchUp(client: Client): void {
+    if (this.host && client.room === this) this.send(client, this.logSoFar())
+  }
+
+  /**
+   * A socket stopped being part of this room: it dropped, stood up, or was
+   * replaced by a newer window of its player.
+   *
+   * A spectator simply goes. A seat is held, in every phase and whoever holds
+   * it, for the window to come back to — with its key, or as its player's
+   * newest window (`takeBack`, `abandon`); to the window at the other end a
+   * dropped connection is a stall, not a choice. A room that is over holds
+   * nothing: the socket is only let off its end screen.
+   */
+  leave(client: Client): void {
     client.room = null
     if (this.spectators.delete(client)) return
     const faction = client.faction
+    client.faction = null
     const seat = faction === null ? null : this.seats[faction]
     if (faction === null || !seat || seat.client !== client) return
     seat.client = null
-    if (this.over) return
-    if (!superseded) return this.hold(faction)
-    if (this.phaseNow !== 'playing') this.end(departure(seat, this.phaseNow))
+    if (!this.over) this.hold(faction)
   }
 
   /**
-   * A signed-in player opened a new window while their seat here — in a room
-   * still being set up — was held with no socket in it. The room is
-   * abandoned exactly as if that socket had still been open (`leave`).
+   * A signed-in player's newest window asked for something while their seat
+   * here — in a room still being set up — was held for a window they have
+   * since replaced. The room is abandoned rather than carried over: a
+   * half-equipped loadout lives in the window that was equipping it, and is
+   * not worth moving between windows.
    */
   abandon(faction: Faction): void {
     const seat = this.seats[faction]
@@ -490,29 +493,35 @@ export class Room {
   }
 
   /**
-   * Close every socket in the room and let go of its holds, for a server
-   * shutting down. Nothing is written: the room is still live in the store,
-   * for the next server to take up.
+   * Let go of every hold, for a server shutting down. Nothing is written: the
+   * room is still live in the store, for the next server to take up. The
+   * sockets are the lobby's to close.
    */
   dispose(): void {
-    for (const faction of FACTIONS) {
-      const seat = this.seats[faction]
-      seat?.grace?.()
-      seat?.client?.transport.close()
-    }
-    for (const spectator of this.spectators) spectator.transport.close()
+    for (const faction of FACTIONS) this.seats[faction]?.grace?.()
   }
 
   /**
    * Put `client` in a seat — a new one, or one already held — under `key`,
-   * which is what its `seated` tells it to keep. A seat in a match already
-   * playing is handed the log straight after.
+   * which is what its `Seated` tells it to keep.
+   *
+   * A different socket still sitting in the seat is that seat's previous
+   * connection: the window reconnecting before the server noticed the old one
+   * was dead, or a socket that has since signed out. It is told why, in case
+   * something is still listening on it, and stands up; the socket itself is
+   * left open, since only its seat was taken.
    */
-  private take(client: Client, faction: Faction, redirected: boolean, key: string): void {
+  private take(client: Client, faction: Faction, redirected: boolean, key: string): Seated {
     client.room = this
     client.faction = faction
     const seat = this.seats[faction]
     if (seat) {
+      const previous = seat.client
+      if (previous && previous !== client) {
+        this.send(previous, { type: 'abort', reason: 'This seat was taken back by another connection.', side: null })
+        previous.room = null
+        previous.faction = null
+      }
       seat.grace?.()
       seat.grace = null
       seat.client = client
@@ -520,8 +529,7 @@ export class Room {
     } else {
       this.seats[faction] = { player: client.player, client, grace: null, key: { plain: key } }
     }
-    this.send(client, { type: 'seated', roomId: this.id, faction, phase: this.phaseNow, redirected, seatKey: key })
-    if (this.host) this.send(client, this.logSoFar())
+    return { roomId: this.id, faction, phase: this.phaseNow, redirected, seatKey: key }
   }
 
   /**
@@ -917,14 +925,28 @@ export class Room {
    * A settled match can still be aborted — a digest that disagrees after the
    * deciding intent is as much a foul as one before it, and the queued
    * settlement checks for exactly that before it touches a roster.
+   *
+   * Everybody told is also sent out of the room: an abort ends a socket's
+   * part in this match, never its connection to the server, which goes on
+   * serving the window in the lobby.
    */
   private end(reason: string, side: Faction | null = null): void {
     if (this.aborted) return
     const wasOver = this.over
     this.aborted = true
     this.options.log(`aborting room ${this.id}: ${reason}`)
-    for (const client of this.sockets()) this.send(client, { type: 'abort', reason, side })
-    if (!wasOver) this.closeDoors()
+    for (const client of [...this.sockets()]) {
+      this.send(client, { type: 'abort', reason, side })
+      client.room = null
+      client.faction = null
+    }
+    for (const faction of FACTIONS) {
+      const seat = this.seats[faction]
+      if (seat) seat.client = null
+    }
+    this.spectators.clear()
+    if (wasOver) this.options.onOver(this)
+    else this.closeDoors()
   }
 
   /**

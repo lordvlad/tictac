@@ -3,7 +3,7 @@ title: "Completed Work Archive"
 id: "BACKLOG-COMPLETED"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-30"
+lastReviewed: "2026-10-07"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -2620,6 +2620,148 @@ away at the door. A deploy has to be something a player in a match barely notice
 - [x] The server keeps serving the previous protocol, and a test fails if a bump forgets to.
 - [x] Living documentation updated (`docs/architecture/networking.md` §8,
       `docs/architecture/deployment.md` §2.3, `docs/architecture/persistence.md`).
+---
+
+### [ITEM-060] One Connection per Window: the API Over JSON-RPC
+**Completed Date:** 2026-10-07  
+**Type:** Infrastructure  
+**Milestone:** M5 — The Shared World  
+
+#### Why
+A signed-in window talked to its match server two ways: HTTP `fetch` to `/api/*` (passkeys,
+sign-out, `me`, the roster, recruiting, the lobby, socket tickets) and a WebSocket for the room
+it sat in. The second channel cost a ticket to bridge the two (a session token must not go in a
+url), a CORS policy for GitHub Pages, and a lobby polled every two seconds because HTTP cannot
+push. The world map and encounters need a channel the server can push down, and the socket the
+one-window-per-player rule already governs is that channel. The user's decision (2026-10-07):
+one connection per window, reused for everything.
+
+#### Key Changes
+- **The contract** (`src/game/Rpc.ts`): requests `tictac/api/account/{registerOptions,
+  registerVerify,loginOptions,loginVerify,signIn,signOut,me}`, `tictac/api/roster/{list,recruit}`,
+  `tictac/api/lobby/{subscribe,unsubscribe}`, `tictac/api/room/{enter,leave}`; pushes
+  `tictac/api/lobby/changed` and `tictac/api/session/replaced`; `RPC_ERRORS` keeps the HTTP codes
+  the routes answered (a 401 is still a 401). Match frames stay notifications on the same socket.
+- **Server** (`src/server/Session.ts`, `Sessions.attach(transport, { url, place })`): `hello`
+  first, then requests answered one at a time in arrival order. A refusal is an error response
+  and the socket stays open; only the version gate, `session/replaced` or the client giving up
+  end a connection, and a room's `abort` ends room membership, not the session. `Lobby` gains
+  `enter`, `leave` and `subscribe` (pushes coalesced per burst of changes). `src/server/Api.ts`,
+  tickets in `Accounts`, the API's CORS and `parseIntent`/`intentQuery` are deleted; the
+  Durable Object hands upgrades to `Sessions` and everything else to its assets, and reads
+  `request.cf` onto the session for `ITEM-063`.
+- **Version admission**: protocol 7 at any build is admitted at the gate; `room/enter`
+  open/join/watch from another build is a `409` naming both builds; a resume follows the room's
+  build; `signIn`/`loginVerify` are a `409` when the player's playing seat is in a room this
+  build cannot carry, so a newer tab cannot cut off the window that can finish it.
+- **Sign-in holds seats.** `signIn` replaces the player's previous socket and holds its seat for
+  the grace in every phase, because the same window reconnecting signs in before it re-enters by
+  key. A setup room is abandoned only when the new window enters other than by that key, or the
+  hold expires.
+- **Protocol 6 for one release**: admitted only for a keyed resume named in its url
+  (`Sessions.resume6`, `resumeOf6`) and answered the protocol-6 way, so a match in progress
+  finishes across the deploy; marked for deletion when `OLDEST_SERVED_PROTOCOL` reaches 7.
+- **Client** (`src/game/ServerConnection.ts`): one per window per server, held at module level in
+  `main.tsx` (`connectionFor`, `leaveServer`). `request`, `watchLobby` (pushed, never polled),
+  `signedIn`/`signedOut`, and `enter(intent, member)` returning the `Transport`
+  `NetworkManager.enterRoom` plays over. Reconnect keeps `ITEM-059`'s schedule (250/500/1000 ms,
+  then every second, 2 s per try, give up after 120 s) and re-establishes hello → signIn →
+  lobby/subscribe → room/enter by seat key. `Account` is a thin wrapper over the connection;
+  the server panel is driven by it.
+
+#### Measured
+- `bun test`: 792 pass, 0 fail. New: `tests/session.test.ts` (7: lobby pushes, room vs socket,
+  refusals as answers on one socket, sign-in replacing a window while holding its seat, the
+  protocol-6 resume and nothing else), `tests/serverConnection.test.ts` (8: request settling,
+  refusals, timeouts, unreachable servers, lobby pushes, the re-establish order, token
+  forgetting, replacement); `tests/accounts.test.ts` (11), `tests/network.test.ts` and
+  `tests/refereed.test.ts` rewritten over `ServerConnection`; `tests/cloudflare.test.ts` drives
+  passkeys, a token nobody issued (`401`, socket open) and the build gate (`409` on
+  `room/enter`) over the socket against `workerd`.
+- In Chromium against `wrangler dev`: each window holds one session socket from the server
+  panel through a passkey registration (`registerOptions`/`registerVerify` on it, no HTTP), the
+  lobby (a room opened in one window appeared in the other by a `lobby/changed` push), a match
+  and its end (`room/leave` on the same socket). A second window signing in as the same player
+  replaced the first, which showed `SESSION_REPLACED`. Two further sockets exist around it, both
+  older than this item: the menu's own-origin probe (opened and closed before any server is
+  chosen) and the page reload a finished match's way back to the menu does (`backToMenu`).
+- Across a deploy under `wrangler dev`: two Chromium windows of build `81ec4a7` (protocol 6)
+  playing on that build's Worker, which was then replaced by this one over the same storage,
+  were each re-seated on the first socket that opened (`seated`, then `log`; no rebuild), played
+  two more turn handovers refereed by the new build and settled (`BLUE WINS`, no verdict). The
+  same swap of the old build under itself behaves identically.
+- Found on the way, older than this item (`cde6af4`): `InteractionController.handleIntent`
+  dropped every intent on the side whose turn it was not, so after a retreat or a win on the
+  other side's turn the end screen's buttons did nothing. `endScreenNext` and `backToMenu` are
+  now answered on any side, spectators included (`END_SCREEN_INTENTS`); observed in Chromium,
+  Red leaving for the menu after Blue retreated on Blue's turn.
+- Not verified on the deployed Worker.
+
+#### Acceptance Criteria
+- [x] No `/api/` HTTP routes remain on either host (Bun server, Worker).
+- [x] One session socket per window, observed in a browser through sign-in, the lobby, a match
+      and its end (the menu's probe and the post-match reload are separate, older behaviour).
+- [x] Lobby changes arrive as pushes; nothing polls.
+- [ ] Passkey registration and sign-in work over RPC on the deployed Worker (covered under
+      `wrangler dev`, in `tests/cloudflare.test.ts` and in Chromium with a virtual
+      authenticator).
+- [x] A protocol-6 window in a match finishes it across the deploy (observed across a
+      `81ec4a7` → this build swap); any other protocol-6 request is refused with the reload text
+      (`tests/session.test.ts`).
+- [x] Tests updated.
+- [x] Living documentation updated (`docs/architecture/networking.md` §8,
+      `docs/architecture/persistence.md` §4, `docs/architecture/deployment.md` §2 and §5,
+      `docs/architecture/rendering.md`).
+---
+
+### [ITEM-061] Serve the Map: a Low-Zoom Planet From R2
+**Completed Date:** 2026-10-07  
+**Type:** Infrastructure  
+**Milestone:** M5 — The Shared World  
+
+#### Why
+The world is the real Earth (GDD-WORLD §1), and the only archive in R2,
+`map-tiles/world.pmtiles`, was Stuttgart only (z0–14, 1,259 tiles). The user's decision
+(2026-10-07): host the whole planet at the most zoomed-out levels now, closer zooms on demand
+later (`ITEM-067`, deferred). Measured with `pmtiles extract --dry-run` against Protomaps build
+`20261007` (138.7 GB at z0–15): z0–8 558 MB, z0–10 3.8 GB, z0–12 18 GB; R2's free tier is
+10 GB-month.
+
+#### Key Changes
+- **Cap: z0–8** (countries, regions, large towns), chosen by the user over z0–10.
+- **The archive**: `scripts/build-planet-tiles.ts` runs `pmtiles extract` by range requests,
+  checks the header covers the whole planet to the cap, and streams it to R2 bucket `map-tiles`
+  through the S3 API (`wrangler r2 object put` does not take objects this large). Object
+  `planet-z8-20261007.pmtiles`, 557,631,269 bytes; a new build is a new key and a change to
+  `MAP_TILES_KEY`, not to code.
+- **One handler for both hosts** (`src/server/Tiles.ts`: `tileHandler`, `blobSource`,
+  `r2Source`). The Worker binds the bucket as `MAP_TILES` and answers `/tiles/{z}/{x}/{y}.mvt`
+  before the Durable Object, so a map pan neither wakes it nor queues behind its sockets; the
+  Bun server takes a `tiles` option (`serve:match --tiles=<archive>`). Tiles go out as stored
+  (gzip, never re-encoded), `204` past the cap, `Access-Control-Allow-Origin: *` — the only
+  CORS left on the server. The R2 `Source` is the reference's with its abort handling fixed,
+  and reads conditional on the archive's etag.
+- **Self-hosted glyphs and sprites** under `public/map/`, so the map contacts no third-party
+  origin. `world.pmtiles` stays in the bucket, unserved, for `ITEM-067` to keep or delete.
+
+#### Measured
+- `tests/tiles.test.ts` (13): bytes equal to the archive's once gunzipped, headers, HEAD, `204`
+  past the cap, `400` outside the world, `404`/`405`/`OPTIONS`, the R2 source matching the file
+  source, an etag swap under a warm handler, aborts.
+- Under `wrangler dev` reading the real bucket: z0, z4 and z8 tiles for Stuttgart, Tokyo and São
+  Paulo answer `200` with gzip MVT and `ACAO: *`; z9 answers `204`. A MapLibre page on another
+  origin drew the planet at z1, Stuttgart at z8.5 and northern India (Devanagari labels) with no
+  failed request and no third-party origin.
+- Glyphs 11.5 MB in the repository, 17.7 MB in `dist/`; sprites 52 KB.
+
+#### Acceptance Criteria
+- [ ] A tile is served to the match server's own origin and to a page on GitHub Pages (needs the
+      deploy; shown under `wrangler dev` and from another origin only).
+- [x] A bare MapLibre page shows the whole planet down to the chosen cap.
+- [x] No third-party origin is contacted at runtime (tiles, glyphs, sprites all self-hosted).
+- [x] The Bun server serves the same route from a local file: `serve:match --tiles=` answered
+      z0 and z8 with `200` and `ACAO: *`, z9 with `204`.
+- [x] Living documentation updated (`docs/architecture/deployment.md` §6).
 ---
 
 ## Rejected — kept for the reasoning

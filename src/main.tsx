@@ -15,6 +15,7 @@ import { World } from './ecs/World'
 import { createEngineContext, type EngineContext } from './engine'
 import './game.css'
 import { Account } from './game/Account'
+import { ServerConnection } from './game/ServerConnection'
 import { AiOpponent } from './game/AiOpponent'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
@@ -100,6 +101,31 @@ function probeOwnOriginServer(): Promise<string | null> {
     // not one worth waiting on further; the menu does not block on this.
     setTimeout(() => settle(null), 2000)
   })
+}
+
+/**
+ * The window's one connection to a match server, while it is on one
+ * (`ITEM-060`, `src/game/ServerConnection.ts`).
+ *
+ * Held here, outside every screen, because it outlives them: the server
+ * panel opens it and a match plays over it, so the lobby, the sign-in and the
+ * room are one socket rather than one each. Leaving the server (Back from its
+ * panel) or typing another address ends it; so does the page reload that
+ * takes a finished match back to the menu (`backToMenu`).
+ */
+let server: ServerConnection | null = null
+
+/** The connection to `url`: this window's existing one if it is to that server and still alive. */
+function connectionFor(url: string): ServerConnection {
+  if (server && server.url === url && server.state.kind !== 'closed') return server
+  server?.close()
+  server = new ServerConnection(url)
+  return server
+}
+
+function leaveServer(): void {
+  server?.close()
+  server = null
 }
 
 const ASSETS: Asset[] = [
@@ -236,22 +262,20 @@ function showMenu(notice?: string): void {
         closeMenu()
         equipThenStart(initData.seed, initData.seedLabel, network)
       }}
+      connectionFor={connectionFor}
+      leaveServer={leaveServer}
       onServerConnect={async (typed, intent) => {
-        const it = new Account(typed)
-        const account = it.token ? it : null
+        const connection = connectionFor(typed)
+        const account = connection.player ? new Account(connection) : null
         // Only a seat in a room still being set up deploys anybody. Watching
         // brings nobody, and a match taken back already has its squad.
         const squad = intent.kind === 'open' || intent.kind === 'join' ? await pickSquad(account) : {}
-        // The ticket is minted only once the roster has been chosen: it is
-        // worth one connection and expires in a minute, so it must not be
-        // spent sitting on a screen the player might linger on.
-        const url = account ? await account.socketUrl(typed) : typed
         const network = new NetworkManager()
         try {
-          await takeSeat(network, await network.connectToServer(url, intent), squad, closeMenu)
+          await takeSeat(network, await network.enterRoom(connection, intent), squad, closeMenu)
         } catch (err) {
-          // Whatever got as far as a socket goes with the failure; the panel
-          // shows the reason, and the player tries again on a fresh one.
+          // Whatever seat was taken is stood up from; the connection stays,
+          // and the panel shows the reason on it.
           network.dispose()
           throw err
         }

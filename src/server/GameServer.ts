@@ -1,19 +1,19 @@
-import { parseIntent, type ServerIntent } from '../game/Lobby'
 import { BUILD_ID, PROTOCOL_VERSION } from '../version'
-import type { Player } from './Accounts'
-import { apiHandler } from './Api'
 import { Lobby } from './Lobby'
-import type { Persistence, RelyingParty } from './Persistence'
-import { socketTransport } from './SocketTransport'
+import type { Persistence } from './Persistence'
+import { Sessions } from './Session'
+import { socketTransport, type ServerSocket } from './SocketTransport'
+import type { TileHandler } from './Tiles'
 
 /**
  * The match server: one lobby of refereed rooms, one database, one port.
  *
- * Everything the game does travels over the WebSocket as JSON-RPC
- * notifications, byte-identical to what two peers send each other — which is
- * what lets a referee watch a match it is not part of. What HTTP adds is the
- * part a socket cannot do: the passkey ceremonies, the roster, the room list,
- * and the ticket that says which account a socket belongs to.
+ * A window holds one WebSocket to it and asks everything over that, as
+ * JSON-RPC (`Session.ts`): signing in, the roster, the lobby, taking a seat.
+ * The match itself travels over the same socket as notifications,
+ * byte-identical to what two peers send each other — which is what lets a
+ * referee watch a match it is not part of. HTTP is left with what is static:
+ * a status document, and the map's tiles.
  *
  * WebSocket rather than WebRTC on purpose. Bun has no WebRTC, and it is the
  * wrong tool anyway: WebRTC exists for NAT traversal between two clients that
@@ -31,16 +31,15 @@ export interface GameServer {
 export interface GameServerOptions {
   persistence: Persistence
   port: number
-  party: RelyingParty
   log?: (message: string) => void
   /** How long a dropped seat is held; the lobby's default unless a test says otherwise. */
   graceMs?: number
+  /** Map tiles at `/tiles/{z}/{x}/{y}.mvt` (`ITEM-061`); none when unset. */
+  tiles?: TileHandler
 }
 
-type Socket = ReturnType<typeof socketTransport>
-
 export async function startGameServer(options: GameServerOptions): Promise<GameServer> {
-  const { persistence, party } = options
+  const { persistence } = options
   const log = options.log ?? ((message: string) => console.info(`[referee] ${message}`))
   const lobby = new Lobby({
     matches: persistence.matches,
@@ -59,33 +58,19 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   // server is up has to find the room already held for it.
   await lobby.restore()
 
-  const api = apiHandler(persistence, lobby, party, log)
-  const sockets = new WeakMap<object, Socket>()
+  const sessions = new Sessions({ lobby, persistence, log })
+  const sockets = new WeakMap<object, ServerSocket>()
 
-  const server = Bun.serve<{ player: Player | null; intent: ServerIntent | null }, never>({
+  const server = Bun.serve<{ url: string }, never>({
     port: options.port,
     async fetch(request, server) {
       if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-        // A ticket is how an account reaches a socket: a browser cannot put an
-        // `Authorization` header on a WebSocket, and a session token in a url
-        // is a session token in somebody's logs.
-        const params = new URL(request.url).searchParams
-        const ticket = params.get('ticket')
-        const player = ticket ? persistence.accounts.redeemTicket(ticket) : null
-        if (ticket && !player) {
-          return Response.json(
-            { error: 'that sign-in ticket is not valid; sign in again' },
-            { status: 401 },
-          )
-        }
-        // An intent the url states badly is not refused here: the lobby says
-        // so in-band, after the version gate, where the page can show it.
-        if (server.upgrade(request, { data: { player, intent: parseIntent(params) } })) return undefined
+        if (server.upgrade(request, { data: { url: request.url } })) return undefined
         return new Response('expected a websocket upgrade', { status: 400 })
       }
 
-      const answered = await api(request)
-      if (answered) return answered
+      const tile = await options.tiles?.(request)
+      if (tile) return tile
 
       // The one question a client needs answered before it commits to a match:
       // are we running the same build?
@@ -101,8 +86,8 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
       open(ws) {
         const transport = socketTransport(ws, log)
         sockets.set(ws, transport)
-        lobby.attach(transport, ws.data.player, ws.data.intent)
-        log(`a client connected${ws.data.player ? ` as ${ws.data.player.name}` : ''}`)
+        sessions.attach(transport, { url: ws.data.url })
+        log('a client connected')
       },
       message(ws, message) {
         sockets.get(ws)?.deliver(typeof message === 'string' ? message : message.toString())

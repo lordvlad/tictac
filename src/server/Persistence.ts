@@ -9,7 +9,7 @@ import { Rosters } from './Rosters'
  * One open database, migrated, with every store that reads it.
  *
  * Nothing else in the server opens a database. A store is handed one, which is
- * what lets the referee, the HTTP API and the tests share a transaction-capable
+ * what lets the referee, the sessions and the tests share a transaction-capable
  * connection instead of three that can disagree — and what lets a test run the
  * whole server against `:memory:` without a file.
  */

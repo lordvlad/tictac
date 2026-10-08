@@ -34,8 +34,14 @@
  * 6: a match server holds many rooms (`src/game/Lobby.ts`). A socket states
  * what it wants in its url, and the server's first frame is `seated`; a
  * protocol-5 client would connect, never be seated, and wait forever.
+ *
+ * 7: one socket per window carries everything (`src/game/Rpc.ts`): signing
+ * in, the roster, the lobby and taking a seat are JSON-RPC requests on it,
+ * and the HTTP API is gone. A protocol-6 window still finishes the match it
+ * is in — it comes back with `intent=resume` in its url, the one thing
+ * protocol 6 says in a url that this server still reads.
  */
-export const PROTOCOL_VERSION = 6
+export const PROTOCOL_VERSION = 7
 
 /**
  * The oldest protocol a match server still serves — for finishing a match,

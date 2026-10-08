@@ -4,6 +4,7 @@
  * Usage:
  *   bun scripts/serve-match.ts
  *   bun scripts/serve-match.ts --db=sqlite://matches.sqlite --rp-id=localhost --origins=http://localhost:5173
+ *   bun scripts/serve-match.ts --tiles=out/tiles/planet-z8-20261007.pmtiles
  *
  * A thin CLI: it reads flags, opens the database and starts the server. What it
  * knows about the game it knows through `GameServer`, which knows it through
@@ -15,6 +16,10 @@
  * a Postgres costs no match in progress: every window reconnects to its seat.
  * The default, `:memory:`, has nothing to take up.
  *
+ * `--tiles` serves `/tiles/{z}/{x}/{y}.mvt` from a local PMTiles archive, as
+ * the Worker does from R2 (`scripts/build-planet-tiles.ts` makes one); without
+ * it the server has no tile route.
+ *
  * Reachability is the honest cost of a WebSocket. A page served over `https`
  * may not open an insecure socket, so a public referee needs a host and a
  * certificate; Chromium's loopback exception makes `ws://localhost` work from
@@ -25,6 +30,7 @@
 import { startGameServer } from '../src/server/GameServer'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import type { RelyingParty } from '../src/server/Persistence'
+import { blobSource, tileHandler } from '../src/server/Tiles'
 import { BUILD_ID, PROTOCOL_VERSION } from '../src/version'
 
 const arg = (name: string): string | undefined =>
@@ -37,12 +43,20 @@ const party: RelyingParty = {
   origins: (arg('origins') ?? 'http://localhost:5173').split(',').map((origin) => origin.trim()),
 }
 
+const tilesPath = arg('tiles')
+if (tilesPath && !(await Bun.file(tilesPath).exists())) {
+  console.error(`[referee] no tile archive at ${tilesPath}`)
+  process.exit(1)
+}
+const tiles = tilesPath ? tileHandler(blobSource(Bun.file(tilesPath), tilesPath)) : undefined
+
 const persistence = await openPersistence(databaseUrl, party)
-const server = await startGameServer({ persistence, port, party })
+const server = await startGameServer({ persistence, port, tiles })
 
 console.info(`[referee] watching on ${server.url} — build ${BUILD_ID}, protocol ${PROTOCOL_VERSION}`)
 console.info(`[referee] database: ${databaseUrl}`)
 console.info(`[referee] passkeys for ${party.id}, from ${party.origins.join(', ')}`)
+console.info(`[referee] map tiles: ${tilesPath ?? 'none (--tiles=<archive.pmtiles>)'}`)
 
 process.on('SIGINT', () => {
   void (async () => {

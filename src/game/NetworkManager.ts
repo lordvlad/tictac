@@ -15,8 +15,8 @@ import {
   type RecordingHeader,
 } from './Recording'
 import type { UnitLoadout } from './Loadout'
-import { intentQuery, type RoomPhase, type Seated, type ServerIntent } from './Lobby'
-import { SocketTransport } from './SocketTransport'
+import type { RoomPhase, Seated, ServerIntent } from './Lobby'
+import type { ServerConnection } from './ServerConnection'
 import type { StateDigest } from './StateDigest'
 import { MY_VERSION, versionRefusal } from '../version'
 import {
@@ -52,51 +52,6 @@ export interface MatchLog {
 const ROOM_PHASES: readonly RoomPhase[] = ['waiting', 'deploying', 'playing']
 
 /**
- * How long a window waits before each try at getting its seat back, in order;
- * the last is repeated until it gives up. Quick at first, because the usual
- * cause is a server restarting under a deploy, which takes about a second.
- *
- * Capped at one second rather than backing off further: the stall a player
- * sees is however long the server was away *plus* the wait that happens to
- * be running when it comes back, and a try against a server that is down is
- * a refused connection that costs nobody anything. A 4 s cap measured as up
- * to four extra seconds on the reconnecting banner after the server was
- * already back.
- */
-export const RECONNECT_DELAYS_MS: readonly number[] = [250, 500, 1000]
-
-/**
- * How long a window keeps trying before it calls the match lost: the server's
- * grace for a dropped seat (`GRACE_MS`), after which there is no seat to take
- * back.
- */
-export const RECONNECT_GIVE_UP_MS = 120_000
-
-/**
- * One try that has neither been seated nor closed by now is abandoned for the
- * next. A socket to a host that has gone quiet can sit in `CONNECTING` far
- * longer than the whole backoff — and so can one accepted by a proxy while the
- * server behind it is still booting, which is exactly a deploy. A healthy
- * server seats a socket in well under a second; at 5 s, a try that happened
- * to start just before the server came back measured as five extra seconds
- * of reconnecting banner.
- */
-const ATTEMPT_TIMEOUT_MS = 2000
-
-/** What the player is told once a window has stopped trying to get back to its match. */
-export const CONNECTION_LOST = 'Lost the connection to the match server.'
-
-/** What a manager connected to a match server is made of beyond itself; the defaults are the browser's. */
-export interface ServerLink {
-  /** Open a socket to `url`. */
-  connect?: (url: string) => Transport
-  /** Run `fn` in `ms`; returns what cancels it. */
-  schedule?: (fn: () => void, ms: number) => () => void
-  /** How long to keep trying to get back to a seat (`RECONNECT_GIVE_UP_MS`). */
-  giveUpMs?: number
-}
-
-/**
  * What a window that got its seat back in a match being played has to do.
  *
  * `caughtUp`: the server's log starts with everything this window applied;
@@ -110,20 +65,25 @@ export type Resync = { kind: 'caughtUp'; missed: number } | { kind: 'rebuild'; l
 
 /** Where a window seated by a match server goes back to after a drop. */
 interface Home {
-  /** The server's url without the ticket and intent it was first reached with. */
-  url: string
   roomId: string
   faction: Faction | null
   /** Null for a spectator, who watches again rather than taking anything back. */
   seatKey: string | null
 }
 
-/** A window's way back to its seat, while it is trying. */
-interface Reconnecting {
-  attempt: number
-  /** Cancels whichever is pending: the wait before the next try, or the try's own deadline. */
-  cancelTry: (() => void) | null
-  cancelGiveUp: () => void
+/**
+ * A seat as the server stated it, checked: it decides what this manager is,
+ * so a field this build cannot read is a refusal rather than a guess. A seat
+ * comes back by its key, so a seat stated without one is unreadable too.
+ */
+function readSeat(raw: Seated): Seated | null {
+  const stated = raw as Partial<Record<keyof Seated, unknown>> | null
+  if (!stated || typeof stated.roomId !== 'string') return null
+  const faction = stated.faction === Faction.Blue || stated.faction === Faction.Red ? stated.faction : null
+  const phase = ROOM_PHASES.find((known) => known === stated.phase)
+  const seatKey = typeof stated.seatKey === 'string' ? stated.seatKey : null
+  if ((faction === null && stated.faction !== null) || !phase || (faction !== null && seatKey === null)) return null
+  return { roomId: stated.roomId, faction, phase, redirected: stated.redirected === true, seatKey }
 }
 
 /** A command as it crossed the wire: what JSON keeps of it, so two copies compare. */
@@ -178,15 +138,16 @@ export type NetworkMessage =
    * The match so far: its opening position and every intent the referee has
    * accepted. Sent by a match server to a socket that is seated in a match
    * already playing, or watching one — which is how a second window takes a
-   * match over and how a spectator catches up (`src/game/Lobby.ts`). Asked
-   * for by the socket's url (`intent=resume`/`watch`), not by a frame.
+   * match over and how a spectator catches up (`src/game/Lobby.ts`). Follows
+   * the answer to `room/enter` (`src/game/Rpc.ts`), never asked for itself.
    */
   | { type: 'log'; matchId: string; header: RecordingHeader; events: RecordedEvent[] }
   /**
-   * Which room this socket is in and as whom (`src/game/Lobby.ts`). The
-   * server's first frame, sent once the client's `hello` has passed the
-   * version gate; a seat in a match already playing, and any spectator, is
-   * sent the `log` next.
+   * Which room a protocol-6 socket is in and as whom: the server's first
+   * frame to a window that still says its intent in its url. Protocol 7 asks
+   * with `room/enter` and is answered with the same shape, so this build
+   * never reads it; it goes with the protocol-6 resume path once
+   * `OLDEST_SERVED_PROTOCOL` reaches 7.
    */
   | { type: 'seated'; roomId: string; faction: Faction | null; phase: RoomPhase; redirected: boolean; seatKey: string | null }
   /**
@@ -313,20 +274,14 @@ export class NetworkManager {
 
   /** Set once a peer has been turned away; nothing it sends is read again. */
   private refused = false
-  /** Set once this window has let go of the match: a close after that is nobody's news. */
-  private disposed = false
   private world: World | null = null
   private owns: (entityId: number) => boolean = () => true
   private readonly peerReady = Promise.withResolvers<PeerSquad>()
 
-  private readonly connect: (url: string) => Transport
-  private readonly schedule: (fn: () => void, ms: number) => () => void
-  private readonly giveUpMs: number
-  /** The server this window asked for its seat, while it is asking (`connectToServer`). */
-  private serverUrl: string | null = null
   /** Where to come back to after a drop, once a match server has seated this window. */
   private home: Home | null = null
-  private reconnecting: Reconnecting | null = null
+  /** Getting the seat back after a drop (`onReconnecting`): nothing goes on the wire meanwhile. */
+  private away = false
   /** Re-seated in a match being played: the `log` that follows is a resync, not a first look. */
   private resyncing = false
   /** Whether a `log` has been handed over (`waitForLog`); a later one is a resync. */
@@ -361,10 +316,10 @@ export class NetworkManager {
   private deployed: Deployment[] | null = null
 
   /**
-   * A socket's wait for the server to say where it sits (`connectToServer`),
-   * while there is one. Held here for the same reason `opening` is: an abort
-   * or a dropped socket before the seat is a failure to connect, owed to the
-   * menu with its reason.
+   * A window's wait for the server to say where it sits (`enterRoom`), while
+   * there is one. Held here for the same reason `opening` is: a refusal, an
+   * abort or a dropped socket before the seat is a failure to enter, owed to
+   * the menu with its reason.
    */
   private seating: PromiseWithResolvers<Seated> | null = null
 
@@ -375,15 +330,7 @@ export class NetworkManager {
    */
   private readonly matchLog = Promise.withResolvers<MatchLog>()
 
-  constructor(link: ServerLink = {}) {
-    this.connect = link.connect ?? ((url) => new SocketTransport(new WebSocket(url)))
-    this.schedule =
-      link.schedule ??
-      ((fn, ms) => {
-        const timer = setTimeout(fn, ms)
-        return () => clearTimeout(timer)
-      })
-    this.giveUpMs = link.giveUpMs ?? RECONNECT_GIVE_UP_MS
+  constructor() {
     // A log that never comes is only a failure to whoever waits for one;
     // most managers never do.
     this.matchLog.promise.catch(() => {})
@@ -422,83 +369,57 @@ export class NetworkManager {
    */
   attach(transport: Transport): void {
     this.transport = transport
-    // Read only from the channel in use: a try at reconnecting that was given
-    // up on can still have a frame in flight, and a seat it states is not
-    // this window's any more.
+    // Read only from the channel in use: a room this window has stood up
+    // from can still have a frame in flight.
     transport.onFrame((frame) => {
       if (transport === this.transport) this.handleIncomingRpc(frame)
     })
     transport.onClosed((reason) => {
       if (transport !== this.transport) return
       this.transport = null
-      // A seat on a match server is held for it, so a drop is a stall: the
-      // window goes back for it rather than telling the player it is over.
-      if (this.home && !this.refused && !this.disposed) {
-        this.redial()
-        return
-      }
       // A channel that dropped is not a peer that was turned away, so this
       // does not go through `refuse`: a player told the build was refused
-      // would go looking for a version to fix.
+      // would go looking for a version to fix. A seat on a match server never
+      // closes for a mere drop — its connection goes back for it — so this is
+      // already the end: refused on the way back, given up on, or replaced.
       this.disappoint(reason)
       this.onDisconnected?.(reason)
     })
   }
 
   /**
-   * Try again for this window's seat, after the next wait in
-   * `RECONNECT_DELAYS_MS` — the first try of a fresh drop, or the next one
-   * after a try that closed or timed out. The whole effort is bounded by
-   * `giveUpMs`, after which the seat is gone on the server's side too.
+   * Where the server put this window, read as the answer arrives (before the
+   * `log` that follows it): the first time, which decides what this manager
+   * is, or on the way back after a drop.
    */
-  private redial(): void {
-    this.reconnecting ??= {
-      attempt: 0,
-      cancelTry: null,
-      cancelGiveUp: this.schedule(() => this.refuse(CONNECTION_LOST), this.giveUpMs),
+  private seated(stated: Seated): void {
+    if (this.refused) return
+    const seat = readSeat(stated)
+    if (!seat) {
+      this.refuse('The match server sent a seat this build cannot read.')
+      return
     }
-    const reconnecting = this.reconnecting
+    if (this.home) {
+      this.reseat(seat)
+      return
+    }
+    if (seat.faction === null) {
+      this.mode = 'spectate'
+    } else {
+      this.mode = seat.faction === Faction.Blue ? 'host' : 'join'
+      this.myFaction = seat.faction
+    }
+    this.home = { roomId: seat.roomId, faction: seat.faction, seatKey: seat.seatKey }
+    this.seating?.resolve(seat)
+  }
+
+  /** A try at getting the seat back has begun (`ServerConnection`'s backoff). */
+  private dropped(attempt: number): void {
+    this.away = true
     // A window that was re-seated and dropped again before its log arrived
     // will be sent the log again, whole.
     this.resyncing = false
-    const delay = RECONNECT_DELAYS_MS[Math.min(reconnecting.attempt, RECONNECT_DELAYS_MS.length - 1)]!
-    reconnecting.attempt++
-    this.onReconnecting?.(reconnecting.attempt)
-    reconnecting.cancelTry = this.schedule(() => this.dial(), delay)
-  }
-
-  /** One try: a socket asking for this window's own seat back, or to watch its room again. */
-  private dial(): void {
-    const home = this.home!
-    const reconnecting = this.reconnecting!
-    const target = new URL(home.url)
-    const intent: ServerIntent =
-      home.seatKey === null
-        ? { kind: 'watch', roomId: home.roomId }
-        : { kind: 'resume', roomId: home.roomId, seatKey: home.seatKey }
-    for (const [key, value] of new URLSearchParams(intentQuery(intent))) target.searchParams.set(key, value)
-    const transport = this.connect(target.href)
-    this.attach(transport)
-    // Armed before anything is said: a channel that answers its first word at
-    // once — seating it, or closing — must find this try's deadline to cancel
-    // or replace, not have it set behind its back.
-    reconnecting.cancelTry = this.schedule(() => {
-      if (transport !== this.transport) return
-      // Closed from this side, which fires no close handler; the next try is
-      // this one's business.
-      this.transport = null
-      transport.close()
-      this.redial()
-    }, ATTEMPT_TIMEOUT_MS)
-    // Straight to the transport, past `sendRpc`, which says nothing while
-    // reconnecting: this is the version every socket states before its seat.
-    transport.send(this.messageToRpc({ type: 'hello', ...MY_VERSION }))
-  }
-
-  private stopReconnecting(): void {
-    this.reconnecting?.cancelTry?.()
-    this.reconnecting?.cancelGiveUp()
-    this.reconnecting = null
+    this.onReconnecting?.(attempt)
   }
 
   /**
@@ -512,7 +433,7 @@ export class NetworkManager {
       this.refuse('The match server put this window in another seat when it reconnected, so its match is lost.')
       return
     }
-    this.stopReconnecting()
+    this.away = false
     if (seat.seatKey !== null) home.seatKey = seat.seatKey
     this.onReconnected?.(seat)
     if (seat.phase === 'playing') {
@@ -602,20 +523,20 @@ export class NetworkManager {
    * not play against, an `abort` the other side stated, or a seat this window
    * could not get back.
    *
-   * Closing the connection is the whole enforcement: there is no partial
+   * Closing the channel is the whole enforcement: there is no partial
    * compatibility to negotiate, and playing on would produce a match whose
-   * result cannot be trusted or stored.
+   * result cannot be trusted or stored. For a room on a match server, closing
+   * is standing up from it (`room/leave`); the window's socket stays.
    */
   private refuse(reason: string): void {
     // Latched: a peer that has been refused does not get to carry on by
     // sending an acceptable frame afterwards. The closed channel is the
     // enforcement in practice, but the decision is this side's and it is not
     // re-litigated per frame. Closing here is also what keeps the *stated*
-    // reason: this side's own `close` fires no close handler, so the socket
-    // shutting a moment later cannot overwrite "build mismatch" with "the
+    // reason: this side's own `close` fires no close handler, so the channel
+    // ending a moment later cannot overwrite "build mismatch" with "the
     // connection was lost".
     this.refused = true
-    this.stopReconnecting()
     console.warn(`[net] The match cannot go on: ${reason}`)
     this.onDisconnected?.(reason)
     this.disappoint(reason)
@@ -653,42 +574,6 @@ export class NetworkManager {
         ? params.reason
         : 'The match server ended the match without saying why.'
       this.refuse(stated)
-      return
-    }
-
-    // Where the server put this socket. Taken at the edge because it decides
-    // what this manager *is* — a seat speaks for its side, a spectator speaks
-    // for nobody — before anything downstream exists to be told.
-    if (method === RpcMethods.seated) {
-      const faction = params.faction === Faction.Blue || params.faction === Faction.Red ? params.faction : null
-      const phase = ROOM_PHASES.find((known) => known === params.phase)
-      if (typeof params.roomId !== 'string' || (faction === null && params.faction !== null) || !phase) {
-        this.refuse('The match server sent a seat this build cannot read.')
-        return
-      }
-      const seat: Seated = {
-        roomId: params.roomId,
-        faction,
-        phase,
-        redirected: params.redirected === true,
-        seatKey: typeof params.seatKey === 'string' ? params.seatKey : null,
-      }
-      if (this.reconnecting) {
-        this.reseat(seat)
-        return
-      }
-      if (faction === null) {
-        this.mode = 'spectate'
-      } else {
-        this.mode = faction === Faction.Blue ? 'host' : 'join'
-        this.myFaction = faction
-      }
-      // A seat comes back by its key and a spectator simply watches again; a
-      // seat stated without a key has nothing to come back with.
-      if (this.serverUrl && (faction === null || seat.seatKey !== null)) {
-        this.home = { url: this.serverUrl, roomId: seat.roomId, faction, seatKey: seat.seatKey }
-      }
-      this.seating?.resolve(seat)
       return
     }
 
@@ -809,43 +694,46 @@ export class NetworkManager {
   }
 
   /**
-   * Connect to the match server at `url`, asking it for `intent`, and wait to
-   * be told where this socket sits.
+   * Enter a room on the match server `connection` is the window's socket to,
+   * asking for `intent` (`room/enter`), and wait to be told where this window
+   * sits.
    *
-   * The intent rides in the url (`intentQuery`) rather than in a frame because
-   * the server has to know who is asking for what before it reads a word —
-   * which room, which seat, which window this player had open before. Added
-   * through `searchParams`, so a ticket the url already carries is kept.
+   * Resolves with the seat, and rejects with the server's own words on a
+   * refusal (a room that is gone or full, a build it will not start) or on
+   * a connection that ended first. A refusal leaves the connection as it
+   * was: the player tries something else on the same socket. What follows
+   * depends on the seat: a room still being set up goes on with
+   * `hostMatch`/`joinMatch` exactly as a data channel would; a match already
+   * playing, or any room watched, is stated as a `log` (`waitForLog`).
    *
-   * Resolves with the seat, and rejects with the server's own reason on an
-   * `abort` (a build it will not play, a room that is gone or full) or with
-   * the socket's on a connection that died first. What follows depends on the
-   * seat: a room still being set up goes on with `hostMatch`/`joinMatch`
-   * exactly as a data channel would; a match already playing, or any room
-   * watched, is stated as a `log` (`waitForLog`).
-   *
-   * The server relays between clients as well as watching, so a socket to it
+   * The server relays between clients as well as watching, so a room on it
    * and a data channel to a peer are the same match from here. What it adds is
    * a third recomputation watching, a log that outlives the tab, and a seat
    * that a player who loses their tab can come back to.
    *
-   * Once seated, a socket that drops is not the end: the window comes back to
-   * its own seat by itself (`onReconnecting`, `onReconnected`, `onResync`),
-   * with the key the seat came with rather than the ticket, which was worth
-   * one connection.
+   * Once seated, a socket that drops is not the end: the connection goes back
+   * for this window's seat by itself, with the key the seat came with, and
+   * this manager is told as it happens (`onReconnecting`, `onReconnected`,
+   * `onResync`).
    */
-  connectToServer(url: string, intent: ServerIntent): Promise<Seated> {
-    const target = new URL(url)
-    const home = new URL(url)
-    for (const key of ['ticket', 'intent', 'room', 'seat']) home.searchParams.delete(key)
-    this.serverUrl = home.href
-    for (const [key, value] of new URLSearchParams(intentQuery(intent))) target.searchParams.set(key, value)
+  enterRoom(connection: ServerConnection, intent: ServerIntent): Promise<Seated> {
     this.seating = Promise.withResolvers()
-    this.attach(this.connect(target.href))
-    // Straight to the transport rather than through `send`: this side has no
-    // mode yet, and a version is a fact about this bundle, not an intent.
-    this.sendRpc(this.messageToRpc({ type: 'hello', ...MY_VERSION }))
+    this.attach(
+      connection.enter(intent, {
+        rejoin: () => {
+          const { roomId, seatKey } = this.home!
+          return seatKey === null ? { kind: 'watch', roomId } : { kind: 'resume', roomId, seatKey }
+        },
+        seated: (seat) => this.seated(seat),
+        dropped: (attempt) => this.dropped(attempt),
+      }),
+    )
     return this.seating.promise
+  }
+
+  /** The room this window was seated in on a match server, if it was. */
+  get roomId(): string | null {
+    return this.home?.roomId ?? null
   }
 
   /**
@@ -923,7 +811,7 @@ export class NetworkManager {
    */
   isMyTurn(activeFaction: Faction): boolean {
     if (this.mode === 'local') return true
-    if (this.mode === 'spectate' || this.reconnecting) return false
+    if (this.mode === 'spectate' || this.away) return false
     return activeFaction === this.myFaction
   }
 
@@ -975,7 +863,7 @@ export class NetworkManager {
     // Nor while getting a seat back: a socket says nothing but its `hello`
     // until the server has seated it. What this side said in the meantime is
     // restated (`reseat`) or found missing by the resync.
-    if (this.mode === 'spectate' || this.reconnecting) return
+    if (this.mode === 'spectate' || this.away) return
     this.transport?.send(frame)
   }
 
@@ -1011,7 +899,8 @@ export class NetworkManager {
   }
 
   /**
-   * The match this window is in has been decided: stop holding the seat.
+   * The match this window is in has been decided: stand up from it
+   * (`room/leave`).
    *
    * Only for a seat on a match server. The room is over the moment the
    * referee settles it, so a server restart while the end screen is up would
@@ -1024,9 +913,12 @@ export class NetworkManager {
     if (this.home) this.dispose()
   }
 
+  /**
+   * Let go of the match: a room on a match server is stood up from — the
+   * window's connection stays, it is the window's and not the match's — and
+   * a peer's channel is closed.
+   */
   dispose(): void {
-    this.disposed = true
-    this.stopReconnecting()
     this.transport?.close()
     // The broker peer too, which is still waiting when nobody ever joined.
     this.hosting?.close()

@@ -15,7 +15,11 @@
  * Nothing here touches the database, so it can be read and tested on its own.
  */
 
-/** Refusals a caller can turn straight into an HTTP response. */
+/**
+ * A passkey, session or roster request turned down, in words the player
+ * reads. A window is answered with it as the request's error, `400` as
+ * `RPC_ERRORS.badInput` and `401` as `RPC_ERRORS.signInFirst` (`Session.ts`).
+ */
 export class AuthError extends Error {
   constructor(
     readonly status: 400 | 401,

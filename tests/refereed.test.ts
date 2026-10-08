@@ -5,32 +5,38 @@ import { Rng } from '../src/core/rng'
 import { isJsonRpcFrame, type JsonRpcFrame } from '../src/game/JsonRpc'
 import { isCommand } from '../src/ecs/systems/CommandSystem'
 import { defaultLoadout } from '../src/game/Loadout'
-import { parseIntent, type Seated } from '../src/game/Lobby'
+import type { Seated } from '../src/game/Lobby'
 import { NetworkManager, type NetworkMessage, type Resync } from '../src/game/NetworkManager'
 import { RECORDING_VERSION, type Deployment, type RecordingHeader } from '../src/game/Recording'
+import type { Player } from '../src/game/Rpc'
+import { heldTokens, ServerConnection } from '../src/game/ServerConnection'
 import { PROTOCOL_VERSION } from '../src/version'
 import type { Transport } from '../src/game/Transport'
-import type { Player } from '../src/server/Accounts'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import { Lobby } from '../src/server/Lobby'
+import type { Persistence } from '../src/server/Persistence'
 import type { RefereeVerdict, Room } from '../src/server/Room'
+import { Sessions } from '../src/server/Session'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'
 import { simulateOverWire, type WireMatchResult } from '../src/sim/WireMatch'
 
 /**
- * A match server on a real socket, in-process.
+ * A match server on a real socket, in-process, and windows that talk to it
+ * the way a browser does: one `ServerConnection` each, a `NetworkManager`
+ * playing over it.
  *
  * The loopback tests cover what the referee decides; this covers the thing they
  * cannot — that `NetworkManager`s reach each other *through* a server over a
- * real WebSocket, by the url intents the lobby reads, that the server relays
- * to the other side and not back to the sender, and that what it wrote down
- * refights.
+ * real WebSocket, that the server relays to the other side and not back to
+ * the sender, that what it wrote down refights, and that a window gets back
+ * to its seat by itself when the server under it restarts.
  *
- * Who a socket is signed in as is stated in its url (`?as=`) rather than by a
- * ticket: tickets are the accounts' business and tested there, and this is
- * about what the lobby does with a player once it has one.
+ * Who a window is signed in as is stated in its url (`?as=`), and presented
+ * as a token that is simply the player's id: passkeys are the accounts'
+ * business and tested there, and this is about what the lobby does with a
+ * player once it has one.
  *
  * Port 0 the first time, so the test cannot collide with anything, including
  * itself; the same port after a `restart`, because a redeployed server is
@@ -40,20 +46,29 @@ async function lobbyOnASocket() {
   const persistence = await openPersistence()
   const store = persistence.matches
   const verdicts: RefereeVerdict[] = []
+  const accounts = {
+    playerFor: async (token: string): Promise<Player | null> =>
+      token.startsWith('id-') ? { id: token, name: token.slice(3) } : null,
+  }
   const newLobby = () =>
     new Lobby({ matches: store, rooms: persistence.rooms, log: () => {}, onVerdict: (verdict) => verdicts.push(verdict) })
   let lobby = newLobby()
+  const sessionsOver = (over: Lobby) =>
+    new Sessions({
+      lobby: over,
+      persistence: { accounts, rosters: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters'>,
+      log: () => {},
+    })
+  let sessions = sessionsOver(lobby)
+  const windows: ServerConnection[] = []
 
   const serve = (port: number): Serving => {
     const sockets = new WeakMap<object, { deliver: (raw: string) => void; closed: () => void }>()
     const server = Bun.serve({
       port,
-      fetch: (request, server) =>
-        server.upgrade(request, { data: { params: new URL(request.url).searchParams } })
-          ? undefined
-          : new Response('no'),
+      fetch: (request, server) => (server.upgrade(request, { data: { url: request.url } }) ? undefined : new Response('no')),
       websocket: {
-        data: {} as { params: URLSearchParams },
+        data: {} as { url: string },
         open(ws) {
           const frames: ((frame: JsonRpcFrame) => void)[] = []
           const closers: ((reason: string) => void)[] = []
@@ -72,9 +87,7 @@ async function lobbyOnASocket() {
               for (const handler of closers) handler('closed')
             },
           })
-          const name = ws.data.params.get('as')
-          const player: Player | null = name ? { id: `id-${name}`, name } : null
-          lobby.attach(transport, player, parseIntent(ws.data.params))
+          sessions.attach(transport, { url: ws.data.url })
         },
         message(ws, message) {
           sockets.get(ws)?.deliver(String(message))
@@ -97,6 +110,16 @@ async function lobbyOnASocket() {
     verdicts,
     url: `ws://127.0.0.1:${port}/`,
     as: (name: string) => `ws://127.0.0.1:${port}/?as=${name}`,
+    /**
+     * A window's connection to `url`, signed in as the url's `?as=` if it
+     * names anybody. Closed with the site.
+     */
+    window: (url: string): ServerConnection => {
+      const name = new URL(url).searchParams.get('as')
+      const connection = new ServerConnection(url, { tokens: heldTokens(name ? `id-${name}` : null) })
+      windows.push(connection)
+      return connection
+    },
     /** The process going away under a deploy: every socket dropped, nothing said to it. */
     crash: async () => {
       await lobby.dispose()
@@ -107,6 +130,7 @@ async function lobbyOnASocket() {
     boot: async () => {
       lobby = newLobby()
       await lobby.restore()
+      sessions = sessionsOver(lobby)
       server = serve(port)
     },
     restart: async () => {
@@ -114,6 +138,7 @@ async function lobbyOnASocket() {
       await site.boot()
     },
     stop: async () => {
+      for (const window of windows) window.close()
       await lobby.dispose()
       server?.stop()
       await persistence.close()
@@ -170,11 +195,11 @@ function nextIntent(manager: NetworkManager): Promise<NetworkMessage> {
  * squads and open the match — everything two players in a lobby do before the
  * first shot.
  */
-async function playing(hostUrl: string, joinerUrl: string, seed: number) {
+async function playing(window: (url: string) => ServerConnection, hostUrl: string, joinerUrl: string, seed: number) {
   const host = new NetworkManager()
   const joiner = new NetworkManager()
-  const opened = await host.connectToServer(hostUrl, { kind: 'open' })
-  const joined = await joiner.connectToServer(joinerUrl, { kind: 'join', roomId: opened.roomId })
+  const opened = await host.enterRoom(window(hostUrl), { kind: 'open' })
+  const joined = await joiner.enterRoom(window(joinerUrl), { kind: 'join', roomId: opened.roomId })
   host.hostMatch(seed, String(seed))
   const opening = await joiner.joinMatch()
   host.send({ type: 'ready', squad: squadOf(Faction.Blue) })
@@ -186,9 +211,9 @@ async function playing(hostUrl: string, joinerUrl: string, seed: number) {
 
 describe('Two clients playing through a match server', () => {
   test('they reach each other over sockets, and the referee keeps the match', async () => {
-    const { lobby, store, url, stop } = await lobbyOnASocket()
+    const { lobby, store, url, window, stop } = await lobbyOnASocket()
     const seed = 777
-    const { host, joiner, roomId, opened, joined, opening, seenByHost, seenByJoiner } = await playing(url, url, seed)
+    const { host, joiner, roomId, opened, joined, opening, seenByHost, seenByJoiner } = await playing(window, url, url, seed)
 
     // The lobby seated them where they asked, and the seed came from the
     // host, through the server, over a socket.
@@ -236,44 +261,45 @@ describe('Two clients playing through a match server', () => {
     await stop()
   })
 
-  test('a client on another build is turned away at the socket', async () => {
+  test('a window on another build may sign in and look, but is not seated in a match it cannot agree with', async () => {
     // The same gate as peer-to-peer play, over a different channel: the server
-    // refuses a build it cannot agree with rather than accusing it later.
+    // refuses a build it cannot agree with rather than accusing it later. It
+    // refuses the room, not the socket — a page on a stale build still needs
+    // the lobby to be told why, and a reload is all it takes to fix.
     const { url, stop } = await lobbyOnASocket()
-    // Spoken by hand rather than through a `NetworkManager`, because the point
-    // is a client this build would never produce: one claiming another build.
-    const socket = new WebSocket(`${url}?intent=open`)
-    await new Promise<void>((resolve) => socket.addEventListener('open', () => resolve()))
-    socket.send(
-      JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'tictac/system/session/hello',
-        params: { protocol: PROTOCOL_VERSION, build: 'c0ffee1' },
-      }),
-    )
-
-    const abort = await new Promise<Record<string, unknown> | null>((resolve) => {
-      socket.addEventListener('message', (event) => resolve(JSON.parse(String(event.data))))
-      setTimeout(() => resolve(null), 1500)
+    // Spoken by hand rather than through a `ServerConnection`, because the
+    // point is a window this build would never produce: one claiming another.
+    const socket = new WebSocket(url)
+    const opened = Promise.withResolvers<void>()
+    socket.addEventListener('open', () => opened.resolve())
+    await opened.promise
+    const answer = Promise.withResolvers<{ error?: { message: string } }>()
+    socket.addEventListener('message', (event) => {
+      const frame = JSON.parse(String(event.data))
+      if (frame.id === 1) answer.resolve(frame)
     })
+    socket.send(
+      JSON.stringify({ jsonrpc: '2.0', method: 'tictac/system/session/hello', params: { protocol: PROTOCOL_VERSION, build: 'c0ffee1' } }),
+    )
+    socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tictac/api/room/enter', params: { intent: { kind: 'open' } } }))
 
-    expect(abort).not.toBeNull()
-    expect(JSON.stringify(abort)).toContain('c0ffee1')
+    expect((await answer.promise).error?.message).toContain('c0ffee1')
+    expect(socket.readyState).toBe(WebSocket.OPEN)
     socket.close()
     await stop()
   })
 
   test('a room that is not there is a reason, not a hang', async () => {
-    const { url, stop } = await lobbyOnASocket()
+    const { url, window, stop } = await lobbyOnASocket()
     const lost = new NetworkManager()
-    await expect(lost.connectToServer(url, { kind: 'join', roomId: 'nowhere' })).rejects.toThrow('gone')
+    await expect(lost.enterRoom(window(url), { kind: 'join', roomId: 'nowhere' })).rejects.toThrow('gone')
     lost.dispose()
     await stop()
   })
 
   test('a player who opens a second window takes their match with them, rebuilt to the same world', async () => {
-    const { lobby, as, stop } = await lobbyOnASocket()
-    const { host, joiner, roomId } = await playing(as('alice'), as('bob'), 4242)
+    const { lobby, as, window, stop } = await lobbyOnASocket()
+    const { host, joiner, roomId } = await playing(window, as('alice'), as('bob'), 4242)
 
     // A few intents in, so there is a match to rebuild rather than an opening.
     const moved = nextIntent(joiner)
@@ -288,7 +314,7 @@ describe('Two clients playing through a match server', () => {
     host.onDisconnected = (reason) => superseded.resolve(reason ?? '')
 
     const second = new NetworkManager()
-    const seat = await second.connectToServer(as('alice'), { kind: 'resume' })
+    const seat = await second.enterRoom(window(as('alice')), { kind: 'resume' })
     expect(seat).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', redirected: false, seatKey: expect.any(String) })
     expect(second.mode).toBe('host')
     expect(await superseded.promise).toContain('another window')
@@ -310,7 +336,7 @@ describe('Two clients playing through a match server', () => {
     // Asking for anything else while that match is on puts the player back
     // in it, and says so.
     const third = new NetworkManager()
-    const back = await third.connectToServer(as('alice'), { kind: 'open' })
+    const back = await third.enterRoom(window(as('alice')), { kind: 'open' })
     expect(back).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', redirected: true, seatKey: expect.any(String) })
     expect((await third.waitForLog()).events).toHaveLength(3)
 
@@ -319,14 +345,14 @@ describe('Two clients playing through a match server', () => {
   })
 
   test('a spectator is shown the match so far, then follows it live without a word', async () => {
-    const { lobby, url, stop } = await lobbyOnASocket()
-    const { host, joiner, roomId } = await playing(url, url, 99)
+    const { lobby, url, window, stop } = await lobbyOnASocket()
+    const { host, joiner, roomId } = await playing(window, url, url, 99)
     const moved = nextIntent(joiner)
     host.send({ type: 'moveUnit', faction: Faction.Blue, squadIndex: 0, path: [{ x: 20, y: 5 }, { x: 20, y: 6 }] })
     await moved
 
     const watcher = new NetworkManager()
-    const seat = await watcher.connectToServer(url, { kind: 'watch', roomId })
+    const seat = await watcher.enterRoom(window(url), { kind: 'watch', roomId })
     expect(seat).toEqual({ roomId, faction: null, phase: 'playing', redirected: false, seatKey: null })
     expect(watcher.mode).toBe('spectate')
     const log = await watcher.waitForLog()
@@ -354,7 +380,7 @@ describe('Two clients playing through a match server', () => {
     // to reach the part the other tests in this file do not: a real winner,
     // over a real socket, refereed by a *second*, independent recomputation
     // of the same match (`src/sim/WireMatch.ts`).
-    const { lobby, store, url, stop } = await lobbyOnASocket()
+    const { lobby, store, url, window, stop } = await lobbyOnASocket()
 
     let seed = 5000
     let result: WireMatchResult | undefined
@@ -418,7 +444,7 @@ describe('A match server that restarts under its matches', () => {
   test('both players come back to their seats by themselves, and the match carries on, refereed', async () => {
     const site = await lobbyOnASocket()
     const seed = 4242
-    const { host, joiner, roomId } = await playing(site.url, site.url, seed)
+    const { host, joiner, roomId } = await playing(site.window, site.url, site.url, seed)
     const match = new MatchHost(header(seed))
     const moved = nextIntent(joiner)
     host.send(MOVE)
@@ -472,8 +498,8 @@ describe('A match server that restarts under its matches', () => {
     const site = await lobbyOnASocket()
     const host = new NetworkManager()
     const joiner = new NetworkManager()
-    const opened = await host.connectToServer(site.url, { kind: 'open' })
-    await joiner.connectToServer(site.url, { kind: 'join', roomId: opened.roomId })
+    const opened = await host.enterRoom(site.window(site.url), { kind: 'open' })
+    await joiner.enterRoom(site.window(site.url), { kind: 'join', roomId: opened.roomId })
     host.hostMatch(31, '31')
     await joiner.joinMatch()
 
@@ -504,7 +530,7 @@ describe('A match server that restarts under its matches', () => {
 
   test('a move played into a dead socket is not lost silently: the window is rebuilt from the log', async () => {
     const site = await lobbyOnASocket()
-    const { host, joiner } = await playing(site.url, site.url, 4242)
+    const { host, joiner } = await playing(site.window, site.url, site.url, 4242)
     const moved = nextIntent(joiner)
     host.send(MOVE)
     await moved
@@ -535,12 +561,12 @@ describe('A match server that restarts under its matches', () => {
 
   test('a spectator comes back to the room it was watching and follows it on', async () => {
     const site = await lobbyOnASocket()
-    const { host, joiner, roomId } = await playing(site.url, site.url, 99)
+    const { host, joiner, roomId } = await playing(site.window, site.url, site.url, 99)
     const moved = nextIntent(joiner)
     host.send(MOVE)
     await moved
     const watcher = new NetworkManager()
-    await watcher.connectToServer(site.url, { kind: 'watch', roomId })
+    await watcher.enterRoom(site.window(site.url), { kind: 'watch', roomId })
     await watcher.waitForLog()
 
     const told = endings(host, joiner, watcher)

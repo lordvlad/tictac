@@ -172,8 +172,9 @@ what it is: the rules, in the page, with nothing in between.
   [ARCH-DEPLOYMENT](../../architecture/deployment.md)), and a real `wrangler deploy` has
   happened against an actual account:
   `https://tictac-match-server.waldemar-reusch.workers.dev`. A single `MatchDurableObject`
-  serves static assets, `/api/…`, and a WebSocket upgrade, and runs the same
-  `Referee`/`Persistence`/`apiHandler` the Bun process does, over a `Db` adapter
+  serves static assets and a WebSocket upgrade (everything a window asks travels over that one
+  socket, [ARCH-NETWORKING §8](../../architecture/networking.md)), and runs the same
+  `Lobby`/`Sessions`/`Persistence` the Bun process does, over a `Db` adapter
   (`workers/DoSqliteDb.ts`) that is honest about the one thing it does not do — roll back a
   failed multi-statement transaction — because `ctx.storage.sql`'s transaction primitive cannot
   run the async code every caller of `Db.transaction` is written in. GitHub Pages remains the

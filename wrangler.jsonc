@@ -24,8 +24,17 @@
   // for what this falls back to when unset.
   "vars": {
     "RELYING_PARTY_ID": "tictac-match-server.waldemar-reusch.workers.dev",
-    "RELYING_PARTY_ORIGINS": "https://tictac-match-server.waldemar-reusch.workers.dev"
+    "RELYING_PARTY_ORIGINS": "https://tictac-match-server.waldemar-reusch.workers.dev",
+    // The map archive in `MAP_TILES`, named for what it holds; a new build is
+    // uploaded under a new key (`scripts/build-planet-tiles.ts`) and swapped in
+    // here (`[ITEM-061]`, docs/architecture/deployment.md §6).
+    "MAP_TILES_KEY": "planet-z8-20261007.pmtiles"
   },
+  // Map tiles, answered by `workers/index.ts` before the Durable Object.
+  // `wrangler dev` simulates the bucket locally and empty unless seeded.
+  "r2_buckets": [
+    { "binding": "MAP_TILES", "bucket_name": "map-tiles" }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "MATCH", "class_name": "MatchDurableObject" }

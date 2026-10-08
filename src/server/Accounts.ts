@@ -2,6 +2,7 @@ import { rollSquadSheets } from '../core/Characters'
 import { ROSTER } from '../config'
 import { Rng } from '../core/rng'
 import { fromBase64Url, toBase64Url } from '../game/Base64Url'
+import type { PasskeyAsserted, PasskeyCreated, PasskeyOptions, Player, SignedIn } from '../game/Rpc'
 import type { Db } from './db/Db'
 import type { RelyingParty } from './Persistence'
 import type { Rosters } from './Rosters'
@@ -28,17 +29,10 @@ import {
  * account, and both happen in one transaction below.
  */
 
-export interface Player {
-  id: string
-  name: string
-}
-
 /** How long a challenge is worth answering. Long enough for a human, short enough to be useless later. */
 const CHALLENGE_MINUTES = 5
 /** How long a signed-in session lasts before the passkey is asked again. */
 const SESSION_DAYS = 30
-/** How long a socket ticket lives: one page transition, no more. */
-const TICKET_SECONDS = 60
 
 interface ChallengeRow {
   id: string
@@ -57,52 +51,7 @@ interface CredentialRow {
   sign_count: number | string
 }
 
-export interface RegistrationOptions {
-  challengeId: string
-  publicKey: Record<string, unknown>
-}
-
-export interface RegistrationAnswer {
-  challengeId: string
-  /** base64url of the credential's raw id. */
-  credentialId: string
-  /** base64url of the bytes the browser signed over. */
-  clientDataJSON: string
-  authenticatorData: string
-  /** base64url SPKI, from `getPublicKey()`. */
-  publicKey: string
-  publicKeyAlgorithm: number
-}
-
-export interface LoginAnswer {
-  challengeId: string
-  credentialId: string
-  clientDataJSON: string
-  authenticatorData: string
-  signature: string
-}
-
-export interface SignedIn {
-  token: string
-  player: Player
-}
-
 export class Accounts {
-  /**
-   * Socket tickets, in memory.
-   *
-   * A WebSocket cannot carry an `Authorization` header from a browser, so the
-   * page trades its session for a short single-use ticket and puts that in the
-   * url. In memory because there is one lobby per process today, which is the
-   * same assumption the lobby itself makes; moving to several instances means
-   * moving these into `auth_challenges` with `purpose='ticket'`.
-   *
-   * A ticket carries the whole `Player`, name included, because the lobby
-   * shows seats by name and says who walked out of a match — and a socket
-   * upgrade is the wrong moment to go back to the database for it.
-   */
-  private readonly tickets = new Map<string, { player: Player; expires: number }>()
-
   constructor(
     private readonly db: Db,
     private readonly rosters: Rosters,
@@ -111,7 +60,7 @@ export class Accounts {
   ) {}
 
   /** What the browser needs to create a passkey, and the id of the challenge it answers. */
-  async registrationOptions(rawName: string): Promise<RegistrationOptions> {
+  async registrationOptions(rawName: string): Promise<PasskeyOptions> {
     const name = rawName.trim()
     if (name.length < 1 || name.length > 24) {
       throw new AuthError(400, 'a name is 1 to 24 characters')
@@ -139,7 +88,7 @@ export class Accounts {
   }
 
   /** Take a created passkey, and with it make a player, a squad and a session. */
-  async register(answer: RegistrationAnswer): Promise<SignedIn> {
+  async register(answer: PasskeyCreated): Promise<SignedIn> {
     const challenge = await this.takeChallenge(answer.challengeId, 'register')
     readClientData(fromBase64Url(answer.clientDataJSON), {
       type: 'webauthn.create',
@@ -189,7 +138,7 @@ export class Accounts {
    * authenticator offers the player their accounts rather than the server
    * having to know who is signing in before they have said so.
    */
-  async loginOptions(): Promise<RegistrationOptions> {
+  async loginOptions(): Promise<PasskeyOptions> {
     const { id, challenge } = await this.issueChallenge('login', null, null)
     return {
       challengeId: id,
@@ -202,7 +151,7 @@ export class Accounts {
     }
   }
 
-  async login(answer: LoginAnswer): Promise<SignedIn> {
+  async login(answer: PasskeyAsserted): Promise<SignedIn> {
     const challenge = await this.takeChallenge(answer.challengeId, 'login')
     const rows = await this.db.query<CredentialRow>`
       SELECT id, player_id, public_key, algorithm, sign_count
@@ -268,24 +217,6 @@ export class Accounts {
 
   async logout(token: string): Promise<void> {
     await this.db.query`DELETE FROM sessions WHERE token_hash = ${await sha256Hex(token)}`
-  }
-
-  /** A one-shot credential for a WebSocket url. */
-  issueTicket(player: Player): string {
-    const ticket = toBase64Url(crypto.getRandomValues(new Uint8Array(24)))
-    this.tickets.set(ticket, {
-      player: { id: player.id, name: player.name },
-      expires: this.now().getTime() + TICKET_SECONDS * 1000,
-    })
-    return ticket
-  }
-
-  /** Spend a ticket. Single use: a url that leaks is a url that no longer works. */
-  redeemTicket(ticket: string): Player | null {
-    const found = this.tickets.get(ticket)
-    this.tickets.delete(ticket)
-    if (!found || found.expires <= this.now().getTime()) return null
-    return found.player
   }
 
   private async issueChallenge(

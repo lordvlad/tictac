@@ -3,7 +3,7 @@ import { AmmoId, ShotMode, WeaponId } from '../src/core/Arsenal'
 import { Faction } from '../src/config'
 import type { CombatRecording } from '../src/game/Recording'
 import { openPersistence } from '../src/server/db/BunSqlDb'
-import type { Player } from '../src/server/Accounts'
+import type { Player } from '../src/game/Rpc'
 import { Lobby } from '../src/server/Lobby'
 import type { RefereeVerdict } from '../src/server/Room'
 import { MatchHost } from '../src/sim/MatchHost'
@@ -53,7 +53,7 @@ describe('A third recomputation of the same match', () => {
     // resolves the same stream. What it ends up holding is not a copy of what
     // they told it — it is its own answer to the same question.
     const { recording, store, lobby } = await harness()
-    const { blue, roomId } = seatBoth(lobby, null, null)
+    const { blue, roomId } = await seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
 
     for (const event of recording.events) blue.send(event.command)
@@ -74,7 +74,7 @@ describe('A third recomputation of the same match', () => {
     // The persistence half. What is stored is the intent stream, so the stored
     // match is re-derivable rather than a summary that could disagree with it.
     const { recording, store, lobby } = await harness()
-    const { blue, roomId } = seatBoth(lobby, null, null)
+    const { blue, roomId } = await seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
     for (const event of recording.events) blue.send(event.command)
 
@@ -92,8 +92,8 @@ describe('A third recomputation of the same match', () => {
     // signalling broker from a refereed match. A frame coming back to its
     // sender would be applied twice.
     const { recording, lobby } = await harness()
-    const { blue, red, roomId } = seatBoth(lobby, null, null)
-    const watcher = connect(lobby, null, { kind: 'watch', roomId })
+    const { blue, red, roomId } = await seatBoth(lobby, null, null)
+    const watcher = await connect(lobby, null, { kind: 'watch', roomId })
     blue.send({ type: 'matchHeader', header: recording.header })
 
     const first = recording.events[0]!.command
@@ -108,7 +108,7 @@ describe('A third recomputation of the same match', () => {
     // The opening position is Blue's to state once both sides have deployed;
     // stated into a room with nobody in the other seat, it opens nothing.
     const { recording, store, lobby } = await harness()
-    const blue = connect(lobby, null, { kind: 'open' })
+    const blue = await connect(lobby, null, { kind: 'open' })
     blue.send({ type: 'matchHeader', header: recording.header })
     blue.send(recording.events[0]!.command)
 
@@ -125,7 +125,7 @@ describe('Attribution, which is the only thing a third party adds', () => {
     // The referee is not asking whether the client agrees with its opponent —
     // it is asking whether it agrees with a recomputation neither player owns.
     const { recording, lobby, verdicts } = await harness()
-    const { blue, red } = seatBoth(lobby, null, null)
+    const { blue, red } = await seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
     for (const event of recording.events.slice(0, 6)) blue.send(event.command)
 
@@ -150,7 +150,7 @@ describe('Attribution, which is the only thing a third party adds', () => {
 
   test('an honest digest is silent, and reaches the other seat', async () => {
     const { recording, lobby, verdicts } = await harness()
-    const { blue, red, roomId } = seatBoth(lobby, null, null)
+    const { blue, red, roomId } = await seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
     for (const event of recording.events.slice(0, 6)) blue.send(event.command)
 
@@ -164,7 +164,7 @@ describe('Attribution, which is the only thing a third party adds', () => {
     // A disagreement about what was *possible* is larger than a disagreement
     // about a number, so it is a verdict rather than a logged shrug.
     const { recording, lobby, verdicts } = await harness()
-    const { blue, red } = seatBoth(lobby, null, null)
+    const { blue, red } = await seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
 
     blue.send({
@@ -186,41 +186,45 @@ describe('Attribution, which is the only thing a third party adds', () => {
   test('a client on another build is refused rather than accused, before it is placed anywhere', async () => {
     // The precondition for ever naming a side: this project deploys on every
     // push, so two builds diverge innocently and the first player a referee
-    // accused would be somebody with a stale cache.
+    // accused would be somebody with a stale cache. Admitted to the server —
+    // it may have a match of its own build to finish — but not to a new room.
     const { lobby, verdicts } = await harness()
-    const stale = connect(lobby, null, { kind: 'open' }, { hello: false })
+    const stale = await connect(lobby, null, null, { version: { protocol: MY_VERSION.protocol, build: 'c0ffee1' } })
 
-    stale.send({ type: 'hello', protocol: MY_VERSION.protocol, build: 'c0ffee1' })
+    const refusal = await stale.request('tictac/api/room/enter', { intent: { kind: 'open' } }).catch((e: Error) => e)
 
-    const abort = stale.of('abort')[0]
-    expect(abort?.reason).toContain('c0ffee1')
-    expect(stale.closed).toBe(true)
+    expect(refusal).toBeInstanceOf(Error)
+    expect((refusal as Error).message).toContain('c0ffee1')
+    expect(stale.closed).toBe(false)
     // Refused, not judged: no verdict, and no room opened for it.
     expect(verdicts).toEqual([])
-    expect(stale.of('seated')).toEqual([])
     expect(lobby.view(null).rooms).toEqual([])
   })
 
-  test('a url that asks for nothing readable is refused in words, after the build is checked', async () => {
+  test('a request for a room it cannot read is refused in words, and the window stays', async () => {
     const { lobby } = await harness()
-    const lost = connect(lobby, null, null)
+    const lost = await connect(lobby, null, null)
 
-    expect(lost.of('abort')[0]?.reason).toMatch(/does not say which match/)
-    expect(lost.closed).toBe(true)
+    const refusal = await lost
+      .request('tictac/api/room/enter', { intent: { kind: 'elsewhere' } as never })
+      .catch((e: Error) => e)
+
+    expect((refusal as Error).message).toMatch(/does not say which match/)
+    expect(lost.closed).toBe(false)
   })
 })
 
 describe('Rejoining a match that outlived its tab', () => {
   test('a player who takes their seat back is handed the whole log, and it refights to the referee', async () => {
     const { recording, store, lobby } = await harness()
-    const { blue, roomId } = seatBoth(lobby, ADA, BO)
+    const { blue, roomId } = await seatBoth(lobby, ADA, BO)
     // Part of a match, so it is still being played when Blue comes back.
     const played = recording.events.slice(0, 20)
     blue.send({ type: 'matchHeader', header: recording.header })
     for (const event of played) blue.send(event.command)
     blue.close()
 
-    const returning = connect(lobby, ADA, { kind: 'resume' })
+    const returning = await connect(lobby, ADA, { kind: 'resume' })
 
     expect(returning.of('seated')).toEqual([
       {
@@ -252,8 +256,8 @@ describe('Rejoining a match that outlived its tab', () => {
   test('taking back a seat nobody holds is refused in words', async () => {
     const { lobby } = await harness()
 
-    const anonymous = connect(lobby, null, { kind: 'resume' })
-    const signedIn = connect(lobby, ADA, { kind: 'resume' })
+    const anonymous = await connect(lobby, null, { kind: 'resume' })
+    const signedIn = await connect(lobby, ADA, { kind: 'resume' })
 
     expect(anonymous.of('abort')[0]?.reason).toBe('You have no match in progress.')
     expect(signedIn.of('abort')[0]?.reason).toBe('You have no match in progress.')

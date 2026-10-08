@@ -74,7 +74,7 @@ graph TD
 ---
 
 ### Milestone 5: The Shared World
-**Status:** Ready  
+**Status:** In progress  
 **Focus:** A squad that is somewhere on the real Earth, and travels there in real time.
 - Goal: everything the GDD calls the shared world ([GDD-WORLD](../design/gdd/world-and-travel.md))
   rests on a squad having a position. M5 gives it one, on a real planet map, with travel on the
@@ -85,6 +85,7 @@ graph TD
   a squad's position and start, `[ITEM-064]` orders, pace and the travel scheduler,
   `[ITEM-065]` the map screen, then `[ITEM-066]` the decisions encounters need (a design task;
   blocks `[ITEM-048]`). Split from `[ITEM-050]` on 2026-10-07.
+- Done: `[ITEM-060]` and `[ITEM-061]` (2026-10-07).
 - **Definition of done:** a signed-in player sees their squad on a real planet map near where
   they registered, sends it travelling, closes the tab, and finds it where the clock says; one
   socket per window.
@@ -94,7 +95,7 @@ graph TD
 Cross-cutting work that is not a milestone deliverable — nothing in the mermaid dependency
 chain above depends on it, and no milestone's Definition of Done names it.
 - Completed (2026-10-01): `[ITEM-045]` Cloudflare Durable Object deployment — a single DO runs
-  the real referee (`Referee`, `Persistence`, `apiHandler`) over its own `Db` adapter, deployed
+  the real referee (`Lobby`, `Sessions`, `Persistence`) over its own `Db` adapter, deployed
   for real at `https://tictac-match-server.waldemar-reusch.workers.dev`, alongside the existing
   Bun process as an additional hosting option for a match server. GitHub Pages remains the
   default way the client itself deploys either way. See

@@ -7,9 +7,12 @@ lastReviewed: "2026-10-07"
 appliesTo:
   - "src/game/NetworkManager.ts"
   - "src/game/JsonRpc.ts"
+  - "src/game/Rpc.ts"
+  - "src/game/ServerConnection.ts"
   - "src/game/Lobby.ts"
   - "src/game/Recording.ts"
   - "src/game/Squads.ts"
+  - "src/server/Session.ts"
   - "src/server/Lobby.ts"
   - "src/server/Room.ts"
   - "src/server/RoomStore.ts"
@@ -106,7 +109,7 @@ against state they both hold. See
 - `ready`: one `Deployment[]` (`ITEM-043`) — a sanitized `CharacterSheet`, the
   kit this side equipped (absent if this build could not read one), and a
   session-state bag per soldier, `{ hp?, fatigue? }`. `hp` is present only on
-  a match server that keeps HP, read off `GET /api/roster` and never invented
+  a match server that keeps HP, read off `roster/list` (§8) and never invented
   by either side. Before `ITEM-043` these travelled as three separate
   same-length arrays (`sheets`, `loadout`, `hp`) with nothing tying their
   lengths together — exactly the failure `ITEM-041` found.
@@ -172,11 +175,10 @@ it. The check is therefore about state rather than about messages:
 
 ## 5. Refusing a peer this build cannot agree with
 
-`src/version.ts` states a hand-maintained `PROTOCOL_VERSION` (3 — bumped from 2
-when `ready` moved to one `Deployment[]`, `ITEM-043`) and a `BUILD_ID` injected
-at build time from the commit. Both first frames carry them — the host's `init`
-and the joiner's `hello` — and a mismatch refuses the connection with prose the
-join screen shows.
+`src/version.ts` states a hand-maintained `PROTOCOL_VERSION` (7; bumped with every change to
+the wire's shape, which §7 enforces) and a `BUILD_ID` injected at build time from the commit.
+Both first frames carry them — the host's `init` and the joiner's `hello` — and a mismatch
+refuses the connection with prose the join screen shows.
 
 This is a precondition rather than hygiene: the project deploys on every push,
 so two peers on different bundles diverge for entirely innocent reasons. Turning
@@ -315,56 +317,107 @@ the version gate, roster verification, recording, settlement and attribution tha
 a single-use `Referee` watching one match for the life of the process. The shapes both sides
 share are in `src/game/Lobby.ts`.
 
-> **Direction (`ITEM-060`, M5).** The HTTP API (`src/server/Api.ts`: passkeys, `me`, roster,
-> recruit, lobby, tickets) is being replaced by JSON-RPC requests and pushed notifications over
-> one session socket per window, with room intents as methods instead of url parameters and no
-> tickets. Only static content stays HTTP: the built client and map tiles (`/tiles/{z}/{x}/{y}.mvt`,
-> `ITEM-061`). Until it lands, **do not add a new `/api` route**; add the capability to
-> `ITEM-060`'s method list instead. This section describes the system as it is today.
+### One socket per window
 
-### Connecting
+A window holds one WebSocket to its match server for as long as it is on it, and everything it
+says to the server travels over it as JSON-RPC 2.0 (`src/game/Rpc.ts`): signing in, the roster,
+the lobby, entering and leaving a room, and the match itself. A request (`id` set) gets exactly
+one response, and the requests on one socket are answered in the order they arrived
+(`Sessions`, `src/server/Session.ts`), so a window may send `signIn` and `room/enter` back to
+back and the room is entered signed in. The match's frames stay notifications, as on a data
+channel. Only static content is plain HTTP: the built client and the map tiles
+(`/tiles/{z}/{x}/{y}.mvt`, ARCH-DEPLOYMENT §6).
 
-A socket says what it wants in its url, not in a frame: `ticket` (signed-in players, from
-`POST /api/ticket`) plus `intentQuery(intent)` — `intent=open|join|watch|resume`, `room=<id>` for
-`join`/`watch`, and `room=<id>&seat=<key>` for a keyed `resume`. Its first frame is `hello`,
-which the server version-gates (§5, in the server's voice; *Admission* below); only then is the
-intent resolved and answered with **one** `seated { roomId, faction, phase, redirected,
-seatKey }`. A seat in a room that is `playing`, and a spectator of one, get the `log` (header and
-every intent so far) straight after; a spectator of a room that starts later gets it, with no
-events, the moment Blue's `matchHeader` arrives. A url without a readable intent is refused
-in-band with a reason rather than as a failed upgrade, so the page can show why.
+One socket rather than HTTP beside it, because the socket already *is* the window as far as the
+one-window rule (below) is concerned: a second channel needed a credential to bridge the two, a
+CORS policy, and a lobby polled because HTTP cannot push. The url is the plain server address;
+who is asking travels in `account/signIn`, never in a url. A host hands each upgraded socket to
+`Sessions.attach(transport, { url, place })`; `place` is where the connection came from when the
+host can tell (`request.cf` on Cloudflare), read off the socket for registration rather than off
+anything the page says.
+
+On a fresh socket, in this order:
+
+1. **`hello`** (a notification) with the page's `PeerVersion`, version-gated (*Admission*
+   below). A request before it is answered `425`.
+2. **`account/signIn`** with the stored token, if the window has one: what binds the socket to
+   a player.
+3. **`lobby/subscribe`**, if the window is showing the lobby.
+4. **`room/enter`**, for a seat or a spectator's place.
+
+| Method (`tictac/api/…`) | Params | Result | Refused with |
+| --- | --- | --- | --- |
+| `account/registerOptions` | `{ name }` | `{ challengeId, publicKey }` | `400` a name is 1 to 24 characters |
+| `account/registerVerify` | attestation, base64url (`PasskeyCreated`) | `{ token, player }`; the socket is bound, as by `signIn` | `400`/`401` a failed ceremony; `409` as `signIn` |
+| `account/loginOptions` | `{}` | `{ challengeId, publicKey }` | — |
+| `account/loginVerify` | assertion, base64url (`PasskeyAsserted`) | `{ token, player }`; the socket is bound | `400`/`401` a failed ceremony (*unknown passkey*, a bad signature); `409` as `signIn` |
+| `account/signIn` | `{ token }` | `{ player }` | `401` *that sign-in has expired; sign in again*; `409` the player's seat in a match being played is in a room this page's build cannot carry on (*Admission*) |
+| `account/signOut` | `{}` | `null`; the token is revoked and the socket anonymous | `401` *sign in first* |
+| `account/me` | `{}` | `{ player }`, null when anonymous | — |
+| `roster/list` | `{}` | `{ roster: RosterEntry[] }` | `401` |
+| `roster/recruit` | `{}` | `{ member }` | `401`; `400` *the roster is already full* |
+| `lobby/subscribe` | `{}` | the `LobbyView` now, then `lobby/changed` pushes | — |
+| `lobby/unsubscribe` | `{}` | `null` | — |
+| `room/enter` | `{ intent }` (`ServerIntent`) | `Seated` | *Entering a room* below |
+| `room/leave` | `{}` | `null` | — |
+
+Two pushes are sent unasked:
+
+- **`tictac/api/lobby/changed`**: the whole `LobbyView`, to each subscriber whose view changed,
+  once per burst of changes — one window replacing another retires a socket, holds a seat and
+  ends a room, and that is one push rather than three.
+- **`tictac/api/session/replaced`**: `{ reason }` (`SESSION_REPLACED`), just before the server
+  closes the socket of a window its player has replaced. That window does not reconnect.
+
+**A refusal is an answer, not an ending.** It is an error response with a code (`RPC_ERRORS`:
+the JSON-RPC codes for a malformed exchange, HTTP-shaped ones for everything else) and a message
+a player can read; anything internal is `500` *the server failed*, with no detail to probe. The
+socket stays open and where it was. Only three things end a connection: the version gate
+(`abort`, then close), `session/replaced`, and the window giving up after a drop. A room's
+`abort` ends the socket's membership of that room, not the session: the window is back in the
+lobby on the same socket.
+
+### Entering a room
+
+`room/enter` is answered with `Seated { roomId, faction, phase, redirected, seatKey }`. A seat
+in a room that is `playing`, and a spectator of one, are sent the `log` notification (header and
+every intent so far) straight after the answer; a spectator of a room that starts later gets it,
+with no events, the moment Blue's `matchHeader` arrives. A socket already in a room that is not
+over is refused `409` *Leave the match you are in first.*; one still on the end screen of a room
+that is over is stood up from it first. An intent that cannot be read is `-32602`.
 
 | Intent | Resolves to | Refused with |
 | --- | --- | --- |
-| `open` | a new room, Blue seat, `waiting` | — |
-| `join{room}` | that room's Red seat; the room becomes `deploying` | *That match already has two players — watch it instead.* / *That match is gone.* / *That match was started on another version of TicTac, and only its own players can finish it.* |
-| `watch{room}` | a spectator of that room, in any phase | *That match is gone.* / *That match was started on another version of TicTac, and only its own players can finish it.* |
-| `resume{room, seat}` | the seat that key belongs to, in any phase, with the log if `playing`; no ticket needed | *That seat is not yours.* / *That match is gone.* |
-| `resume` (a ticket, no key) | the player's own seat in a `playing` room, with the log — a new window | *You have no match in progress.* |
+| `open` | a new room, Blue seat, `waiting` | `409` build mismatch (*Admission*) |
+| `join{roomId}` | that room's Red seat; the room becomes `deploying` | `409` *That match already has two players — watch it instead.* / `410` *That match is gone.* / `409` *That match was started on another version of TicTac, and only its own players can finish it.* / `409` build mismatch |
+| `watch{roomId}` | a spectator of that room, in any phase | `410` *That match is gone.* / `409` another version, as for `join` / `409` build mismatch |
+| `resume{roomId, seatKey}` | the seat that key belongs to, in any phase, with the log if `playing` | `403` *That seat is not yours.* / `410` *That match is gone.* / `409` a room of another build (*Admission*) |
+| `resume` (signed in, no key) | the player's own seat in a `playing` room, with the log — a new window | `410` *You have no match in progress.* |
 
-After `seated`, a seat in a room still being set up carries on exactly as a peer match does:
+After the answer, a seat in a room still being set up carries on exactly as a peer match does:
 Blue announces the seed (`init`), Red states its build (`hello`), both deploy (`ready`), and
-Blue's `matchHeader` opens the match (`playing`). The in-band `resume { matchId, afterSeq }`
-of protocol 5 is gone: taking a seat back is an intent of the url, and the log comes whole.
+Blue's `matchHeader` opens the match (`playing`).
+
+`room/leave` stands the socket up from its room and leaves it connected, in the lobby. A
+spectator goes; a window done with a match that is over is let off its end screen; a seat in a
+match still being set up or played is held for its grace exactly as if the socket had dropped.
 
 ### Seat keys
 
 Every seat gets a key the moment it is taken — 18 random bytes, base64url — sent in
-`seated.seatKey` (null for a spectator, who has nothing to take back and simply watches again);
-the database keeps only its SHA-256 (`RoomStore`). A socket presenting `resume{room, seat}` with
-a key that fits is **the same window reconnecting**, after its connection dropped or its server
-restarted, signed in or not: it takes that seat back in whatever phase the room is in, with no
-ticket, abandons nothing, and becomes whoever the seat belongs to — so a later new window of
-that player supersedes it as usual. A socket still sitting in the seat is that window's previous
-connection, which the server had not yet noticed was dead; it is retired with *This seat was
-taken back by another connection.* Because a key is checked against its hash, which WebCrypto
-computes asynchronously, a keyed `seated` arrives a moment after `hello` rather than in reply to
-it; the socket says nothing until it is seated.
+`Seated.seatKey` (null for a spectator, who has nothing to take back and simply watches again);
+the database keeps only its SHA-256 (`RoomStore`). `resume{roomId, seatKey}` with a key that
+fits is **the same window reconnecting**, after its connection dropped or its server restarted,
+signed in or not: it takes that seat back in whatever phase the room is in, abandons nothing,
+and becomes whoever the seat belongs to — so a later new window of that player supersedes it as
+usual. A socket still sitting in the seat is that window's previous connection, which the server
+had not yet noticed was dead; it is retired with *This seat was taken back by another
+connection.*
 
-The key stays the same for the whole room and comes back in every `seated` for that seat, with
-one exception: a signed-in player's **new window** taking the seat over with a ticket (`resume`
-without a key, or a redirect) is not a reconnection, so the seat gets a fresh key and the
-replaced window's key stops working — it cannot take the seat back from under the new one.
+The key stays the same for the whole room and comes back in every `Seated` for that seat, with
+one exception: a signed-in player's **new window** taking the seat over (`resume` without a key,
+or a redirect) is not a reconnection, so the seat gets a fresh key and the replaced window's key
+stops working — it cannot take the seat back from under the new one.
 
 After a keyed reconnect into a room still `waiting` or `deploying`, the window restates what it
 had already said — a second `hello`, Blue's `init`, either side's `ready` if it had deployed —
@@ -376,17 +429,31 @@ it.
 
 Every room records the build and protocol it was opened under.
 
-- **Any first `hello`** must state a protocol from `OLDEST_SERVED_PROTOCOL` (the one before the
-  server's own, never below 6) up to `PROTOCOL_VERSION`, or it is refused as in §5 (*Protocol
-  mismatch: the match server speaks protocol 6, this page speaks protocol 5. …*).
-- **`open`, `join` and `watch`** start something on this server, so they take its own build and
-  protocol (*Build mismatch: the match server is running build b, this page is running build
-  a. …*). `join` and `watch` also need the room's build to be the page's (*That match was
+- **The `hello`** must state the server's own protocol (`PROTOCOL_VERSION`), at any build: a
+  page still on the build before a deploy has a match to finish here, so what a page may start
+  is weighed when it asks, not at the gate. Anything else is refused as in §5 (*Protocol
+  mismatch: the match server speaks protocol 7, this page speaks protocol 5. …*) with `abort`,
+  and the socket is closed.
+- **`open`, `join` and `watch`** start something on this server, so they take its own build
+  (`409` *Build mismatch: the match server is running build b, this page is running build a.
+  …*). `join` and `watch` also need the room's build to be the page's (`409` *That match was
   started on another version of TicTac, and only its own players can finish it.*).
-- **`resume`**, keyed or not, finishes something: any served protocol will do, and the build
-  that has to match is the **room's**, not the server's (*That match was started on another
-  version of TicTac (build a; this page is running build b), so this page cannot carry it
-  on.*). A page turned away here displaces nobody's window.
+- **`resume`**, keyed or not, finishes something: the build that has to match is the
+  **room's**, not the server's (`409` *That match was started on another version of TicTac
+  (build a; this page is running build b), so this page cannot carry it on.*). A page turned
+  away here displaces nobody's window.
+- **`signIn`**, and the passkey methods that sign in, are refused with that same `409` when the
+  player's seat in a match being played is in a room of another build: binding the socket would
+  retire the window that can finish the match. The page keeps its token, since a page that can
+  finish it should find the token where it was left, and shows the reason.
+- **Protocol 6** (`OLDEST_SERVED_PROTOCOL`, `max(6, PROTOCOL_VERSION − 1)`) is admitted for one
+  thing: the keyed resume a protocol-6 page puts in the url it opens the socket at
+  (`?intent=resume&room=…&seat=…`, `resumeOf6`), so a match in progress when protocol 7 was
+  deployed finishes across that deploy. It is answered the protocol-6 way (`Sessions.resume6`):
+  a `seated` notification and the log, or an `abort` and a close; a protocol-6 window being
+  replaced is sent `abort` rather than `session/replaced`. Any other protocol-6 socket is
+  refused at the gate. This path — `resume6`, `resumeOf6`, `Upgrade.url` and the protocol-6
+  branch of `Lobby.replace` — is deleted once `OLDEST_SERVED_PROTOCOL` reaches 7.
 
 ### What goes where
 
@@ -411,35 +478,41 @@ keyed reconnect is not a new window, and triggers neither.
 - **One match per player.** A player holding a seat in a room that is playing who asks to
   open, join or watch anything is put back in their own seat instead, with
   `redirected: true` and the log.
-- **One live window per player.** A player's newest socket, once past the version gate,
-  replaces their previous one wherever it was: that socket is sent *You opened TicTac in
-  another window; this one was disconnected.* and closed. A seat it held in a match already
-  `playing` passes to the new socket untouched — the opponent never notices. A seat in a room
-  still `waiting` or `deploying` is abandoned, whether its socket was still open or the seat was
-  only being held after a drop: that room is aborted for everybody in it (*Ada left before the
-  match began.*) and the player is free before the new intent is weighed. A half-equipped
-  loadout lives in the window equipping it and is not moved.
+- **One live window per player.** Signing in on a new socket (`account/signIn`, or a passkey
+  ceremony) replaces the player's previous one wherever it was: that socket is sent
+  `session/replaced` (*You opened TicTac in another window; this one was disconnected.*) and
+  closed. A seat it held is **held** for the grace like any dropped seat, in every phase: the
+  same window reconnecting signs in before it re-enters by its seat key, so signing in cannot be
+  what abandons a room. What happens to the seat is then the new window's doing. Entering by
+  that seat's key takes it back. Any other `room/enter` carries a seat in a match already
+  `playing` over to the new socket untouched — the opponent never notices — and abandons a seat
+  in a room still `waiting` or `deploying`: that room is aborted for everybody in it (*Ada left
+  before the match began.*) and the player is free before the new intent is weighed. A hold that
+  runs out first ends the room as for any dropped seat. A half-equipped loadout lives in the
+  window equipping it and is not moved.
 
 ### Leaving, and the end of a room
 
-- **Every seat whose socket drops is held**, in every phase, signed in or anonymous, for a grace
-  period (`GRACE_MS`, two minutes; injectable), shown as `connected: false` in the lobby. Its
-  window takes it back with its key within that time (or, for a `playing` seat, a signed-in
-  player's new window does), and nobody else in the room is told anything. Its expiry aborts
-  the room: *Bo left before the match began.* (or *The other player left before the match
-  began.* for an anonymous seat) if it was still being set up, *Bo left the match.* (or *The
-  other player left the match.*) if it was playing.
+- **Every seat whose socket drops is held** — and so is one stood up from with `room/leave`
+  before its match is over, or left behind by a replaced window — in every phase, signed in or
+  anonymous, for a grace period (`GRACE_MS`, two minutes; injectable), shown as
+  `connected: false` in the lobby. Its window takes it back with its key within that time (or,
+  for a `playing` seat, a signed-in player's new window does), and nobody else in the room is
+  told anything. Its expiry aborts the room: *Bo left before the match began.* (or *The other
+  player left before the match began.* for an anonymous seat) if it was still being set up,
+  *Bo left the match.* (or *The other player left the match.*) if it was playing.
 - A room is over when it settles (`winnerOf`) or aborts. Either way it leaves the listing and
   its players are free to open or join another at once. A settled room keeps its sockets —
-  both clients finish on their own end screens — while an abort is sent to every socket in it.
-  An abort for a player leaving is not a verdict: `onVerdict` hears only the referee's own
-  judgements (a digest that disagrees, an intent it cannot carry out, a squad that is not the
-  roster, a write that failed).
+  both clients finish on their own end screens — while an abort is sent to every socket in it
+  and takes each out of the room, still connected. An abort for a player leaving is not a
+  verdict: `onVerdict` hears only the referee's own judgements (a digest that disagrees, an
+  intent it cannot carry out, a squad that is not the roster, a write that failed).
 
-`GET /api/lobby` answers a `LobbyView`: rooms not over, newest first, each with its phase,
-seats (name, connected), spectator count and turn; and `you`, the asker's own seat, when a
-valid bearer token names them. A token the server no longer honours is treated as anonymous
-rather than refused: the room list is public.
+`lobby/subscribe` answers a `LobbyView`: rooms not over, newest first, each with its phase,
+seats (name, connected), spectator count and turn; and `you`, the socket's own seat when it is
+signed in. Anonymous sockets may subscribe: the room list is public. From then on the server
+pushes `lobby/changed` with the whole view whenever what that subscriber sees changes, until
+`lobby/unsubscribe` or the socket closes, so no window polls.
 
 ### Restarts and deploys
 
@@ -450,8 +523,8 @@ stopped (below); its row is deleted when the room ends. `Lobby.restore()` — ru
 `startGameServer` before it opens its port, and by the Durable Object inside
 `blockConcurrencyWhile` — takes every live room up again: every seat with no socket in it, held
 for a fresh grace period; a `playing` room's `MatchHost` refought from the stored header and
-events, which also become the log a socket is handed. One match per player, and `you` in
-`/api/lobby`, hold for restored rooms exactly as for any other. `Lobby.dispose()` closes every
+events, which also become the log a socket is handed. One match per player, and `you` in the
+lobby view, hold for restored rooms exactly as for any other. `Lobby.dispose()` closes every
 socket without a word and writes nothing, so to a window a restart is a dropped connection: it
 reconnects with its key, and the match carries on. A room of another build still `waiting` is
 let go on restore instead, since no page could join it.
@@ -469,13 +542,33 @@ build is judged exactly as it always was. ARCH-DEPLOYMENT §2.3 walks through a 
 
 ### The browser's side
 
-`NetworkManager.connectToServer(url, intent)` opens the socket with the intent on its url,
-sends `hello`, and resolves with the `seated` frame — or rejects with the stated reason if an
-`abort` or a close comes first. `seated` and `log` are taken at its edge, never forwarded as
-commands; `waitForLog()` hands the log over whenever it is asked for, and any intent relayed
-while the window is still being built is held and released, in order, the moment `onMessage`
-is assigned. A spectator is `mode: 'spectate'`: it hears everything and transmits nothing after
-`hello` — no intents, no digests, no component updates.
+A window holds one `ServerConnection` (`src/game/ServerConnection.ts`) per server. `main.tsx`
+keeps it at module level — `connectionFor(url)` returns the live one to that url or replaces
+it, `leaveServer()` closes it — because it outlives every screen: the server panel opens it, a
+match plays over it, and the panel shown again without a page load (a room refused, a match
+aborted) finds it still signed in and subscribed. A finished match's way back to the menu
+(`backToMenu`) reloads the page, which ends the connection like any other page load. The panel
+(`src/hud/menu/ServerPanel.tsx`) is driven by it: its state, its player,
+and the lobby through `watchLobby`, whose subscription ends with its last listener. `Account`
+(`src/game/Account.ts`) is a thin wrapper over it for the passkey ceremonies, calling
+`signedIn`/`signedOut` so the token is kept or dropped. The token lives in `localStorage` keyed
+by the server's origin (`browserTokens(url)`) and is presented with `account/signIn` on every
+socket the connection opens.
+
+`request(method, params)` rejects with an `RpcError` (the server's words and code) for a
+refusal, and with a plain `Error` when no answer came: the socket went, or `REQUEST_TIMEOUT_MS`
+(10 s) passed. A first socket that never opens is *No match server answers at that address.*
+and is not dialled again: the address is more likely wrong than the server away.
+
+`NetworkManager.enterRoom(connection, intent)` takes a `Transport` scoped to the room from
+`connection.enter(intent, member)` and plays over it exactly as over a data channel; it resolves
+with the `Seated` answer, or rejects with the server's reason and leaves the connection as it
+was, so the player tries something else on the same socket. Closing that transport is
+`room/leave`. `seated` and `log` are taken at its edge, never forwarded as commands;
+`waitForLog()` hands the log over whenever it is asked for, and any intent relayed while the
+window is still being built is held and released, in order, the moment `onMessage` is assigned.
+A spectator is `mode: 'spectate'`: it hears everything and transmits nothing after `hello` — no
+intents, no digests, no component updates.
 
 What `main.tsx` does with the seat (`takeSeat`):
 
@@ -508,19 +601,25 @@ that check on the very first handover of *every* refereed match, and are fixed w
 
 #### Coming back after a drop
 
-Once seated, a manager remembers where it sits: the server's url without its ticket and intent,
-the room, and the `seatKey` from `seated` (a spectator: just the room). A socket that closes
-after that is not reported — unless the window disposed it, was refused, or was sent an `abort`
-— but taken as a stall: the manager calls `onReconnecting(attempt)` and dials
-`intent=resume&room=<id>&seat=<key>` (a spectator, `watch`) after 250 ms, 500 ms, then every
-second — never longer, because the stall a player sees is the server's outage *plus* whatever
-wait is running when it comes back — each try abandoned after 2 s without a seat (a proxy can
-hold one open while the server behind it boots), until `RECONNECT_GIVE_UP_MS`
-(two minutes, the server's grace) has passed; then `onDisconnected('Lost the connection to the
-match server.')`. Each try says `hello` and nothing else until it is seated. An `abort` on any
-try ends it with the server's reason, exactly as before. A `seated` in another room or seat is
-reported as a lost match. The connector and the timers are injectable (`ServerLink`), which is
-how `tests/network.test.ts` walks the schedule without waiting for it.
+Once seated, a manager remembers where it sits — the room and the `seatKey` (a spectator: just
+the room) — and gives the connection its way back, `rejoin()`: `resume{roomId, seatKey}`, or
+`watch{roomId}`. A socket that closes under a connection that has been open is a stall, not an
+ending: the connection tells the manager (`onReconnecting(attempt)`) and dials the same url
+again after 250 ms, 500 ms, then every second (`RECONNECT_DELAYS_MS`) — never longer, because
+the stall a player sees is the server's outage *plus* whatever wait is running when it comes
+back — each try abandoned after 2 s if it has not got back (a proxy can hold one open while the
+server behind it boots), until `RECONNECT_GIVE_UP_MS` (two minutes, the server's grace) has
+passed; then *Lost the connection to the match server.*
+
+Each new socket is put back in the one order that works: `hello`, since nothing is answered
+before it; `signIn` with the stored token, since the lobby's `you` and a seat's owner depend on
+it (a `401` forgets the token, any other refusal keeps it with the reason); `lobby/subscribe` if
+anybody is listening; `room/enter` with `rejoin()` if it was seated, whose answer is followed by
+the match itself. A refusal on that last step ends the room, not the try: the server is there
+and has said the window stands in its lobby. `session/replaced` ends the connection with no
+reconnect. A `Seated` in another room or seat is reported as a lost match. The connector and the
+timers are injectable (`ServerLink`), which is how `tests/serverConnection.test.ts` and
+`tests/network.test.ts` walk the schedule without waiting for it.
 
 Everything else the manager holds — mode, side, opening, deployed squad, held commands, the
 world it is bound to — survives the new socket. While reconnecting `isMyTurn` is false and

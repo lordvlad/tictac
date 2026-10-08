@@ -1,6 +1,14 @@
 import { isJsonRpcFrame, type JsonRpcFrame } from '../game/JsonRpc'
 import type { Transport } from '../game/Transport'
 
+/** A server-side socket's transport, and the two calls its host makes into it. */
+export interface ServerSocket extends Transport {
+  /** A text frame the socket received. */
+  deliver(raw: string): void
+  /** The socket closed, for `reason`. */
+  closed(reason: string): void
+}
+
 /**
  * One socket, behind the transport port.
  *
@@ -10,14 +18,14 @@ import type { Transport } from '../game/Transport'
  * defines `startGameServer`, which calls `Bun.serve` directly, and importing
  * anything from a file that references the `Bun` global pulls that reference
  * into whichever TypeScript project imports it — `workers/MatchDurableObject.ts`
- * (`[ITEM-045]`) wires the same `Lobby` behind a Cloudflare `WebSocket`
+ * (`[ITEM-045]`) attaches the same `Sessions` to a Cloudflare `WebSocket`
  * instead of a `Bun.serve` one, and needs this function without `Bun.serve`'s
  * types along for the ride.
  */
 export function socketTransport(
   ws: { send: (data: string) => void; close: () => void },
   log: (message: string) => void,
-): Transport & { deliver: (raw: string) => void; closed: (reason: string) => void } {
+): ServerSocket {
   const frames: ((frame: JsonRpcFrame) => void)[] = []
   const closers: ((reason: string) => void)[] = []
   return {

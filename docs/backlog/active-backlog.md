@@ -402,171 +402,6 @@ to this item.
 
 ---
 
-### [ITEM-060] One Connection per Window: the API Over JSON-RPC
-**Type:** Infrastructure
-**Priority:** P2
-**Status:** Ready
-**Milestone:** M5 — The Shared World
-
-#### Why
-A signed-in window today talks to its match server two ways: HTTP `fetch` to `/api/*`
-(`src/server/Api.ts`: passkey ceremonies, sign-out, `me`, the roster, recruiting, the lobby,
-socket tickets) and a WebSocket for the room it sits in. The user's decision (2026-10-07) is
-that the socket is reused for everything: one connection per window. It also pays for itself:
-
-- The lobby panel polls `GET /api/lobby` every two seconds (`LOBBY_POLL_MS` in
-  `src/hud/menu/ServerPanel.tsx`); over a socket the server pushes changes instead.
-- Socket tickets (`POST /api/ticket`, held in memory by `Accounts`) exist only because a
-  session token must not go in a socket url; an RPC carrying the token over an open socket
-  needs no ticket.
-- The API's CORS (`Access-Control-Allow-*` in `Api.ts`) exists only because a page on GitHub
-  Pages `fetch`es another origin; a WebSocket needs none.
-- The world map (`ITEM-064`, `ITEM-065`) and, later, an encounter's join window (`ITEM-048`) need
-  a channel the server can push down. The socket already governed by the one-live-window-per-player
-  rule (`ITEM-058`) is that channel, rather than a second one to reconcile with it.
-
-Only static content stays HTTP: the built client, and map tiles, which MapLibre fetches by url
-(`ITEM-061` moves them to `/tiles/{z}/{x}/{y}.mvt`, off `/api`).
-
-#### Change
-1. **A session socket per window**, opened as soon as a match server is chosen (not when a
-   room is entered), and kept for the life of the window. Rooms are entered and left over it.
-2. **Requests with ids, and notifications for pushes.** `src/game/JsonRpc.ts` already declares
-   `JsonRpcRequest`, `JsonRpcSuccessResponse` and `JsonRpcErrorResponse`; only notifications are
-   used today. Requests carry ids and get exactly one response; the server pushes with
-   notifications. Match traffic stays the notifications it is.
-3. **A method for every route in `Api.ts`**: passkey register options/verify, login
-   options/verify, sign out, `me`, roster list, recruit. The lobby becomes a **subscription**:
-   one call answers the current `LobbyView` and later changes arrive as notifications.
-4. **Room intents become methods.** `open`, `join`, `watch` and `resume`, which ride the socket
-   url today (`intentQuery`), are RPC calls answered by `seated`, with the same refusal texts.
-5. **Identity is bound by an RPC carrying the session token**, never in a url. `/api/ticket`
-   and the ticket store in `Accounts` are removed. Signing in or out over the socket rebinds or
-   unbinds the session in place.
-6. **The session rules carry over at session level**: one live window per player (`ITEM-058`)
-   applies to the session socket, and seat keys and reconnect (`ITEM-059`) keep working — a
-   reconnecting window resumes its seat by key over the new socket.
-7. **`request.cf` is captured on the upgrade** and kept on the session, so registration can read
-   the connection's latitude/longitude (`ITEM-063`).
-8. **The HTTP `/api` handler and its CORS are removed** from `GameServer.ts` and
-   `workers/MatchDurableObject.ts`; only static assets and `/tiles/` stay HTTP.
-9. **Protocol bump to 7.** `OLDEST_SERVED_PROTOCOL` (`Math.max(6, PROTOCOL_VERSION - 1)`) then
-   becomes 6, so the server keeps admitting a protocol-6 socket that resumes an existing room by
-   seat key (url intent `resume{room, seat}`), and a match in progress finishes across the
-   deploy. Every other protocol-6 request is refused with the reload text.
-
-#### Affected Files
-- `src/server/Api.ts` (removed; its handlers move behind RPC methods)
-- `src/server/Lobby.ts` (session sockets, lobby subscription, intents as methods)
-- `src/server/Room.ts`, `src/server/Accounts.ts` (tickets removed), `src/server/GameServer.ts`
-- `workers/MatchDurableObject.ts` (`request.cf` on the upgrade; no `/api`)
-- `src/game/Account.ts`, `src/game/NetworkManager.ts`, `src/game/JsonRpc.ts`
-- `src/hud/menu/ServerPanel.tsx` (no polling), `src/main.tsx`
-- `src/version.ts` (protocol 7)
-- `docs/architecture/networking.md`, `docs/architecture/persistence.md`,
-  `docs/architecture/deployment.md`
-
-#### P2P / Simulation Impact
-- Wire protocol 7: new request/response and notification methods on the match-server socket;
-  the wire-shape catalogue gains them. Peer-to-peer matches are untouched.
-- Match commands, the match stream and determinism are unchanged.
-
-#### Acceptance Criteria
-- [ ] No `/api/` HTTP routes remain on either host (Bun server, Worker).
-- [ ] One socket per window, observed in a browser through sign-in, the lobby, a match and back.
-- [ ] Lobby changes arrive as pushes; nothing polls.
-- [ ] Passkey registration and sign-in work over RPC on the deployed Worker.
-- [ ] A protocol-6 window in a match finishes it across the deploy; any other protocol-6 request
-      is refused with the reload text.
-- [ ] Tests updated (`bun test`).
-- [ ] Living documentation updated: networking, persistence, deployment.
-
-#### Risks & Mitigations
-- **Risk:** WebAuthn ceremonies were built around request/response HTTP and its error paths.
-- **Mitigation:** the RPC methods keep the same inputs and outputs; verify on the deployed
-  Worker, not only locally (an acceptance criterion).
-- **Risk:** a socket that is now long-lived keeps a Durable Object awake where a page with no
-  room used to cost nothing.
-- **Mitigation:** accepted for now; Cloudflare's Hibernation API for the session socket is the
-  later fix if the bill shows it.
-
----
-
-### [ITEM-061] Serve the Map: a Low-Zoom Planet From R2
-**Type:** Infrastructure
-**Priority:** P2
-**Status:** Ready — the zoom cap is still to be chosen (see Change 1)
-**Milestone:** M5 — The Shared World
-
-#### Why
-The world is the real Earth (GDD-WORLD §1), and the only archive in R2,
-`map-tiles/world.pmtiles`, is Stuttgart: its header says lon 8.9–9.5, lat 48.55–49.0, z0–14,
-1,259 tiles. The user's decision (2026-10-07, D1): host the whole planet at the most zoomed-out
-levels now; closer zooms are built on demand later (`ITEM-067`, deferred).
-
-Measured against Protomaps build `20261007.pmtiles` (the full planet, z0–15, is 138.7 GB) with
-`pmtiles extract --dry-run`:
-
-| Zooms | Size |
-| --- | --- |
-| z0–6 | 45 MB |
-| z0–7 | 189 MB |
-| z0–8 | 558 MB |
-| z0–9 | 1.6 GB |
-| z0–10 | 3.8 GB |
-| z0–11 | 8.0 GB |
-| z0–12 | 18 GB |
-
-R2's free tier is 10 GB-month; standard storage beyond it is $0.015/GB-month.
-
-#### Change
-1. **Choose the zoom cap.** The candidates are **z0–8** (558 MB: countries, regions and large
-   towns) and **z0–10** (3.8 GB: town streets begin to show), both inside the free tier. The
-   choice is open and made when this item is pulled.
-2. **Produce the archive** with `pmtiles extract https://build.protomaps.com/<date>.pmtiles
-   <out> --maxzoom=N`, which streams by range requests (no 138 GB download).
-3. **Upload it through the R2 S3 API** (multipart). `wrangler r2 object put` does not handle
-   multi-GB objects. The credentials are in `.env` by name (`R2_S3_API`, `R2_ACCESS_KEY_ID`,
-   `R2_SECRET_ACCESS_KEY`).
-4. **Bind `map-tiles` to `tictac-match-server`** in `wrangler.jsonc`.
-5. **Port the reference's R2 `Source`** (`../no-way-home/packages/workers/src/lib/r2-pmtiles-source.ts`)
-   with its abort handling fixed.
-6. **Answer `/tiles/{z}/{x}/{y}.mvt` in `workers/index.ts`**, before the request reaches the
-   Durable Object: tiles need no game state, and a tile request should not wake or queue on it.
-   The response carries CORS for any origin (a static asset, read by GitHub Pages).
-7. **The Bun server answers the same route** from a local `.pmtiles` file, for development and
-   tests.
-8. **Self-host the style's glyphs and sprites.** The reference loads them from
-   `protomaps.github.io`; they become static assets of this project.
-9. **Retire the Stuttgart-only `world.pmtiles`**, unless the deferred pipeline (`ITEM-067`)
-   wants it.
-
-#### Affected Files
-- `wrangler.jsonc` (R2 binding), `workers/index.ts` (the tile route)
-- `src/server/GameServer.ts` (the same route from a local file)
-- A new tile-source module beside them (the ported R2 `Source`)
-- `public/` (glyphs, sprites, style)
-- `package.json` (`pmtiles`)
-- `docs/architecture/deployment.md`
-
-#### P2P / Simulation Impact
-- None. Tiles are static content, not on the match wire.
-
-#### Acceptance Criteria
-- [ ] A tile is served to the match server's own origin and to a page on GitHub Pages.
-- [ ] A bare MapLibre page shows the whole planet down to the chosen cap.
-- [ ] No third-party origin is contacted at runtime (tiles, glyphs, sprites all self-hosted).
-- [ ] The Bun server serves the same route from a local file.
-- [ ] Living documentation updated (deployment: the binding, the archive, how it was produced).
-
-#### Risks & Mitigations
-- **Risk:** a player zooms past the cap and sees nothing finer.
-- **Mitigation:** MapLibre overzooms the last level; `ITEM-067` is the real answer.
-- **Risk:** a multi-GB upload fails part-way.
-- **Mitigation:** multipart through the S3 API, which retries a part rather than the whole.
-
----
-
 ### [ITEM-062] Travel Maths in the Headless Core
 **Type:** Feature
 **Priority:** P2
@@ -617,8 +452,8 @@ sound maths with the wrong signatures for this project.
 ### [ITEM-063] A Squad Has a Position, and a Place to Start
 **Type:** Feature
 **Priority:** P2
-**Status:** Ready — after `ITEM-060` (`request.cf` on the session) and `ITEM-062` (the waypoint
-shape)
+**Status:** Ready — after `ITEM-062` (the waypoint shape); `request.cf` is already on the session
+(`ITEM-060`, shipped)
 **Milestone:** M5 — The Shared World
 
 #### Why
@@ -724,7 +559,7 @@ arm the alarm for the earliest.
 ### [ITEM-065] The Map Screen
 **Type:** Feature
 **Priority:** P2
-**Status:** Ready — after `ITEM-061` and `ITEM-064`
+**Status:** Ready — after `ITEM-064` (the tiles it draws are served, `ITEM-061`)
 **Milestone:** M5 — The Shared World
 
 #### Why

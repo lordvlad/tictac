@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
 import type { RecordedEvent, RecordingHeader } from '../src/game/Recording'
-import type { Player } from '../src/server/Accounts'
+import type { Player } from '../src/game/Rpc'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import { Lobby } from '../src/server/Lobby'
 import { hashSeatKey, type RefereeVerdict } from '../src/server/Room'
@@ -65,9 +65,9 @@ async function deployment() {
 }
 
 /** The window behind `dropped` reconnecting to its seat with its key, as a page on `version`. */
-function reconnect(lobby: Lobby, dropped: Connection, version: PeerVersion = MY_VERSION): Promise<Connection> {
+async function reconnect(lobby: Lobby, dropped: Connection, version: PeerVersion = MY_VERSION): Promise<Connection> {
   const intent = { kind: 'resume', roomId: roomOf(dropped), seatKey: keyOf(dropped) } as const
-  return answered(connect(lobby, null, intent, { version }))
+  return answered(await connect(lobby, null, intent, { version }))
 }
 
 /** The referee's world after `events`, computed by nobody in the room. */
@@ -83,11 +83,11 @@ describe('A restart loses no room', () => {
     const first = await serve()
     // A millisecond apart, so that newest-first is an order the store can
     // restore rather than a tie.
-    const waiting = connect(first, ADA, { kind: 'open' })
+    const waiting = await connect(first, ADA, { kind: 'open' })
     await Bun.sleep(2)
-    const deploying = seatBoth(first, null, BO)
+    const deploying = await seatBoth(first, null, BO)
     await Bun.sleep(2)
-    const playing = seatBoth(first, null, null)
+    const playing = await seatBoth(first, null, null)
     playing.blue.send({ type: 'matchHeader', header: RECORDING.header })
     for (const event of RECORDING.events.slice(0, HALF)) playing.blue.send(event.command)
     await first.idle()
@@ -136,7 +136,7 @@ describe('A restart loses no room', () => {
     deployingBlue!.send({ type: 'init', seed: 7, seedLabel: 'seven', ...MY_VERSION })
     expect(deployingRed!.of('init')).toHaveLength(1)
     // And a room waiting for an opponent can still get one.
-    expect(connect(second, CY, { kind: 'join', roomId: roomOf(waiting) }).of('seated')[0]).toMatchObject({
+    expect((await connect(second, CY, { kind: 'join', roomId: roomOf(waiting) })).of('seated')[0]).toMatchObject({
       faction: Faction.Red,
       phase: 'deploying',
     })
@@ -171,17 +171,17 @@ describe('A restart loses no room', () => {
     const { persistence, verdicts, serve, expire } = await deployment()
     const header = await enlistFor(persistence, RECORDING.header, ADA, BO)
     const first = await serve()
-    const { blue, red, roomId } = seatBoth(first, ADA, BO)
+    const { blue, red, roomId } = await seatBoth(first, ADA, BO)
     blue.send({ type: 'matchHeader', header })
     for (const event of RECORDING.events.slice(0, 4)) blue.send(event.command)
-    const waiting = connect(first, CY, { kind: 'open' })
+    const waiting = await connect(first, CY, { kind: 'open' })
     await first.dispose()
 
     const second = await serve()
     await reconnect(second, red)
     // One match per player holds for a restored room: whatever Bo's new
     // window asks for, it is put back in his own seat.
-    const window = connect(second, BO, { kind: 'open' })
+    const window = await connect(second, BO, { kind: 'open' })
     expect(window.of('seated')[0]).toMatchObject({ roomId, faction: Faction.Red, redirected: true })
     expect(window.of('log')[0]!.events).toHaveLength(4)
 
@@ -205,10 +205,10 @@ describe('A rolling update', () => {
     const { persistence, verdicts, serve } = await deployment()
     const header = await enlistFor(persistence, RECORDING.header, ADA, BO)
     const old = await serve(OLD)
-    const { blue, red, roomId } = seatBoth(old, ADA, BO, { version: OLD })
+    const { blue, red, roomId } = await seatBoth(old, ADA, BO, { version: OLD })
     blue.send({ type: 'matchHeader', header })
     for (const event of RECORDING.events.slice(0, HALF)) blue.send(event.command)
-    const lonely = connect(old, CY, { kind: 'open' }, { version: OLD })
+    const lonely = await connect(old, CY, { kind: 'open' }, { version: OLD })
     await old.dispose()
 
     const fresh = await serve(NEW)
@@ -225,17 +225,17 @@ describe('A rolling update', () => {
       { kind: 'join', roomId } as const,
       { kind: 'watch', roomId } as const,
     ]) {
-      expect(connect(fresh, null, intent, { version: OLD }).of('abort')[0]?.reason).toStartWith(refusal)
+      expect((await connect(fresh, null, intent, { version: OLD })).of('abort')[0]?.reason).toStartWith(refusal)
     }
     // And a page on the new build can neither join nor watch a room of the old one…
     for (const intent of [{ kind: 'join', roomId } as const, { kind: 'watch', roomId } as const]) {
-      expect(connect(fresh, null, intent, { version: NEW }).of('abort')[0]?.reason).toBe(
+      expect((await connect(fresh, null, intent, { version: NEW })).of('abort')[0]?.reason).toBe(
         'That match was started on another version of TicTac, and only its own players can finish it.',
       )
     }
     // …nor carry a player's match on in a new window — which leaves the
     // window that can carry it on alone.
-    const reloaded = connect(fresh, ADA, { kind: 'resume' }, { version: NEW })
+    const reloaded = await connect(fresh, ADA, { kind: 'resume' }, { version: NEW })
     expect(reloaded.of('abort')[0]?.reason).toBe(
       'That match was started on another version of TicTac (build old; this page is running build new), ' +
         'so this page cannot carry it on.',
@@ -266,7 +266,7 @@ describe('A rolling update', () => {
     const header = await enlistFor(persistence, RECORDING.header, ADA, BO)
     const rostersBefore = [await persistence.rosters.active('A'), await persistence.rosters.active('B')]
     const old = await serve(OLD)
-    const { blue, red, roomId } = seatBoth(old, ADA, BO, { version: OLD })
+    const { blue, red, roomId } = await seatBoth(old, ADA, BO, { version: OLD })
     blue.send({ type: 'matchHeader', header })
     for (const event of RECORDING.events.slice(0, HALF)) blue.send(event.command)
     await old.dispose()
@@ -315,14 +315,14 @@ describe('A rolling update', () => {
   test('a protocol older than the server still serves is refused, even to take a seat back', async () => {
     const { serve } = await deployment()
     const lobby = await serve()
-    const { blue, red, roomId } = seatBoth(lobby, null, null)
+    const { blue, red, roomId } = await seatBoth(lobby, null, null)
     red.close()
     const ancient: PeerVersion = { protocol: OLDEST_SERVED_PROTOCOL - 1, build: MY_VERSION.build }
     const refusal =
       `Protocol mismatch: the match server speaks protocol ${PROTOCOL_VERSION}, ` +
       `this page speaks protocol ${ancient.protocol}.`
 
-    const opening = connect(lobby, null, { kind: 'open' }, { version: ancient })
+    const opening = await connect(lobby, null, { kind: 'open' }, { version: ancient })
     const returning = await reconnect(lobby, red, ancient)
 
     expect(opening.of('abort')[0]?.reason).toStartWith(refusal)

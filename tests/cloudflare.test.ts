@@ -24,11 +24,11 @@ import { softwareAuthenticator } from './support/authenticator'
  *
  * What this proves: a request reaches the single `MatchDurableObject`
  * through the Worker's routing; static assets serve through it rather than
- * around it; a passkey ceremony, a roster fetch and a ticket all work over
- * real HTTP; a signed-in socket, an anonymous one, and one with an invalid
- * ticket are each treated the way `tests/server.test.ts` proves the
- * `Bun.serve` lobby treats them — the same `Lobby`, `Persistence` and
- * `apiHandler`, now behind a Cloudflare `WebSocket` and `ctx.storage.sql`.
+ * around it; a passkey ceremony and a roster read work as JSON-RPC on the
+ * one socket a window holds; a signed-in socket, an anonymous one, and a
+ * token nobody issued are each treated the way `tests/server.test.ts` proves
+ * the `Bun.serve` lobby treats them — the same `Sessions`, `Lobby` and
+ * `Persistence`, now behind a Cloudflare `WebSocket` and `ctx.storage.sql`.
  * And, past a single relayed frame: a whole decisive match, driven by
  * `src/sim/WireMatch.ts`, settles through this object's own independent
  * recomputation exactly as it does headless — the part that needed two real
@@ -110,24 +110,55 @@ function freePort(): void {
   Bun.spawnSync(['fuser', '-k', `${PORT}/tcp`])
 }
 
-/** Registers a fresh passkey over real HTTP, the way a browser would. */
-async function registered(): Promise<string> {
-  const key = await softwareAuthenticator()
-  const post = async (path: string, body: unknown): Promise<Record<string, unknown>> => {
-    const response = await fetch(`${BASE}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', origin: ORIGIN },
-      body: JSON.stringify(body),
-    })
-    return (await response.json()) as Record<string, unknown>
+interface Answer {
+  result?: Record<string, unknown>
+  error?: { code: number; message: string }
+}
+
+/**
+ * A raw socket to the deployment, past `hello`, that asks by JSON-RPC the way
+ * a window does — spoken by hand, so a test can claim to be what no window of
+ * this build would (`build`).
+ */
+interface RpcSocket {
+  socket: WebSocket
+  call(method: string, params?: Record<string, unknown>): Promise<Answer>
+}
+
+async function rpcSocket(build = MY_VERSION.build): Promise<RpcSocket> {
+  const socket = new WebSocket(BASE.replace('http', 'ws'))
+  await once(socket, 'open')
+  const pending = new Map<number, (answer: Answer) => void>()
+  socket.addEventListener('message', (event: MessageEvent) => {
+    const frame = JSON.parse(String(event.data)) as Answer & { id?: number }
+    if (typeof frame.id !== 'number') return
+    pending.get(frame.id)?.(frame)
+    pending.delete(frame.id)
+  })
+  socket.send(JSON.stringify({ jsonrpc: '2.0', method: RpcMethods.hello, params: { protocol: PROTOCOL_VERSION, build } }))
+  let lastId = 0
+  return {
+    socket,
+    call: (method: string, params: Record<string, unknown> = {}): Promise<Answer> => {
+      const { promise, resolve } = Promise.withResolvers<Answer>()
+      const id = ++lastId
+      pending.set(id, resolve)
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+      return promise
+    },
   }
-  const options = await post('/api/auth/register/options', { name: 'Tester' })
+}
+
+/** Registers a fresh passkey on `window`'s socket, the way a browser would, and hands back the session token. */
+async function registered(window: RpcSocket): Promise<string> {
+  const key = await softwareAuthenticator()
+  const options = (await window.call('tictac/api/account/registerOptions', { name: 'Tester' })).result!
   const created = await key.create({
     challengeId: options.challengeId as string,
     challenge: (options.publicKey as { challenge: string }).challenge,
   })
-  const verified = await post('/api/auth/register/verify', created)
-  return verified.token as string
+  const verified = await window.call('tictac/api/account/registerVerify', { ...created })
+  return verified.result!.token as string
 }
 
 describe('The planted Cloudflare deployment', () => {
@@ -191,26 +222,14 @@ describe('The planted Cloudflare deployment', () => {
     // pinned here — that the Worker carries the bundle's id (the wrapper's
     // `--define` reached it), and that the refusal a player reads quotes
     // both hashes with a label saying which machine is running which.
-    const socket = new WebSocket(BASE.replace('http', 'ws'))
-    await once(socket, 'open')
-    const refusal = new Promise<string>((resolve) => {
-      socket.addEventListener('message', (event: MessageEvent) => {
-        const frame = JSON.parse(String(event.data)) as { method: string; params: { reason: string } }
-        if (frame.method === RpcMethods.abort) resolve(frame.params.reason)
-      })
-    })
-    socket.send(
-      JSON.stringify({
-        jsonrpc: '2.0',
-        method: RpcMethods.hello,
-        params: { protocol: PROTOCOL_VERSION, build: 'c0ffee1' },
-      }),
-    )
+    const stale = await rpcSocket('c0ffee1')
+    const refused = await stale.call('tictac/api/room/enter', { intent: { kind: 'open' } })
 
-    const reason = await refusal
-    expect(reason).toContain(`the match server is running build ${bundled}`)
-    expect(reason).toContain('this page is running build c0ffee1')
-    socket.close()
+    expect(refused.error?.message).toContain(`the match server is running build ${bundled}`)
+    expect(refused.error?.message).toContain('this page is running build c0ffee1')
+    // Refused a room, not the server: a stale page still reads the lobby.
+    expect(stale.socket.readyState).toBe(WebSocket.OPEN)
+    stale.socket.close()
   })
 
   test('a plain request serves the built client through the Durable Object', async () => {
@@ -221,32 +240,24 @@ describe('The planted Cloudflare deployment', () => {
     expect(body.toLowerCase()).toContain('tictac')
   })
 
-  test('a signed-in player trades a session for a socket', async () => {
-    const token = await registered()
-    const ticketed = await fetch(`${BASE}/api/ticket`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, origin: ORIGIN },
-    })
-    const { ticket } = (await ticketed.json()) as { ticket: string }
+  test('a passkey registered on one socket signs in another, with nothing over HTTP', async () => {
+    const first = await rpcSocket()
+    const token = await registered(first)
+    first.socket.close()
 
-    const socket = new WebSocket(`${BASE.replace('http', 'ws')}/?ticket=${ticket}`)
-    await once(socket, 'open')
-    socket.close()
+    const second = await rpcSocket()
+    const signed = await second.call('tictac/api/account/signIn', { token })
+    expect((signed.result?.player as { name: string }).name).toBe('Tester')
+    expect((await second.call('tictac/api/roster/list')).result?.roster).toHaveLength(6)
+    second.socket.close()
   })
 
-  test('a socket with a ticket nobody issued is turned away', async () => {
-    // Spoken by hand rather than with `new WebSocket`, because what is being
-    // checked is the HTTP answer to an upgrade the object refuses.
-    const response = await fetch(`${BASE}/?ticket=nope`, {
-      headers: {
-        upgrade: 'websocket',
-        connection: 'Upgrade',
-        'sec-websocket-version': '13',
-        'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
-      },
-    })
-    expect(response.status).toBe(401)
-    expect(((await response.json()) as { error: string }).error).toMatch(/not valid/)
+  test('a token nobody issued signs nobody in, and the socket stays', async () => {
+    const window = await rpcSocket()
+    const refused = await window.call('tictac/api/account/signIn', { token: 'nope' })
+    expect(refused.error?.code).toBe(401)
+    expect(window.socket.readyState).toBe(WebSocket.OPEN)
+    window.socket.close()
   })
 
   test('an anonymous socket is still welcome', async () => {
@@ -270,7 +281,7 @@ describe('The planted Cloudflare deployment', () => {
   })
 
   test('a whole simulated match reaches settlement through the Durable Object, not just a few moves', async () => {
-    // Every other test here proves a socket, a ticket, a passkey — pieces of
+    // Every other test here proves a socket, a sign-in, a passkey — pieces of
     // the wire. This proves the referee itself: driven by `src/sim/WireMatch.ts`,
     // a real `SimMatch` plays a decisive match against its own rules, then the
     // exact same commands travel to this deployment's `MatchDurableObject`

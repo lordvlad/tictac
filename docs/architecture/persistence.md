@@ -8,6 +8,7 @@ appliesTo:
   - "src/server/**"
   - "scripts/serve-match.ts"
   - "src/game/Account.ts"
+  - "src/game/Rpc.ts"
   - "src/game/Base64Url.ts"
   - "src/game/MatchEnd.ts"
   - "src/game/Recording.ts"
@@ -185,31 +186,34 @@ WebCrypto support for it is confirmed; accepting an algorithm the server cannot
 verify would register a passkey nobody could ever sign in with.
 
 **Sessions** are a 32-byte token returned once; only its SHA-256 hex is stored,
-so a stolen database is not a drawer full of working sessions. **Socket
-tickets** are in memory, single-use and worth 60 seconds: a browser cannot put
-an `Authorization` header on a WebSocket, and a session token in a url is a
-session token in somebody's logs. A ticket redeems to the whole `Player`
-(`{ id, name }`), because the lobby seats and names players by it.
+so a stolen database is not a drawer full of working sessions. The token never
+travels in a url: a window presents it with `account/signIn` on every socket it
+opens, which binds that socket to the whole `Player` (`{ id, name }`), because
+the lobby seats and names players by it.
 
-### HTTP surface (`src/server/Api.ts`)
+### Over the socket (`src/server/Session.ts`)
 
-| Route | Body | Answer |
+Accounts and rosters are JSON-RPC requests on the window's one socket
+([ARCH-NETWORKING §8](networking.md) has the order on a fresh socket and every
+refusal); the shapes are in `src/game/Rpc.ts`. A method that needs a player is
+refused `401` *sign in first* on a socket nobody signed in on.
+
+| Method (`tictac/api/…`) | Params | Result |
 |---|---|---|
-| `POST /api/auth/register/options` | `{ name }` | `{ challengeId, publicKey }` |
-| `POST /api/auth/register/verify` | attestation, base64url | `{ token, player }` |
-| `POST /api/auth/login/options` | `{}` | `{ challengeId, publicKey }` |
-| `POST /api/auth/login/verify` | assertion, base64url | `{ token, player }` |
-| `POST /api/auth/logout` | bearer | `204` |
-| `GET /api/me` | bearer | `{ player }` |
-| `GET /api/roster` | bearer | `{ roster }` |
-| `POST /api/roster/recruit` | bearer | `{ member }` — `400` if the roster is already full |
-| `POST /api/ticket` | bearer | `{ ticket }` |
-| `GET /api/lobby` | bearer optional | `LobbyView` (`src/game/Lobby.ts`): open rooms newest first, and `you` — the asker's seat, null without a valid token (never a `401`) |
+| `account/registerOptions` | `{ name }` | `{ challengeId, publicKey }` |
+| `account/registerVerify` | attestation, base64url | `{ token, player }`; the socket is signed in |
+| `account/loginOptions` | `{}` | `{ challengeId, publicKey }` |
+| `account/loginVerify` | assertion, base64url | `{ token, player }`; the socket is signed in |
+| `account/signIn` | `{ token }` | `{ player }` — `401` for a token the server no longer honours |
+| `account/signOut` | `{}` | `null`; the token is revoked |
+| `account/me` | `{}` | `{ player }`, null when anonymous |
+| `roster/list` | `{}` | `{ roster }` |
+| `roster/recruit` | `{}` | `{ member }` — `400` if the roster is already full |
 
-CORS is granted only to the configured origins — the same list the ceremony is
-checked against, because they are the same question: which pages is this server
-part of? Every error body is `{ error }`, and anything unexpected is a 500 that
-says only `the server failed`.
+A ceremony is checked against the configured origins (`--origins`); there is no
+CORS, because nothing but the built client and the map's tiles is HTTP. Every
+refusal is an error response whose message a player can read, and anything
+unexpected is a `500` that says only `the server failed`.
 
 ---
 
@@ -258,8 +262,8 @@ A starting HP has to be something both peers and the referee agree on
 *before the first digest*, so it cannot be injected by the referee after the
 fact — it travels on the wire, on the same `Deployment` its sheet does
 (`[ITEM-043]`; before it, as a separate `startingHp` array matched to `sheets`
-by position only): a client fetches its own roster's HP from `GET
-/api/roster`, folds it into `state.hp` on its own `ready.squad`, and the
+by position only): a client reads its own roster's HP with `roster/list`,
+folds it into `state.hp` on its own `ready.squad`, and the
 match's host does the same for both sides before sending `matchHeader`.
 `Squads`/`Soldier` then deploy each unit at that HP instead of full — the one
 behaviour change `ITEM-038` makes to a live match, and the reason
@@ -303,7 +307,7 @@ settled match's record is added onto the roster's cumulative one, field by
 field (`mergeDeeds`), never replacing it — the combat log GDD §5 calls a
 "scar."
 
-**Refilling a slot.** `Rosters.recruit` (`POST /api/roster/recruit`) rolls one
+**Refilling a slot.** `Rosters.recruit` (`roster/recruit`) rolls one
 fresh `CharacterSheet` — `characterSheet`, seeded from system randomness the
 same way `enlist` deals the first squad — and writes it through
 `roster_active_slot` into the lowest slot `0..SQUAD_SIZE-1` this player's
@@ -354,14 +358,12 @@ callsign it may not keep once picked alongside others), toggled up to
 member with `downtime > 0` is greyed with the matches left instead of their
 attributes and cannot be toggled — the client-side mirror of the referee's own
 refusal, not a substitute for it. An empty slot renders a **Recruit** button
-in its place, calling `POST /api/roster/recruit` and splicing the answer
+in its place, calling `roster/recruit` and splicing the answer
 straight into the list. The pick becomes the `characterId` the client states
-on each `Deployment` it sends; `main.ts` mints the connection ticket only
-*after* the pick, not before it, so lingering on the roster screen cannot burn
-the ticket's 60-second window before ever connecting. `Account.roster()`
-mirrors `RosterMember` client-side as `RosterEntry` (`src/game/Account.ts`)
-rather than importing the server's type — `src/game`/`src/hud` never import
-`src/server/`, even for a type.
+on each `Deployment` it sends. `Account.roster()` reads `RosterEntry`
+(`src/game/Rpc.ts`), the client's mirror of `RosterMember`, rather than the
+server's type — `src/game`/`src/hud` never import `src/server/`, even for a
+type.
 
 > **A live match's header is not what was handed to `Squads`.** `main.ts`
 > builds the `matchHeader` a referee judges from `Squads.deploymentsOf`,
@@ -381,8 +383,9 @@ rather than importing the server's type — `src/game`/`src/hud` never import
 ## 6. The Server and the Client
 
 `startGameServer` (`src/server/GameServer.ts`) is one `Bun.serve` with three
-jobs, in order: a WebSocket upgrade carrying an optional `?ticket=`, the HTTP
-API, and the status document. `scripts/serve-match.ts` is a thin CLI over it:
+jobs, in order: a WebSocket upgrade (handed to `Sessions`), map tiles when it
+was given a `tiles` handler, and the status document. `scripts/serve-match.ts`
+is a thin CLI over it:
 
 ```sh
 bun run serve:match -- --db=sqlite://matches.sqlite --rp-id=localhost --origins=http://localhost:5173
@@ -403,8 +406,9 @@ synchronously in arrival order and every write is appended to one chain that
 drains in that order. A write that fails ends the match: a referee that could
 not write down what it saw has no evidence.
 
-On the client, `src/game/Account.ts` holds a session per server url in
-`localStorage` and does the two ceremonies through `navigator.credentials`. When
-a token is present the menu's match-server panel fetches the roster and a ticket
-before connecting, and `equipThenStart` deploys that roster instead of a fresh
+On the client, `src/game/Account.ts` does the two ceremonies through
+`navigator.credentials` over the window's `ServerConnection`, which keeps the
+session token in `localStorage` per server origin and signs every socket in with
+it. When the window is signed in the menu's match-server panel reads the roster
+before the match, and `equipThenStart` deploys that roster instead of a fresh
 roll; without one, nothing changes.

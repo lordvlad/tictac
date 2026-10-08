@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
-import { Account, type Player } from '../../game/Account'
+import { useEffect, useReducer, useRef, useState } from 'react'
+import { Account } from '../../game/Account'
 import type { LobbyView, ServerIntent } from '../../game/Lobby'
+import type { ServerConnection } from '../../game/ServerConnection'
 import {
   MENU_COLOURS,
   MenuButton,
@@ -19,14 +20,18 @@ import { LobbyList } from './LobbyList'
  * share one panel, and the status line above them says which of the two the
  * next match will be.
  *
- * The lobby is the server's list of rooms (`src/game/Lobby.ts`), polled while
- * the panel is up. Every way in — open, join, watch, take back a match from
- * another window — is one `onServerConnect(url, intent)`; the server decides
- * where the socket actually lands, and says so.
+ * Everything on it travels over the window's one connection to the server
+ * (`ServerConnection`): who this window is, the room list — pushed by the
+ * server as it changes, never polled — and every way in, which is one
+ * `onServerConnect(url, intent)`; the server decides where the window
+ * actually lands, and says so.
  */
 
-/** How often the room list is re-asked. Rooms fill in seconds, not minutes. */
-const LOBBY_POLL_MS = 2_000
+/**
+ * How long a typed address has to stand still before a connection is opened
+ * to it: every keystroke is an address, and only the last one is meant.
+ */
+const ADDRESS_SETTLE_MS = 400
 
 /** What the status line says while each kind of connection is in flight. */
 const WAITING: Record<ServerIntent['kind'], string> = {
@@ -44,64 +49,61 @@ const FAILURE: Record<ServerIntent['kind'], string> = {
   resume: 'Could not continue your match here.',
 }
 
-/** What a server says about whoever is holding this page, as the panel shows it. */
+/** What the connection says about whoever is holding this page, as the panel shows it. */
 interface ServerIdentity {
-  /** The signed-in account, or null for an anonymous (still welcome) visitor. */
-  player: Player | null
-  /** False when nothing answered: there is no account to offer either way. */
+  /** Signed in: the passkey row offers signing out. */
+  signedIn: boolean
+  /** False when there is no server to talk to: there is no account to offer either way. */
   reachable: boolean
   text: string
   colour: string
 }
 
-async function identify(url: string): Promise<ServerIdentity> {
-  let me: Player | null = null
-  try {
-    me = await new Account(url.trim()).me()
-  } catch {
-    return {
-      player: null,
-      reachable: false,
-      text: 'No match server answers at that address',
-      colour: MENU_COLOURS.danger,
-    }
+function identify(connection: ServerConnection | null): ServerIdentity {
+  const state = connection?.state ?? { kind: 'connecting' as const }
+  switch (state.kind) {
+    case 'connecting':
+      return { signedIn: false, reachable: true, text: '…', colour: MENU_COLOURS.muted }
+    case 'closed':
+      return { signedIn: false, reachable: false, text: state.reason, colour: MENU_COLOURS.danger }
+    case 'reconnecting':
+      return {
+        signedIn: false,
+        reachable: true,
+        text: 'The match server stopped answering — still trying…',
+        colour: MENU_COLOURS.warning,
+      }
   }
-  if (!me) {
+  const player = connection!.player
+  if (player) {
     return {
-      player: null,
+      signedIn: true,
       reachable: true,
-      text: 'Not signed in — matches here are not kept',
-      colour: MENU_COLOURS.muted,
+      text: `Signed in as ${player.name} — your squad is kept on this server`,
+      colour: MENU_COLOURS.signedIn,
     }
   }
+  const refused = connection!.signInRefused
+  if (refused) return { signedIn: false, reachable: true, text: refused, colour: MENU_COLOURS.warning }
   return {
-    player: me,
+    signedIn: false,
     reachable: true,
-    text: `Signed in as ${me.name} — your squad is kept on this server`,
-    colour: MENU_COLOURS.signedIn,
+    text: 'Not signed in — matches here are not kept',
+    colour: MENU_COLOURS.muted,
   }
-}
-
-/**
- * Why the room list could not be fetched, in words a player can act on. A
- * `TypeError` is `fetch` itself failing — nothing answered — rather than a
- * server that answered with a reason.
- */
-function lobbyFailure(err: unknown): string {
-  if (err instanceof TypeError || !(err instanceof Error)) {
-    return 'The match server stopped answering — still trying…'
-  }
-  return `The match server would not list its matches: ${err.message}`
 }
 
 export function ServerPanel({
   url,
   onUrlChange,
+  connectionFor,
   onServerConnect,
   onBack,
 }: {
   url: string
   onUrlChange: (url: string) => void
+  /** The window's connection to the server at an address (`main.tsx`). */
+  connectionFor: (url: string) => ServerConnection
   /**
    * Connect to the server at `url` with `intent`. Resolves once the match,
    * loadout or spectator view has taken over; rejects with a player-readable
@@ -110,101 +112,66 @@ export function ServerPanel({
   onServerConnect: (url: string, intent: ServerIntent) => Promise<void>
   onBack: () => void
 }) {
-  const [identity, setIdentity] = useState<ServerIdentity>({
-    player: null,
-    reachable: true,
-    text: '…',
-    colour: MENU_COLOURS.muted,
-  })
+  const [connection, setConnection] = useState<ServerConnection | null>(null)
+  /** Redraw on every change of the connection's state or of who it is signed in as. */
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
   const [accountName, setAccountName] = useState('')
   const [status, setStatus] = useState<{ text: string; colour?: string } | null>(null)
-  /**
-   * The last room list and the last failure to get one, each tagged with the
-   * address it was for, so a change of address hides the old server's rooms
-   * at once instead of after the new server's first answer.
-   */
-  const [lobby, setLobby] = useState<{ url: string; view: LobbyView; at: number } | null>(null)
-  const [lobbyError, setLobbyError] = useState<{ url: string; text: string } | null>(null)
+  /** The room list as last pushed, and when — the rooms' ages are counted from it. */
+  const [lobby, setLobby] = useState<{ view: LobbyView; at: number } | null>(null)
   /** A connection is in flight: the ways in are disabled until it settles. */
   const [busy, setBusy] = useState(false)
-  /** The takeover has been tried in this panel; a failed one is not retried every poll. */
+  /** The takeover has been tried in this panel; a failed one is not retried on every push. */
   const resumed = useRef(false)
 
   const trimmed = url.trim()
 
   /**
-   * Who this server thinks we are, re-asked whenever the address changes.
-   *
-   * `active` because the address is typed: every keystroke starts a request,
-   * and the one that finishes last is not necessarily the one for the address
-   * now in the box.
+   * The connection to the address in the box, once it has stood still. The
+   * window keeps one connection (`connectionFor`): coming back to this panel
+   * without a page load — a room refused, a match aborted — finds it still
+   * open, and only a different address replaces it.
    */
   useEffect(() => {
-    let active = true
-    void identify(url).then((found) => {
-      if (active) setIdentity(found)
-    })
-    return () => {
-      active = false
+    if (!trimmed) {
+      setConnection(null)
+      return
     }
-  }, [url])
+    const timer = window.setTimeout(() => setConnection(connectionFor(trimmed)), ADDRESS_SETTLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [trimmed, connectionFor])
+
+  useEffect(() => connection?.onChange(redraw), [connection])
 
   /**
-   * The room list, polled while the server answers.
-   *
-   * Each poll is scheduled when the previous one settles rather than on a
-   * fixed interval, so a slow server is never asked twice at once. Restarted
-   * on a change of account as well as of address: `you` is the asking
-   * player's seat, and signing in is what makes there be one. Stale answers
-   * are dropped by `active`, as in the identity lookup above. A failure keeps
-   * the last list up — a blip should not empty the screen — and keeps polling.
+   * The room list, as the server pushes it. A new connection shows nothing
+   * of the old one's rooms: they were another server's.
    */
-  const playerId = identity.player?.id ?? null
   useEffect(() => {
-    if (!identity.reachable || !trimmed) return
-    let active = true
-    let timer: number | undefined
-    const poll = async () => {
-      try {
-        const view = await new Account(trimmed).lobby()
-        if (!active) return
-        setLobby({ url: trimmed, view, at: Date.now() })
-        setLobbyError(null)
-      } catch (err) {
-        if (!active) return
-        setLobbyError({ url: trimmed, text: lobbyFailure(err) })
-      }
-      if (active) timer = window.setTimeout(() => void poll(), LOBBY_POLL_MS)
-    }
-    void poll()
-    return () => {
-      active = false
-      window.clearTimeout(timer)
-    }
-  }, [trimmed, identity.reachable, playerId])
+    setLobby(null)
+    if (!connection) return
+    return connection.watchLobby((view) => setLobby({ view, at: Date.now() }))
+  }, [connection])
 
-  const view = lobby?.url === trimmed ? lobby.view : null
-  const listError = lobbyError?.url === trimmed ? lobbyError.text : null
+  const identity = identify(connection)
+  const view = lobby?.view ?? null
   const you = view?.you ?? null
 
   /**
-   * Run a passkey ceremony, then ask again who we are.
-   *
-   * Asking rather than believing the ceremony's own answer: the session token
-   * is what every later request carries, and whether it works is a question
-   * only the server can settle. Asked directly rather than by re-running the
-   * effect above, which the unchanged address would not do.
+   * Run a passkey ceremony. Who the window then is comes from the
+   * connection, which the ceremony's answer has already told.
    */
   const ceremony = async (act: (it: Account) => Promise<unknown>) => {
+    if (!connection) return
     try {
-      await act(new Account(trimmed))
+      await act(new Account(connection))
+      setStatus(null)
     } catch (err) {
       setStatus({
         text: err instanceof Error ? err.message : 'That did not work.',
         colour: MENU_COLOURS.danger,
       })
     }
-    setIdentity(await identify(url))
   }
 
   /**
@@ -232,10 +199,10 @@ export function ServerPanel({
   }
 
   /**
-   * The takeover: this player's match is being played in another window, so
-   * it moves here — the server closes the other window and replays the log
-   * into this one. Once per panel, and never while this panel is itself
-   * mid-connection (that seat is the one it is connecting).
+   * The takeover: this player's match is being played and no window holds
+   * it — signing in here replaced the one that did — so it continues here,
+   * rebuilt from the log. Once per panel, and never while this panel is
+   * itself mid-connection (that seat is the one it is connecting).
    */
   const youPlaying = you?.phase === 'playing'
   useEffect(() => {
@@ -245,13 +212,11 @@ export function ServerPanel({
   }, [youPlaying, busy])
 
   /**
-   * What the status line says. A connection in flight speaks first; then a
-   * room list that cannot be had, because that is the more current news; then
+   * What the status line says. A connection in flight speaks first; then
    * whatever last went wrong; and otherwise what to do next.
    */
   let line: { text: string; colour?: string } = { text: 'Looking for matches…' }
   if (busy && status) line = status
-  else if (listError) line = { text: listError, colour: MENU_COLOURS.danger }
   else if (status) line = status
   else if (!identity.reachable) line = { text: 'Run one with bun run serve:match.' }
   else if (view) line = { text: 'Open a match, or join or watch one below.' }
@@ -277,7 +242,7 @@ export function ServerPanel({
           // being created, so it sits above both ways of presenting one.
           style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}
         >
-          {identity.player ? (
+          {identity.signedIn ? (
             <MenuButton
               id="btn-passkey-signout"
               tone="neutralDark"

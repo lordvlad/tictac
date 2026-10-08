@@ -17,15 +17,20 @@ appliesTo:
   - "src/server/db/BunSqlDb.ts"
   - "src/server/Persistence.ts"
   - "src/server/Lobby.ts"
+  - "src/server/Session.ts"
   - "src/server/RoomStore.ts"
   - "src/sim/WireMatch.ts"
+  - "src/server/Tiles.ts"
+  - "scripts/build-planet-tiles.ts"
+  - "scripts/copy-public.mjs"
+  - "public/map/**"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
   - "docs/design/rfc/0002-region-sharded-durable-objects.md"
   - "docs/architecture/persistence.md"
   - "docs/architecture/networking.md"
   - "docs/backlog/active-backlog.md"
-tags: ["deployment", "cloudflare", "durable-objects", "github-pages", "wrangler"]
+tags: ["deployment", "cloudflare", "durable-objects", "github-pages", "wrangler", "r2", "map-tiles"]
 ---
 
 # Deployment: GitHub Pages and the Cloudflare Durable Object
@@ -62,10 +67,11 @@ per match — and that one instance hosts every room:
 
 ```
 workers/index.ts (Worker)
+  ├── /tiles/{z}/{x}/{y}.mvt  ── answered here from R2 (§6), never reaching the object
   └── env.MATCH.idFromName('singleton')  ── always the same id
         └── workers/MatchDurableObject.ts (the one instance)
-              ├── fetch(): a WebSocket upgrade (→ Lobby → a Room), /api/… (→ apiHandler,
-              │            including /api/lobby), or env.ASSETS.fetch(request)
+              ├── fetch(): a WebSocket upgrade (→ Sessions → Lobby → a Room),
+              │            or env.ASSETS.fetch(request)
               └── ctx.storage.sql, behind workers/DoSqliteDb.ts (the Db adapter)
 ```
 
@@ -87,11 +93,13 @@ assumption other code quietly depends on.
 ### 2.2 The single instance serves both websocket and static assets
 
 `wrangler.jsonc`'s `assets` block sets `run_worker_first: true`, so **every** request reaches
-the Worker — and so the Durable Object — rather than the assets layer answering some of them
-directly. `MatchDurableObject.fetch` branches: a `WebSocket` upgrade is checked for a ticket and
-handed to the referee (§2.3); an `/api/…` path is handed to `apiHandler`; anything else is
-handed to `env.ASSETS.fetch(request)`, which is bound through from the Worker's own `env`
-(Durable Object constructors receive the same `env` a Worker does). This is a deliberate design
+the Worker rather than the assets layer answering some of them directly. The Worker answers map
+tiles itself (§6), so a map pan neither wakes the Durable Object nor queues behind its sockets,
+and forwards everything else to the object. `MatchDurableObject.fetch` branches: a `WebSocket`
+upgrade is handed to `Sessions` (§2.3); anything else is handed to `env.ASSETS.fetch(request)`,
+which is bound through from the Worker's own `env` (Durable Object constructors receive the same
+`env` a Worker does). There is no HTTP API: a window asks everything over its socket
+([ARCH-NETWORKING §8](networking.md)). This is a deliberate design
 choice for a small deployment with one Worker and one object, not a general pattern —
 Cloudflare's own convention is for the assets layer to answer static requests without ever
 reaching a Worker, and this deployment opts out of that specifically because the item asked for
@@ -99,14 +107,16 @@ one Durable Object that does both.
 
 ### 2.3 A real referee, not a relay — rooms that survive the instance, and why a socket does not hibernate
 
-`MatchDurableObject` runs the same `Lobby`, `Persistence` (via `persistenceOverDb`) and
-`apiHandler` that `startGameServer` runs behind `Bun.serve`. Nothing about any of the three was
-Bun-specific once handed a `Db` (`workers/DoSqliteDb.ts`, §3) and a transport with `send`/
-`close` (`socketTransport`, `src/server/SocketTransport.ts` — split out of `GameServer.ts` for
-the same isolation reason as §4's typecheck). A WebSocket upgrade reads its ticket, redeems it
-through the same `Accounts.redeemTicket` the Bun-hosted server uses, reads the intent off the
-url (`parseIntent`), and attaches to the `Lobby` exactly as `GameServer.ts`'s `websocket.open`
-handler does.
+`MatchDurableObject` runs the same `Lobby`, `Sessions` and `Persistence` (via
+`persistenceOverDb`) that `startGameServer` runs behind `Bun.serve`. Nothing about any of the
+three was Bun-specific once handed a `Db` (`workers/DoSqliteDb.ts`, §3) and a transport with
+`send`/`close` (`socketTransport`, `src/server/SocketTransport.ts` — split out of
+`GameServer.ts` for the same isolation reason as §4's typecheck). A WebSocket upgrade is
+accepted and attached with `Sessions.attach(transport, { url, place })` exactly as
+`GameServer.ts`'s `websocket.open` handler does, with nothing checked at the upgrade: who the
+socket is, and what it wants, it says over the socket. `place` is read off `request.cf`, which
+the Worker's `stub.fetch(request)` carries through, so registration can record where a new
+player connected from.
 
 **Rooms are durable.** Every room writes itself to `ctx.storage.sql` as it changes — opened,
 joined, started, its squads verified, judged or only witnessed, ended — through the same
@@ -115,8 +125,8 @@ ordered write chain its match log goes through (`RoomStore`,
 `blockConcurrencyWhile`, so no request reaches the object before every room it held is held
 again: each seat with no socket in it and a fresh grace period, each playing room's referee
 rebuilt by refighting its log. A deploy, a runtime restart or an eviction therefore costs a
-room nothing. To the windows in it, it is a dropped connection: each reconnects to its own seat
-with the key its `seated` gave it (`intent=resume&room=…&seat=…`, no ticket), restates what it
+room nothing. To the windows in it, it is a dropped connection: each reconnects, signs in again
+with its stored token, re-enters its own seat with the key its `Seated` gave it, restates what it
 had said if the match had not begun, and plays on — the opponent sees a short stall. A window
 that does not come back within the grace period ends its room exactly as a dropped one always
 did ([ARCH-NETWORKING §8](networking.md)).
@@ -128,20 +138,20 @@ dropped seat — are in memory; restoring them on every message would be refight
 per frame. Sockets are accepted with plain `server.accept()` instead: as long as any socket is
 open, the runtime keeps this instance resident, the ordinary cost of any stateful connection.
 Once every socket closes nothing pins the instance, and an eviction then is simply a restart the
-next request pays for. Static-asset and `/api/…` traffic never needed the exemption, since both
-are stateless replies against durable storage, or against the room list as it stands.
+next request pays for. Static-asset traffic never needed the exemption, since it is a
+stateless reply.
 
 **A rolling update.** `wrangler deploy` replaces the Worker and restarts the object under the
-new build while browsers keep running the previous bundle. The new server serves every protocol
-from `OLDEST_SERVED_PROTOCOL` (the one before its own, never below 6) up to its own, and each
-room keeps the build it was opened under, so:
+new build while browsers keep running the previous bundle. The new server admits its own protocol
+at any build, and the protocol before (`OLDEST_SERVED_PROTOCOL`, never below 6) only for a keyed
+resume named in the socket's url; each room keeps the build it was opened under, so:
 
 - the windows of a match in progress reconnect to it on the previous bundle and finish it — a
   seat is taken back by a page on the *room's* build, not the server's;
-- opening, joining or watching anything takes the server's own build and protocol; a stale
-  page is told to reload (§2.4), and a current page cannot join or watch a room of the previous
-  build (*That match was started on another version of TicTac, and only its own players can
-  finish it.*);
+- opening, joining or watching anything takes the server's own build; a stale page is refused
+  that room with a `409` telling it to reload (§2.4), and still reads the lobby; a current page
+  cannot join or watch a room of the previous build (*That match was started on another version
+  of TicTac, and only its own players can finish it.*);
 - a room of the previous build still waiting for an opponent is let go on restore, since no page
   can join it any more;
 - the new server keeps refereeing the previous build's rooms, but cannot tell a foul from a
@@ -156,8 +166,9 @@ judged and kept, as if nothing had happened.
 The referee is not a bystander to the version gate. Under
 [ADR-0004](../design/adr/0004-full-knowledge-lockstep.md) it recomputes every intent itself, so
 `src/version.ts` applies to it exactly as it applies to a peer: it states its own build, and
-refuses to open, join or watch anything for a client whose build differs (a seat taken back
-answers to its room's build instead, §2.3). That makes "which commit is this Worker?" a
+refuses to open, join or watch anything for a client whose build differs — a `409` on
+`room/enter`, the socket left open (a seat taken back answers to its room's build instead, §2.3).
+That makes "which commit is this Worker?" a
 *gameplay* fact, not a diagnostic.
 
 `BUILD_ID` reaches a bundle through a build-time `--define`, and the client and the Worker are
@@ -242,7 +253,7 @@ files is written in.
 implementation (`openDb`/`wrap`). Doing so pulls in `@types/bun`, which pulls in `@types/node`'s
 ambient `NodeJS` namespace — which redeclares `crypto`/`BufferSource` in a way that conflicts
 with `@cloudflare/workers-types`' own the moment both are reachable from one TypeScript project.
-Wiring the real referee and `apiHandler` into `workers/` made that true transitively (`Api.ts` →
+Wiring the real referee into `workers/` made that true transitively (`Session.ts` →
 `Persistence.ts`/`Rosters.ts`/`Accounts.ts` → `Db.ts`), so the Bun-specific half moved to
 `src/server/db/BunSqlDb.ts` (`openDb`, and `openPersistence`, which also needed `openDb`),
 leaving `Db.ts` itself — the port: `Dialect`, `SqlValue`, the `Db` interface, `dialectOf` — free
@@ -297,9 +308,9 @@ back in `afterAll`). That pairing is the point. An earlier version of this file 
 directly and drove it from a test process whose own `BUILD_ID` was the `dev` fallback — which
 is exactly what the unstamped Worker reported, so the two agreed and the suite went green
 against a deployment no browser could play on (§2.4). Now the Worker carries the commit and so
-do the clients, so losing the define fails every socket test here rather than none of them,
-and one test asserts the refusal text directly: the server's build is the bundle's, and both
-hashes are named.
+do the clients, so losing the define fails every test here that enters a room rather than none
+of them, and one test asserts the refusal directly: `room/enter` from a page on another build is
+a `409` naming both hashes — the server's build is the bundle's — and the socket stays open.
 
 `wrangler dev` spawns a `workerd` child of its own; `afterAll` killing only the process this
 test spawned did not reliably reach it, discovered as several orphaned `workerd` processes
@@ -310,9 +321,10 @@ line across an unknown process tree shape.
 
 What it proves, concretely — mirroring `tests/server.test.ts`'s scenarios against the `Bun.serve`
 referee: a plain request serves the built client through the Durable Object (not around it); a
-signed-in player trades a session for a socket; a socket with an unissued ticket is turned away
-with the same 401 and message; an anonymous socket is still welcome; and a frame that is not
-JSON-RPC is silently dropped rather than crashing the connection or being relayed — the specific
+passkey registered over RPC on one socket signs in another with its token, and that socket reads
+the roster (`roster/list`), with nothing over HTTP; a token nobody issued is a `401` error and
+the socket stays open; an anonymous socket is still welcome; and a frame that is not JSON-RPC is
+silently dropped rather than crashing the connection or being relayed — the specific
 behaviour that distinguishes the current, real referee from this deployment's first-pass bare
 relay. Past a single relayed frame, `src/sim/WireMatch.ts` elevates `SimMatch` — already able to
 play a whole decisive match deterministically, both sides, in milliseconds — to send that exact
@@ -321,13 +333,105 @@ applying it in memory: a `tests/cloudflare.test.ts` scenario drives a full match
 confirms the Durable Object's own independent recomputation, over `ctx.storage.sql`, reaches the
 same decisive winner — the proof that needed two real browsers before, now had without either.
 
-All of the above was repeated against the real deploy, not only `wrangler dev` — a real passkey
-registration, ticket and socket against
+`ITEM-045` repeated these checks against the real deploy, not only `wrangler dev` — a real
+passkey registration and socket (over the HTTP API of the time) against
 `https://tictac-match-server.waldemar-reusch.workers.dev`, and a whole decisive match driven
 through it anonymously by `src/sim/WireMatch.ts` with no abort (which, at the time, said less
 than it looked: see §2.4). What remains open: the match
-above is anonymous; a *registered* match, whose roster is checked afterward via `GET
-/api/roster`, needs `SimMatch` or its wire harness to deploy a squad sourced from a real
+above is anonymous; a *registered* match, whose roster is checked afterward via `roster/list`,
+needs `SimMatch` or its wire harness to deploy a squad sourced from a real
 roster's exact rows rather than its own freshly-rolled sheets (`Room.verifyRosters` checks
 for an exact match) — not built, and a different piece of work than making the deploy itself
 real. See the open acceptance criteria on [`ITEM-045`](../backlog/active-backlog.md).
+
+## 6. Map Tiles: a Low-Zoom Planet From R2
+
+The world map (GDD-WORLD §1) is the real Earth, drawn by MapLibre from vector tiles at
+`/tiles/{z}/{x}/{y}.mvt` (`[ITEM-061]`). They are static content: no game state, no account, the
+same bytes for everyone.
+
+### 6.1 The archive
+
+One PMTiles archive holds every tile: **the whole planet at zooms 0–8** (countries, regions,
+large towns), cut from Protomaps' daily OpenStreetMap build `20261007` — 557,631,269 bytes,
+87,381 tiles, gzip-compressed MVT, basemap schema v4. Hosting the planet at every zoom would be
+138.7 GB; past z8 MapLibre overzooms the last level, and closer zooms built on demand are
+`ITEM-067`.
+
+It is produced and uploaded by **`bun scripts/build-planet-tiles.ts`** (`--build=<date>`,
+`--maxzoom=<n>`, `--pmtiles=<path to the go-pmtiles CLI>`):
+
+1. `pmtiles extract https://build.protomaps.com/<date>.pmtiles <out> --maxzoom=<n>` reads the
+   planet by range requests, so only the extract itself is downloaded (z0–8: ~13 s).
+2. The script checks the result's own header: the whole planet, z0 to the cap.
+3. It streams the file to the R2 bucket **`map-tiles`** through R2's S3 API (Bun's `S3Client`,
+   16 MB parts, retried per part), with the `R2_S3_API`/`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`
+   credentials from `.env`, and compares the stored size with the file's. `wrangler r2 object
+   put` is not used: it does not take objects this large.
+
+The object is **`map-tiles/planet-z8-20261007.pmtiles`** (etag
+`cd0825df637d5778e8c3e7ddc1ba6b73-34`, a 34-part upload). The key names what it holds, and the
+script refuses to overwrite a different object under it: a new build or cap is a new key, and
+switching to it is a change to `MAP_TILES_KEY` in `wrangler.jsonc`, not to code. The bucket
+still holds the Stuttgart-only `world.pmtiles` (z0–14 of lon 8.9–9.5, lat 48.55–49.0), which
+nothing serves; it stays until `ITEM-067` decides whether its pipeline wants it.
+
+### 6.2 Serving it
+
+`src/server/Tiles.ts` is one handler for both hosts over a PMTiles `Source`:
+
+- **The Worker** binds the bucket as `MAP_TILES` (`wrangler.jsonc`'s `r2_buckets`) and answers
+  `/tiles/…` in `workers/index.ts`, **before** `env.MATCH.get(…)`: a map pan fires dozens of
+  tile requests, and none of them should wake the Durable Object or queue behind its sockets.
+  The handler lives per isolate, so the archive's header and directories are read once and a
+  warm tile is one R2 range read. Its cache keeps resolved values, not shared promises, because
+  a Worker may not await I/O another request started.
+- **The Bun server** reads a local archive through `blobSource(Bun.file(path))`
+  (`bun run serve:match --tiles=<archive.pmtiles>`); without `--tiles` it has no tile route.
+
+A tile is sent **as stored**: gzip bytes with `Content-Encoding: gzip`, never inflated and
+deflated again (the Worker needs `encodeBody: 'manual'` for that, or it would gzip the gzip).
+Every tile response — `200`, or `204` for a tile the archive does not have, including every
+tile past z8 — carries `Access-Control-Allow-Origin: *`, because the client on GitHub Pages
+reads tiles from the match server's origin; this is the only CORS the deployment has. `OPTIONS`
+is answered for any origin; `/tiles/` paths that are not a tile are `404`, and a tile outside
+the world (`x` or `y` ≥ 2^z) is `400`.
+
+Tiles are `Cache-Control: public, max-age=604800`. The URL does not name the archive, so a
+swapped archive reaches a browser that cached the old one within a week. Cloudflare's Cache API
+is not used: it only works on Workers behind a custom domain, and this one is on
+`*.workers.dev` (§4); with a custom domain it is the next step for hot tiles.
+
+The R2 `Source` is a port of the reference's (`no-way-home`'s `r2-pmtiles-source.ts`) with
+its abort handling fixed — it checked the signal only after fetching and buffering the whole
+range. Now an aborted request skips the read and an abort during one cancels the body. It
+also reads with the archive's etag as a precondition, so a key overwritten under a warm isolate
+is re-read rather than mixed with the old archive's directories.
+
+`wrangler dev` simulates `MAP_TILES` locally and empty, so tiles there are an error until the
+bucket is seeded (`wrangler r2 object put map-tiles/<key> --local --file=…`) or the binding is
+marked `"remote": true` in a local copy of the config, which reads the real bucket with the
+account's credentials.
+
+### 6.3 Glyphs and sprites
+
+The map style (Protomaps' `dark` flavour, from `@protomaps/basemaps`) needs font glyphs and an
+icon sprite. The reference loaded both from `protomaps.github.io`; here they are static assets
+of the client, so the map contacts no third-party origin at runtime:
+
+- `public/map/fonts/{fontstack}/{range}.pbf` — the four fontstacks the style references: Noto
+  Sans Regular, Medium and Italic, and Noto Sans Devanagari Regular v1 (Indian and Nepalese
+  place names). 11.5 MB in the repository. Most of the Devanagari stack's 256 ranges are
+  symlinks to Noto Sans Regular's; `scripts/copy-public.mjs` copies them as files, so `dist/`
+  carries 17.7 MB of glyphs. A browser fetches only the ranges its labels use; CJK ideographs,
+  kana and hangul are drawn from local fonts by MapLibre and never fetched. `OFL.txt` is the
+  fonts' licence.
+- `public/map/sprites/dark{,@2x}.{json,png}` — 52 KB, from `basemaps-assets` `sprites/v4`
+  (derived from the MIT-licensed tangrams icons).
+
+A style points at them as `glyphs: <client origin>/map/fonts/{fontstack}/{range}.pbf` and
+`sprite: <client origin>/map/sprites/dark` — the client's own origin, whichever host served it,
+since static assets carry no CORS — and at the tiles of the match server it is connected to.
+Verified with a bare MapLibre page served from a different origin than `wrangler dev`: the whole
+planet at z1, Stuttgart at z8.5 and northern India at z6.5 (Devanagari labels) rendered with no
+failed request and no origin contacted besides the page's own and the tile server.

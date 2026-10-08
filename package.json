@@ -32,6 +32,7 @@
     "@tweakpane/plugin-essentials": "^0.2.1",
     "@use-gesture/vanilla": "^10.3.1",
     "peerjs": "^1.5.5",
+    "pmtiles": "^4.5.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "three": "0.184.0",

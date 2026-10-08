@@ -27,26 +27,21 @@ meta & campaign) are all complete; fatigue and medical-bay downtime (`[ITEM-039]
 2026-09-30. `[ITEM-045]` (Cloudflare Durable Object deployment) closed on 2026-10-01 — see the
 [archive](../backlog/completed.md). Retreat (`[ITEM-051]`, `[ITEM-052]`) closed on 2026-10-02;
 React HUD & menus (`[ITEM-055]`) closed on 2026-10-04.
-Next is M5 — The Shared World ([roadmap](roadmap.md)): a squad that is somewhere on a real planet
-map and travels in real time, over one socket per window. `[ITEM-050]` was split into the slices
-below on 2026-10-07; the fights met on the road
+M5 — The Shared World ([roadmap](roadmap.md)) is under way: a squad that is somewhere on a real
+planet map and travels in real time, over one socket per window. `[ITEM-050]` was split into
+slices on 2026-10-07; one connection per window (`[ITEM-060]`) and the z0–8 planet basemap
+(`[ITEM-061]`) closed on 2026-10-07. The fights met on the road
 ([GDD-WORLD](../design/gdd/world-and-travel.md)) come after it.
 
 ---
 ## 📋 Ready — pull in this order
-1. `[ITEM-060]` One connection per window — the API over JSON-RPC on the session socket;
-   lobby pushes, no tickets, no `/api` routes; protocol 7.
-2. `[ITEM-061]` Serve the map — a low-zoom planet from R2 at `/tiles/{z}/{x}/{y}.mvt` (zoom cap
-   z0–8 or z0–10 still to choose).
-3. `[ITEM-062]` Travel maths in the headless core — the waypoint maths ported, clock injected,
+1. `[ITEM-062]` Travel maths in the headless core — the waypoint maths ported, clock injected,
    stable trip/checkpoint keys.
-4. `[ITEM-063]` A squad has a position, and a place to start — the `squads` table and the
+2. `[ITEM-063]` A squad has a position, and a place to start — the `squads` table and the
    start drawn near `request.cf`.
-5. `[ITEM-064]` Orders, pace and the travel scheduler — RPC orders, one alarm for the earliest
+3. `[ITEM-064]` Orders, pace and the travel scheduler — RPC orders, one alarm for the earliest
    due moment.
-6. `[ITEM-065]` The map screen — MapLibre, the squad drawn moving, orders on right-click.
-
-`[ITEM-061]` and `[ITEM-062]` depend on nothing in `[ITEM-060]` and can run in parallel with it.
+4. `[ITEM-065]` The map screen — MapLibre, the squad drawn moving, orders on right-click.
 
 **Next after these:** `[ITEM-066]` Before encounters — the design decisions `[ITEM-048]` needs
 (a GDD task, no code).
@@ -66,6 +61,8 @@ below on 2026-10-07; the fights met on the road
 - `[ITEM-054]` Capture and rescue — an idea; the left-behind of a retreat are lost until then.
 
 ## ⚠️ Left open by finished work
+- **ITEM-060 / ITEM-061**: passkeys over RPC and tiles served to the Worker's own origin and to
+  GitHub Pages are checked under `wrangler dev` only; both need the deploy.
 - **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
   socket is not tested end to end (settlement is tested at the function the referee calls, and
   `Rosters` is unchanged). The live AI opponent stays on `stand`; which order an AI squad fights

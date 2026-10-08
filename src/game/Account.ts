@@ -1,6 +1,9 @@
-import { sanitizeSheet, type CharacterSheet } from '../core/Characters'
+import { sanitizeSheet } from '../core/Characters'
 import { fromBase64Url, toBase64Url } from './Base64Url'
-import type { LobbyView } from './Lobby'
+import type { Player, RosterEntry } from './Rpc'
+import type { ServerConnection } from './ServerConnection'
+
+export type { Player, RosterEntry } from './Rpc'
 
 /**
  * The player's account on one match server, from the browser's side.
@@ -9,75 +12,19 @@ import type { LobbyView } from './Lobby'
  * knows whose roster to deploy. None of this touches local or peer-to-peer
  * play, which still rolls a fresh squad and writes nothing anywhere.
  *
- * One `Account` per server url: the token is stored under that url, because two
- * servers are two different sets of people.
+ * Everything here is a request on the window's one connection to that server
+ * (`ServerConnection`, `src/game/Rpc.ts`). What is left on this side is the
+ * part only a browser can do — the passkey ceremony itself — and reading what
+ * comes back as this build reads it. Who the window is signed in as is the
+ * connection's to know (`connection.player`): it presents the stored token on
+ * every socket it opens.
  */
-
-export interface Player {
-  id: string
-  name: string
-}
-
-/**
- * One character on a kept roster, as a client sees it: enough to show and to
- * pick from (`[ITEM-042]`), never the combat log or growth a player cannot
- * act on here.
- */
-export interface RosterEntry {
-  characterId: string
-  slot: number
-  sheet: CharacterSheet
-  hp: number
-  /** Consecutive deployments without rest, `0..FATIGUE.max` (`[ITEM-039]`). */
-  fatigue: number
-  /** Matches of medical bay left before this member can be picked again. */
-  downtime: number
-}
-
-interface Failure {
-  error?: string
-}
-
 export class Account {
-  /** The same host over HTTP, since the game is addressed by its socket url. */
-  readonly httpBase: string
-
-  constructor(serverUrl: string) {
-    const url = new URL(serverUrl)
-    const protocol = url.protocol === 'wss:' ? 'https:' : url.protocol === 'ws:' ? 'http:' : url.protocol
-    this.httpBase = `${protocol}//${url.host}`
-  }
-
-  private get storageKey(): string {
-    return `tictac.session:${this.httpBase}`
-  }
-
-  get token(): string | null {
-    return localStorage.getItem(this.storageKey)
-  }
-
-  /** Who this browser is signed in as, or null. A rejected token is cleared. */
-  async me(): Promise<Player | null> {
-    if (!this.token) return null
-    try {
-      const { player } = await this.call<{ player: Player }>('GET', '/api/me')
-      return player
-    } catch (error) {
-      if (error instanceof Error && error.message === 'sign in first') {
-        localStorage.removeItem(this.storageKey)
-        return null
-      }
-      throw error
-    }
-  }
+  constructor(private readonly connection: ServerConnection) {}
 
   /** Make a passkey, and with it a player and a squad on this server. */
   async register(name: string): Promise<Player> {
-    const options = await this.call<{ challengeId: string; publicKey: Record<string, unknown> }>(
-      'POST',
-      '/api/auth/register/options',
-      { name },
-    )
+    const options = await this.connection.request('tictac/api/account/registerOptions', { name })
     const publicKey = options.publicKey as unknown as PublicKeyCredentialCreationOptions & {
       challenge: string
       user: { id: string; name: string; displayName: string }
@@ -95,28 +42,20 @@ export class Account {
     const spki = response.getPublicKey()
     if (!spki) throw new Error("this browser cannot hand over the passkey's public key")
 
-    const { token, player } = await this.call<{ token: string; player: Player }>(
-      'POST',
-      '/api/auth/register/verify',
-      {
-        challengeId: options.challengeId,
-        credentialId: toBase64Url(credential.rawId),
-        clientDataJSON: toBase64Url(response.clientDataJSON),
-        authenticatorData: toBase64Url(response.getAuthenticatorData()),
-        publicKey: toBase64Url(spki),
-        publicKeyAlgorithm: response.getPublicKeyAlgorithm(),
-      },
-    )
-    localStorage.setItem(this.storageKey, token)
-    return player
+    const signed = await this.connection.request('tictac/api/account/registerVerify', {
+      challengeId: options.challengeId,
+      credentialId: toBase64Url(credential.rawId),
+      clientDataJSON: toBase64Url(response.clientDataJSON),
+      authenticatorData: toBase64Url(response.getAuthenticatorData()),
+      publicKey: toBase64Url(spki),
+      publicKeyAlgorithm: response.getPublicKeyAlgorithm(),
+    })
+    this.connection.signedIn(signed)
+    return signed.player
   }
 
   async signIn(): Promise<Player> {
-    const options = await this.call<{ challengeId: string; publicKey: Record<string, unknown> }>(
-      'POST',
-      '/api/auth/login/options',
-      {},
-    )
+    const options = await this.connection.request('tictac/api/account/loginOptions', {})
     const publicKey = options.publicKey as unknown as {
       challenge: string
       rpId: string
@@ -129,28 +68,28 @@ export class Account {
     if (!credential) throw new Error('no passkey was offered')
 
     const response = credential.response as AuthenticatorAssertionResponse
-    const { token, player } = await this.call<{ token: string; player: Player }>(
-      'POST',
-      '/api/auth/login/verify',
-      {
-        challengeId: options.challengeId,
-        credentialId: toBase64Url(credential.rawId),
-        clientDataJSON: toBase64Url(response.clientDataJSON),
-        authenticatorData: toBase64Url(response.authenticatorData),
-        signature: toBase64Url(response.signature),
-      },
-    )
-    localStorage.setItem(this.storageKey, token)
-    return player
+    const signed = await this.connection.request('tictac/api/account/loginVerify', {
+      challengeId: options.challengeId,
+      credentialId: toBase64Url(credential.rawId),
+      clientDataJSON: toBase64Url(response.clientDataJSON),
+      authenticatorData: toBase64Url(response.authenticatorData),
+      signature: toBase64Url(response.signature),
+    })
+    this.connection.signedIn(signed)
+    return signed.player
   }
 
+  /**
+   * End the session on the server as well as here: a token that is only
+   * forgotten locally is a token that still works. Forgotten here whatever
+   * the server says, so a window can always get back to being nobody.
+   */
   async signOut(): Promise<void> {
-    if (this.token) {
-      // The session is ended on the server as well as forgotten here: a token
-      // that is only deleted locally is a token that still works.
-      await this.call('POST', '/api/auth/logout', {}).catch(() => undefined)
+    try {
+      if (this.connection.player) await this.connection.request('tictac/api/account/signOut', {})
+    } finally {
+      this.connection.signedOut()
     }
-    localStorage.removeItem(this.storageKey)
   }
 
   /**
@@ -160,52 +99,13 @@ export class Account {
    * checks a deployment against.
    */
   async roster(): Promise<RosterEntry[]> {
-    const { roster } = await this.call<{ roster: RosterEntry[] }>('GET', '/api/roster')
+    const { roster } = await this.connection.request('tictac/api/roster/list', {})
     return roster.map((member) => ({ ...member, sheet: sanitizeSheet(member.sheet) }))
   }
 
   /** Fill the lowest empty slot with a fresh recruit (`[ITEM-037]`). */
   async recruit(): Promise<RosterEntry> {
-    const { member } = await this.call<{ member: RosterEntry }>('POST', '/api/roster/recruit', {})
+    const { member } = await this.connection.request('tictac/api/roster/recruit', {})
     return { ...member, sheet: sanitizeSheet(member.sheet) }
-  }
-
-  /**
-   * The rooms on this server (`src/game/Lobby.ts`): who is waiting for an
-   * opponent, what is being played, and — when signed in — the seat this
-   * player already holds. Works signed out too; `you` is then null.
-   */
-  async lobby(): Promise<LobbyView> {
-    return this.call<LobbyView>('GET', '/api/lobby')
-  }
-
-  /**
-   * The socket url with a single-use ticket on it.
-   *
-   * A browser cannot put an `Authorization` header on a WebSocket, so the
-   * session buys a ticket that is worth one connection and expires in a minute.
-   */
-  async socketUrl(wsUrl: string): Promise<string> {
-    const { ticket } = await this.call<{ ticket: string }>('POST', '/api/ticket', {})
-    const url = new URL(wsUrl)
-    url.searchParams.set('ticket', ticket)
-    return url.toString()
-  }
-
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const headers: Record<string, string> = {}
-    const token = this.token
-    if (token) headers.authorization = `Bearer ${token}`
-    if (body !== undefined) headers['content-type'] = 'application/json'
-    const response = await fetch(`${this.httpBase}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-    if (response.status === 204) return undefined as T
-    const text = await response.text()
-    const parsed = text ? (JSON.parse(text) as T & Failure) : ({} as T & Failure)
-    if (!response.ok) throw new Error(parsed.error ?? `the server answered ${response.status}`)
-    return parsed
   }
 }

@@ -1,28 +1,47 @@
 import { Faction } from '../../src/config'
 import { maxHpOf, sanitizeSheet, type CharacterSheet } from '../../src/core/Characters'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../../src/game/JsonRpc'
-import type { ServerIntent } from '../../src/game/Lobby'
+import type { LobbyView, ServerIntent } from '../../src/game/Lobby'
 import type { NetworkMessage } from '../../src/game/NetworkManager'
 import type { CombatRecording, Deployment, RecordingHeader } from '../../src/game/Recording'
+import type { Player, RpcMethod, RpcParams, RpcResult } from '../../src/game/Rpc'
 import { loopback } from '../../src/game/Transport'
-import type { Player } from '../../src/server/Accounts'
 import type { Lobby } from '../../src/server/Lobby'
 import type { Persistence } from '../../src/server/Persistence'
+import { Sessions } from '../../src/server/Session'
 import { STOCK_PLAN } from '../../src/sim/Balance'
 import { SimMatch } from '../../src/sim/SimMatch'
-import { MY_VERSION, type PeerVersion } from '../../src/version'
+import { MY_VERSION, PROTOCOL_VERSION, type PeerVersion } from '../../src/version'
 
 /**
- * A socket to a lobby, held the way a client holds one, spoken in raw
- * JSON-RPC frames rather than through `NetworkManager` — so what is under test
- * is the server's half of the conversation and nothing else.
+ * A socket to a lobby, held the way a window holds one, spoken in raw
+ * JSON-RPC frames rather than through `ServerConnection`/`NetworkManager` —
+ * so what is under test is the server's half of the conversation and nothing
+ * else.
+ *
+ * The match's own notifications are collected as `NetworkMessage`s, and so
+ * is the answer to the room this socket asked for: a seat as `seated`, a
+ * refusal as `abort` with the server's reason — the two shapes these tests
+ * have always read a room's answer in, whether it came as a notification
+ * (protocol 6) or as the response to `room/enter` (protocol 7).
  */
 export interface Connection {
   send(message: NetworkMessage): void
+  /** Ask the server something on this socket, as a window does; rejects with the server's reason. */
+  request<M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>
   /** Everything the server sent, in order. */
   received: NetworkMessage[]
   /** Everything of one type the server sent, in order. */
   of<T extends NetworkMessage['type']>(type: T): Extract<NetworkMessage, { type: T }>[]
+  /** Every lobby view pushed to this socket (`lobby/changed`), in order. */
+  lobby: LobbyView[]
+  /**
+   * The first pushed view that satisfies `ready` — one already here, or the
+   * next to arrive. Pushes are gathered into one per change and sent a
+   * moment after it, so this is how a test waits for one: by the push
+   * itself, never by a guessed delay.
+   */
+  lobbyWhere(ready: (view: LobbyView) => boolean): Promise<LobbyView>
   /** True once the server has closed this socket. */
   readonly closed: boolean
   /** Hang up, as a tab closing does. */
@@ -30,43 +49,133 @@ export interface Connection {
 }
 
 /**
- * Connect to `lobby` as `player` (null for anonymous), asking for `intent`.
- *
- * States `version` (this build, unless a test is an older or newer page)
- * straight away, as every client's first frame does, unless `hello: false` —
- * for a test that wants to say something else first.
+ * The session layer over each lobby, as a host builds one: every socket a
+ * test connects goes through it. Players sign in with a token that is simply
+ * their id — the accounts behind `Sessions` are what `tests/session.test.ts`
+ * is about, not these.
  */
-export function connect(
+interface Layer {
+  sessions: Sessions
+  /** Players whose id is a token the layer's accounts honour. */
+  known: Map<string, Player>
+}
+
+const layers = new WeakMap<Lobby, Layer>()
+
+function layerOf(lobby: Lobby): Layer {
+  let layer = layers.get(lobby)
+  if (!layer) {
+    const known = new Map<string, Player>()
+    const accounts = { playerFor: async (token: string) => known.get(token) ?? null }
+    const sessions = new Sessions({
+      lobby,
+      persistence: { accounts, rosters: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters'>,
+      log: () => {},
+    })
+    layer = { sessions, known }
+    layers.set(lobby, layer)
+  }
+  return layer
+}
+
+/**
+ * Connect to `lobby` as `player` (null for anonymous), asking for `intent`,
+ * and resolve once the server has answered it — the way a window does it:
+ * `hello` with `version`, `account/signIn` when there is a player, then
+ * `room/enter`. A page on the protocol before this one (`version`) asks for a
+ * keyed resume the only way it can, in its url.
+ *
+ * `hello: false` states nothing at all, for a test that wants to say
+ * something else first; nothing is asked then either.
+ */
+export async function connect(
   lobby: Lobby,
   player: Player | null,
   intent: ServerIntent | null,
   { hello = true, version = MY_VERSION }: { hello?: boolean; version?: PeerVersion } = {},
-): Connection {
+): Promise<Connection> {
+  const { sessions, known } = layerOf(lobby)
   const [mine, theirs] = loopback()
   const received: NetworkMessage[] = []
+  const views: LobbyView[] = []
+  const lobbyWaiters = new Set<{ ready: (view: LobbyView) => boolean; resolve: (view: LobbyView) => void }>()
+  /** Requests awaiting their answer, by id; `read` sees a result as it arrives, before any frame after it. */
+  const pending = new Map<number, { waiting: PromiseWithResolvers<unknown>; read?: (result: unknown) => void }>()
+  let lastId = 0
   let closed = false
   mine.onFrame((frame) => {
-    if (!('method' in frame)) return
+    if (!('method' in frame)) {
+      const asked = typeof frame.id === 'number' ? pending.get(frame.id) : undefined
+      if (!asked) return
+      pending.delete(frame.id as number)
+      if ('error' in frame) {
+        asked.waiting.reject(new Error(frame.error.message))
+        return
+      }
+      asked.read?.(frame.result)
+      asked.waiting.resolve(frame.result)
+      return
+    }
     const params = (frame as JsonRpcNotification).params as Record<string, unknown>
+    // The window being replaced by a newer one of its player: read as the
+    // `abort` it was before protocol 7, which is what these tests check for.
+    if (frame.method === 'tictac/api/session/replaced') {
+      received.push({ type: 'abort', reason: String(params.reason), side: null })
+      return
+    }
+    if (frame.method === 'tictac/api/lobby/changed') {
+      const view = params as unknown as LobbyView
+      views.push(view)
+      for (const waiter of [...lobbyWaiters]) {
+        if (!waiter.ready(view)) continue
+        lobbyWaiters.delete(waiter)
+        waiter.resolve(view)
+      }
+      return
+    }
     for (const [type, method] of Object.entries(RpcMethods)) {
       if (method === frame.method) received.push({ ...params, type } as NetworkMessage)
     }
   })
   mine.onClosed(() => {
     closed = true
+    for (const { waiting } of pending.values()) waiting.reject(new Error('the socket closed'))
+    pending.clear()
   })
-  lobby.attach(theirs, player, intent)
+
+  const older = version.protocol < PROTOCOL_VERSION
+  const url = older && intent?.kind === 'resume' ? `ws://lobby.test/?intent=resume&room=${intent.roomId}&seat=${intent.seatKey}` : 'ws://lobby.test/'
+  sessions.attach(theirs, { url })
 
   const send = (message: NetworkMessage): void => {
     const params = { ...message } as Record<string, unknown>
     delete params.type
     mine.send({ jsonrpc: '2.0', method: RpcMethods[message.type], params } as JsonRpcFrame)
   }
-  if (hello) send({ type: 'hello', ...version })
-
-  return {
+  const ask = <M extends RpcMethod>(
+    method: M,
+    params: RpcParams<M>,
+    read?: (result: RpcResult<M>) => void,
+  ): Promise<RpcResult<M>> => {
+    const id = ++lastId
+    const waiting = Promise.withResolvers<unknown>()
+    pending.set(id, { waiting, read: read as ((result: unknown) => void) | undefined })
+    mine.send({ jsonrpc: '2.0', id, method, params: params as Record<string, unknown> })
+    return waiting.promise as Promise<RpcResult<M>>
+  }
+  const request = <M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> => ask(method, params)
+  const connection: Connection = {
     send,
+    request,
     received,
+    lobby: views,
+    lobbyWhere: (ready) => {
+      const already = views.find(ready)
+      if (already) return Promise.resolve(already)
+      const { promise, resolve } = Promise.withResolvers<LobbyView>()
+      lobbyWaiters.add({ ready, resolve })
+      return promise
+    },
     of: <T extends NetworkMessage['type']>(type: T) =>
       received.filter((message): message is Extract<NetworkMessage, { type: T }> => message.type === type),
     get closed() {
@@ -74,13 +183,38 @@ export function connect(
     },
     close: () => mine.close(),
   }
+  if (!hello) return connection
+  send({ type: 'hello', ...version })
+  if (older) {
+    // A protocol-6 page asks for nothing: its url said it all, and the
+    // answer is a notification. Wait for it.
+    await answered(connection)
+    return connection
+  }
+  try {
+    if (player) {
+      known.set(player.id, player)
+      await request('tictac/api/account/signIn', { token: player.id })
+    }
+    if (intent) {
+      // The seat is recorded as its answer is read — before the `log` that
+      // follows it — as a window takes it.
+      await ask('tictac/api/room/enter', { intent }, (seated) => received.push({ type: 'seated', ...seated }))
+    }
+  } catch (error) {
+    // A refusal — or a socket the gate already closed — read as a room's
+    // `abort` with the server's reason, unless the server sent one itself.
+    if (connection.of('abort').length === 0) {
+      received.push({ type: 'abort', reason: error instanceof Error ? error.message : String(error), side: null })
+    }
+  }
+  return connection
 }
 
 /**
- * Resolves once the server has answered `connection`'s `hello` — seated it,
- * or turned it away. A seat taken back by key is placed only after its key is
- * hashed, which WebCrypto does asynchronously; everything else is answered at
- * once and resolves straight away.
+ * Resolves once the server has answered `connection` — seated it, or turned
+ * it away. `connect` already waits for its own answer; this is for a
+ * protocol-6 page, whose answer is a notification.
  */
 export async function answered(connection: Connection): Promise<Connection> {
   for (let waited = 0; waited < 1_000; waited++) {
@@ -90,14 +224,14 @@ export async function answered(connection: Connection): Promise<Connection> {
   throw new Error(`never answered; received ${connection.received.map((m) => m.type).join(', ')}`)
 }
 
-/** The seat key a connection was handed, read off its `seated` frame. */
+/** The seat key a connection was handed, read off its `seated` answer. */
 export function keyOf(connection: Connection): string {
   const key = connection.of('seated')[0]?.seatKey
   if (!key) throw new Error(`no seat key; received ${connection.received.map((m) => m.type).join(', ')}`)
   return key
 }
 
-/** The room a connection was placed in, read off its `seated` frame. */
+/** The room a connection was placed in, read off its `seated` answer. */
 export function roomOf(connection: Connection): string {
   const seated = connection.of('seated')[0]
   if (!seated) throw new Error(`never seated; received ${connection.received.map((m) => m.type).join(', ')}`)
@@ -105,15 +239,15 @@ export function roomOf(connection: Connection): string {
 }
 
 /** One room with both seats taken: `blue` opened it and `red` joined it. */
-export function seatBoth(
+export async function seatBoth(
   lobby: Lobby,
   blue: Player | null,
   red: Player | null,
   options: { version?: PeerVersion } = {},
 ) {
-  const host = connect(lobby, blue, { kind: 'open' }, options)
+  const host = await connect(lobby, blue, { kind: 'open' }, options)
   const roomId = roomOf(host)
-  const joiner = connect(lobby, red, { kind: 'join', roomId }, options)
+  const joiner = await connect(lobby, red, { kind: 'join', roomId }, options)
   return { blue: host, red: joiner, roomId }
 }
 

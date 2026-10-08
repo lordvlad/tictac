@@ -81,6 +81,12 @@ const SPECTATOR_INTENTS: Partial<Record<HudIntent['type'], true>> = {
   selectUnit: true,
 }
 
+/** The end screen's buttons: answered on any side, whoever's turn the match ended on. */
+const END_SCREEN_INTENTS: Partial<Record<HudIntent['type'], true>> = {
+  endScreenNext: true,
+  backToMenu: true,
+}
+
 /** What floats over a unit that breaks, by the break. */
 const BREAK_CALLOUT: Record<MoraleBreak, { text: string; color: string }> = {
   panic: { text: 'PANIC', color: '#ffb347' },
@@ -560,13 +566,17 @@ export class InteractionController {
 
   /** Single place where a HUD press becomes a change to the game. */
   handleIntent(intent: HudIntent): void {
-    if (this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) {
+    // The end screen belongs to everybody at the table: the match is over, so
+    // whose turn it ended on decides nothing, and without this the side that
+    // was waiting — or a spectator — could never leave it.
+    const leaving = END_SCREEN_INTENTS[intent.type] === true
+    if (!leaving && this.network && !this.network.isMyTurn(this.turnManager.activeFaction)) {
       return
     }
     // A replay is not commanded. Only the view controls answer: the panels that
     // would spend a unit's points are hidden, and this is what makes that a rule
     // rather than a consequence of the layout.
-    if (this.spectating && !SPECTATOR_INTENTS[intent.type]) return
+    if (!leaving && this.spectating && !SPECTATOR_INTENTS[intent.type]) return
 
     // Retreat asks twice; anything else pressed in between means not now.
     if (this.retreatArmed && intent.type !== 'requestRetreat' && intent.type !== 'confirmRetreat') {

@@ -1,6 +1,7 @@
 import { Faction } from '../config'
 import { NetworkManager, type NetworkMessage } from '../game/NetworkManager'
 import type { CombatRecording } from '../game/Recording'
+import { heldTokens, ServerConnection } from '../game/ServerConnection'
 import type { StateDigest } from '../game/StateDigest'
 import { SimMatch, type MatchOutcome, type MatchSetup } from './SimMatch'
 
@@ -77,14 +78,18 @@ export async function simulateOverWire(options: WireMatchOptions): Promise<WireM
   const recording = sim.recording
   if (!recording) throw new Error('simulateOverWire needs a recording; SimMatch was not asked to keep one')
 
+  // Two windows, each with its own connection to the server: one socket each,
+  // as a browser has. Tokens are held in memory — nobody signs in.
+  const hostLine = new ServerConnection(url, { tokens: heldTokens() })
+  const joinerLine = new ServerConnection(url, { tokens: heldTokens() })
   const host = new NetworkManager()
   const joiner = new NetworkManager()
 
   let roomId: string
   try {
     // Seated before the other connects, so the room exists to be joined.
-    roomId = (await host.connectToServer(url, { kind: 'open' })).roomId
-    await joiner.connectToServer(url, { kind: 'join', roomId })
+    roomId = (await host.enterRoom(hostLine, { kind: 'open' })).roomId
+    await joiner.enterRoom(joinerLine, { kind: 'join', roomId })
     // The joiner says hello into the room; the host hears it and states the
     // opening it announced (`restate`) — the same exchange whichever of the
     // two speaks first.
@@ -109,6 +114,8 @@ export async function simulateOverWire(options: WireMatchOptions): Promise<WireM
   } finally {
     host.dispose()
     joiner.dispose()
+    hostLine.close()
+    joinerLine.close()
   }
 
   return { outcome, recording, digest: sim.host.digest(), roomId }
