@@ -42,6 +42,8 @@ export interface Persistence {
   accounts: Accounts
   rosters: Rosters
   squads: Squads
+  /** The passkeys' relying party, which a server also publishes the related origins of (`RelatedOrigins.ts`). */
+  party: RelyingParty
   close(): Promise<void>
 }
 
@@ -71,6 +73,7 @@ export async function persistenceOverDb(
     accounts: new Accounts(db, rosters, squads, party),
     rosters,
     squads,
+    party,
     close: () => db.close(),
   }
 }

@@ -3023,6 +3023,52 @@ paper before building, each against the code it touches.
 - [x] `ITEM-048`'s Change and Affected Files are updated to match.
 ---
 
+### [ITEM-068] Sign in from GitHub Pages: WebAuthn related origins
+**Completed Date:** 2026-10-08  
+**Type:** Bug  
+**Milestone:** M5 — The Shared World  
+
+#### Why
+Passkeys are bound to the Worker's host (`tictac-match-server.waldemar-reusch.workers.dev`), and
+a browser refuses a relying party id that is not a registrable suffix of the page's host. So
+nobody could register or sign in from `https://lordvlad.github.io`, and the world map
+(`ITEM-065`) opened only on the Worker's own origin.
+
+#### Key Changes
+- **`src/server/RelatedOrigins.ts`**: `GET /.well-known/webauthn` answers
+  `{"origins": [...]}` (`application/json`) with the relying party's origins — the same list the
+  ceremony's `origin` check uses, so a site is trusted for both or neither.
+- **`workers/index.ts`** answers it before the Durable Object, from `RELYING_PARTY_*`
+  (`relyingPartyOf`, now exported from `MatchDurableObject.ts`).
+- **`startGameServer`** serves it too, from `Persistence.party`: a `serve:match` on its own
+  domain with its client on another site needs the same file.
+- **`wrangler.jsonc`**: `RELYING_PARTY_ORIGINS` gains `https://lordvlad.github.io`.
+- The client needed no change: it spreads the server's options, so a Pages page already asks for
+  the Worker's id (`rp.id` at registration, `rpId` at sign-in).
+- Browser support: Chrome/Edge 128+ and Safari 18; Firefox does not fetch the file yet.
+
+#### Measured
+- Chrome 151, headless, with a CDP virtual authenticator, on a page at
+  `https://pages.example.org`, against `wrangler dev` configured with relying party
+  `rp.example.com` and both origins, behind local TLS (`--host-resolver-rules`, a self-signed
+  certificate trusted by SPKI): Chrome fetched `https://rp.example.com/.well-known/webauthn`
+  from the Worker; registration and sign-in succeeded, the credential bound to
+  `rp.example.com`, and the server accepted the cross-site origin. With the file answered `404`,
+  registration failed with Chrome's `SecurityError` (*…an attempt to fetch the
+  .well-known/webauthn resource of the claimed RP ID failed*). A `.test` domain did not work
+  for this: Chrome needs a registrable domain on a known suffix.
+- Not verified: the real Pages site against the deployed Worker (needs a deploy), Safari, and
+  Firefox (unsupported).
+
+#### Acceptance Criteria
+- [x] The Worker serves `/.well-known/webauthn` with the configured origins
+      (`tests/cloudflare.test.ts`, `tests/relatedOrigins.test.ts`).
+- [x] `RELYING_PARTY_ORIGINS` includes the GitHub Pages origin.
+- [x] A page on another site registers and signs in with the server's passkeys in Chromium.
+- [x] Living documentation updated (`docs/architecture/deployment.md` §4,
+      `docs/architecture/persistence.md` §4 and §6).
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

@@ -146,12 +146,11 @@ function placeOf(cf: unknown): LatLng | null {
 
 /**
  * The relying party a deploy's passkeys are bound to, from the Worker's own
- * vars when a real domain has been chosen (`wrangler.jsonc`'s `vars`, or
- * `wrangler secret`), falling back to the same local default `bun run dev`
- * uses. Nothing sets these vars yet — a real `wrangler deploy` still needs a
- * chosen domain to configure them with.
+ * vars (`wrangler.jsonc`'s `vars`, or `wrangler secret`), falling back to the
+ * same local default `bun run dev` uses. Also what `index.ts` publishes as the
+ * related origins (`src/server/RelatedOrigins.ts`).
  */
-function relyingPartyOf(env: Env): RelyingParty {
+export function relyingPartyOf(env: Env): RelyingParty {
   if (!env.RELYING_PARTY_ID) return LOCAL_RELYING_PARTY
   return {
     id: env.RELYING_PARTY_ID,

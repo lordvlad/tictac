@@ -192,6 +192,19 @@ travels in a url: a window presents it with `account/signIn` on every socket it
 opens, which binds that socket to the whole `Player` (`{ id, name }`), because
 the lobby seats and names players by it.
 
+**Related origins** (`src/server/RelatedOrigins.ts`, `ITEM-068`). A browser
+refuses a relying party id that is not a registrable suffix of the page's own
+host, so a client on GitHub Pages could not use passkeys bound to the Worker's
+host — unless that host lends its id out. It does, at `GET /.well-known/webauthn`:
+`{"origins": [...]}`, `application/json`, listing exactly `party.origins`, the
+same list the ceremony's `origin` check uses, so a site is trusted for both or
+neither. The page asks for the server's id explicitly because it never picks
+one: the client spreads the server's options (`rp.id` at registration, `rpId`
+at sign-in) into `navigator.credentials`. Chrome/Edge 128+ and Safari 18 fetch
+the file; Firefox does not yet, so in Firefox a passkey only works on a page on
+the relying party's own site. Both the Worker (`workers/index.ts`, before the
+Durable Object) and `startGameServer` serve it, from the same handler.
+
 ### Over the socket (`src/server/Session.ts`)
 
 Accounts and rosters are JSON-RPC requests on the window's one socket
@@ -411,9 +424,10 @@ at once end up with one squad.
 
 ## 6. The Server and the Client
 
-`startGameServer` (`src/server/GameServer.ts`) is one `Bun.serve` with three
+`startGameServer` (`src/server/GameServer.ts`) is one `Bun.serve` with four
 jobs, in order: a WebSocket upgrade (handed to `Sessions`), map tiles when it
-was given a `tiles` handler, and the status document. `scripts/serve-match.ts`
+was given a `tiles` handler, the related-origins file (§4), and the status
+document. `scripts/serve-match.ts`
 is a thin CLI over it:
 
 ```sh

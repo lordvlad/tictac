@@ -53,10 +53,10 @@ met on the road
 - `[ITEM-054]` Capture and rescue — an idea; the left-behind of a retreat are lost until then.
 
 ## ⚠️ Left open by finished work
-- **ITEM-065**: nobody can sign in from the GitHub Pages client, so the map opens only on the
-  Worker's own origin: passkeys are bound to `workers.dev`, and WebAuthn refuses them to a
-  `github.io` page. WebAuthn's related origins (`/.well-known/webauthn` on the Worker listing the
-  Pages origin) would lift that in browsers that support it.
+- **ITEM-068**: signing in from the GitHub Pages client (related origins) is proved in Chromium
+  locally, not yet on `https://lordvlad.github.io` against the deployed Worker — check after the
+  next deploy. Firefox does not support related origins, so a Firefox player still signs in only
+  on the Worker's own origin.
 - **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
   socket is not tested end to end (settlement is tested at the function the referee calls, and
   `Rosters` is unchanged). The live AI opponent stays on `stand`; which order an AI squad fights

@@ -3,7 +3,7 @@ title: "Deployment: GitHub Pages and the Planted Cloudflare Durable Object"
 id: "ARCH-DEPLOYMENT"
 type: "architecture"
 status: "active"
-lastReviewed: "2026-10-07"
+lastReviewed: "2026-10-08"
 appliesTo:
   - ".github/workflows/deploy.yml"
   - "wrangler.jsonc"
@@ -21,6 +21,7 @@ appliesTo:
   - "src/server/RoomStore.ts"
   - "src/sim/WireMatch.ts"
   - "src/server/Tiles.ts"
+  - "src/server/RelatedOrigins.ts"
   - "scripts/build-planet-tiles.ts"
   - "scripts/copy-public.mjs"
   - "public/map/**"
@@ -68,6 +69,7 @@ per match — and that one instance hosts every room:
 ```
 workers/index.ts (Worker)
   ├── /tiles/{z}/{x}/{y}.mvt  ── answered here from R2 (§6), never reaching the object
+  ├── /.well-known/webauthn  ── answered here from the RELYING_PARTY_* vars (§4)
   └── env.MATCH.idFromName(MATCH_SERVER)  ── always the same id ('singleton', src/server/Owner.ts)
         └── workers/MatchDurableObject.ts (the one instance)
               ├── fetch(): a WebSocket upgrade (→ Sessions → Lobby → a Room),
@@ -282,11 +284,19 @@ file the same functions are imported from.
   (`[ITEM-045]`): `https://tictac-match-server.waldemar-reusch.workers.dev`, on the account's
   default `*.workers.dev` subdomain rather than a custom domain — nothing in this item asked
   for one, and `wrangler deploy` assigns `*.workers.dev` for free the moment a Worker exists.
-  `wrangler.jsonc`'s `vars` sets `RELYING_PARTY_ID`/`RELYING_PARTY_ORIGINS` to that exact host
-  (a `*.workers.dev` subdomain is on the public suffix list, so the relying party id has to be
-  the full host, not just `workers.dev`); `MatchDurableObject` falls back to
-  `LOCAL_RELYING_PARTY` only when they are unset, which is correct for local development and
-  nothing else. Credentials (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`) live in a
+  `wrangler.jsonc`'s `vars` sets `RELYING_PARTY_ID` to that exact host (a `*.workers.dev`
+  subdomain is on the public suffix list, so the relying party id has to be the full host, not
+  just `workers.dev`) and `RELYING_PARTY_ORIGINS` to that host's origin plus
+  `https://lordvlad.github.io` (an origin, no path). The second origin is what lets the GitHub
+  Pages client sign in at all (`[ITEM-068]`): a browser refuses a relying party id that is not
+  a registrable suffix of the page's host, unless the id's host lists the page's origin at
+  `GET /.well-known/webauthn` — WebAuthn Related Origin Requests. `workers/index.ts` answers
+  that path itself, before the Durable Object, with `{"origins": [...]}` built from
+  `RELYING_PARTY_ORIGINS` (`src/server/RelatedOrigins.ts`; ARCH-PERSISTENCE §4). Chrome/Edge
+  128+ and Safari 18 honour it; Firefox does not yet, so a Firefox player on GitHub Pages still
+  cannot sign in, only one on the Worker's own origin. `MatchDurableObject` falls back to
+  `LOCAL_RELYING_PARTY` only when these vars are unset, which is correct for local development
+  and nothing else. Credentials (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`) live in a
   git-ignored `.env`, sourced into the shell before running this command — never committed, and
   not read by anything else in the repo.
 - **`bun run typecheck:cf`** (wired into `bun run lint`) — `workers/tsconfig.json` typechecks
@@ -329,7 +339,8 @@ accumulating across test runs — one pegged at full CPU — and eventually maki
 line across an unknown process tree shape.
 
 What it proves, concretely — mirroring `tests/server.test.ts`'s scenarios against the `Bun.serve`
-referee: a plain request serves the built client through the Durable Object (not around it); a
+referee: a plain request serves the built client through the Durable Object (not around it);
+`/.well-known/webauthn` lists every configured relying-party origin as JSON; a
 passkey registered over RPC on one socket signs in another with its token, and that socket reads
 the roster (`roster/list`) and its squad near Stuttgart (`squad/get`; `wrangler dev` reports no
 location), with nothing over HTTP; a squad sent two metres arrives by the object's own storage

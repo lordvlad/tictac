@@ -24,7 +24,10 @@
   // for what this falls back to when unset.
   "vars": {
     "RELYING_PARTY_ID": "tictac-match-server.waldemar-reusch.workers.dev",
-    "RELYING_PARTY_ORIGINS": "https://tictac-match-server.waldemar-reusch.workers.dev",
+    // The GitHub Pages client signs in with this host's passkeys through
+    // WebAuthn related origins: `/.well-known/webauthn` lists these
+    // (`src/server/RelatedOrigins.ts`). An origin has no path.
+    "RELYING_PARTY_ORIGINS": "https://tictac-match-server.waldemar-reusch.workers.dev,https://lordvlad.github.io",
     // The map archive in `MAP_TILES`, named for what it holds; a new build is
     // uploaded under a new key (`scripts/build-planet-tiles.ts`) and swapped in
     // here (`[ITEM-061]`, docs/architecture/deployment.md §6).

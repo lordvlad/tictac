@@ -5,6 +5,7 @@ import type { Persistence } from './Persistence'
 import { Schedule } from './Schedule'
 import { Sessions } from './Session'
 import { socketTransport, type ServerSocket } from './SocketTransport'
+import { relatedOriginsHandler } from './RelatedOrigins'
 import type { TileHandler } from './Tiles'
 
 /**
@@ -15,7 +16,7 @@ import type { TileHandler } from './Tiles'
  * The match itself travels over the same socket as notifications,
  * byte-identical to what two peers send each other — which is what lets a
  * referee watch a match it is not part of. HTTP is left with what is static:
- * a status document, and the map's tiles.
+ * a status document, the map's tiles, and the passkeys' related origins.
  *
  * WebSocket rather than WebRTC on purpose. Bun has no WebRTC, and it is the
  * wrong tool anyway: WebRTC exists for NAT traversal between two clients that
@@ -104,6 +105,9 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
 
   const sessions = new Sessions({ lobby, persistence, journeys, now: () => clock.now(), log })
   const sockets = new WeakMap<object, ServerSocket>()
+  // Parity with the Worker: a `serve:match` on its own domain can have its
+  // client hosted on another site only if it publishes this too.
+  const relatedOrigins = relatedOriginsHandler(persistence.party)
 
   const server = Bun.serve<{ url: string }, never>({
     port: options.port,
@@ -115,6 +119,8 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
 
       const tile = await options.tiles?.(request)
       if (tile) return tile
+      const related = relatedOrigins(request)
+      if (related) return related
 
       // The one question a client needs answered before it commits to a match:
       // are we running the same build?

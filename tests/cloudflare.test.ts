@@ -39,6 +39,8 @@ import type { LatLng } from '../src/core/Travel'
 const PORT = 18917
 const BASE = `http://127.0.0.1:${PORT}`
 const ORIGIN = 'http://localhost:5173'
+/** A second, cross-site origin: the shape of the GitHub Pages client's. */
+const PAGES = 'https://pages.example'
 
 let dev: Subprocess
 /**
@@ -198,7 +200,7 @@ describe('The planted Cloudflare deployment', () => {
         '--var',
         'RELYING_PARTY_ID:localhost',
         '--var',
-        `RELYING_PARTY_ORIGINS:${ORIGIN}`,
+        `RELYING_PARTY_ORIGINS:${ORIGIN}, ${PAGES}`,
       ],
       {
         cwd: import.meta.dir + '/..',
@@ -239,6 +241,15 @@ describe('The planted Cloudflare deployment', () => {
     const body = await response.text()
     expect(body).toContain('<html')
     expect(body.toLowerCase()).toContain('tictac')
+  })
+
+  test('the relying party host lends its passkeys to every configured origin', async () => {
+    // Answered by the Worker itself, from its vars: a browser on another site
+    // fetches this before it will use a passkey bound to this host.
+    const response = await fetch(`${BASE}/.well-known/webauthn`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('application/json')
+    expect(await response.json()).toEqual({ origins: [ORIGIN, PAGES] })
   })
 
   test('a passkey registered on one socket signs in another, with nothing over HTTP', async () => {
