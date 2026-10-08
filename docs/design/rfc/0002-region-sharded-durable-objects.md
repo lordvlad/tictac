@@ -80,6 +80,11 @@ back. The same fiction toolkit does the same job at a border a player never deli
 but can still see across: whatever justifies the boundary justifies why the far side is not
 visible or reachable from up close either.
 
+*Squad travel* (GDD-WORLD §3) moves in straight lines on the wall clock. The two are reconciled in
+[GDD-WORLD §5.4](../gdd/world-and-travel.md) (point 8, `ITEM-066`): inside a zone routes stay
+straight; a route that would cross a border is cut at the crossing, where the squad stops, and
+going through is an order of its own — the hand-off this section describes.
+
 **The hand-off is the source's responsibility.** The Durable Object currently holding a
 connection initiates its hand-off to the destination when a crossing happens — not an external
 orchestrator, and not the destination reaching in to pull the connection over. §4 is the shape

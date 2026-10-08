@@ -222,9 +222,9 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
 ### [ITEM-048] Wild Alien Encounters on the Road
 **Type:** Feature
 **Priority:** P2
-**Status:** Backlog — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5,
-[GDD-OVERVIEW](../design/gdd/overview.md) §2); not startable until the travel scheduler
-(`ITEM-064`) ships and `ITEM-066` has settled the decisions it needs
+**Status:** Ready — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5, with the
+decisions about rooms and rosters in §5.4 from `ITEM-066`; [GDD-OVERVIEW](../design/gdd/overview.md)
+§2); the travel scheduler (`ITEM-064`) and its checkpoint keys (`ITEM-062`) are built
 **Milestone:** Unscheduled
 
 #### Why
@@ -246,33 +246,54 @@ the squad was and what happens to its journey afterwards.
    the area's danger and the travel pace. The roll is setup randomness from a stream seeded by
    (squad, trip, checkpoint), never a match's dice, and is decided at the checkpoint, not in
    advance, so no future encounter exists to leak. Contact halts travel.
-2. **The referee plays the alien side.** It issues the alien squad's commands as intents, the
-   same commands a human sends, using the policy `ebc3d49` split out of `SimMatch`. Not the
-   human's client: a client that drives its own opponent can make it play badly.
-3. **The referee can also play an absent human's side** (GDD-WORLD §5.2), to that player's
-   standing order (`ITEM-052`). A player online at contact gets a **join window** to take the
-   fight; otherwise the AI plays it. With nobody present the fight is fought out at once on the
-   server, headless. Every one of these is an ordinary match: recorded, replayable, settled.
-4. **The header records who controlled each side** (human or AI), for audit and for the
-   return feed.
-5. **The alien squad is rolled, not stored.** Sheets and kit are dealt from system randomness
+2. **The server opens the room** (GDD-WORLD §5.4, points 3 and 7): `Lobby.openEncounter`
+   creates a `Room` already `playing`, under the server's build, and starts it from a header the
+   server composes (`Room.start`): a seed from system randomness, the player's party as Blue,
+   the rolled alien squad as Red, each side's controller. The party is the first `SQUAD_SIZE`
+   active members by slot who are neither in the medical bay nor deployed in another live room;
+   with nobody fit the squad is passed by. Encounter rooms are not listed in the lobby.
+3. **The alien side is played by an AI seat, not by the referee and not by the human's client**
+   (point 4): `AiOpponent` generalised into a server-side `AiSeat` — a `NetworkManager` and the
+   `Policy` (`ebc3d49`) on a `loopback()` transport the room holds as an ordinary `Client`,
+   reading the match from the room's `log` and refereed like a human. A client that drove its own
+   opponent could make it play badly.
+4. **An AI seat can also play an absent human's side** (GDD-WORLD §5.2, §5.4 points 1–2), to
+   that player's standing order (`ITEM-052`). The player's seat starts *reserved* until a
+   deadline: an online player is pushed `tictac/api/encounter/started { roomId, joinBy }` and
+   takes the fight with `room/enter { kind: 'resume' }` within `JOIN_WINDOW_MS` (60 s); an
+   offline player has no window. At the deadline the seat passes to the AI, and in a room with an
+   AI to fall back on, `Room.hold`'s grace expiry does the same instead of ending the room. The
+   lobby's `you` carries the seat's controller; the panel takes over only a seat that is still
+   the player's to take, and otherwise offers to watch. With nobody present both seats are AI
+   seats and the fight plays out in milliseconds through the same room. Every one of these is an
+   ordinary match: recorded, replayable, settled.
+5. **The header records who controlled each side** (human or AI), for audit and for the
+   return feed; `RoomStore` keeps a controller per seat (a migration), so a restored room
+   re-attaches its AI seats from the log under the new build.
+6. **The alien squad is rolled, not stored.** Sheets and kit are dealt from system randomness
    at encounter start, stated in the header like any squad, never written to `roster`; the
    alien side settles like an anonymous one does. The encounter sizes it within today's
    `1..SQUAD_SIZE` (`ITEM-041` already handles short-handed squads); once `ITEM-047` lands the
    encounter is the caller that states a per-combat cap.
-6. **The human side settles normally**, including growth, whether it played or the AI played
-   for it.
-7. **After the fight** a surviving squad resumes its route or stops and waits: a player
+7. **The human side settles normally**, including growth, whether it played or the AI played
+   for it. `Rosters.rest` is unchanged (§5.4 point 5), and the header is composed from the
+   roster rows, so `verifyRosters` passes it byte for byte (point 6).
+8. **After the fight** a surviving squad resumes its route or stops and waits: a player
    setting.
-8. **A return feed**: what happened while the player was away, each fight watchable back.
+9. **A return feed**: what happened while the player was away, each fight watchable back.
 
 #### Affected Files
-- `src/server/Room.ts` (an AI-controlled side; settling a side with no roster)
-- `src/sim/Policy.ts`, `src/game/AiOpponent.ts` (the policy seated by the referee)
+- `src/server/Lobby.ts` (`openEncounter`, `seatOf` and `you` with a controller, encounter rooms
+  unlisted), `src/server/Room.ts` (reserved seats, `hold` falling back to the AI, `start` from a
+  server header, settling a side with no roster)
+- `src/server/RoomStore.ts` and `src/server/db/migrations.ts` (a controller per seat)
+- `src/sim/Policy.ts`, `src/game/AiOpponent.ts` → a server-side `AiSeat`
+- `src/game/Lobby.ts` (`LobbyView.you.controller`), `src/game/Rpc.ts` (`encounter/started`)
 - `src/game/Recording.ts` (controller per side in the header)
 - Travel's alarm/checkpoint scheduler from `ITEM-064`; the stable (squad, trip, checkpoint) keys
   from `ITEM-062`
-- `src/hud/` (the join window, the return feed)
+- `src/hud/` (the join window, the return feed), `src/hud/menu/ServerPanel.tsx` (takeover only of
+  a seat still the player's)
 - `docs/architecture/networking.md`, `docs/architecture/persistence.md`
 
 #### P2P / Simulation Impact
@@ -399,59 +420,6 @@ to this item.
 
 #### Acceptance Criteria
 - [ ] Designed in the GDD before any of it is built.
-
----
-
-### [ITEM-066] Before Encounters: the Decisions ITEM-048 Needs
-**Type:** Feature
-**Priority:** P2
-**Status:** Backlog — a design task (GDD edits, no code); next after the M5 build items; blocks
-`ITEM-048`
-**Milestone:** M5 — The Shared World
-
-#### Why
-`ITEM-048` assumes the server can start a fight on its own. Everything built for rooms so far
-(`ITEM-058`, `ITEM-059`) assumes a human opens it, a human joins it and humans hold the seats.
-These clashes have to be decided in the GDD before encounters are built, not discovered while
-building them.
-
-#### Change
-Settle each in [GDD-WORLD](../design/gdd/world-and-travel.md) §5 (and the networking doc where
-it is a protocol rule):
-1. **Is an encounter the player's one match?** And what does the lobby panel's auto-resume do
-   with a fight the player did not start?
-2. **The join window vs the two-minute seat grace** (`GRACE_MS`): an encounter at 03:00 must not
-   abort itself because nobody took the seat.
-3. **A server-side way to create a room** for known players, with pre-seated seats and a
-   header the server composes.
-4. **An AI seat attached server-side** over a loopback transport, as `AiOpponent` does in the
-   browser.
-5. **Rosters marking travellers as away.** Today `Rosters.rest()` heals every non-deployed member
-   after any settlement.
-6. **`verifyRosters` is byte-exact**: if travel ever changes character state, it must still
-   verify.
-7. **Build pinning** of a room created before a deploy and joined after.
-8. **The unreconciled seam** between RFC-0002 §2/§6.2 (crossing a boundary is a deliberate act)
-   and GDD-WORLD's free straight-line travel: record it, and either reconcile it or state which
-   one gives way.
-
-#### Affected Files
-- `docs/design/gdd/world-and-travel.md`
-- `docs/design/rfc/0002-region-sharded-durable-objects.md` (the seam)
-- `docs/architecture/networking.md` (where a decision is a protocol rule)
-
-#### P2P / Simulation Impact
-- None directly; it decides what `ITEM-048` may assume about the referee and the rosters.
-
-#### Acceptance Criteria
-- [ ] Each of the eight points has a recorded decision (or an explicit "not needed for the first
-      encounter, because …") in the GDD.
-- [ ] `ITEM-048`'s Change and Affected Files are updated to match.
-
-#### Risks & Mitigations
-- **Risk:** decisions made on paper miss what the code forces.
-- **Mitigation:** each decision names the file and function it touches (`Room`, `Lobby`,
-  `Rosters.rest`, `verifyRosters`), as this item's Change does.
 
 ---
 

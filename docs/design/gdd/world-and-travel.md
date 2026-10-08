@@ -197,6 +197,73 @@ sleeping squad is a target. What stands between a squad and that risk:
    behalf. Once it does, its weaknesses cost real characters, so improving it stops being
    optional.
 
+### 5.4 What an encounter changes in rooms and rosters (`ITEM-066`)
+
+Every room so far is opened by a human, joined by a human, and held by humans' sockets
+(`ITEM-058`, `ITEM-059`). An encounter is started by the server, and often nobody is there.
+These are the decisions `ITEM-048` builds on, each naming the code it changes.
+
+1. **An encounter is the player's one match.** While their squad is in one, `Lobby.seatOf`
+   finds that seat and every open, join or watch puts them back in it (`redirected`), as for
+   any match: the squad is busy. The lobby panel's takeover (`ServerPanel`'s `resume` when
+   `you.phase` is `playing`) is how a player *takes the fight* inside the join window, so the
+   lobby's `you` gains who controls the seat (`human`, `ai`). Once the AI holds it, the panel
+   does not take it over: it offers to watch. There is no taking a fight back from the AI
+   mid-match; the join window is the only hand-over. Encounter rooms are not listed in the
+   lobby for others to join or watch.
+2. **The join window is not the seat grace.** A seat the server reserved for a player who has
+   not arrived is a third state, beside held-by-a-socket and dropped: *reserved until* a
+   deadline. An online player (a socket bound to them) is told
+   (`tictac/api/encounter/started { roomId, joinBy }`) and has **60 seconds**
+   (`JOIN_WINDOW_MS`, tunable); an offline player has no window at all. At the deadline the
+   seat passes to the AI. In a room that has an AI to fall back on, `Room.hold`'s expiry does
+   the same instead of ending the room with `departure()`: an encounter never aborts because a
+   human left it. `GRACE_MS` still governs how long a dropped player can come back to their own
+   seat before the AI takes it.
+3. **The server opens the room.** `Lobby.openEncounter` creates a `Room` directly in `playing`,
+   with its seats assigned to known players or the AI, and starts it from a header the server
+   composes (`Room.start`), not one a host client sends — today `start` runs only on Blue's
+   `matchHeader`, and a seat the server placed in a room still `waiting` or `deploying` would be
+   abandoned the moment the player's window asked for anything (`Lobby.supersede`): the seed from system randomness, the
+   battlefield `generateMap(seed)`, the player's party as Blue, the rolled alien squad as Red.
+   **The party** is, until a travelling party can be chosen, the first `SQUAD_SIZE` active
+   members by slot who are neither in the medical bay nor deployed in another live room; with
+   nobody fit, the squad is passed by and the roll says so. The header records each side's
+   controller (`ITEM-048` point 4).
+4. **The AI is a client of the room, not the referee.** A server-side seat is the browser's
+   `AiOpponent` generalised (`AiSeat`): a `NetworkManager` and a `Policy` on one end of a
+   `loopback()` transport, the `Room` holding the other end as an ordinary `Client`. It reads the
+   match from the room's `log`, as a window resuming a match does, plays either side, and is
+   refereed like a human. It is already headless (`src/game`, `src/sim`), and it draws its own
+   randomness, never `matchDice(seed)`. A fight with nobody present is the same room with two
+   AI seats; over loopback it plays out in milliseconds and records and settles through the same
+   path, rather than a second, `SimMatch`-only one.
+5. **Resting stays per settled match** (`Rosters.rest`). Today every active member who did not
+   deploy heals after any settlement. The whole roster travels with the squad and there is no
+   base, so a member who stayed out of a fight did rest through it. Not changed for the first
+   encounter; once bases exist (`ITEM-047`) and members can be left behind, `rest` applies to
+   those at the base and travel decides what it does to the rest.
+6. **Travel never changes a character except through their roster row.** `Room.verifyRosters`
+   compares the header's sheets, HP and fatigue to the roster rows byte for byte. The server
+   composes an encounter's header *from* those rows, at creation, and a member deployed in a
+   live room is excluded from any other party (decision 3), so no settlement can change a row
+   between the header and the check. If travel ever wears characters (fatigue on the road), it
+   writes the rows first, and the header is read from them.
+7. **An encounter takes the server's build, and the AI is not pinned to it.** The room is
+   created under `lobby.version`; a window on another build cannot take the join
+   (`Lobby.fits`), so the AI plays that seat when the window lapses. A room survives a deploy as
+   any room does (`RoomStore`, `ITEM-059`); its AI seats are re-attached on restore from the
+   room's log and play on under the new build. Like any room restored under another build, it is
+   then witnessed rather than judged (`Room`'s `witness`), so a fight a deploy interrupts is
+   recorded and settled but not refereed to the end. `RoomStore` gains a controller per seat so
+   a restored room knows which seats to re-attach.
+8. **Straight lines inside a zone, deliberate crossings between them.** GDD-WORLD's travel goes
+   in a straight line; RFC-0002 §2 makes crossing a zone boundary a deliberate act. They do not
+   clash while the world is one zone, which it is. Once it has borders, the RFC wins at the
+   border: a route that would cross one is cut where it meets the crossing (the gate, the
+   checkpoint), the squad stops there, and going through is its own order — the hand-off
+   (`ownerOf`, `src/server/Owner.ts`). Inside a zone, routes stay straight lines.
+
 ## 6. Not designed yet
 
 - **Fog of war on the map.** The prior art's model (reveal along the route actually travelled,

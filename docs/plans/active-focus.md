@@ -38,13 +38,10 @@ met on the road
 
 ---
 ## 📋 Ready — pull in this order
-1. `[ITEM-066]` Before encounters — the design decisions `[ITEM-048]` needs (a GDD task, no
-   code).
+1. `[ITEM-048]` Wild alien encounters on the road — the server opens the fight, an AI seat plays
+   the aliens and any absent player, a join window for an online one (GDD-WORLD §5.4).
 
 ## 🧊 Backlog — not yet queued
-- `[ITEM-048]` Wild alien encounters on the road — after `[ITEM-064]` (the travel scheduler) and
-  `[ITEM-066]`'s decisions; seats the AI for the aliens and for absent players, with a join
-  window.
 - `[ITEM-053]` Player encounters on the road — after `[ITEM-064]` and `[ITEM-048]`; offline
   squads engageable, on trial.
 - `[ITEM-067]` Closer zooms on demand — deferred: high-zoom tiles built the first time an area

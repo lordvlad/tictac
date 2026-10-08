@@ -545,6 +545,25 @@ squad either, [RFC-0001](../design/rfc/0001-referee-and-transports.md) §8.6). A
 another build whose recomputation never disagreed settles normally; a room of the server's own
 build is judged exactly as it always was. ARCH-DEPLOYMENT §2.3 walks through a rolling update.
 
+### Rooms the server opens (decided in `ITEM-066`, built in `ITEM-048`)
+
+An encounter on the road ([GDD-WORLD §5.4](../design/gdd/world-and-travel.md)) is a room the
+server opens itself, already `playing`, from a header it composes. Not built yet; these are the
+rules it is built to:
+
+- **A seat can be held by the AI.** Each seat has a controller, `human` or `ai`, stated in the
+  header and kept in `RoomStore`. An AI seat is a `Client` over a `loopback()` transport, so the
+  room relays to it and referees it exactly as it does a window. The lobby's `you` carries the
+  controller, and the panel's takeover (`resume`) applies only while the seat is the player's to
+  take.
+- **A reserved seat** waits for its player until a deadline, then passes to the AI. An online
+  player is pushed `tictac/api/encounter/started { roomId, joinBy }`; taking the fight is
+  `room/enter { kind: 'resume' }` before `joinBy`. A dropped player's seat passes to the AI when
+  its grace runs out, rather than ending the room.
+- **Not listed.** Encounter rooms are left out of the lobby's room list.
+- **Build.** The room takes the server's build; `Lobby.fits` still decides whether a window may
+  take a seat. AI seats are the server's own and are re-attached under whatever build it runs.
+
 ### The browser's side
 
 A window holds one `ServerConnection` (`src/game/ServerConnection.ts`) per server. `main.tsx`

@@ -2984,6 +2984,45 @@ done is observed.
       `docs/architecture/world.md` §5).
 ---
 
+### [ITEM-066] Before Encounters: the Decisions ITEM-048 Needs
+**Completed Date:** 2026-10-08  
+**Type:** Feature (design)  
+**Milestone:** M5 — The Shared World  
+
+#### Why
+`ITEM-048` assumes the server can start a fight on its own, and everything built for rooms
+(`ITEM-058`, `ITEM-059`) assumes humans open, join and hold them. The clashes were settled on
+paper before building, each against the code it touches.
+
+#### Key Changes
+- **GDD-WORLD §5.4**, eight decisions:
+  1. an encounter is the player's one match; the panel's takeover is how a player takes the
+     fight, and does not take over an AI-held seat; no mid-match hand-back; encounter rooms
+     unlisted;
+  2. a *reserved* seat state with a 60 s join window (`JOIN_WINDOW_MS`) for an online player,
+     none for an offline one; in a room with an AI to fall back on, grace expiry passes the seat
+     to the AI instead of ending the room (`Room.hold`, `departure`);
+  3. `Lobby.openEncounter` opens a room already `playing` from a server-composed header; the
+     party is the first `SQUAD_SIZE` fit members by slot not deployed elsewhere;
+  4. the AI is a client of the room (`AiSeat`, `AiOpponent` generalised over `loopback()`), not
+     the referee; nobody present means two AI seats in the same room;
+  5. `Rosters.rest` unchanged until bases exist (`ITEM-047`);
+  6. travel changes characters only through roster rows, and the header is composed from them,
+     so `verifyRosters` passes byte for byte;
+  7. encounter rooms take the server's build; AI seats are not pinned and are re-attached on
+     restore; `RoomStore` keeps a controller per seat;
+  8. straight lines inside a zone, deliberate crossings at borders: RFC-0002 wins at the border.
+- **`docs/architecture/networking.md` §8**: *Rooms the server opens* — controllers per seat,
+  reserved seats, `encounter/started`, unlisted rooms, build.
+- **RFC-0002 §2**: a pointer to decision 8.
+- **`ITEM-048`**: Change and Affected Files rewritten to these decisions; now Ready.
+
+#### Acceptance Criteria
+- [x] Each of the eight points has a recorded decision (or an explicit "not needed for the first
+      encounter, because …") in the GDD.
+- [x] `ITEM-048`'s Change and Affected Files are updated to match.
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the
