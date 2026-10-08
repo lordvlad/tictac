@@ -357,6 +357,7 @@ On a fresh socket, in this order:
 | `roster/list` | `{}` | `{ roster: RosterEntry[] }` | `401` |
 | `roster/recruit` | `{}` | `{ member }` | `401`; `400` *the roster is already full* |
 | `squad/get` | `{}` | `{ squad: { id, waypoints } }` — a player from before squads is placed on first asking | `401` |
+| `clock/now` | `{}` | `{ now }` — the server's clock, the one its travel schedule runs by; a window measures its offset on every socket that opens (`ServerConnection.now()`) | — |
 | `squad/order` | `{ order }` (`SquadOrder`, [ARCH-WORLD §2](world.md)) | `{ squad }`, and `squad/changed` to the player's window | `401`; `-32602` a malformed order; `409` a verb that does not fit (*already on the move*, *not on the move*) |
 | `lobby/subscribe` | `{}` | the `LobbyView` now, then `lobby/changed` pushes | — |
 | `lobby/unsubscribe` | `{}` | `null` | — |

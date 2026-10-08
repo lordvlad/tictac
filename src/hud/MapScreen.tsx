@@ -16,9 +16,10 @@ import type { WorldMap } from './map/WorldMap'
  *
  * Nothing here asks the server where the squad is: the route comes from
  * `squad/get` and every `squad/changed` push, and the position is
- * `positionAt(route, Date.now())` each frame — the server's own function, so
- * a refresh mid-journey lands exactly where the squad was drawn before it.
- * That holds to the accuracy of this machine's clock.
+ * `positionAt(route, connection.now())` each frame — the server's own
+ * function, at the server's own time (its clock, measured over the socket),
+ * so a refresh mid-journey lands exactly where the squad was drawn before
+ * it, whatever this machine's clock says.
  */
 
 /** Redraws per second of a moving squad: a walking squad moves a few metres between them. */
@@ -68,7 +69,7 @@ function MapView({
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   /** A clock tick for the status line; the map redraws on its own loop. */
-  const [now, setNow] = useState(() => Date.now())
+  const [now, setNow] = useState(() => connection.now())
 
   // The route: asked for when the map opens and again whenever the socket
   // comes back, since an arrival recorded while it was away was pushed to
@@ -109,7 +110,7 @@ function MapView({
         map.current = new Loaded(element, {
           serverUrl: connection.url,
           assetsUrl,
-          center: positionAt(first.waypoints, Date.now()).position,
+          center: positionAt(first.waypoints, connection.now()).position,
           onPick: (at, screen) => setPicked({ at, screen }),
         })
       },
@@ -125,11 +126,11 @@ function MapView({
   // Draw the squad where the clock puts it, a few times a second.
   useEffect(() => {
     if (!squad) return
-    const draw = () => map.current?.draw(squad.waypoints, Date.now())
+    const draw = () => map.current?.draw(squad.waypoints, connection.now())
     draw()
     const timer = window.setInterval(() => {
       draw()
-      setNow(Date.now())
+      setNow(connection.now())
     }, 1000 / DRAWS_PER_SECOND)
     return () => window.clearInterval(timer)
   }, [squad])

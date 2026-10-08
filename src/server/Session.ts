@@ -47,6 +47,8 @@ export interface SessionsOptions {
   persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads'>
   /** Squads on the move: the orders a window gives. */
   journeys: Journeys
+  /** The clock travel runs by (`clock/now`); the wall clock unless a host or a test says otherwise. */
+  now?: () => number
   /** Called for anything worth a line in a server log. */
   log?: (message: string) => void
 }
@@ -87,12 +89,14 @@ export class Sessions {
   private readonly lobby: Lobby
   private readonly persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads'>
   private readonly journeys: Journeys
+  private readonly now: () => number
   private readonly log: (message: string) => void
 
   constructor(options: SessionsOptions) {
     this.lobby = options.lobby
     this.persistence = options.persistence
     this.journeys = options.journeys
+    this.now = options.now ?? (() => Date.now())
     this.log = options.log ?? ((message) => console.info(`[session] ${message}`))
   }
 
@@ -292,6 +296,9 @@ export class Sessions {
     },
     'tictac/api/squad/get': async (session, _params, reply) => {
       reply({ squad: await this.persistence.squads.ensure(signedIn(session).player.id, session.place) })
+    },
+    'tictac/api/clock/now': (_session, _params, reply) => {
+      reply({ now: this.now() })
     },
     'tictac/api/squad/order': async (session, params, reply) => {
       const player = signedIn(session).player

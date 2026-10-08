@@ -239,3 +239,12 @@ describe('Checkpoints stay where they were', () => {
     expect(positionAt(recorded, server.now).travelling).toBe(false)
   })
 })
+
+describe('The clock windows draw by', () => {
+  test('is the server\'s: the one its schedule runs on', async () => {
+    const { server, window } = await traveller()
+    server.now = Date.UTC(2031, 0, 1)
+    expect((await window.call('tictac/api/clock/now')).result).toEqual({ now: Date.UTC(2031, 0, 1) })
+  })
+})
+

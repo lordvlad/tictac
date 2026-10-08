@@ -56,8 +56,7 @@ met on the road
 - `[ITEM-054]` Capture and rescue — an idea; the left-behind of a retreat are lost until then.
 
 ## ⚠️ Left open by finished work
-- **ITEM-065**: tiles cross-origin on the real GitHub Pages site, after a deploy. The map's
-  clock is the browser's: a machine whose clock is off draws the squad off by as much.
+- **ITEM-065**: tiles cross-origin on the real GitHub Pages site, after a deploy.
 - **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
   socket is not tested end to end (settlement is tested at the function the referee calls, and
   `Rosters` is unchanged). The live AI opponent stays on `stand`; which order an AI squad fights

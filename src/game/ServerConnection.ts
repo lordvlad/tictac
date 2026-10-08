@@ -80,6 +80,9 @@ export const UNREACHABLE = 'No match server answers at that address.'
 /** A request the server never answered. */
 export const NO_ANSWER = 'The match server did not answer.'
 
+/** Round trips taken to measure the server's clock; the quickest is trusted. */
+const CLOCK_SAMPLES = 3
+
 /** A request whose socket went before its answer came. */
 const DROPPED = 'The connection to the match server dropped.'
 
@@ -136,6 +139,8 @@ export interface ServerLink {
   schedule?: (fn: () => void, ms: number) => () => void
   /** How long to keep trying to get back after a drop (`RECONNECT_GIVE_UP_MS`). */
   giveUpMs?: number
+  /** This machine's clock; `Date.now` unless a test turns it. */
+  clock?: () => number
   tokens?: TokenStore
 }
 
@@ -200,6 +205,9 @@ export class ServerConnection {
   private readonly connect: (url: string) => Transport
   private readonly schedule: (fn: () => void, ms: number) => () => void
   private readonly giveUpMs: number
+  private readonly clock: () => number
+  /** The server's clock minus this machine's, as last measured. */
+  private offset = 0
   private readonly tokens: TokenStore
 
   private current: ConnectionState = { kind: 'connecting' }
@@ -240,12 +248,23 @@ export class ServerConnection {
         return () => clearTimeout(timer)
       })
     this.giveUpMs = link.giveUpMs ?? RECONNECT_GIVE_UP_MS
+    this.clock = link.clock ?? (() => Date.now())
     this.tokens = link.tokens ?? browserTokens(url)
     this.dial()
   }
 
   get state(): ConnectionState {
     return this.current
+  }
+
+  /**
+   * The server's time now, as well as this window can tell: its own clock
+   * corrected by the offset measured on the socket (`syncClock`). What a
+   * squad is drawn by, so a machine whose clock is off still draws it where
+   * the server has it.
+   */
+  now(): number {
+    return this.clock() + this.offset
   }
 
   /** Hear about every change of state or of who this window is signed in as; returns what stops it. */
@@ -583,6 +602,31 @@ export class ServerConnection {
     for (const waiter of this.waiters.splice(0)) waiter.resolve(socket)
     // A listener that arrived after the way back had passed the lobby.
     if (this.lobbyListeners.size > 0 && !socket.lobby) this.subscribeOn(socket).catch(warnLobby)
+    void this.syncClock(socket)
+  }
+
+  /**
+   * Measure how far the server's clock is from this machine's, on every
+   * socket that opens: a few round trips, keeping the one that took least,
+   * whose midpoint is the best guess at when the server read its clock. A
+   * server that does not answer leaves the last measurement standing.
+   */
+  private async syncClock(socket: Socket): Promise<void> {
+    let best: { rtt: number; offset: number } | null = null
+    for (let sample = 0; sample < CLOCK_SAMPLES; sample++) {
+      const sent = this.clock()
+      let server: unknown
+      try {
+        server = (await this.call(socket, 'tictac/api/clock/now', {}))?.now
+      } catch {
+        return
+      }
+      if (typeof server !== 'number' || !Number.isFinite(server)) return
+      const received = this.clock()
+      const rtt = received - sent
+      if (!best || rtt < best.rtt) best = { rtt, offset: server - (sent + received) / 2 }
+    }
+    if (best && !socket.done) this.offset = best.offset
   }
 
   private receive(socket: Socket, frame: JsonRpcFrame): void {

@@ -156,6 +156,12 @@ export interface RpcApi {
    */
   'tictac/api/squad/get': { params: Record<string, never>; result: { squad: Squad } }
   /**
+   * The server's clock, in ms since the epoch: the one its travel schedule
+   * runs by (the Durable Object's on Cloudflare). A window draws its squad by
+   * this rather than by its own clock, which may be off by anything.
+   */
+  'tictac/api/clock/now': { params: Record<string, never>; result: { now: number } }
+  /**
    * Give this player's squad an order. The answer is the new route; the same
    * route is pushed as `squad/changed` to the player's window. Refused
    * `RPC_ERRORS.conflict` for a verb that does not fit — "go here" to a squad

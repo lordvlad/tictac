@@ -83,6 +83,13 @@ export interface HandServer {
   sockets: HandSocket[]
   down: boolean
   answer: ((socket: HandSocket, request: JsonRpcRequest) => void) | null
+  /**
+   * How the server tells its time (`clock/now`), which every window asks as
+   * its socket opens: the hand clock unless a test says otherwise. Kept out
+   * of `heard`, like the answer to it, so a test about something else lists
+   * only what it is about.
+   */
+  tellTime: (socket: HandSocket, request: JsonRpcRequest) => void
   connect(url: string): Transport
   readonly last: HandSocket
 }
@@ -93,6 +100,7 @@ export function handServer(clock: HandClock): HandServer {
     sockets,
     down: false,
     answer: null,
+    tellTime: (socket, request) => socket.reply(request.id as number, { now: clock.now }),
     connect: (url: string): Transport => {
       const [ours, theirs] = loopback()
       const socket: HandSocket = {
@@ -108,6 +116,10 @@ export function handServer(clock: HandClock): HandServer {
         drop: () => theirs.close(),
       }
       theirs.onFrame((frame) => {
+        if ('method' in frame && frame.method === 'tictac/api/clock/now') {
+          server.tellTime(socket, frame as JsonRpcRequest)
+          return
+        }
         socket.heard.push(frame)
         if (!('method' in frame)) return
         if (frame.method === RpcMethods.hello) {

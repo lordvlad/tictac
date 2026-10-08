@@ -102,7 +102,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   })
   await journeys.restore()
 
-  const sessions = new Sessions({ lobby, persistence, journeys, log })
+  const sessions = new Sessions({ lobby, persistence, journeys, now: () => clock.now(), log })
   const sockets = new WeakMap<object, ServerSocket>()
 
   const server = Bun.serve<{ url: string }, never>({

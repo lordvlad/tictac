@@ -169,9 +169,10 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
     cross-origin request, and nothing third-party is fetched.
   - **The squad is drawn, never polled.** The route comes from `squad/get` (again whenever the
     socket comes back) and every `squad/changed` push; ten times a second the screen draws
-    `positionAt(route, Date.now())` — the server's own function — as a dot, the trail behind it,
-    the route ahead and its stops. A refresh mid-journey lands where the squad was drawn before
-    it, to the accuracy of the machine's clock.
+    `positionAt(route, connection.now())` — the server's own function at the server's own time
+    (its clock, measured over the socket; [ARCH-WORLD §5](world.md)) — as a dot, the trail behind
+    it, the route ahead and its stops. A refresh mid-journey lands where the squad was drawn
+    before it, whatever the machine's clock says.
 - **Not React:** Tweakpane's panels inside `DebugPanel`, the frame counter's per-frame text
   (`FpsCounter`), the page-corner containers (`CornerStack`) and the Three.js canvas.
 - **Tests** that need a DOM register happy-dom for their own file only

@@ -56,7 +56,7 @@ export function rpcServer(persistence: Persistence, start = Date.UTC(2026, 9, 8,
     now: () => now,
     tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
   })
-  const sessions = new Sessions({ lobby, persistence, journeys, log: () => {} })
+  const sessions = new Sessions({ lobby, persistence, journeys, now: () => now, log: () => {} })
 
   const window = (place: LatLng | null = null): Window => {
     const [page, socket] = loopback()

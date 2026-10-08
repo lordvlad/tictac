@@ -796,7 +796,7 @@ describe('Entering a room on a match server', () => {
     expect(server.last.url.search).toBe('')
     expect(server.last.heard).toEqual([
       notify(RpcMethods.hello, { ...MY_VERSION }),
-      { jsonrpc: '2.0', id: 1, method: 'tictac/api/room/enter', params: { intent: { kind: 'watch', roomId: 'r00m' } } },
+      { jsonrpc: '2.0', id: expect.any(Number), method: 'tictac/api/room/enter', params: { intent: { kind: 'watch', roomId: 'r00m' } } },
     ])
 
     // The seat decides who this side is; the answer that said so is never

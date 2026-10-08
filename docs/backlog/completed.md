@@ -2937,7 +2937,13 @@ done is observed.
   offers the verbs that fit: *Go here* at rest; *Go here now / first / next* travelling.
 - **The squad is drawn, never polled**: the route from `squad/get` (read again whenever the
   socket comes back) and `squad/changed` (`ServerConnection.watchSquad`); ten times a second,
-  `positionAt(route, Date.now())` as a dot, the trail behind it, the route ahead and its stops.
+  `positionAt(route, connection.now())` as a dot, the trail behind it, the route ahead and its
+  stops.
+- **By the server's clock** (the user's call): `tictac/api/clock/now` answers the Durable
+  Object's time; every socket measures its offset over three round trips, keeping the quickest,
+  and `ServerConnection.now()` is the local clock plus that offset. A browser whose clock is off
+  still draws the squad where the server has it (`tests/serverConnection.test.ts`: a machine five
+  minutes slow tells the server's time to the millisecond).
 - **`src/hud/map/WorldMap.ts`** is the only file that imports MapLibre, reached by dynamic
   `import()`; `scripts/build-bundle.ts` now sets `splitting: true`. MapLibre's stylesheet and its
   tile worker are imported `with { type: 'file' }` — the stylesheet because Bun hoists a lazy

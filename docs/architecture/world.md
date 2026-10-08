@@ -107,8 +107,15 @@ Durable Object and its storage, and renaming it would address a new, empty one.
 
 `src/hud/MapScreen.tsx` reads the route with `squad/get`, keeps it current from `squad/changed`
 (and reads it again when its socket comes back, since a push sent while it was away reached
-nobody), and draws `positionAt(route, Date.now())` ten times a second. It never asks where the
-squad is. Orders are a right-click on the map; [ARCH-RENDERING §4](rendering.md) has the screen.
+nobody), and draws `positionAt(route, connection.now())` ten times a second. It never asks where
+the squad is.
+
+**The server's clock, not the window's.** Arrivals and checkpoints are the server's arithmetic on
+the Durable Object's clock; a browser's clock can be off by minutes. Every socket that opens asks
+`clock/now` three times and keeps the quickest round trip: the offset is the server's answer
+minus the midpoint of that trip, good to half its length. `ServerConnection.now()` is this
+machine's clock plus that offset, so a squad is drawn where the server has it whatever the
+machine's clock says. A server that does not answer `clock/now` leaves the last offset, or none. Orders are a right-click on the map; [ARCH-RENDERING §4](rendering.md) has the screen.
 
 ## 6. Pushes
 

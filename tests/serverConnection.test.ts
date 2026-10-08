@@ -207,3 +207,42 @@ describe('Getting back after a drop', () => {
     expect(seated.drops).toEqual([])
   })
 })
+
+describe('The server\'s clock', () => {
+  test('is measured over the socket, and the window tells time by it rather than by its own', async () => {
+    // This machine's clock is five minutes behind the server's. Every round
+    // trip takes 80 ms but one, which takes 4: that is the one to trust.
+    const clock = handClock()
+    const server = handServer(clock)
+    server.answer = answering()
+    const SERVER_AHEAD = 5 * 60_000
+    let local = 1_000_000
+    let trips = 0
+    server.tellTime = (socket, request) => {
+      const delay = trips++ === 1 ? 2 : 40
+      local += delay
+      const serverNow = local + SERVER_AHEAD
+      local += delay
+      socket.reply(request.id as number, { now: serverNow })
+    }
+    const connection = new ServerConnection('ws://tictac.test/', {
+      connect: server.connect,
+      schedule: clock.schedule,
+      tokens: heldTokens(),
+      clock: () => local,
+    })
+    await clock.advance(0)
+
+    expect(trips).toBe(3)
+    expect(connection.now() - local).toBe(SERVER_AHEAD)
+  })
+
+  test('a server that cannot say leaves the window on its own clock', async () => {
+    const { clock, server, connection } = setup()
+    server.tellTime = (socket, request) =>
+      socket.refuse(request.id as number, RPC_ERRORS.noSuchMethod, 'The match server does not answer that.')
+    await clock.advance(0)
+    expect(Math.abs(connection.now() - Date.now())).toBeLessThan(1000)
+  })
+})
+
