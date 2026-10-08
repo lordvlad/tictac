@@ -2974,8 +2974,11 @@ done is observed.
 - [x] A squad sent on a long trip keeps travelling with the tab closed; on return it is where
       the clock says, and an arrival that happened while away is recorded at its expected time.
 - [x] A refresh mid-journey resumes without a jump.
-- [ ] Tiles load cross-origin on GitHub Pages — shown with the client on another origin than the
-      match server under `wrangler dev`; on the real Pages site after a deploy.
+- [x] Tiles load cross-origin on GitHub Pages: on `a65a167`, a page at
+      `https://lordvlad.github.io` fetched z0 and z8 tiles from the deployed Worker (`200`, MVT)
+      and z9 (`204`). The map itself cannot be opened there yet: passkeys are bound to the
+      Worker's domain, which WebAuthn does not let a `github.io` page use, so nobody signs in
+      from Pages (true since `ITEM-045`).
 - [x] MapLibre is not in the initial bundle.
 - [x] Living documentation updated (`docs/architecture/rendering.md` §4,
       `docs/architecture/world.md` §5).

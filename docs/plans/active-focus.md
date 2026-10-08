@@ -56,7 +56,10 @@ met on the road
 - `[ITEM-054]` Capture and rescue — an idea; the left-behind of a retreat are lost until then.
 
 ## ⚠️ Left open by finished work
-- **ITEM-065**: tiles cross-origin on the real GitHub Pages site, after a deploy.
+- **ITEM-065**: nobody can sign in from the GitHub Pages client, so the map opens only on the
+  Worker's own origin: passkeys are bound to `workers.dev`, and WebAuthn refuses them to a
+  `github.io` page. WebAuthn's related origins (`/.well-known/webauthn` on the Worker listing the
+  Pages origin) would lift that in browsers that support it.
 - **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
   socket is not tested end to end (settlement is tested at the function the referee calls, and
   `Rosters` is unchanged). The live AI opponent stays on `stand`; which order an AI squad fights
@@ -93,7 +96,7 @@ met on the road
 
 ---
 
-## Definition of Done for M5 — met under `wrangler dev`; the deploy confirms it
+## Definition of Done for M5 — met (on the Worker's origin; see ITEM-065 above for Pages)
 1. A signed-in player sees their squad on a real planet map near where they registered
    (`ITEM-061`, `ITEM-063`, `ITEM-065`).
 2. They send it travelling, close the tab, and find it where the clock says (`ITEM-062`,
