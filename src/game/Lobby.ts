@@ -96,6 +96,8 @@ export interface LobbySeat {
   connected: boolean
 }
 
+import type { SeatControl } from './Encounter'
+
 export interface LobbyRoom {
   id: string
   phase: RoomPhase
@@ -111,6 +113,18 @@ export interface LobbyRoom {
 /** The rooms as a window is shown them (`lobby/subscribe`, then every `lobby/changed`); `you` is null for an anonymous socket. */
 export interface LobbyView {
   rooms: LobbyRoom[]
-  /** The seat the asking player holds, if any. A client seeing one takes it over (`resume`). */
-  you: { roomId: string; faction: Faction; phase: RoomPhase } | null
+  /**
+   * The seat the asking player holds, if any. A client seeing one takes it
+   * over (`resume`) — unless `control` says it is not theirs to take: the AI
+   * has it (`ai`), or the server is still keeping it for them to decide
+   * (`reserved`, until `joinBy`; `encounter/started` is what asks them).
+   */
+  you: {
+    roomId: string
+    faction: Faction
+    phase: RoomPhase
+    control: SeatControl
+    /** The server's clock, in ms, when a `reserved` seat passes to the AI; null otherwise. */
+    joinBy: number | null
+  } | null
 }

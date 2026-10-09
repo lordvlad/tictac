@@ -241,8 +241,9 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       phase: 'waiting',
       createdAt,
       judged: true,
+      encounter: false,
       sides: { [Faction.Blue]: null, [Faction.Red]: null },
-      blue: { playerId: 'A', name: 'Ada', keyHash: 'hash-of-blue' },
+      blue: { playerId: 'A', name: 'Ada', keyHash: 'hash-of-blue', control: 'player', joinBy: null },
       red: null,
     })
 
@@ -260,10 +261,33 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
         judged: false,
         sides: { [Faction.Blue]: { playerId: 'A', characterIds: ['c1', 'c2'] }, [Faction.Red]: null },
         blue: { ...waiting.blue, keyHash: 'rotated' },
-        red: { playerId: null, name: null, keyHash: 'hash-of-red' },
+        red: { playerId: null, name: null, keyHash: 'hash-of-red', control: 'player', joinBy: null },
       }
       await store.rooms.save(later)
       expect(await store.rooms.live()).toEqual([later])
+
+      await store.close()
+    })
+
+    test('who moves each seat, the deadline of a reserved one, and whether the server opened the room come back as written', async () => {
+      const store = await freshPersistence(url)
+      // A millisecond clock is far past what Postgres's INTEGER holds, which is
+      // why the deadline is kept as a timestamp: it has to come back exactly.
+      const joinBy = Date.UTC(2026, 9, 8, 9, 1, 0, 123)
+      const fight: StoredRoom = {
+        ...room('fight', '2026-10-08T09:00:00.000Z'),
+        phase: 'playing',
+        encounter: true,
+        blue: { playerId: 'A', name: 'Ada', keyHash: 'hash-of-blue', control: 'reserved', joinBy },
+        red: { playerId: null, name: null, keyHash: 'hash-of-red', control: 'ai', joinBy: null },
+      }
+      await store.rooms.save(fight)
+      expect(await store.rooms.live()).toEqual([fight])
+
+      // Passed to the AI: the same row, rewritten, with no deadline left.
+      const passed: StoredRoom = { ...fight, blue: { ...fight.blue, control: 'ai', joinBy: null } }
+      await store.rooms.save(passed)
+      expect(await store.rooms.live()).toEqual([passed])
 
       await store.close()
     })

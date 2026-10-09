@@ -71,8 +71,8 @@ describe('The lobby lists what can be joined and what can be watched', () => {
     expect(view.rooms[2]).toMatchObject({ blue: { name: 'Ada' }, red: null, spectators: 0 })
     expect(view.you).toBeNull()
 
-    expect(lobby.view(ADA).you).toEqual({ roomId: roomOf(waiting), faction: Faction.Blue, phase: 'waiting' })
-    expect(lobby.view(BO).you).toEqual({ roomId: deploying.roomId, faction: Faction.Red, phase: 'deploying' })
+    expect(lobby.view(ADA).you).toEqual({ roomId: roomOf(waiting), faction: Faction.Blue, phase: 'waiting', control: 'player', joinBy: null })
+    expect(lobby.view(BO).you).toEqual({ roomId: deploying.roomId, faction: Faction.Red, phase: 'deploying', control: 'player', joinBy: null })
   })
 
   test('a room that is over is no longer listed, and its players are free', async () => {
@@ -330,7 +330,7 @@ describe('Leaving', () => {
       ['deploying', true, false],
       ['deploying', true, false],
     ])
-    expect(lobby.view(BO).you).toEqual({ roomId: named.roomId, faction: Faction.Red, phase: 'deploying' })
+    expect(lobby.view(BO).you).toEqual({ roomId: named.roomId, faction: Faction.Red, phase: 'deploying', control: 'player', joinBy: null })
 
     expire()
 
@@ -371,7 +371,7 @@ describe('Leaving', () => {
     expect(holds.map((hold) => hold.ms)).toEqual([5_000])
     expect(red.of('abort')).toEqual([])
     expect(lobby.view(null).rooms[0]!.blue).toEqual({ name: 'Ada', connected: false })
-    expect(lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing' })
+    expect(lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'player', joinBy: null })
 
     const back = await connect(lobby, ADA, { kind: 'resume' })
     expect(back.of('seated')[0]).toMatchObject({ roomId, faction: Faction.Blue, redirected: false })
@@ -463,7 +463,7 @@ describe('Taking a seat back with its key', () => {
 
     expect(back.of('seated')[0]).toMatchObject({ roomId, faction: Faction.Blue, phase: 'deploying' })
     expect(red.of('abort')).toEqual([])
-    expect(lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'deploying' })
+    expect(lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'deploying', control: 'player', joinBy: null })
     // The reconnected window restates its opening, which the other seat hears
     // as it heard the first one.
     back.send({ type: 'hello', ...MY_VERSION })

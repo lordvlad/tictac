@@ -1,17 +1,19 @@
-import { Faction, FACTION_INFO, FACTIONS, SQUAD_SIZE } from '../config'
+import { ENCOUNTER, Faction, FACTION_INFO, FACTIONS, SQUAD_SIZE } from '../config'
 import { sanitizeSheet } from '../core/Characters'
 import { isCommand } from '../ecs/systems/CommandSystem'
 import { toBase64Url } from '../game/Base64Url'
-import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../game/JsonRpc'
+import type { SeatControl } from '../game/Encounter'
+import { frameOf, messageOf, type JsonRpcFrame, type JsonRpcNotification } from '../game/JsonRpc'
 import type { LobbyRoom, LobbySeat, RoomPhase, Seated } from '../game/Lobby'
 import { carriedOut, settlement, winnerOf, type UnitFate } from '../game/MatchEnd'
 import type { NetworkMessage } from '../game/NetworkManager'
 import type { RecordedEvent, RecordingHeader } from '../game/Recording'
 import type { Player } from '../game/Rpc'
 import { compareDigests, type Divergence, type StateDigest } from '../game/StateDigest'
-import type { Transport } from '../game/Transport'
+import { loopback, type Transport } from '../game/Transport'
 import { MatchHost } from '../sim/MatchHost'
 import type { PeerVersion } from '../version'
+import { AiSeat } from './AiSeat'
 import type { MatchStore, StoredMatch } from './MatchStore'
 import type { RoomStore, StoredRoom, StoredSeat, VerifiedSide } from './RoomStore'
 import type { Rosters } from './Rosters'
@@ -53,6 +55,15 @@ import type { Rosters } from './Rosters'
  * on another build than the room's cannot tell a foul from a rules change, so
  * it judges such a room only until the first disagreement and witnesses it
  * from then on (`witness`).
+ *
+ * **An encounter room** is the one a server opens itself, for a fight on the
+ * road (`openEncounter`, `ITEM-048`): already playing, unlisted, and never
+ * ended for want of a human. Every seat has a controller (`SeatControl`) —
+ * the player's window, the AI, or *reserved*: kept for a player who has not
+ * arrived, until a deadline — and the AI sits down in any seat nobody is
+ * going to. It is a client of the room like any window (`AiSeat`), so what it
+ * sends is judged the way a human's is. Whose a seat *is* stays on the seat
+ * (`player`) whoever moves it, because that is whose roster the match settles.
  */
 
 /** What the referee decided about a match, for a caller that wants to watch. */
@@ -114,6 +125,10 @@ export interface RoomOptions {
   graceMs: number
   /** Run `fn` after `ms`; the answer cancels it. Injected so a test can be the clock. */
   schedule: (fn: () => void, ms: number) => () => void
+  /** The server's clock, in ms (`clock/now`): what a reserved seat's deadline is read against. */
+  now: () => number
+  /** Called when what a lobby view shows changes without a frame to say so: a seat passing to the AI on a timer. */
+  onChanged: () => void
   /**
    * Called the moment the room is over (settled or aborted), and once more
    * if a settled room is then aborted — which sends its sockets out of it.
@@ -133,6 +148,14 @@ interface Seat {
    * kept, until the window holding the key presents it.
    */
   key: { readonly plain: string } | { readonly hash: string }
+  /** Who moves it now. The seat's `player` is whose it *is*, whoever that is. */
+  control: SeatControl
+  /** The server's clock, in ms, when a `reserved` seat passes to the AI; null otherwise. */
+  joinBy: number | null
+  /** Cancels the deadline of a reserved seat, while one is running. */
+  deadline: (() => void) | null
+  /** The AI sitting in the seat, while `control` is `ai`; its end of the loopback is `client`. */
+  ai: AiSeat | null
 }
 
 export class Room {
@@ -145,6 +168,7 @@ export class Room {
   private aborted = false
   private settled = false
   private judging = true
+  private encounterRoom = false
 
   /**
    * Every intent the referee accepted, numbered as the store numbers them.
@@ -214,9 +238,28 @@ export class Room {
     return this.judging
   }
 
-  /** True once no socket is left in the room, seated or watching. */
+  /** True once no window is left in the room, seated or watching: the AI is the server's own and keeps nothing alive. */
   get empty(): boolean {
-    return !this.seats[Faction.Blue]?.client && !this.seats[Faction.Red]?.client && this.spectators.size === 0
+    const seated = FACTIONS.some((faction) => {
+      const seat = this.seats[faction]
+      return seat?.client && !seat.ai
+    })
+    return !seated && this.spectators.size === 0
+  }
+
+  /** A fight the server opened for a player on the road (`openEncounter`): unlisted, and the AI plays on where a human leaves. */
+  get encounter(): boolean {
+    return this.encounterRoom
+  }
+
+  /** Who moves `faction`'s seat now, or null when nobody sits there. */
+  controlOf(faction: Faction): SeatControl | null {
+    return this.seats[faction]?.control ?? null
+  }
+
+  /** When a reserved seat passes to the AI, on the server's clock; null for a seat that is not reserved. */
+  joinByOf(faction: Faction): number | null {
+    return this.seats[faction]?.joinBy ?? null
   }
 
   /** The seat a signed-in player holds here, while the room is not over. */
@@ -303,9 +346,33 @@ export class Room {
   }
 
   /**
+   * Open a fight the server composed on the road (`ITEM-048`): the match
+   * already playing from `header`, with `player` as Blue and the game's own
+   * aliens as Red.
+   *
+   * Blue is kept for `player` until `joinBy` (the server's clock, in ms) and
+   * the AI plays it after; null is a player who is not here to be asked, and
+   * the AI sits down at once. Red is the AI's from the start. Both seats are
+   * set before the match starts, and the room never waits for a host to state
+   * its opening (`start` is otherwise Blue's `matchHeader`): nobody's window
+   * is in it, so there is nobody to ask.
+   */
+  openEncounter(header: RecordingHeader, player: Player, joinBy: number | null): void {
+    this.encounterRoom = true
+    this.seats[Faction.Blue] = newSeat(player, { plain: mintSeatKey() })
+    this.seats[Faction.Red] = newSeat(null, { plain: mintSeatKey() })
+    this.start(header)
+    this.sitAi(Faction.Red)
+    if (joinBy === null) this.sitAi(Faction.Blue)
+    else this.reserve(Faction.Blue, joinBy)
+  }
+
+  /**
    * Take up a room a previous server wrote down, with nobody in it yet: every
-   * seat is held from now for the grace period, for its window to come back
-   * to with its key (`reclaim`).
+   * seat a player held is held from now for the grace period, for its window
+   * to come back to with its key (`reclaim`). A seat the AI held is the AI's
+   * again, from the log, and one kept for a player (`reserved`) is kept until
+   * the deadline it had (`resume`).
    *
    * A match already playing is rebuilt the way a rejoining client rebuilds
    * it, by refighting the log the store kept — which also becomes the copy a
@@ -315,12 +382,12 @@ export class Room {
    */
   restore(stored: StoredRoom, match: StoredMatch | null): void {
     this.judging = stored.judged
+    this.encounterRoom = stored.encounter
     this.sides = { [Faction.Blue]: stored.sides[Faction.Blue], [Faction.Red]: stored.sides[Faction.Red] }
     const seat = (held: StoredSeat): Seat => ({
-      player: held.playerId ? { id: held.playerId, name: held.name ?? held.playerId } : null,
-      client: null,
-      grace: null,
-      key: { hash: held.keyHash },
+      ...newSeat(held.playerId ? { id: held.playerId, name: held.name ?? held.playerId } : null, { hash: held.keyHash }),
+      control: held.control,
+      joinBy: held.joinBy,
     })
     this.seats[Faction.Blue] = seat(stored.blue)
     this.seats[Faction.Red] = stored.red && seat(stored.red)
@@ -337,7 +404,7 @@ export class Room {
       }
     }
     if (this.over) return
-    for (const faction of FACTIONS) if (this.seats[faction]) this.hold(faction)
+    for (const faction of FACTIONS) this.resume(faction)
     this.options.log(
       `room ${this.id}: restored, ${this.phaseNow}, build ${this.version.build}${this.judging ? '' : ', witnessed'}`,
     )
@@ -453,7 +520,7 @@ export class Room {
     if (this.aborted || client.faction === null) return
     if (!('method' in frame)) return
     const params = (frame as JsonRpcNotification).params as Record<string, unknown>
-    const message = toMessage(frame.method, params)
+    const message = messageOf(frame.method, params)
     if (!message) return
 
     switch (message.type) {
@@ -493,12 +560,18 @@ export class Room {
   }
 
   /**
-   * Let go of every hold, for a server shutting down. Nothing is written: the
-   * room is still live in the store, for the next server to take up. The
-   * sockets are the lobby's to close.
+   * Let go of every hold, for a server shutting down, and of every AI seat: it
+   * is the server's own, and plays on when the next one restores the room.
+   * Nothing is written: the room is still live in the store, for the next
+   * server to take up. The sockets are the lobby's to close.
    */
   dispose(): void {
-    for (const faction of FACTIONS) this.seats[faction]?.grace?.()
+    for (const faction of FACTIONS) {
+      const seat = this.seats[faction]
+      seat?.grace?.()
+      seat?.deadline?.()
+      this.standAi(faction)
+    }
   }
 
   /**
@@ -524,17 +597,24 @@ export class Room {
       }
       seat.grace?.()
       seat.grace = null
+      // Kept for this player and taken by them: the AI will not sit in it.
+      seat.deadline?.()
+      seat.deadline = null
+      seat.joinBy = null
+      seat.control = 'player'
       seat.client = client
       seat.key = { plain: key }
     } else {
-      this.seats[faction] = { player: client.player, client, grace: null, key: { plain: key } }
+      this.seats[faction] = newSeat(client.player, { plain: key }, client)
     }
     return { roomId: this.id, faction, phase: this.phaseNow, redirected, seatKey: key }
   }
 
   /**
    * Hold a seat whose socket dropped, and end the room if its window does not
-   * come back in time — with the reason the phase it ends in calls for.
+   * come back in time — with the reason the phase it ends in calls for. A
+   * room with an AI to fall back on (an encounter) hands the seat to it
+   * instead: a fight is never ended by a human leaving it.
    */
   private hold(faction: Faction): void {
     const seat = this.seats[faction]
@@ -544,8 +624,94 @@ export class Room {
     )
     seat.grace = this.options.schedule(() => {
       seat.grace = null
-      this.end(departure(seat, this.phaseNow))
+      if (this.encounterRoom) this.passToAi(faction)
+      else this.end(departure(seat, this.phaseNow))
     }, this.options.graceMs)
+  }
+
+  /**
+   * A seat a previous server wrote down, taken up as what it was: the AI sat
+   * down again in a seat it held, a reserved seat left to run out its
+   * deadline (already past, the AI has it at once), and a player's held for
+   * their window to come back to.
+   */
+  private resume(faction: Faction): void {
+    const seat = this.seats[faction]
+    if (!seat) return
+    if (seat.control === 'ai') this.sitAi(faction)
+    else if (seat.control === 'reserved') this.reserve(faction, seat.joinBy ?? this.options.now())
+    else this.hold(faction)
+  }
+
+  /** Keep `faction`'s seat for its player until `joinBy` on the server's clock, and then pass it to the AI. */
+  private reserve(faction: Faction, joinBy: number): void {
+    const seat = this.seats[faction]!
+    seat.control = 'reserved'
+    seat.joinBy = joinBy
+    const left = joinBy - this.options.now()
+    if (left <= 0) {
+      this.passToAi(faction)
+      return
+    }
+    seat.deadline = this.options.schedule(() => {
+      seat.deadline = null
+      this.passToAi(faction)
+    }, left)
+  }
+
+  /** The player's seat goes to the AI, for good: they did not come, or did not come back. */
+  private passToAi(faction: Faction): void {
+    const seat = this.seats[faction]
+    if (!seat || this.over || seat.control === 'ai') return
+    this.options.log(`room ${this.id}: the AI takes ${seat.player?.name ?? 'a player'}'s seat`)
+    this.sitAi(faction)
+    this.options.onChanged()
+  }
+
+  /**
+   * Sit the AI in `faction`'s seat and hand it the match so far, which it
+   * plays on from if it is that side's turn. Its socket is the other end of a
+   * loopback, so from here on the seat is an ordinary client of the room.
+   */
+  private sitAi(faction: Faction): void {
+    // An AI that could not carry on has called the fight off (`stuck`): the
+    // seat that was next to be sat has nothing left to play.
+    if (this.over) return
+    const seat = this.seats[faction]!
+    seat.grace?.()
+    seat.grace = null
+    seat.deadline?.()
+    seat.deadline = null
+    seat.joinBy = null
+    seat.control = 'ai'
+    const [mine, theirs] = loopback()
+    seat.ai = new AiSeat(faction, mine, {
+      log: this.options.log,
+      turnLimit: ENCOUNTER.turnLimit,
+      // A bug, and one that would hold the player to a seat nothing moves for
+      // good — every other request of theirs is refused while the AI has it.
+      stuck: () => this.end(CALLED_OFF),
+    })
+    const ai: Client = { transport: theirs, player: null, version: this.options.serverVersion, room: this, faction, gone: false }
+    seat.client = ai
+    // What a window's socket gets from the session layer (`Lobby.receive`),
+    // this seat gets straight from its loopback.
+    theirs.onFrame((frame) => this.receive(ai, frame))
+    this.catchUp(ai)
+    this.persist()
+  }
+
+  /** Stand the AI up from `faction`'s seat, if it sits there: the room is over or the server stopping. */
+  private standAi(faction: Faction): void {
+    const seat = this.seats[faction]
+    if (!seat?.ai) return
+    seat.ai.dispose()
+    seat.ai = null
+    if (seat.client) {
+      seat.client.room = null
+      seat.client.faction = null
+      seat.client = null
+    }
   }
 
   /** The match so far, as a socket arriving now is handed it. */
@@ -599,6 +765,8 @@ export class Room {
         playerId: held.player?.id ?? null,
         name: held.player?.name ?? null,
         keyHash: 'plain' in held.key ? await hashSeatKey(held.key.plain) : held.key.hash,
+        control: held.control,
+        joinBy: held.joinBy,
       }
     }
     return {
@@ -607,6 +775,7 @@ export class Room {
       phase: this.phaseNow,
       createdAt: this.createdAt,
       judged: this.judging,
+      encounter: this.encounterRoom,
       sides: { [Faction.Blue]: this.sides[Faction.Blue], [Faction.Red]: this.sides[Faction.Red] },
       blue: (await seat(Faction.Blue))!,
       red: await seat(Faction.Red),
@@ -614,9 +783,7 @@ export class Room {
   }
 
   private send(client: Client, message: NetworkMessage): void {
-    const params = { ...message } as Record<string, unknown>
-    delete params.type
-    client.transport.send({ jsonrpc: '2.0', method: RpcMethods[message.type], params })
+    client.transport.send(frameOf(message))
   }
 
   /** To the other seat, never back to the sender and never to a spectator. */
@@ -957,8 +1124,12 @@ export class Room {
   private closeDoors(): void {
     for (const faction of FACTIONS) {
       const seat = this.seats[faction]
-      seat?.grace?.()
-      if (seat) seat.grace = null
+      if (!seat) continue
+      seat.grace?.()
+      seat.grace = null
+      seat.deadline?.()
+      seat.deadline = null
+      this.standAi(faction)
     }
     this.enqueue(() => this.options.rooms.end(this.id))
     this.options.onOver(this)
@@ -986,15 +1157,16 @@ function same(a: string, b: string): boolean {
   return difference === 0
 }
 
+/** What the players are told when the AI playing a fight cannot carry on. The detail is in the server's log. */
+const CALLED_OFF = 'This fight has been called off: the AI playing it could not carry on.'
+
 /** Why a room ends when `seat` is gone from it for good, in the phase it ends in. */
 function departure(seat: Seat, phase: RoomPhase): string {
   const who = seat.player?.name ?? 'The other player'
   return phase === 'playing' ? `${who} left the match.` : `${who} left before the match began.`
 }
 
-function toMessage(method: string, params: Record<string, unknown>): NetworkMessage | null {
-  for (const [type, name] of Object.entries(RpcMethods)) {
-    if (name === method) return { ...params, type } as NetworkMessage
-  }
-  return null
+/** A seat nobody has taken yet, for `player`; `client` is who sits in it already, if anybody. */
+function newSeat(player: Player | null, key: Seat['key'], client: Client | null = null): Seat {
+  return { player, client, grace: null, key, control: 'player', joinBy: null, deadline: null, ai: null }
 }

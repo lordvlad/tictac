@@ -37,8 +37,9 @@ signing in from the GitHub Pages client (`[ITEM-068]`). **M5's definition of don
 production** (build `b677bcc`): a passkey registered on `https://lordvlad.github.io` opens the
 map on the deployed Worker.
 On 2026-10-09 the map's closer zooms were built (`[ITEM-067]`: tiles to z14 pulled from the planet
-the first time they are looked at). The fights met on the road
-([GDD-WORLD](../design/gdd/world-and-travel.md) §5) are what comes next, as `[ITEM-048]`.
+the first time they are looked at). Wild alien encounters on the road (`[ITEM-048]`) were built the same day: the server opens the
+fight, an AI seat plays the aliens and any absent player, and an online player gets a 60 s join
+window. Fights between players (`[ITEM-053]`) come next.
 
 **How the client reaches its server.** One address, `MATCH_SERVER_URL` in `src/config.ts` (the
 Cloudflare Worker); the menu has no address to type. A page served from this machine may add
@@ -47,12 +48,10 @@ ignored.
 
 ---
 ## 📋 Ready — pull in this order
-1. `[ITEM-048]` Wild alien encounters on the road — the server opens the fight, an AI seat plays
-   the aliens and any absent player, a join window for an online one (GDD-WORLD §5.4).
+1. `[ITEM-053]` Player encounters on the road — offline squads engageable, on trial; routes
+   checked against every other squad's when set.
 
 ## 🧊 Backlog — not yet queued
-- `[ITEM-053]` Player encounters on the road — after `[ITEM-064]` and `[ITEM-048]`; offline
-  squads engageable, on trial.
 - `[ITEM-046]` Region-sharded Durable Objects — depends on the shared world having load to
   shard.
 - `[ITEM-047]` Uncap the roster (bench grows with bases/vehicles, squad cap set per combat) —
@@ -93,6 +92,16 @@ ignored.
   its z8 archive).
 - **ITEM-063**: `squads` is one row per player *for now* (`squads_player`); captives, alien squads
   and a player with several squads widen it, and `[ITEM-048]`/`[ITEM-053]` lean on that.
+- **ITEM-048** (built; seen in Chromium against the Bun server and over RPC, not yet on the
+  deployed Worker): (1) a crash between a room opening and its `encounters` row being written
+  could open two rooms for one contact; (2) a fight whose room ends without a result row reads
+  *In progress* in the feed forever, and while a seat is still `reserved` the feed already says
+  *The AI is playing for you*; (3) an order given right after contact can set the squad off
+  while its fight runs; (4) the join prompt is hidden while a match, end screen or replay is on
+  screen, so a player in one finds the fight in the feed afterwards; (5) the same AI fights both
+  sides, and in these runs it won every AI-against-AI fight as Blue, which is a balance
+  observation, not a finding; (6) a window that lapses and a fight that ends in milliseconds
+  means the *AI is playing that seat* refusal is rarely visible; the fight is simply over.
 - **ITEM-066** (decisions, built in `[ITEM-048]`): `Rosters.rest` is unchanged until bases exist
   (`[ITEM-047]`), so travel heals nothing; and an encounter's party is "the first `SQUAD_SIZE`
   fit members by slot" until a travelling party can be chosen — a placeholder rule, with nobody
@@ -101,8 +110,9 @@ ignored.
   fight a deploy interrupts is witnessed, not refereed to the end.
 - **ITEM-051 / ITEM-052**: a referee settling a *registered* retreat into `roster` through the
   socket is not tested end to end (settlement is tested at the function the referee calls, and
-  `Rosters` is unchanged). The live AI opponent stays on `stand`; which order an AI squad fights
-  to is `[ITEM-048]`'s to choose. Retreat is available from turn one and a fresh, unseen squad
+  `Rosters` is unchanged). Every AI seat — the browser opponent, the aliens and an absent
+  player's side in an encounter — fights to `stand`: a player's standing order (`[ITEM-052]`) is
+  not applied to the AI playing their squad. Retreat is available from turn one and a fresh, unseen squad
   gets away 95% of the time — by design (avoiding a fight costs only time), to be revisited if it
   plays as too cheap.
 - **ITEM-019**: the sweep's policy neither sneaks nor throws stones, so the balance sweep does

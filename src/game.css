@@ -2823,3 +2823,134 @@ canvas {
   border-radius: 8px;
   transform: translate(8px, 8px);
 }
+
+/* Return feed, in the map's panel (src/hud/EncounterFeed.tsx). */
+.map-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hud-border);
+}
+
+.map-feed-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+}
+
+.map-feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 40vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.map-feed-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 8px;
+  font-size: 13px;
+  border-left: 3px solid var(--hud-border);
+}
+
+.map-feed-row.won {
+  border-left-color: var(--hud-accent);
+}
+
+.map-feed-row.lost {
+  border-left-color: var(--hud-danger);
+}
+
+.map-feed-row button {
+  flex: none;
+  align-self: flex-start;
+}
+
+.map-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #0e1218;
+  background: var(--hud-accent);
+  border-radius: 8px;
+}
+
+/* The join prompt (src/hud/EncounterPrompt.tsx): mounted on <body> above
+   every screen, the map's 20000 included. */
+.enc-prompt {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30000;
+  width: min(380px, calc(100vw - 32px));
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+  color: var(--hud-text);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-danger);
+  border-radius: 10px;
+}
+
+.enc-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.enc-count {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-danger);
+}
+
+.enc-note {
+  font-size: 12px;
+  color: var(--hud-dim);
+}
+
+.enc-problem {
+  font-size: 12px;
+  color: var(--hud-danger);
+}
+
+.enc-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.enc-actions button {
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--hud-text);
+  background: #1b2330;
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.enc-actions .enc-take {
+  color: #0e1218;
+  background: var(--hud-accent);
+  border-color: var(--hud-accent);
+  font-weight: 700;
+}
+
+.enc-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

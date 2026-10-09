@@ -241,4 +241,56 @@ export const MIGRATIONS: readonly Migration[] = [
       'CREATE INDEX squads_start ON squads (start_lat_e6, start_lng_e6)',
     ],
   },
+  {
+    id: 8,
+    name: 'encounter rooms',
+    up: [
+      // A room the server opened for a fight on the road (`ITEM-048`) is not
+      // listed and falls back to the AI where an ordinary room would end;
+      // zero for every room opened before this, which a player opened.
+      'ALTER TABLE rooms ADD COLUMN encounter INTEGER NOT NULL DEFAULT 0',
+      // Who moves each seat — `player`, `reserved` or `ai` (`SeatControl`) —
+      // so a restarted server knows which seats to re-attach the AI to, and
+      // which to keep for a player still inside the join window. Every
+      // earlier seat was a player's.
+      "ALTER TABLE rooms ADD COLUMN blue_control TEXT NOT NULL DEFAULT 'player'",
+      "ALTER TABLE rooms ADD COLUMN red_control TEXT NOT NULL DEFAULT 'player'",
+      // When a reserved seat passes to the AI, as an ISO string like every
+      // timestamp here: a millisecond clock does not fit Postgres's INTEGER.
+      // Null for a seat that is not reserved.
+      'ALTER TABLE rooms ADD COLUMN blue_join_by TEXT',
+      'ALTER TABLE rooms ADD COLUMN red_join_by TEXT',
+    ],
+  },
+  {
+    id: 9,
+    name: 'encounters',
+    up: [
+      // What found a squad on the road (`ITEM-048`): one row per contact, a
+      // fight opened or a squad passed by, never for a roll that found
+      // nothing — that is reproducible from its key. The unique key is what
+      // makes a checkpoint handled once across a restart. `found_at` is the
+      // server's clock in ms, a BIGINT because a millisecond epoch does not
+      // fit Postgres's INTEGER; the place is in millionths of a degree, as a
+      // squad's start is. `room_id` is the fight's room, which is its match:
+      // how it ended is read from `match_results`, not copied here.
+      `CREATE TABLE encounters (
+         id            TEXT    PRIMARY KEY,
+         squad_id      TEXT    NOT NULL REFERENCES squads(id),
+         player_id     TEXT    NOT NULL REFERENCES players(id),
+         trip          TEXT    NOT NULL,
+         checkpoint    INTEGER NOT NULL,
+         found_at      BIGINT  NOT NULL,
+         lat_e6        INTEGER NOT NULL,
+         lng_e6        INTEGER NOT NULL,
+         aliens        INTEGER NOT NULL,
+         room_id       TEXT,
+         passed_for    TEXT,
+         played_by_you INTEGER NOT NULL DEFAULT 0,
+         UNIQUE (squad_id, trip, checkpoint)
+       )`,
+      'CREATE INDEX encounters_player ON encounters (player_id, found_at)',
+      'CREATE INDEX encounters_room ON encounters (room_id)',
+    ],
+  },
 ]

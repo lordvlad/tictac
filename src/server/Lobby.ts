@@ -1,7 +1,10 @@
-import { Faction } from '../config'
+import { ENCOUNTER, Faction, SQUAD_SIZE } from '../config'
+import { dealAliens } from '../core/Encounters'
 import { toBase64Url } from '../game/Base64Url'
 import { RpcMethods, type JsonRpcNotification } from '../game/JsonRpc'
+import { defaultLoadout } from '../game/Loadout'
 import type { LobbyRoom, LobbyView, Seated, ServerIntent } from '../game/Lobby'
+import { RECORDING_VERSION, type Deployment, type RecordingHeader } from '../game/Recording'
 import {
   RPC_ERRORS,
   SESSION_REPLACED,
@@ -11,6 +14,7 @@ import {
   type RpcPushes,
 } from '../game/Rpc'
 import { MY_VERSION, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
+import type { EncounterContact, EncounterOpened } from './EncounterPort'
 import type { MatchStore } from './MatchStore'
 import { hashSeatKey, Room, type Client, type RefereeVerdict, type RoomOptions } from './Room'
 import type { RoomStore } from './RoomStore'
@@ -60,6 +64,12 @@ import type { Rosters } from './Rosters'
  * take a seat in it back, so a deploy lets every match in progress finish on
  * the bundle it started on, while opening, joining and watching require the
  * server's own build.
+ *
+ * **A fight on the road is a room the server opens** (`openEncounter`): the
+ * player's seat in it is *reserved* for them until the join window closes and
+ * then the AI's, a seat they hold is the AI's the moment its grace runs out,
+ * and nobody but the player ever sees the room. While the AI has their seat
+ * the player is refused it, and may only watch.
  */
 
 /** How long a seat is held for its window after its socket drops. */
@@ -85,6 +95,12 @@ export interface LobbyOptions {
    * newer or older server over a database another one wrote.
    */
   version?: PeerVersion
+  /** The server's clock, in ms (`clock/now`); the wall clock unless a test turns it. */
+  now?: () => number
+  /** The seed of a fight's map: system randomness, unless a test needs the fight to be the same one twice. */
+  mapSeed?: () => number
+  /** Called when a player takes a fight the server kept for them, before the AI did (`room`'s id). */
+  onEncounterTaken?: (roomId: string) => void
 }
 
 /**
@@ -105,6 +121,7 @@ const GONE = 'That match is gone.'
 const NOT_YOURS = 'That seat is not yours.'
 const OTHER_BUILD = 'That match was started on another version of TicTac, and only its own players can finish it.'
 const IN_A_ROOM = 'Leave the match you are in first.'
+const AI_HAS_IT = 'The AI is playing that seat now.'
 
 const LOBBY_CHANGED = 'tictac/api/lobby/changed' satisfies RpcPush
 const SESSION_REPLACED_PUSH = 'tictac/api/session/replaced' satisfies RpcPush
@@ -128,6 +145,10 @@ export class Lobby {
   /** What every room is opened with: the lobby's own options, and the way back to it. */
   private readonly roomOptions: RoomOptions
   private readonly store: { matches: MatchStore; rooms: RoomStore }
+  private readonly rosters: Rosters | undefined
+  private readonly now: () => number
+  private readonly mapSeed: () => number
+  private readonly onEncounterTaken: ((roomId: string) => void) | undefined
   private readonly log: (message: string) => void
   private disposed = false
 
@@ -135,12 +156,17 @@ export class Lobby {
     this.log = options.log ?? ((message) => console.info(`[lobby] ${message}`))
     this.version = options.version ?? MY_VERSION
     this.store = { matches: options.matches, rooms: options.rooms }
+    this.rosters = options.rosters
+    this.now = options.now ?? (() => Date.now())
+    this.mapSeed = options.mapSeed ?? (() => crypto.getRandomValues(new Uint32Array(1))[0]!)
+    this.onEncounterTaken = options.onEncounterTaken
     this.roomOptions = {
       matches: options.matches,
       rooms: options.rooms,
       rosters: options.rosters,
       serverVersion: this.version,
       onVerdict: options.onVerdict,
+      now: this.now,
       log: this.log,
       graceMs: options.graceMs ?? GRACE_MS,
       schedule:
@@ -149,6 +175,7 @@ export class Lobby {
           const timer = setTimeout(fn, ms)
           return () => clearTimeout(timer)
         }),
+      onChanged: () => this.changed(),
       onOver: (room) => {
         this.sweep(room)
         this.changed()
@@ -184,6 +211,80 @@ export class Lobby {
       this.rooms.set(room.id, room)
       room.restore(stored, match)
     }
+  }
+
+  /**
+   * Open the fight a contact on the road makes (`ITEM-048`, GDD-WORLD §5.4),
+   * or say why there is none; resolves once the room exists and the player,
+   * if they are online, has been told.
+   *
+   * The party is the first `SQUAD_SIZE` active members by slot who are not in
+   * the medical bay. A member deployed in a live room would be excluded too,
+   * but a player holds one seat at a time (`seatOf`), so such a member can
+   * only belong to a player who is busy, and that is a pass in itself. The
+   * header is composed *from* the roster rows, which is what lets the room's
+   * check of the squad against the roster (`Room.verifyRosters`) pass byte
+   * for byte; nothing can change a row between the two, since no live room
+   * holds these members and what the player's last match decided has landed
+   * (`idle`).
+   *
+   * The seed of the map comes from system randomness, not from the aliens'
+   * seed: the map is not part of what the contact rolled. A player with a
+   * window bound is told and has `ENCOUNTER.joinWindowMs` to take the fight;
+   * one without has none, and the AI plays their side from the start.
+   */
+  async openEncounter(contact: EncounterContact): Promise<EncounterOpened> {
+    const { player } = contact
+    if (!this.rosters) throw new Error('this lobby keeps no rosters, so there is no squad to find on the road')
+    await this.idle()
+    const party = (await this.rosters.active(player.id))
+      .filter((member) => member.downtime === 0)
+      .slice(0, SQUAD_SIZE)
+    if (this.disposed) throw new Error('the lobby has stopped')
+    // Weighed after every wait, and acted on without another: nothing may
+    // seat the player between this check and the room being in the map.
+    if (this.seatOf(player.id)) return { opened: false, passedFor: 'busy' }
+    if (party.length === 0) return { opened: false, passedFor: 'nobodyFit' }
+
+    const kit = defaultLoadout(party.length)
+    const humans: Deployment[] = party.map((member, i) => ({
+      characterId: member.characterId,
+      sheet: member.sheet,
+      loadout: kit[i]!,
+      state: { hp: member.hp, fatigue: member.fatigue },
+    }))
+    const aliens = dealAliens(contact.alienSeed, Math.min(SQUAD_SIZE, Math.max(1, party.length + contact.sizeOffset)))
+    const seed = this.mapSeed()
+    const header: RecordingHeader = {
+      version: RECORDING_VERSION,
+      seed,
+      seedLabel: String(seed),
+      source: 'live',
+      createdAt: new Date(this.now()).toISOString(),
+      turnCap: null,
+      squads: { [Faction.Blue]: humans, [Faction.Red]: aliens },
+      controllers: { [Faction.Blue]: 'human', [Faction.Red]: 'ai' },
+    }
+
+    const window = this.windows.get(player.id)
+    const joinBy = window && !window.gone ? this.now() + ENCOUNTER.joinWindowMs : null
+    const room = new Room(this.freshId(), this.version, this.roomOptions)
+    this.rooms.set(room.id, room)
+    room.openEncounter(header, player, joinBy)
+    this.log(
+      `room ${room.id}: ${player.name} met ${aliens.length} aliens on the road with ${party.length}, ` +
+        (joinBy === null ? 'offline, the AI plays their side' : `online, theirs to take until ${joinBy}`),
+    )
+    if (joinBy !== null) {
+      this.tell(player.id, 'tictac/api/encounter/started', {
+        roomId: room.id,
+        joinBy,
+        at: contact.at,
+        place: contact.place,
+      })
+    }
+    this.changed()
+    return { opened: true, roomId: room.id, aliens: aliens.length, joinBy }
   }
 
   /** A socket connected: served from now on, and closed with the server, whatever it goes on to ask. */
@@ -395,6 +496,22 @@ export class Lobby {
       const reason = this.fits(client, kept.room)
       if (reason) throw new Refusal(RPC_ERRORS.conflict, reason)
     }
+    // A takeover that names a match is for that match. Its prompt may be
+    // stale — the fight it offered is over and another has begun — and the
+    // player is not put in a fight they were never asked about.
+    if (kept && intent.kind === 'resume' && intent.roomId && intent.roomId !== kept.room.id) {
+      throw new Refusal(RPC_ERRORS.gone, GONE)
+    }
+    // Turned down before their previous window is retired, like a build that
+    // cannot play: the fight is the AI's now, and is not taken back from it.
+    // Watching it is all that is left to ask for.
+    if (
+      kept &&
+      kept.room.controlOf(kept.faction) === 'ai' &&
+      !(intent.kind === 'watch' && intent.roomId === kept.room.id)
+    ) {
+      throw new Refusal(RPC_ERRORS.conflict, AI_HAS_IT)
+    }
     if (player) this.supersede(player, client)
 
     const held = player ? this.seatOf(player.id) : null
@@ -402,7 +519,13 @@ export class Lobby {
     let seated: Seated
     if (held) {
       room = held.room
-      seated = room.takeBack(client, held.faction, intent.kind !== 'resume')
+      const control = room.controlOf(held.faction)
+      if (control === 'ai') {
+        seated = room.watch(client)
+      } else {
+        seated = room.takeBack(client, held.faction, intent.kind !== 'resume')
+        if (control === 'reserved') this.onEncounterTaken?.(room.id)
+      }
     } else {
       switch (intent.kind) {
         case 'open': {
@@ -447,7 +570,7 @@ export class Lobby {
   /** The room `id` names, for joining or watching: still going, and of this server's build. */
   private joinable(id: string): Room {
     const room = this.rooms.get(id)
-    if (!room || room.over) throw new Refusal(RPC_ERRORS.gone, GONE)
+    if (!room || room.over || room.encounter) throw new Refusal(RPC_ERRORS.gone, GONE)
     if (room.version.build !== this.version.build) throw new Refusal(RPC_ERRORS.conflict, OTHER_BUILD)
     return room
   }
@@ -473,6 +596,7 @@ export class Lobby {
     if (!room || room.over) throw new Refusal(RPC_ERRORS.gone, GONE)
     const faction = room.seatFor(key, hash)
     if (faction === null) throw new Refusal(RPC_ERRORS.notYours, NOT_YOURS)
+    if (room.controlOf(faction) === 'ai') throw new Refusal(RPC_ERRORS.conflict, AI_HAS_IT)
     const reason = this.fits(client, room)
     if (reason) throw new Refusal(RPC_ERRORS.conflict, reason)
     const seated = room.reclaim(client, faction, key)
@@ -543,7 +667,7 @@ export class Lobby {
   /** Open rooms, newest first, as the lobby lists them. */
   private listings(): LobbyRoom[] {
     return [...this.rooms.values()]
-      .filter((room) => !room.over)
+      .filter((room) => !room.over && !room.encounter)
       .reverse()
       .map((room) => room.listing())
   }
@@ -551,7 +675,9 @@ export class Lobby {
   /** The seat `player` holds, as their own view of the lobby shows it. */
   private youOf(player: Player | null): LobbyView['you'] {
     const held = player ? this.seatOf(player.id) : null
-    return held ? { roomId: held.room.id, faction: held.faction, phase: held.room.phase } : null
+    if (!held) return null
+    const { room, faction } = held
+    return { roomId: room.id, faction, phase: room.phase, control: room.controlOf(faction)!, joinBy: room.joinByOf(faction) }
   }
 
   /**

@@ -1,3 +1,4 @@
+import type { Controller } from './Encounter'
 import { MELEE, MeleeId } from '../core/Melee'
 import type { MapOptions } from '../core/MapGenerator'
 import { Faction, SQUAD_SIZE } from '../config'
@@ -103,6 +104,13 @@ export interface RecordingHeader {
    * it needs both sides' kit regardless of which one a player chose.
    */
   squads: Record<Faction, Deployment[]>
+  /**
+   * Whose each side is: a player's squad (`human`) or the game's (`ai`).
+   * Absent for a match two players opened, where both are human. Stated by
+   * the server for a fight it opened itself (`ITEM-048`); never changes, and
+   * is not who moved the side — an absent player's side is still `human`.
+   */
+  controllers?: Record<Faction, Controller>
   /**
    * Layout beyond the seed. Absent for every map the game plays, which is
    * the default layout; present when a sweep asked for another one, because
@@ -309,6 +317,19 @@ export function deploymentsFrom(raw: unknown, what: string): Deployment[] {
 }
 
 /**
+ * Whose each side was (`RecordingHeader.controllers`), or null when the header
+ * does not state it. Dropped rather than refused: nothing replays from it, it
+ * only says who was playing, and a header from before it stated nothing.
+ */
+function controllersFrom(raw: unknown): Record<Faction, Controller> | null {
+  const stated = raw as Partial<Record<Faction, unknown>> | null | undefined
+  const blue = stated?.[Faction.Blue]
+  const red = stated?.[Faction.Red]
+  const known = (controller: unknown): controller is Controller => controller === 'human' || controller === 'ai'
+  return known(blue) && known(red) ? { [Faction.Blue]: blue, [Faction.Red]: red } : null
+}
+
+/**
  * A header's map options, refused rather than defaulted: the terrain is
  * regenerated from them, so a value this build does not understand would
  * replay the match on a different map.
@@ -369,6 +390,7 @@ export function parseRecording(raw: unknown): CombatRecording {
   if (!head.squads || typeof head.squads !== 'object') throw new Error('header: squads missing')
   const rawSquads = head.squads as Partial<Record<Faction, unknown>>
 
+  const controllers = controllersFrom(head.controllers)
   const header: RecordingHeader = {
     version: RECORDING_VERSION,
     seed: head.seed >>> 0,
@@ -381,6 +403,7 @@ export function parseRecording(raw: unknown): CombatRecording {
       [Faction.Blue]: deploymentsFrom(rawSquads[Faction.Blue], 'header.squads.blue'),
       [Faction.Red]: deploymentsFrom(rawSquads[Faction.Red], 'header.squads.red'),
     },
+    ...(controllers ? { controllers } : {}),
     ...(head.map === undefined ? {} : { map: mapOptionsFrom(head.map) }),
   }
 

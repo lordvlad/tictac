@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from 'react'
 import { Account } from '../../game/Account'
 import type { LobbyView, ServerIntent } from '../../game/Lobby'
 import type { ServerConnection } from '../../game/ServerConnection'
+import { autoResumes } from '../EncounterView'
 import {
   MENU_COLOURS,
   MenuButton,
@@ -178,8 +179,12 @@ export function ServerPanel({
    * it — signing in here replaced the one that did — so it continues here,
    * rebuilt from the log. Once per panel, and never while this panel is
    * itself mid-connection (that seat is the one it is connecting).
+   *
+   * Only a seat that is the player's (`autoResumes`): a fight the server is
+   * holding for them (`reserved`) is the join prompt's question, and one the
+   * AI has is not theirs to take.
    */
-  const youPlaying = you?.phase === 'playing'
+  const youPlaying = autoResumes(you)
   useEffect(() => {
     if (!youPlaying || busy || resumed.current) return
     resumed.current = true
@@ -293,6 +298,18 @@ export function ServerPanel({
           Back
         </MenuButton>
       </div>
+      {/* The AI sits a fight the player did not take; live watching is not offered, the feed plays it back. */}
+      {!busy && you?.control === 'ai' && (
+        <div id="lobby-ai-seat" style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '0 0 8px 0' }}>
+          <p style={{ fontSize: 12, color: MENU_COLOURS.warning, margin: 0, flex: 1 }}>
+            The AI is fighting for your squad. Watch it back from the map&apos;s feed.
+          </p>
+          <MenuButton id="btn-watch-fight" tone="serverDeep" size="sm" onClick={() => void onOpenMap()}>
+            Watch
+          </MenuButton>
+        </div>
+      )}
+
       <StatusLine id="server-status" text={line.text} colour={line.colour} />
 
       {view && (

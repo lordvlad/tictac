@@ -148,13 +148,19 @@ A squad on the move can run into something. That is the commonest way a fight st
   from the squad, the trip and the checkpoint, so it can be audited afterwards. It is never a
   draw from a match's dice, and it is not decided in advance: no future encounter exists for a
   client to read.
+  *First-cut numbers* (`ENCOUNTER` in `src/config.ts`): a **15% chance per hour** at a normal pace,
+  scaled by the hours of the stretch, by pace (**cautious ×0.5**, normal ×1, **flat out ×1.5**)
+  and by the area's danger, never above **90%**. No area has a danger yet, so danger is flat:
+  every area is 1. A five-hour walk at a normal pace is about a 55% chance of at least one
+  fight. These are tuning, to be changed after play.
 - **Other players** (`ITEM-053`). Every leg is a straight line at a steady speed, so the
   server can work out exactly when two squads' routes come within reach of each other. It
   checks a new route against every other squad in the zone when it is set, schedules the
   meeting, and checks again when the moment comes, since either route may have changed by
   then.
 
-Contact stops the squad. The fight is an ordinary match: the same rules, the same referee, the
+Contact stops the squad — when there is a fight. A squad whose player is already in a match, or
+with nobody fit to fight, is passed by: it carries on, and the feed says so. The fight is an ordinary match: the same rules, the same referee, the
 same log, the same settlement.
 
 ### 5.2 Who plays a fight nobody is watching

@@ -23,6 +23,8 @@ import {
   type JsonRpcFrame,
   type JsonRpcNotification,
   componentUpdateMethod,
+  frameOf,
+  messageOf,
   parseComponentUpdateMethod,
   RpcMethods,
 } from './JsonRpc'
@@ -445,15 +447,15 @@ export class NetworkManager {
     // A room still being set up keeps nothing for anybody: say again what
     // this side had said, and announce itself so the other side does too —
     // a `ready` either sent while the other was away reaches it this way.
-    this.sendRpc(this.messageToRpc({ type: 'hello', ...MY_VERSION }))
+    this.sendRpc(frameOf({ type: 'hello', ...MY_VERSION }))
     this.restate()
     // The opening position went into a socket that was already dying, or this
     // side would be in a match being played: state it again, and every intent
     // this side has played since — nothing else can have been, because the
     // match only starts for the other side once the server hears this.
     if (this.header) {
-      this.sendRpc(this.messageToRpc({ type: 'matchHeader', header: this.header }))
-      for (const command of this.stream) this.sendRpc(this.messageToRpc(command))
+      this.sendRpc(frameOf({ type: 'matchHeader', header: this.header }))
+      for (const command of this.stream) this.sendRpc(frameOf(command))
     }
   }
 
@@ -673,24 +675,11 @@ export class NetworkManager {
       return
     }
 
-    const msg = this.rpcToMessage(method, params)
+    const msg = messageOf(method, params)
     if (!msg) return
     console.info(`%c[NET 📥 IN: ${msg.type}]`, 'color: #a855f7; font-weight: bold;', msg)
     if (this.home && isCommand(msg)) this.stream.push(wireCopy(msg))
     this.deliver(msg)
-  }
-
-  private messageToRpc(msg: NetworkMessage): JsonRpcNotification {
-    const params = { ...msg } as Record<string, unknown>
-    delete params.type
-    return { jsonrpc: '2.0', method: RpcMethods[msg.type], params }
-  }
-
-  private rpcToMessage(method: string, params: Record<string, unknown>): NetworkMessage | null {
-    for (const [type, name] of Object.entries(RpcMethods)) {
-      if (name === method) return { ...params, type } as NetworkMessage
-    }
-    return null
   }
 
   /**
@@ -800,7 +789,7 @@ export class NetworkManager {
     this.opening = Promise.withResolvers()
     // Straight to the transport rather than through `send`: a version is a
     // fact about this bundle, not an intent the match can replay.
-    this.sendRpc(this.messageToRpc({ type: 'hello', ...MY_VERSION }))
+    this.sendRpc(frameOf({ type: 'hello', ...MY_VERSION }))
     return this.opening.promise
   }
 
@@ -879,7 +868,7 @@ export class NetworkManager {
     // carries it: a command lost on the way is what a resync finds.
     if (this.home && isCommand(msg)) this.stream.push(wireCopy(msg))
     console.info(`%c[NET 📤 OUT: ${msg.type}]`, 'color: #38bdf8; font-weight: bold;', msg)
-    this.sendRpc(this.messageToRpc(msg))
+    this.sendRpc(frameOf(msg))
   }
 
   /**

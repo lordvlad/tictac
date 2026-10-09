@@ -93,7 +93,7 @@ describe('The match server on a real port', () => {
       turn: null,
     })
     expect(seenByWatcher.you).toBeNull()
-    expect(seenByAda.you).toEqual({ roomId: opened.roomId, faction: Faction.Blue, phase: 'waiting' })
+    expect(seenByAda.you).toEqual({ roomId: opened.roomId, faction: Faction.Blue, phase: 'waiting', control: 'player', joinBy: null })
 
     // The token is what every later socket presents, and it still works.
     expect(token.length).toBeGreaterThan(0)

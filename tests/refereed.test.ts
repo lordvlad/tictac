@@ -57,7 +57,10 @@ async function lobbyOnASocket() {
   const sessionsOver = (over: Lobby) =>
     new Sessions({
       lobby: over,
-      persistence: { accounts, rosters: {}, squads: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters' | 'squads'>,
+      persistence: { accounts, rosters: {}, squads: {}, encounters: {}, matches: store } as unknown as Pick<
+        Persistence,
+        'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'
+      >,
       // Nothing here travels.
       journeys: {} as Journeys,
       log: () => {},

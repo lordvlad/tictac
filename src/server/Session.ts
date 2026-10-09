@@ -1,3 +1,4 @@
+import { ENCOUNTER } from '../config'
 import { SPEED_KMH, type LatLng, type Pace } from '../core/Travel'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification, type JsonRpcRequest } from '../game/JsonRpc'
 import type { ServerIntent } from '../game/Lobby'
@@ -44,7 +45,7 @@ export interface Upgrade {
 export interface SessionsOptions {
   lobby: Lobby
   /** The accounts and rosters asked about over a socket. */
-  persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads'>
+  persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>
   /** Squads on the move: the orders a window gives. */
   journeys: Journeys
   /** The clock travel runs by (`clock/now`); the wall clock unless a host or a test says otherwise. */
@@ -87,7 +88,7 @@ const FAILED = 'the server failed'
 
 export class Sessions {
   private readonly lobby: Lobby
-  private readonly persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads'>
+  private readonly persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>
   private readonly journeys: Journeys
   private readonly now: () => number
   private readonly log: (message: string) => void
@@ -304,6 +305,21 @@ export class Sessions {
       const player = signedIn(session).player
       reply({ squad: await this.journeys.order(player.id, session.place, orderOf(params.order)) })
     },
+    'tictac/api/encounter/feed': async (session, _params, reply) => {
+      reply({ entries: await this.persistence.encounters.feed(signedIn(session).player.id, ENCOUNTER.feedLimit) })
+    },
+    'tictac/api/match/recording': async (session, params, reply) => {
+      const player = signedIn(session).player
+      const matchId = text(params, 'matchId')
+      const recording = await this.persistence.matches.match(matchId)
+      if (!recording) throw new Refusal(RPC_ERRORS.gone, 'There is no such match.')
+      // Only a player in the match may watch it back: a fight is somebody's
+      // squad's, and its log shows what their characters carried.
+      if (!(await this.persistence.encounters.involved(player.id, matchId))) {
+        throw new Refusal(RPC_ERRORS.notYours, 'You were not in that match.')
+      }
+      reply({ recording: { header: recording.header, events: recording.events } })
+    },
     'tictac/api/lobby/subscribe': (session, _params, reply) => {
       reply(this.lobby.subscribe(session.client))
     },
@@ -385,9 +401,15 @@ function intentOf(value: unknown): ServerIntent {
       if (usable(intent.roomId)) return { kind: intent.kind, roomId: intent.roomId }
       break
     case 'resume':
-      // Both or neither: a room without its key proves nothing, and a key
-      // without its room names nothing.
-      if (intent.roomId == null && intent.seatKey == null) return { kind: 'resume' }
+      // A key without its room names nothing, and proves nothing. A room
+      // without a key is a signed-in player taking their own match over —
+      // a fight the server kept a seat in for them (`ITEM-048`) — which the
+      // lobby holds to the seat they have (`Lobby.place`).
+      if (intent.seatKey == null) {
+        if (intent.roomId == null) return { kind: 'resume' }
+        if (usable(intent.roomId)) return { kind: 'resume', roomId: intent.roomId }
+        break
+      }
       if (usable(intent.roomId) && usable(intent.seatKey)) {
         return { kind: 'resume', roomId: intent.roomId, seatKey: intent.seatKey }
       }

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { type LatLng, type Pace, positionAt, type TravelState } from '../core/Travel'
+import type { CombatRecording } from '../game/Recording'
 import type { Squad, SquadOrder } from '../game/Rpc'
 import type { ServerConnection } from '../game/ServerConnection'
+import { EncounterFeed } from './EncounterFeed'
 import type { WorldMap } from './map/WorldMap'
 
 /**
@@ -31,20 +33,38 @@ const PACES: { pace: Pace; label: string; speed: string }[] = [
   { pace: 'flatOut', label: 'Flat out', speed: '7 km/h' },
 ]
 
-/** Open the map over everything else; resolves once the player closes it. */
-export function openMap(connection: ServerConnection, assetsUrl: string): Promise<void> {
+/** The map that is open now, if any: what `closeMap` closes from outside. */
+let closeOpen: (() => void) | null = null
+
+/**
+ * Open the map over everything else; resolves once the player closes it.
+ * `onWatch` is told which fight to play back from the return feed; the map
+ * stays open until it chooses to close it (`closeMap`).
+ */
+export function openMap(
+  connection: ServerConnection,
+  assetsUrl: string,
+  onWatch: (recording: CombatRecording) => void,
+): Promise<void> {
   const container = document.createElement('div')
   container.className = 'map-root'
   document.body.appendChild(container)
   const root = createRoot(container)
   const closed = Promise.withResolvers<void>()
   const close = () => {
+    if (closeOpen === close) closeOpen = null
     root.unmount()
     container.remove()
     closed.resolve()
   }
-  root.render(<MapView connection={connection} assetsUrl={assetsUrl} onClose={close} />)
+  closeOpen = close
+  root.render(<MapView connection={connection} assetsUrl={assetsUrl} onClose={close} onWatch={onWatch} />)
   return closed.promise
+}
+
+/** Close the open map, if there is one: something else (a fight to take, a replay to play) needs the screen. */
+export function closeMap(): void {
+  closeOpen?.()
 }
 
 interface Picked {
@@ -56,10 +76,12 @@ function MapView({
   connection,
   assetsUrl,
   onClose,
+  onWatch,
 }: {
   connection: ServerConnection
   assetsUrl: string
   onClose: () => void
+  onWatch: (recording: CombatRecording) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
   const map = useRef<WorldMap | null>(null)
@@ -200,6 +222,7 @@ function MapView({
         {connection.state.kind === 'reconnecting' && (
           <div className="map-problem">Reconnecting to the match server…</div>
         )}
+        <EncounterFeed connection={connection} onWatch={onWatch} />
       </div>
       {picked && (
         <div className="map-orders" style={{ left: picked.screen.x, top: picked.screen.y }}>

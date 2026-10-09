@@ -40,7 +40,7 @@ describe('The lobby, pushed', () => {
     // Bo joins from the watching socket: the push he gets says the seat is his.
     await watcher.request('tictac/api/room/enter', { intent: { kind: 'join', roomId: roomOf(host) } })
     const joined = await watcher.lobbyWhere((view) => view.you !== null)
-    expect(joined.you).toEqual({ roomId: roomOf(host), faction: Faction.Red, phase: 'deploying' })
+    expect(joined.you).toEqual({ roomId: roomOf(host), faction: Faction.Red, phase: 'deploying', control: 'player', joinBy: null })
 
     // Ada's seat drops: the room stays listed, her seat marked as away.
     host.close()

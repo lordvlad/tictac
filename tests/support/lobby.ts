@@ -36,6 +36,8 @@ export interface Connection {
   of<T extends NetworkMessage['type']>(type: T): Extract<NetworkMessage, { type: T }>[]
   /** Every lobby view pushed to this socket (`lobby/changed`), in order. */
   lobby: LobbyView[]
+  /** Every other `tictac/api/*` notification the server pushed to this socket, in order: `encounter/started` and the like. */
+  pushed: JsonRpcNotification[]
   /**
    * The first pushed view that satisfies `ready` — one already here, or the
    * next to arrive. Pushes are gathered into one per change and sent a
@@ -70,7 +72,7 @@ function layerOf(lobby: Lobby): Layer {
     const accounts = { playerFor: async (token: string) => known.get(token) ?? null }
     const sessions = new Sessions({
       lobby,
-      persistence: { accounts, rosters: {}, squads: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters' | 'squads'>,
+      persistence: { accounts, rosters: {}, squads: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>,
       // Nothing here travels.
       journeys: {} as Journeys,
       log: () => {},
@@ -101,6 +103,7 @@ export async function connect(
   const [mine, theirs] = loopback()
   const received: NetworkMessage[] = []
   const views: LobbyView[] = []
+  const pushed: JsonRpcNotification[] = []
   const lobbyWaiters = new Set<{ ready: (view: LobbyView) => boolean; resolve: (view: LobbyView) => void }>()
   /** Requests awaiting their answer, by id; `read` sees a result as it arrives, before any frame after it. */
   const pending = new Map<number, { waiting: PromiseWithResolvers<unknown>; read?: (result: unknown) => void }>()
@@ -125,6 +128,9 @@ export async function connect(
     if (frame.method === 'tictac/api/session/replaced') {
       received.push({ type: 'abort', reason: String(params.reason), side: null })
       return
+    }
+    if (frame.method.startsWith('tictac/api/') && frame.method !== 'tictac/api/lobby/changed') {
+      pushed.push(frame as JsonRpcNotification)
     }
     if (frame.method === 'tictac/api/lobby/changed') {
       const view = params as unknown as LobbyView
@@ -172,6 +178,7 @@ export async function connect(
     request,
     received,
     lobby: views,
+    pushed,
     lobbyWhere: (ready) => {
       const already = views.find(ready)
       if (already) return Promise.resolve(already)

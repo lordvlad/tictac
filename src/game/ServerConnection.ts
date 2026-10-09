@@ -223,6 +223,7 @@ export class ServerConnection {
   private room: Room | null = null
   private readonly lobbyListeners = new Set<(view: LobbyView) => void>()
   private readonly squadListeners = new Set<(pushed: RpcPushes['tictac/api/squad/changed']) => void>()
+  private readonly encounterListeners = new Set<(started: RpcPushes['tictac/api/encounter/started']) => void>()
   private lobbyView: LobbyView | null = null
   private readonly listeners = new Set<() => void>()
 
@@ -336,6 +337,17 @@ export class ServerConnection {
   watchSquad(listener: (pushed: RpcPushes['tictac/api/squad/changed']) => void): () => void {
     this.squadListeners.add(listener)
     return () => this.squadListeners.delete(listener)
+  }
+
+  /**
+   * Something found this player's squad and a fight is theirs to take
+   * (`encounter/started`). A window that connects after the push is not sent
+   * it: it learns the same from `LobbyView.you` (`control: 'reserved'`).
+   * Returns what stops it.
+   */
+  watchEncounters(listener: (started: RpcPushes['tictac/api/encounter/started']) => void): () => void {
+    this.encounterListeners.add(listener)
+    return () => this.encounterListeners.delete(listener)
   }
 
   /**
@@ -652,6 +664,11 @@ export class ServerConnection {
         return
       case 'tictac/api/squad/changed':
         for (const listener of this.squadListeners) listener(params as unknown as RpcPushes['tictac/api/squad/changed'])
+        return
+      case 'tictac/api/encounter/started':
+        for (const listener of this.encounterListeners) {
+          listener(params as unknown as RpcPushes['tictac/api/encounter/started'])
+        }
         return
     }
     if (frame.method === RpcMethods.abort && !socket.entered) {

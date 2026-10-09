@@ -208,7 +208,7 @@ describe('A server that restarts', () => {
     const later = due + 2 * HOUR
     const armed: (number | null)[] = []
     const schedule = new Schedule({ now: () => later, arm: (at) => armed.push(at) })
-    const restarted = new Journeys({ squads: persistence.squads, schedule, now: () => later, tell: () => {} })
+    const restarted = new Journeys({ squads: persistence.squads, encounters: persistence.encounters, schedule, now: () => later, tell: () => {} })
     await restarted.restore()
     expect(armed.at(-1)).toBe(due)
 

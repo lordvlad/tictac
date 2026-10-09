@@ -119,8 +119,8 @@ describe('A restart loses no room', () => {
       if (room.red) expect(room.red.connected).toBe(false)
     }
     expect(second.view(null).rooms[1]).toMatchObject({ blue: { name: null }, red: { name: 'Bo' } })
-    expect(second.view(ADA).you).toEqual({ roomId: roomOf(waiting), faction: Faction.Blue, phase: 'waiting' })
-    expect(second.view(BO).you).toEqual({ roomId: deploying.roomId, faction: Faction.Red, phase: 'deploying' })
+    expect(second.view(ADA).you).toEqual({ roomId: roomOf(waiting), faction: Faction.Blue, phase: 'waiting', control: 'player', joinBy: null })
+    expect(second.view(BO).you).toEqual({ roomId: deploying.roomId, faction: Faction.Red, phase: 'deploying', control: 'player', joinBy: null })
     expect(holds.filter((hold) => !hold.cancelled).map((hold) => hold.ms)).toEqual([5_000, 5_000, 5_000, 5_000, 5_000])
 
     // Each window reconnects with its key: same room, same side, same key, same phase.

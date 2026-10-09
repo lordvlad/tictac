@@ -359,6 +359,8 @@ On a fresh socket, in this order:
 | `squad/get` | `{}` | `{ squad: { id, waypoints } }` — a player from before squads is placed on first asking | `401` |
 | `clock/now` | `{}` | `{ now }` — the server's clock, the one its travel schedule runs by; a window measures its offset on every socket that opens (`ServerConnection.now()`) | — |
 | `squad/order` | `{ order }` (`SquadOrder`, [ARCH-WORLD §2](world.md)) | `{ squad }`, and `squad/changed` to the player's window | `401`; `-32602` a malformed order; `409` a verb that does not fit (*already on the move*, *not on the move*) |
+| `encounter/feed` | `{}` | `{ entries: EncounterEntry[] }` — what found the player's squad on the road, newest first, at most `ENCOUNTER.feedLimit`; each says how it ended (`inProgress`, `won`, `lost`, `passedBy` and why), who played the player's side and which match to watch back ([ARCH-WORLD §3a](world.md)) | `401` |
+| `match/recording` | `{ matchId }` | `{ recording: { header, events } }` — a match the player was in, running or settled, in the shape a replay plays | `401`; `-32602` no `matchId`; `403` *you were not in that match*; `410` no such match |
 | `lobby/subscribe` | `{}` | the `LobbyView` now, then `lobby/changed` pushes | — |
 | `lobby/unsubscribe` | `{}` | `null` | — |
 | `room/enter` | `{ intent }` (`ServerIntent`) | `Seated` | *Entering a room* below |
@@ -548,21 +550,72 @@ build is judged exactly as it always was. ARCH-DEPLOYMENT §2.3 walks through a 
 ### Rooms the server opens (decided in `ITEM-066`, built in `ITEM-048`)
 
 An encounter on the road ([GDD-WORLD §5.4](../design/gdd/world-and-travel.md)) is a room the
-server opens itself, already `playing`, from a header it composes. Not built yet; these are the
-rules it is built to:
+server opens itself, already `playing`, from a header it composes: `Lobby.openEncounter(contact)`
+([ARCH-WORLD §3b](world.md) has what it decides before it opens one). `Room.openEncounter(header,
+player, joinBy)` sets both seats and starts the match in one go — `Room.start` is otherwise Blue's
+`matchHeader`, and nobody's window is in this room to send one.
 
-- **A seat can be held by the AI.** Each seat has a controller, `human` or `ai`, stated in the
-  header and kept in `RoomStore`. An AI seat is a `Client` over a `loopback()` transport, so the
-  room relays to it and referees it exactly as it does a window. The lobby's `you` carries the
-  controller, and the panel's takeover (`resume`) applies only while the seat is the player's to
-  take.
-- **A reserved seat** waits for its player until a deadline, then passes to the AI. An online
-  player is pushed `tictac/api/encounter/started { roomId, joinBy }`; taking the fight is
-  `room/enter { kind: 'resume' }` before `joinBy`. A dropped player's seat passes to the AI when
-  its grace runs out, rather than ending the room.
-- **Not listed.** Encounter rooms are left out of the lobby's room list.
-- **Build.** The room takes the server's build; `Lobby.fits` still decides whether a window may
-  take a seat. AI seats are the server's own and are re-attached under whatever build it runs.
+- **A seat has a controller: who moves it** (`SeatControl`, `src/game/Encounter.ts`). `player` is a
+  window, or the window that holds its key; `reserved` is kept for a player who has not arrived,
+  until a deadline; `ai` is the AI's. It is the seat's `control`, apart from its `player`, which is
+  whose seat it *is* and so whose roster the match settles: a seat the AI plays for an absent
+  player is still theirs, and `Room.seatOf` still finds it (one match per player). The header
+  states the other thing, `controllers: { Blue: human, Red: ai }`: whose each *squad* is. It never
+  changes; the human side is always Blue.
+- **The AI is a client of the room, not the referee** (`src/server/AiSeat.ts`). The room holds one
+  end of a `loopback()` as an ordinary `Client` and the seat holds the other, so the room relays to
+  it and judges what it sends exactly as it does a window — its digests are checked, its intents
+  refought. It learns the match as a window taking one over does, from the `log` the room hands every
+  socket it seats in a match being played (`catchUp`): it builds its own `MatchHost`, applies each
+  logged intent, and plays its side (`AiPlayer`, the browser opponent's play loop, in `src/sim`)
+  whenever it is that side's turn, deferred one turn of the microtask queue so that it never answers
+  from inside the frame that handed it the turn. It draws no randomness, the match's dice least of
+  all. It does not use `NetworkManager`, which would bring the browser's WebRTC library into a
+  Worker; `frameOf` and `messageOf` (`src/game/JsonRpc.ts`) are all it needs of the wire.
+- **Two AI seats are a fight in milliseconds.** With nobody present both seats are the AI's and
+  the whole fight is the microtask queue — no timer waits on a wall clock — recorded and settled
+  by the same room that records and settles a played one. The price of needing no timer is that
+  the fight holds the event loop until it ends: a few hundred milliseconds of CPU for an ordinary
+  fight, about a second for a stalemate (measured, in-process, three world copies — the two seats'
+  and the referee's). A fight between two
+  AIs can stalemate, and about one in a hundred does: past `ENCOUNTER.turnLimit` (40 turns) an AI seat stops waiting and
+  gets out (the `evade` standing order), which ends the match by retreat like any other; a fight
+  still going at twice that is given up, and the room calls it off (nothing is settled, and the
+  player is free) rather than hold the event loop for ever. The same call-off follows an AI that
+  cannot learn the match from its log or whose policy throws.
+- **A reserved seat** waits for its player until `joinBy` (`now + ENCOUNTER.joinWindowMs`, on the
+  server's clock), then passes to the AI: `Room` asks `options.schedule` for the deadline, and a
+  test is the clock. An online player (a socket bound to them) is pushed
+  `tictac/api/encounter/started { roomId, joinBy, at, place }` (`Lobby.tell`); an offline one has no
+  window, and the AI sits at once. Taking the fight is `room/enter { kind: 'resume', roomId }`, which
+  `Lobby.place` answers like any signed-in player taking their match over: the reservation and its
+  deadline are cancelled, the seat is `player`, and `onEncounterTaken` tells the feed. A `roomId` that
+  is not the seat the player holds is refused as gone: a stale prompt does not put them in another
+  fight.
+- **A dropped seat goes to the AI.** `Room.hold` still holds a seat whose socket dropped for
+  `GRACE_MS` for its window and its key; in a room with an AI to fall back on (`encounter`) the grace
+  running out *passes the seat to the AI* where any other room ends with `departure()`. A fight is
+  never aborted because a human left it.
+- **The AI's seat is not the player's to take.** `you.control` is `ai`, and every `room/enter` the
+  player makes — resume, open, join, a key from before — is refused *The AI is playing that seat now.*
+  They may watch their own fight (`watch` of that room), which is all the panel then offers.
+  Nothing takes a fight back from the AI mid-match.
+- **Not listed, not joinable.** `Lobby.view` leaves encounter rooms out of `rooms`, and `joinable`
+  turns away anyone else's join or watch as *gone*. Live watching by anyone but the player is out
+  of scope; the fight is watched back from its recording afterwards (`match/recording`).
+- **Restarts.** `RoomStore` keeps each seat's control, a reserved seat's deadline and whether the room
+  is an encounter (migration 8, [ARCH-PERSISTENCE §3](persistence.md)). `Room.restore` refights
+  the log as for any room and then takes each seat up as it was: an `ai` seat gets the AI back,
+  from the log — it replays the whole match into a world of its own and plays on, in the middle of
+  a turn as readily as at its start — a `reserved` seat runs out the deadline it had (already
+  past, the AI sits at once), and a `player` seat is held for the grace.
+- **Build.** The room takes the server's build; `Lobby.fits` still decides whether a window may take
+  a seat, so a page on another build is refused the join and the AI plays the seat when the window
+  lapses. AI seats are the server's own and are re-attached under whatever build it runs; like any
+  room restored under another build, the room is then witnessed rather than judged.
+- **The lobby is told when a timer changes what it shows.** A seat passing to the AI on its
+  deadline or its grace changes `you.control` without any frame to say so, so the room tells the lobby
+  (`RoomOptions.onChanged`), which pushes `lobby/changed` as it does for any change.
 
 ### The browser's side
 

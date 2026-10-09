@@ -147,8 +147,8 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   progress* (Watch; a seat held for a dropped player reads "reconnecting…") — inside a scrolling
   box so a busy server never pushes the card off-screen. **Open a Match**, Join and Watch are all
   one `onServerConnect(url, intent)` prop; the server decides where the window lands. When the
-  lobby reports this player's own match as `playing`, the panel takes it over once (`resume`);
-  when it is still being set up elsewhere, a warning says that acting here abandons it.
+  lobby reports this player's own match as `playing` and theirs to take (`control: 'player'`), the
+  panel takes it over once (`resume`); when it is still being set up elsewhere, a warning says that acting here abandons it.
 - **The world map** (`src/hud/MapScreen.tsx`, `ITEM-065`) is opened from the match-server panel
   by a signed-in player (**Open the Map**) and closed back to it. Its React panel holds the
   squad's status, the pace (cautious, normal, flat out) and Stop; a right-click on the map offers
@@ -176,6 +176,35 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
     (its clock, measured over the socket; [ARCH-WORLD §5](world.md)) — as a dot, the trail behind
     it, the route ahead and its stops. A refresh mid-journey lands where the squad was drawn
     before it, whatever the machine's clock says.
+- **Fights on the road** (`ITEM-048`; [ARCH-WORLD §5](world.md), [GDD-WORLD §5](../design/gdd/world-and-travel.md)).
+  Three pieces, whose logic is plain functions in `src/hud/EncounterView.ts` (the countdown, the
+  prompt's question, the feed's wording, the panel's rule) so it is tested without a DOM:
+  - **The join prompt** (`EncounterPrompt.tsx`) is mounted by `main.tsx` on `<body>` above every
+    screen — z-index 30000, over the map's 20000 — and follows the window's `ServerConnection`
+    (`connectionToServer` and `leaveServer` hand it over). It is asked by `encounter/started`
+    (`watchEncounters`) and equally by `LobbyView.you.control === 'reserved'`, which is how a
+    window that connected after the push learns the same. *"Aliens found your squad — take the
+    fight?"* counts down to `joinBy` on the server's clock (`connection.now()`), with **Take the
+    fight** and the note that the AI plays it for you if the time runs out. Taking it is the
+    server panel's `resume` path — `room/enter { kind: 'resume', roomId }` then `takeSeat` — run
+    by `takeEncounter` in `main.tsx`, which puts the map away first (`closeMap`) and the menu once
+    the room's log is in; a refusal ("the AI has it") is shown on the prompt. At the deadline it
+    becomes *"The AI is fighting for your squad"* with a link to the feed. It is shown only from
+    the menu or the map (`available`): in a match or a replay the player is not somewhere a seat
+    can be taken over from, and the AI plays it.
+  - **The panel's rule.** `ServerPanel`'s one-shot takeover (`youPlaying`) resumes only a seat
+    whose `control` is `player`. `reserved` is the prompt's question; `ai` is no longer the
+    player's to take, so the panel says so and offers **Watch**, which opens the map's feed.
+  - **The return feed** (`EncounterFeed.tsx`), under *While you were away* in the map's panel:
+    `encounter/feed`, newest first, one line each — when (relative, server time), where
+    (rounded coordinates; there is no geocoder), *Won / Lost / In progress / Passed by: nobody
+    fit | you were busy*, who played, how many aliens — read when the map opens, when the socket
+    comes back, and on `encounter/started` and `squad/changed`. Lines newer than the last time
+    the feed was closed (kept per server in `localStorage`) carry a *new* badge. **Watch** reads
+    `match/recording { matchId }`, parses it as a recording file is parsed (`parseRecording`), and
+    hands it to `main.tsx`'s `playBack`: the map and menu close and `startPlayback` runs, ending
+    like any replay. A recording this build cannot read (`RECORDING_VERSION`) or the server
+    refuses is said on its line.
 - **Not React:** Tweakpane's panels inside `DebugPanel`, the frame counter's per-frame text
   (`FpsCounter`), the page-corner containers (`CornerStack`) and the Three.js canvas.
 - **Tests** that need a DOM register happy-dom for their own file only

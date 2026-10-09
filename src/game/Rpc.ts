@@ -1,5 +1,7 @@
 import type { CharacterSheet } from '../core/Characters'
 import type { LatLng, Pace, Waypoint } from '../core/Travel'
+import type { EncounterEntry, EncounterStarted } from './Encounter'
+import type { CombatRecording } from './Recording'
 import type { LobbyView, Seated, ServerIntent } from './Lobby'
 
 /**
@@ -169,6 +171,17 @@ export interface RpcApi {
    */
   'tictac/api/squad/order': { params: { order: SquadOrder }; result: { squad: Squad } }
   /**
+   * What found this player's squad on the road, newest first, and how each
+   * fight ended (`ITEM-048`). Refused `signInFirst` to an anonymous socket.
+   */
+  'tictac/api/encounter/feed': { params: Record<string, never>; result: { entries: EncounterEntry[] } }
+  /**
+   * A finished or running match this player was in, to watch back: the
+   * recording a replay plays. `notYours` for a match they were not in, `gone`
+   * for one that does not exist.
+   */
+  'tictac/api/match/recording': { params: { matchId: string }; result: { recording: CombatRecording } }
+  /**
    * The lobby now, and `tictac/api/lobby/changed` with the whole view
    * whenever it changes until `lobby/unsubscribe` (or the socket closes).
    * `you` is this socket's player's own seat. Open to anonymous sockets.
@@ -213,6 +226,12 @@ export interface RpcPushes {
    * `squad/get` answers it.
    */
   'tictac/api/squad/changed': { squad: Squad }
+  /**
+   * Something found this player's squad and they are online: the fight is a
+   * room already playing, and is theirs to take until `joinBy`
+   * (`EncounterStarted`). Sent to their one window.
+   */
+  'tictac/api/encounter/started': EncounterStarted
 }
 
 export type RpcPush = keyof RpcPushes

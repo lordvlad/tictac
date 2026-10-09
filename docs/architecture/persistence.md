@@ -109,6 +109,8 @@ Migrations are append-only and never edited once shipped:
 5. **`fatigue and medical bay`** — `roster.fatigue`, `roster.downtime` (`ITEM-039`).
 6. **`rooms`** — `rooms`, the lobby's live rooms (§3).
 7. **`squads`** — `squads`, where each squad is on the world map (§5a).
+8. **`encounter rooms`** — `rooms.encounter`, `blue_control`, `red_control`, `blue_join_by`, `red_join_by`: the rooms the server opens for a fight on the road, and who moves each seat (§3).
+9. **`encounters`** — `encounters`, what found a squad on the road (§5b).
 
 > This is the *database* schema. The **recorded command and component
 > shapes** are a separate guard — `bun run schema:catalog`, see
@@ -147,6 +149,9 @@ restarted server needs to hold it again (`Lobby.restore`,
 | `sides` | JSON: the squads the referee verified against the rosters, which is who a settlement credits |
 | `blue_player_id`, `blue_name`, `blue_key_hash` | the Blue seat: its player (null for an anonymous one) and the SHA-256 of its key |
 | `red_player_id`, `red_name`, `red_key_hash` | the same for Red, all null while the room waits |
+| `encounter` | 1 for a fight the server opened on the road (`ITEM-048`): not listed, and the AI plays on where a human leaves. 0 for every room a player opened |
+| `blue_control`, `red_control` | who moves each seat: `player` (a window holds it, or can take it back), `reserved` (kept for a player who has not arrived) or `ai`. A seat's *player* above is whose it is, whoever moves it |
+| `blue_join_by`, `red_join_by` | when a `reserved` seat passes to the AI, an ISO timestamp like every other here — a millisecond epoch does not fit Postgres's `INTEGER`. Null otherwise |
 
 A seat's key is never stored, only its hash — the same reason `sessions` keeps
 no token. There are no foreign keys: an anonymous seat names nobody, and nothing
@@ -154,11 +159,17 @@ reads a player through a room.
 
 Each row is rewritten whole (`save`, an upsert) at every transition the room
 makes — opened, joined, started, squads verified, a seat's key replaced by a new
-window, judging stopped — on the room's own write chain (§6), so the row is
+window, judging stopped, a seat passed to the AI — on the room's own write chain (§6), so the row is
 always one state the room was really in. A room that settles or aborts deletes
 its row (`end`) behind everything else it had to write; what remains of it is
 its match log. The table therefore holds live rooms only and does not grow.
 `live()` reads them back oldest first.
+
+What `encounter` and the controls are for is restoring: a restarted server sits the AI back down in
+every seat whose control is `ai`, from the match log (`AiSeat` learns a match from a `log`, as a
+window taking it over does), holds a `player` seat for the grace like any, and lets a `reserved`
+seat run out the deadline it had — a deadline already past gives the AI the seat as the room comes
+back. A room written before migration 8 reads as a player's room with player seats.
 
 ---
 
@@ -225,6 +236,8 @@ refused `401` *sign in first* on a socket nobody signed in on.
 | `roster/recruit` | `{}` | `{ member }` — `400` if the roster is already full |
 | `squad/get` | `{}` | `{ squad }` — its id and waypoint list (§5a) |
 | `squad/order` | `{ order }` | `{ squad }` — the new route ([ARCH-WORLD](world.md)) |
+| `encounter/feed` | `{}` | `{ entries }` — the player's encounters, newest first (§5b) |
+| `match/recording` | `{ matchId }` | `{ recording }` — a match the player was in (§5b) |
 
 A ceremony is checked against the configured origins (`--origins`); there is no
 CORS, because nothing but the built client and the map's tiles is HTTP. Every
@@ -419,6 +432,32 @@ waypoint and the columns agree, and the reported location is written down nowher
 should do. `Squads.ensure` places a player who has no squad the first time `squad/get` asks,
 near the asking socket's place, with `ON CONFLICT (player_id) DO NOTHING` so two windows asking
 at once end up with one squad.
+
+---
+
+## 5b. Encounters on the Road
+
+`src/server/Encounters.ts`, migration 9 (`ITEM-048`, GDD-WORLD §5). One row per *contact*: a
+fight opened, or a squad passed by (`passed_for`: `busy` or `nobodyFit`). A roll that found
+nothing writes no row — it is a function of its key, so a row would only be a second copy of it.
+
+| Column | What |
+|---|---|
+| `squad_id`, `trip`, `checkpoint` | the roll's key, `UNIQUE`: a checkpoint is handled once, which is what makes an alarm fired again after a restart harmless |
+| `player_id` | whose squad it was; the feed reads by it (`encounters_player`) |
+| `found_at` | the server's clock in ms when the squad was found. `BIGINT`: a millisecond epoch does not fit Postgres's `INTEGER` |
+| `lat_e6`, `lng_e6` | where the squad stood, in millionths of a degree, as a start is kept |
+| `aliens` | how many came; 0 when passed by |
+| `room_id` | the fight's room, which is its match id; null when passed by (`encounters_room`) |
+| `played_by_you` | 1 when the player took the seat inside the join window (`Encounters.markTaken`, from the lobby's `onEncounterTaken`); 0 when the AI played it |
+
+How a fight ended is not copied here: the feed joins `match_results` on `room_id`. No result yet
+is `inProgress`; a winner of Blue is `won`. The human side is always Blue in an encounter.
+
+`match/recording` lets a player read a match's header and events if a settled result names them
+(`match_results`), a live room holds them in a seat (`rooms`), or the match is their encounter's
+(`encounters.room_id`, which covers a seat the AI took from them). Not theirs is `403`; not a
+match at all, `410`.
 
 ---
 

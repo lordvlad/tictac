@@ -290,6 +290,14 @@ export class Policy {
     while (!turn.next().done);
   }
 
+  /**
+   * Change what a side fights to, from the next turn it plays. For a caller
+   * that cannot wait out a stalemate: telling a side to get out ends it.
+   */
+  setOrder(faction: Faction, order: StandingOrder): void {
+    this.orders[faction] = order
+  }
+
   /** Both sides look after every intent: the one acting sees what it walked into, and the other sees whatever just walked past it. */
   private act(command: NetworkMessage): Carried {
     const applied = this.apply(command)

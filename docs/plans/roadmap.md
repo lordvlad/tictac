@@ -89,7 +89,7 @@ graph TD
 - Done: `[ITEM-060]` and `[ITEM-061]` (2026-10-07), `[ITEM-062]`–`[ITEM-066]` and `[ITEM-068]`
   (2026-10-08). M5's definition of done is met, in production, from both the Worker's own origin
   and the GitHub Pages client. Unscheduled and built afterwards: `[ITEM-067]` closer zooms on
-  demand (2026-10-09).
+  demand and `[ITEM-048]` wild alien encounters on the road (both 2026-10-09).
 - **Definition of done:** a signed-in player sees their squad on a real planet map near where
   they registered, sends it travelling, closes the tab, and finds it where the clock says; one
   socket per window.

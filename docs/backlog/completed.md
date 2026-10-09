@@ -3139,6 +3139,84 @@ Hosting every zoom is 138.7 GB (z0–15), so closer zooms are built for the plac
       exercised only under `wrangler dev`.
 ---
 
+### [ITEM-048] Wild Alien Encounters on the Road
+**Completed Date:** 2026-10-09  
+**Type:** Feature  
+**Milestone:** Unscheduled (taken up after M5)  
+
+#### Why
+Every refereed match needed two humans, and a squad on the map met nothing. Aliens find a
+travelling squad, and the fight is an ordinary match: same rules, same referee, same log, same
+settlement (GDD-WORLD §5, with the room and roster decisions of §5.4).
+
+#### Key Changes
+- **The roll** (`src/core/Encounters.ts`): at each hourly checkpoint of a trip the server rolls
+  whether the stretch just travelled found the squad. The chance is 15% per hour at a normal pace
+  (`ENCOUNTER` in `src/config.ts`), halved cautious and 1.5× flat out, capped at 90%, with danger
+  flat. It is drawn from `Rng(hashSeed("squad|trip|checkpoint"))`: reproducible after the fact,
+  independent between checkpoints, never a match's dice. The schedule gained a `CHECKPOINT`
+  kind beside `ARRIVAL`; checkpoints are weighed in time order on the route as it was then, so a
+  late alarm does not reorder them.
+- **Contact halts, a miss does not**: a fight stops the squad where it stood at the checkpoint
+  (`squad/changed` pushed); a contact that cannot become a fight (*busy*: the player already
+  holds a match; *nobodyFit*) is recorded and the squad carries on. Rows in `encounters` are
+  unique on (squad, trip, checkpoint), so a re-fired alarm after a restart is idempotent.
+- **The server opens the room** (`Lobby.openEncounter`): already `playing`, unlisted, under the
+  server's build, from a header it composes — the first four fit roster members by slot as Blue,
+  dealt aliens as Red (`dealAliens`, nothing written to `roster`), a crypto seed,
+  `controllers: { Blue: 'human', Red: 'ai' }` in the header (an optional field; protocol stays 7).
+- **The AI is a client of the room** (`src/server/AiSeat.ts`): the browser opponent's play loop was
+  extracted to `src/sim/AiPlayer.ts`; the seat rebuilds its own `MatchHost` from the room's log,
+  plays through `Policy` and sends ordinary frames over a `loopback()`, refereed like a human. A
+  stalemate guard (`ENCOUNTER.turnLimit`, 40) calls a fight off rather than hold a player to a
+  seat nothing moves.
+- **Seats have a control**: `player`, `reserved` (until `joinBy`) or `ai`, in `LobbyView.you`. An
+  online player is pushed `encounter/started` and has 60 s (`ENCOUNTER.joinWindowMs`) to resume;
+  an offline player's seat is the AI's at once; a dropped seat's grace expiry in an encounter
+  room passes to the AI instead of aborting. Migration 8 stores the controls and deadlines so a
+  restart re-attaches AI seats from the log and re-arms deadlines.
+- **The feed** (`encounters` table, migration 9; `encounter/feed`, `match/recording`): newest
+  first, with result, who played and a recording to watch back; checked against `match_results`.
+- **Client**: a join prompt with a countdown on the server's clock (`EncounterPrompt`), the
+  server panel no longer auto-takes a `reserved` or `ai` seat, and "While you were away" in the
+  map panel with Watch. A `resume` without a seat key, which `main.tsx` already sent, is now
+  accepted (it was refused as invalid).
+
+#### Measured
+- `tests/encounters.test.ts`, `encounterTravel.test.ts`, `encounterRooms.test.ts` (17),
+  `aiSeat.test.ts`, `aiPlayer.test.ts`, `encounterPrompt.test.ts` (30) and the updated lobby,
+  restart, server, session and store tests: 949 tests pass; lint, build and `typecheck:cf` clean.
+  Covered: late-alarm time order; halt at the contact's moment; a passed-by contact in the feed;
+  idempotent re-roll after restart; an offline player's fight settling the roster exactly as an
+  independent replay of the stored log does, with no alien rows; an online player's turn through
+  the referee with digests equal; lapse, late take-over, dropped-seat grace, restart mid-fight,
+  unlisted rooms; determinism (`tests/determinism.test.ts`).
+- In Chromium against the Bun server with a clock the script turned (a 24 h flat-out trip, found
+  after 4 h): the prompt appeared with the push; **Take the fight** put the player in the match as
+  Blue with four soldiers; ending the turn let the server-side AI play Red's turn and hand back
+  (Turn 2); retreat settled ("you got out", all alive); the map's feed then read *Lost · 4
+  aliens · You played · Watch* and the squad was free again.
+- Over raw RPC on the same server: a window that let the 60 s lapse saw `control: reserved` in
+  the window and the AI play it (*won, played by the AI*); a player offline at contact had the
+  squad halted, the fight fought AI against AI and settled (*won, played by the AI*), and a
+  427-event recording to fetch.
+
+#### Acceptance Criteria
+- [x] A travelling squad runs into an alien squad at a checkpoint, and its journey stops.
+- [x] An online player takes the fight inside the join window and plays it through the referee to
+      settlement; a player who lets the window lapse has it played for them.
+- [x] With nobody online the fight is fought out on the server and settles the roster, growth
+      included, exactly as a played match would.
+- [x] Nothing about the alien squad is written to `roster`.
+- [x] The encounter roll for a given (squad, trip, checkpoint) is reproducible after the fact.
+- [x] Two encounters roll different alien squads; the same recording replays identically.
+- [x] `tests/determinism.test.ts` still passes: the AI draws nothing from the match stream.
+- [x] Living documentation updated (`networking.md` §8, `persistence.md` migrations 8–9 and §5b,
+      `world.md` §3a–3b and the client, `rendering.md` §4, GDD-WORLD §5.1).
+- [ ] Not yet seen on the deployed Worker (a real checkpoint alarm under `ctx.storage.setAlarm`,
+      the push to a real window): after a deploy.
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

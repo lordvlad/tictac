@@ -68,6 +68,11 @@ export class MatchDurableObject extends DurableObject<Env> {
         rooms: this.persistence.rooms,
         rosters: this.persistence.rosters,
         log: this.log,
+        onEncounterTaken: (roomId) => {
+          this.persistence.encounters
+            .markTaken(roomId)
+            .catch((error: unknown) => this.log(`could not record that ${roomId} was taken: ${String(error)}`))
+        },
         onVerdict: (verdict) => {
           this.log(`verdict on ${verdict.matchId}: ${verdict.reason}`)
           for (const found of verdict.found) {
@@ -88,9 +93,12 @@ export class MatchDurableObject extends DurableObject<Env> {
       })
       const journeys = new Journeys({
         squads: this.persistence.squads,
+        encounters: this.persistence.encounters,
         schedule: this.schedule,
         now: () => Date.now(),
         tell: (playerId, squad) => this.lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
+        openEncounter: (contact) => this.lobby.openEncounter(contact),
+        log: this.log,
       })
       await journeys.restore()
       this.sessions = new Sessions({ lobby: this.lobby, persistence: this.persistence, journeys, log: this.log })

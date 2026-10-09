@@ -219,119 +219,6 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
 
 ---
 
-### [ITEM-048] Wild Alien Encounters on the Road
-**Type:** Feature
-**Priority:** P2
-**Status:** Ready — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5, with the
-decisions about rooms and rosters in §5.4 from `ITEM-066`; [GDD-OVERVIEW](../design/gdd/overview.md)
-§2); the travel scheduler (`ITEM-064`) and its checkpoint keys (`ITEM-062`) are built
-**Milestone:** Unscheduled
-
-#### Why
-Humans are the only playable faction at the start; the aliens are run by the game and have no
-persistent identity (GDD-OVERVIEW §2). Meeting them is a wild encounter: a random alien squad,
-rolled fresh for the fight, gone once the fight is settled. Today there is no way to fight the
-game at all from a live client against the referee; every refereed match needs two humans.
-
-This item first argued it could ship before the world existed, with "a random place" meaning
-only a freshly generated battlefield. That sequencing was overruled (2026-10-02): an encounter
-is something that happens *somewhere on the map*, to a squad that was going somewhere, so it
-waits for the world map (`ITEM-050`, split into `ITEM-060`–`ITEM-065`) and for the decisions in
-`ITEM-066`. The battlefield is still `generateMap(seed)`; the world map adds where
-the squad was and what happens to its journey afterwards.
-
-#### Change
-1. **Encounters are found on the road** (GDD-WORLD §5.1). At each travel alarm checkpoint the
-   server rolls whether an alien squad found the squad on the stretch just travelled, scaled by
-   the area's danger and the travel pace. The roll is setup randomness from a stream seeded by
-   (squad, trip, checkpoint), never a match's dice, and is decided at the checkpoint, not in
-   advance, so no future encounter exists to leak. Contact halts travel.
-2. **The server opens the room** (GDD-WORLD §5.4, points 3 and 7): `Lobby.openEncounter`
-   creates a `Room` already `playing`, under the server's build, and starts it from a header the
-   server composes (`Room.start`): a seed from system randomness, the player's party as Blue,
-   the rolled alien squad as Red, each side's controller. The party is the first `SQUAD_SIZE`
-   active members by slot who are neither in the medical bay nor deployed in another live room;
-   with nobody fit the squad is passed by. Encounter rooms are not listed in the lobby.
-3. **The alien side is played by an AI seat, not by the referee and not by the human's client**
-   (point 4): `AiOpponent` generalised into a server-side `AiSeat` — a `NetworkManager` and the
-   `Policy` (`ebc3d49`) on a `loopback()` transport the room holds as an ordinary `Client`,
-   reading the match from the room's `log` and refereed like a human. A client that drove its own
-   opponent could make it play badly.
-4. **An AI seat can also play an absent human's side** (GDD-WORLD §5.2, §5.4 points 1–2), to
-   that player's standing order (`ITEM-052`). The player's seat starts *reserved* until a
-   deadline: an online player is pushed `tictac/api/encounter/started { roomId, joinBy }` and
-   takes the fight with `room/enter { kind: 'resume' }` within `JOIN_WINDOW_MS` (60 s); an
-   offline player has no window. At the deadline the seat passes to the AI, and in a room with an
-   AI to fall back on, `Room.hold`'s grace expiry does the same instead of ending the room. The
-   lobby's `you` carries the seat's controller; the panel takes over only a seat that is still
-   the player's to take, and otherwise offers to watch. With nobody present both seats are AI
-   seats and the fight plays out in milliseconds through the same room. Every one of these is an
-   ordinary match: recorded, replayable, settled.
-5. **The header records who controlled each side** (human or AI), for audit and for the
-   return feed; `RoomStore` keeps a controller per seat (a migration), so a restored room
-   re-attaches its AI seats from the log under the new build.
-6. **The alien squad is rolled, not stored.** Sheets and kit are dealt from system randomness
-   at encounter start, stated in the header like any squad, never written to `roster`; the
-   alien side settles like an anonymous one does. The encounter sizes it within today's
-   `1..SQUAD_SIZE` (`ITEM-041` already handles short-handed squads); once `ITEM-047` lands the
-   encounter is the caller that states a per-combat cap.
-7. **The human side settles normally**, including growth, whether it played or the AI played
-   for it. `Rosters.rest` is unchanged (§5.4 point 5), and the header is composed from the
-   roster rows, so `verifyRosters` passes it byte for byte (point 6).
-8. **After the fight** a surviving squad resumes its route or stops and waits: a player
-   setting.
-9. **A return feed**: what happened while the player was away, each fight watchable back.
-
-#### Affected Files
-- `src/server/Lobby.ts` (`openEncounter`, `seatOf` and `you` with a controller, encounter rooms
-  unlisted), `src/server/Room.ts` (reserved seats, `hold` falling back to the AI, `start` from a
-  server header, settling a side with no roster)
-- `src/server/RoomStore.ts` and `src/server/db/migrations.ts` (a controller per seat)
-- `src/sim/Policy.ts`, `src/game/AiOpponent.ts` → a server-side `AiSeat`
-- `src/game/Lobby.ts` (`LobbyView.you.controller`), `src/game/Rpc.ts` (`encounter/started`)
-- `src/game/Recording.ts` (controller per side in the header)
-- Travel's alarm/checkpoint scheduler from `ITEM-064`; the stable (squad, trip, checkpoint) keys
-  from `ITEM-062`
-- `src/hud/` (the join window, the return feed), `src/hud/menu/ServerPanel.tsx` (takeover only of
-  a seat still the player's)
-- `docs/architecture/networking.md`, `docs/architecture/persistence.md`
-
-#### P2P / Simulation Impact
-- **The AI's own choices are intent, not rules.** It may take its own randomness to decide, but
-  it must never draw from the match stream (`matchDice(seed)`): only the rules draw there, the
-  same order on every side (ADR-0004, `tests/determinism.test.ts`).
-- A recording replays from commands, so an AI match replays without the AI.
-- The balance sweep is unchanged; it already plays AI against AI.
-
-#### Acceptance Criteria
-- [ ] A travelling squad runs into an alien squad at a checkpoint, and its journey stops.
-- [ ] An online player takes the fight inside the join window and plays it through the referee to
-      settlement; a player who lets the window lapse has it played for them.
-- [ ] With nobody online the fight is fought out on the server and settles the roster, growth
-      included, exactly as a played match would.
-- [ ] Nothing about the alien squad is written to `roster`.
-- [ ] The encounter roll for a given (squad, trip, checkpoint) is reproducible after the fact.
-- [ ] Two encounters roll different alien squads; the same recording replays identically.
-- [ ] `tests/determinism.test.ts` still passes: the AI draws nothing from the match stream.
-- [ ] Living documentation updated.
-
-#### Risks & Mitigations
-- **Risk:** the aliens are a faction in the lore only. There is no alien kit (no plasma weapon
-  exists in `src/`) and `Faction` is Blue/Red, so the first encounters are an AI squad dressed
-  as aliens with human kit.
-- **Mitigation:** ship the encounter with existing kit and file alien kit separately; the
-  encounter does not depend on what the squad carries.
-- **Risk:** the policy was written to measure balance, not to be fun to fight or to fight well on
-  a player's behalf; it never sneaks, throws smoke or uses doors (focus board, "Left open").
-  Once it plays absent players' squads, its weaknesses cost real characters.
-- **Mitigation:** retreat (`ITEM-051`, `ITEM-052`) gives an absent squad a way out; improving
-  the policy is filed as its own work once this exposes where it fails.
-- **Risk:** a join window needs a way to tell an online player that something found them.
-- **Mitigation:** in-app only to start (the player's open socket); push notifications are out of
-  scope.
-
----
-
 ### [ITEM-049] Start Location From the Player's Real-World Area — merged into ITEM-050
 **Type:** Feature
 **Status:** Merged into `ITEM-050` (2026-10-02): the start location and the world map need the
@@ -359,8 +246,8 @@ R2, `map-tiles/world.pmtiles`, is not a world map but Stuttgart only (lon 8.9–
 ### [ITEM-053] Player Encounters on the Road
 **Type:** Feature
 **Priority:** P3
-**Status:** Backlog — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5); waits for
-the travel scheduler (`ITEM-064`) and `ITEM-048`
+**Status:** Ready — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5); the travel
+scheduler (`ITEM-064`) and the server-opened room with an AI seat (`ITEM-048`) are built
 **Milestone:** Unscheduled
 
 #### Why

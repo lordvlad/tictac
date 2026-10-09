@@ -1,6 +1,7 @@
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../../src/game/JsonRpc'
 import type { LatLng } from '../../src/core/Travel'
 import { loopback } from '../../src/game/Transport'
+import type { OpenEncounter } from '../../src/server/EncounterPort'
 import { Journeys } from '../../src/server/Journeys'
 import { Lobby } from '../../src/server/Lobby'
 import type { Persistence } from '../../src/server/Persistence'
@@ -45,15 +46,29 @@ export interface RpcServer {
   window(place?: LatLng | null): Window
 }
 
-export function rpcServer(persistence: Persistence, start = Date.UTC(2026, 9, 8, 9)): RpcServer {
+export interface RpcServerOptions {
+  /** What finds a squad on the road opens here; unset, nothing is rolled for (`ITEM-048`). */
+  openEncounter?: OpenEncounter
+  /** A new trip's id; random unless a test needs to pick what its checkpoints roll. */
+  mintTrip?: () => string
+}
+
+export function rpcServer(
+  persistence: Persistence,
+  start = Date.UTC(2026, 9, 8, 9),
+  options: RpcServerOptions = {},
+): RpcServer {
   let now = start
   const lobby = new Lobby({ matches: persistence.matches, rooms: persistence.rooms, log: () => {} })
   const armed: (number | null)[] = []
   const schedule = new Schedule({ now: () => now, arm: (at) => armed.push(at) })
   const journeys = new Journeys({
     squads: persistence.squads,
+    encounters: persistence.encounters,
     schedule,
     now: () => now,
+    openEncounter: options.openEncounter,
+    mintTrip: options.mintTrip,
     tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
   })
   const sessions = new Sessions({ lobby, persistence, journeys, now: () => now, log: () => {} })

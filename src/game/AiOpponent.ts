@@ -1,20 +1,19 @@
 import { Faction } from '../config'
 import { rollSquadSheets } from '../core/Characters'
-import { isCommand } from '../ecs/systems/CommandSystem'
+import { AiPlayer } from '../sim/AiPlayer'
 import { MatchHost } from '../sim/MatchHost'
-import { Policy } from '../sim/Policy'
 import { defaultLoadout } from './Loadout'
 import { NetworkManager, type NetworkMessage } from './NetworkManager'
 import type { Deployment } from './Recording'
-import { compareDigests, reportDivergence } from './StateDigest'
+import { reportDivergence } from './StateDigest'
 import { loopback, type Transport } from './Transport'
 
-/**
- * How much the AI minds standing near its own squad, in expected hit points per
- * squadmate inside a frag's blast. One metre of closing is worth 2 to it, so
- * this is a nudge — it still advances as a group, just not as a clump.
- */
-const SPACING = 2
+/** A turn of the event loop, so the page draws what has been decided so far. */
+function breathe(): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  setTimeout(resolve, 0)
+  return promise
+}
 
 /**
  * A match against the machine: an opponent that is a *peer*.
@@ -27,17 +26,16 @@ const SPACING = 2
  * of a wire it does here, including resolving every intent itself and
  * comparing state digests (ADR-0004).
  *
- * What it brings is a {@link MatchHost}, the scene-free world a referee uses,
- * kept in step with the player's by applying every command it receives, and the
- * {@link Policy} the balance sweep measures the game with. When the host says
- * it is Red's turn, the policy plays it and every intent it applies is sent to
- * the player as it goes.
+ * What it brings is an {@link AiPlayer}: a scene-free world kept in step with
+ * the player's by applying every command it receives, and the policy the
+ * balance sweep measures the game with. When it is Red's turn the policy plays
+ * it, and every intent it applies is sent to the player as it goes. The same
+ * player sits in a server's seat (`AiSeat`); what is here is only how this one
+ * reaches the page.
  */
 export class AiOpponent {
   private readonly network = new NetworkManager()
-  private host: MatchHost | null = null
-  private policy: Policy | null = null
-  private playing = false
+  private player: AiPlayer | null = null
   private closed = false
 
   private constructor() {}
@@ -58,6 +56,7 @@ export class AiOpponent {
     this.network.attach(transport)
     this.network.onDisconnected = () => {
       this.closed = true
+      this.player?.stop()
     }
     this.network.onMessage = (message) => this.receive(message)
     this.network
@@ -80,79 +79,15 @@ export class AiOpponent {
   private receive(message: NetworkMessage): void {
     if (this.closed) return
     if (message.type === 'matchHeader') {
-      const host = new MatchHost(message.header)
-      this.host = host
-      this.policy = new Policy(
-        host,
-        (command) => {
-          const applied = host.apply(command)
-          if (applied.applied) this.network.send(command)
-          return applied
-        },
-        {
-          watching: { [Faction.Blue]: true, [Faction.Red]: true },
-          spacing: SPACING,
-          // The fingerprint is of the world as this side hands it over.
-          observer: { ending: () => this.network.send({ type: 'digest', digest: host.digest() }) },
-        },
-      )
-      return
-    }
-    const { host } = this
-    if (!host) return
-    if (message.type === 'digest') {
-      const { digest } = message
-      reportDivergence(
-        `state at the end of turn ${digest.turn}`,
-        compareDigests(host.digest(), digest, (entityId) => `#${entityId}`),
-      )
-      return
-    }
-    if (!isCommand(message)) return
-    const applied = host.apply(message)
-    if (!applied.applied) {
-      console.error(`[ai] the player's ${message.type} was refused (${applied.reason}): the two sides disagree`)
-      return
-    }
-    this.consider()
-  }
-
-  private get over(): boolean {
-    const living = this.host?.living
-    return !living || living[Faction.Blue] === 0 || living[Faction.Red] === 0
-  }
-
-  /**
-   * Play if it is this side's turn.
-   *
-   * Deferred, never run from inside the frame that announced the turn: the
-   * player's side is still applying the intent that handed over, and a reply
-   * delivered into the middle of that would be applied before it finished.
-   */
-  private consider(): void {
-    if (this.playing || this.closed || this.over || this.host?.activeFaction !== Faction.Red) return
-    this.playing = true
-    this.play()
-      .catch((err: unknown) => {
-        this.closed = true
-        console.error('[ai] gave up the match:', err)
+      this.player = new AiPlayer(new MatchHost(message.header), {
+        faction: Faction.Red,
+        send: (sent) => this.network.send(sent),
+        breathe,
+        diverged: reportDivergence,
+        failed: (problem) => console.error(`[ai] ${problem}`),
       })
-  }
-
-  private async play(): Promise<void> {
-    const breathe = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
-    try {
-      await breathe()
-      // A breath between units too, so the page draws what has been decided so far.
-      for (const _unit of this.policy!.steps()) {
-        await breathe()
-        if (this.closed || this.over) return
-      }
-    } finally {
-      // Released the moment the handover is sent, not a tick later: the player
-      // may answer it at once, and a reply that finds this side still "playing"
-      // would never be played.
-      this.playing = false
+      return
     }
+    this.player?.hear(message)
   }
 }

@@ -62,12 +62,20 @@ const WALL_CLOCK: ServerClock = {
 export async function startGameServer(options: GameServerOptions): Promise<GameServer> {
   const { persistence } = options
   const log = options.log ?? ((message: string) => console.info(`[referee] ${message}`))
+  const clock = options.clock ?? WALL_CLOCK
   const lobby = new Lobby({
     matches: persistence.matches,
     rooms: persistence.rooms,
     rosters: persistence.rosters,
     log,
     graceMs: options.graceMs,
+    // The same clock the squads travel by: a fight found on the road keeps a
+    // seat for its player until a moment on it.
+    now: () => clock.now(),
+    schedule: (fn, ms) => clock.schedule(fn, ms),
+    onEncounterTaken: (roomId) => {
+      persistence.encounters.markTaken(roomId).catch((error: unknown) => log(`could not record that ${roomId} was taken: ${String(error)}`))
+    },
     onVerdict: (verdict) => {
       log(`verdict on ${verdict.matchId}: ${verdict.reason}`)
       for (const found of verdict.found) {
@@ -81,7 +89,6 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
 
   // The Durable Object's one alarm, as a timer: the schedule asks for one
   // moment at a time, and each new ask replaces the last.
-  const clock = options.clock ?? WALL_CLOCK
   let cancelAlarm: (() => void) | null = null
   const schedule: Schedule = new Schedule({
     now: () => clock.now(),
@@ -97,9 +104,12 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   })
   const journeys = new Journeys({
     squads: persistence.squads,
+    encounters: persistence.encounters,
     schedule,
     now: () => clock.now(),
     tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
+    openEncounter: (contact) => lobby.openEncounter(contact),
+    log,
   })
   await journeys.restore()
 

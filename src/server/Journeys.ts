@@ -1,17 +1,24 @@
+import { rollEncounter, stretchOf } from '../core/Encounters'
 import {
   addStop,
+  type Checkpoint,
+  checkpoints,
+  type Departure,
   detour,
   type Gait,
   isAtRest,
   type LatLng,
   plannedArrivals,
+  positionAt,
   redirect,
   setOff,
   settle,
   stop,
   type Waypoint,
 } from '../core/Travel'
-import { RPC_ERRORS, type Squad, type SquadOrder } from '../game/Rpc'
+import { RPC_ERRORS, type Player, type Squad, type SquadOrder } from '../game/Rpc'
+import type { Encounters } from './Encounters'
+import type { OpenEncounter } from './EncounterPort'
 import { Refusal } from './Lobby'
 import { MATCH_SERVER, ownerOf } from './Owner'
 import type { Schedule } from './Schedule'
@@ -33,6 +40,8 @@ import type { Squads } from './Squads'
 
 /** The schedule's kind for "a squad reaches its next waypoint". */
 const ARRIVAL = 'arrival'
+/** The schedule's kind for "a stretch of a squad's trip is ready to be weighed for a contact" (`ITEM-048`). */
+const CHECKPOINT = 'checkpoint'
 
 const ALREADY_MOVING = 'Your squad is already on the move: send it somewhere now, first or next instead.'
 const NOT_MOVING = 'Your squad is not on the move.'
@@ -40,6 +49,8 @@ const NOT_HERE = 'That squad is kept by another match server.'
 
 export interface JourneysOptions {
   squads: Squads
+  /** Where a contact is written down, so a checkpoint is handled once (`ITEM-048`). */
+  encounters: Encounters
   schedule: Schedule
   now: () => number
   /** Tell `playerId`'s window its squad has a new route (`squad/changed`). */
@@ -48,31 +59,65 @@ export interface JourneysOptions {
   self?: string
   /** A new trip's id. */
   mintTrip?: () => string
+  /**
+   * Open the fight when something finds a squad (`ITEM-048`): the lobby's
+   * `openEncounter`, wired by the host. Unset on a host that has no lobby
+   * to open one in; a contact is then not rolled for at all.
+   */
+  openEncounter?: OpenEncounter
+  /** Called for anything worth a line in a server log. */
+  log?: (message: string) => void
 }
 
 export class Journeys {
   private readonly squads: Squads
+  private readonly encounters: Encounters
   private readonly schedule: Schedule
   private readonly now: () => number
   private readonly tell: (playerId: string, squad: Squad) => void
   private readonly self: string
   private readonly mintTrip: () => string
+  private readonly openEncounter: OpenEncounter | undefined
+  private readonly log: (message: string) => void
+  /**
+   * The last checkpoint of each squad's trip that has been weighed. Memory
+   * only: after a restart a squad's checkpoints are weighed again, which is
+   * harmless because a roll is a function of its key and a contact has its row.
+   */
+  private readonly weighed = new Map<string, { trip: string; index: number }>()
   private queue: Promise<unknown> = Promise.resolve()
 
   constructor(options: JourneysOptions) {
     this.squads = options.squads
+    this.encounters = options.encounters
     this.schedule = options.schedule
     this.now = options.now
     this.tell = options.tell
     this.self = options.self ?? MATCH_SERVER
     this.mintTrip = options.mintTrip ?? (() => crypto.randomUUID())
-    this.schedule.handle(ARRIVAL, (id) => this.serially(() => this.arrive(id)))
+    this.openEncounter = options.openEncounter
+    this.log = options.log ?? ((message) => console.warn(`[journeys] ${message}`))
+    this.schedule.handle(ARRIVAL, (id, at) => this.serially(() => this.arrive(id, at)))
+    this.schedule.handle(CHECKPOINT, (id, at) =>
+      this.serially(async () => {
+        // A contact that cannot be opened must not stop the schedule firing the
+        // rest; the checkpoint stays unweighed and the next arrival or order
+        // weighs it again.
+        try {
+          const found = await this.weighDue(id, at)
+          if (found) this.plan(found.squad)
+        } catch (error) {
+          this.log(`checkpoint of squad ${id} failed: ${error instanceof Error ? error.stack : String(error)}`)
+        }
+      }),
+    )
   }
 
   /**
-   * Schedule every squad's next arrival from the database, as a server does
-   * before it lets anybody in. An arrival that fell due while no server was
-   * running is due at once, and recorded at the time it should have happened.
+   * Schedule every squad's next arrival and checkpoint from the database, as
+   * a server does before it lets anybody in. An arrival that fell due while no
+   * server was running is due at once, and recorded at the time it should
+   * have happened; so is a checkpoint.
    */
   restore(): Promise<void> {
     return this.serially(async () => {
@@ -87,13 +132,22 @@ export class Journeys {
    */
   order(playerId: string, near: LatLng | null, order: SquadOrder): Promise<Squad> {
     return this.serially(async () => {
-      const squad = await this.squads.ensure(playerId, near)
-      this.owned(squad)
+      const placed = await this.squads.ensure(playerId, near)
+      this.owned(placed)
       const now = this.now()
+      // What was due before this order is weighed on the route as it was,
+      // not on the one the order is about to make.
+      const { player, squad } = (await this.weighDue(placed.id, now))!
+      const oldTrip = tripOf(squad.waypoints)
       const waypoints = this.apply(squad.waypoints, order, now)
       if (!waypoints) throw new Refusal(RPC_ERRORS.conflict, order.kind === 'goHere' ? ALREADY_MOVING : NOT_MOVING)
-      const next: Squad = { id: squad.id, waypoints }
+      let next: Squad = { id: squad.id, waypoints }
       await this.squads.save(next)
+      // A stop or a turn ends the trip early, and its last stretch counts.
+      if (this.openEncounter && oldTrip && (order.kind === 'stop' || order.kind === 'goHereNow')) {
+        const ended = checkpoints(next.waypoints, oldTrip).find((checkpoint) => checkpoint.end)
+        if (ended && this.unweighed(next.id, ended)) next = await this.weigh(player, next, ended)
+      }
       this.plan(next)
       this.tell(playerId, next)
       return next
@@ -115,12 +169,18 @@ export class Journeys {
     }
   }
 
-  /** The alarm reached a squad's next arrival: record what is due, and schedule what is next. */
-  private async arrive(id: string): Promise<void> {
-    const found = await this.squads.byId(id)
+  /**
+   * The alarm reached a squad's next arrival: weigh what came before it,
+   * record the arrival at the moment it was due, and schedule what is next.
+   * Only up to `at`: an arrival due later has its own moment, and a
+   * checkpoint between the two must see the route as it was then.
+   */
+  private async arrive(id: string, at: number): Promise<void> {
+    const weighed = await this.weighDue(id, at)
+    const found = weighed ?? (await this.squads.byId(id))
     if (!found) return
     this.owned(found.squad)
-    const settled = settle(found.squad.waypoints, this.now())
+    const settled = settle(found.squad.waypoints, at)
     if (settled === found.squad.waypoints) {
       this.plan(found.squad)
       return
@@ -128,13 +188,115 @@ export class Journeys {
     const next: Squad = { id, waypoints: [...settled] }
     await this.squads.save(next)
     this.plan(next)
-    this.tell(found.playerId, next)
+    this.tell(found.player.id, next)
   }
 
-  /** Schedule `squad`'s next arrival, or nothing for a squad at rest. */
+  /**
+   * Weigh every checkpoint of the squad's trip due by `until`, earliest first,
+   * each on the route as it stood at its own moment. A contact that halts
+   * the squad cuts its trip short, so the loop reads the route afresh each
+   * time. Returns the squad as it is after, or null for one that is gone.
+   */
+  private async weighDue(id: string, until: number): Promise<{ player: Player; squad: Squad } | null> {
+    let found = await this.squads.byId(id)
+    if (!this.openEncounter) return found
+    while (found) {
+      this.owned(found.squad)
+      const next = this.nextCheckpoint(found.squad)
+      if (!next || next.at > until) return found
+      const squad = await this.weigh(found.player, found.squad, next)
+      if (squad !== found.squad) this.tell(found.player.id, squad)
+      found = { player: found.player, squad }
+    }
+    return found
+  }
+
+  /**
+   * Roll one checkpoint (GDD-WORLD §5.1). Nothing found: nothing changes. A
+   * fight opened: the squad is halted where it stood at the checkpoint. A
+   * squad passed by carries on. Returns the squad, a new object if it was
+   * halted.
+   */
+  private async weigh(player: Player, squad: Squad, checkpoint: Checkpoint): Promise<Squad> {
+    const { trip, index } = checkpoint
+    const stretch = stretchOf(squad.waypoints, trip, index)
+    const roll = stretch && rollEncounter({ squad: squad.id, trip, index }, stretch)
+    if (!roll?.met || !this.openEncounter) {
+      this.weighed.set(squad.id, { trip, index })
+      return squad
+    }
+    const there = settle(squad.waypoints, checkpoint.at)
+    const place = positionAt(there, checkpoint.at).position
+    // A contact already written down was handled before a restart: it is not
+    // opened a second time, only the halt it called for is made sure of.
+    let outcome = await this.encounters.find(squad.id, trip, index)
+    if (!outcome) {
+      const opened = await this.openEncounter({
+        player,
+        squadId: squad.id,
+        trip,
+        checkpoint: index,
+        at: checkpoint.at,
+        place,
+        alienSeed: roll.alienSeed,
+        sizeOffset: roll.sizeOffset,
+      })
+      outcome = opened.opened
+        ? { roomId: opened.roomId, passedFor: null }
+        : { roomId: null, passedFor: opened.passedFor }
+      await this.encounters.record({
+        squadId: squad.id,
+        playerId: player.id,
+        trip,
+        checkpoint: index,
+        at: checkpoint.at,
+        place,
+        aliens: opened.opened ? opened.aliens : 0,
+        ...outcome,
+      })
+    }
+    this.weighed.set(squad.id, { trip, index })
+    if (outcome.roomId === null) return squad
+    // Contact stops the squad where it stood. A squad that has already
+    // arrived has nothing left to stop.
+    const halted = stop(there, checkpoint.at)
+    if (!halted) return squad
+    const next: Squad = { id: squad.id, waypoints: halted }
+    await this.squads.save(next)
+    return next
+  }
+
+  /** The first checkpoint of the squad's trip nobody has weighed, or null. */
+  private nextCheckpoint(squad: Squad): Checkpoint | null {
+    const trip = tripOf(squad.waypoints)
+    if (!trip) return null
+    // Whatever fell due before the squad's latest departure was weighed before
+    // that departure was written (`order`, `arrive`), and the route no longer
+    // says where the squad stood then.
+    const since = departureOf(squad.waypoints)!.at
+    return (
+      checkpoints(squad.waypoints, trip).find(
+        (checkpoint) => checkpoint.at > since && this.unweighed(squad.id, checkpoint),
+      ) ?? null
+    )
+  }
+
+  private unweighed(id: string, checkpoint: Checkpoint): boolean {
+    const done = this.weighed.get(id)
+    return !(done?.trip === checkpoint.trip && checkpoint.index <= done.index)
+  }
+
+  /** Schedule `squad`'s next arrival and checkpoint, or nothing for a squad at rest. */
   private plan(squad: Squad): void {
-    if (isAtRest(squad.waypoints)) this.schedule.clear(ARRIVAL, squad.id)
-    else this.schedule.set(ARRIVAL, squad.id, plannedArrivals(squad.waypoints)[0]!)
+    if (isAtRest(squad.waypoints)) {
+      this.schedule.clear(ARRIVAL, squad.id)
+      this.schedule.clear(CHECKPOINT, squad.id)
+      return
+    }
+    this.schedule.set(ARRIVAL, squad.id, plannedArrivals(squad.waypoints)[0]!)
+    const next = this.openEncounter ? this.nextCheckpoint(squad) : null
+    if (next) this.schedule.set(CHECKPOINT, squad.id, next.at)
+    else this.schedule.clear(CHECKPOINT, squad.id)
   }
 
   /**
@@ -151,6 +313,18 @@ export class Journeys {
     this.queue = done.catch(() => {})
     return done
   }
+}
+
+/** The latest departure a route holds: the one its current trip, or its last, is on. */
+function departureOf(waypoints: readonly Waypoint[]): Departure | null {
+  for (const waypoint of waypoints.toReversed()) {
+    if (waypoint.kind === 'past' && waypoint.departed) return waypoint.departed
+  }
+  return null
+}
+
+function tripOf(waypoints: readonly Waypoint[]): string | null {
+  return departureOf(waypoints)?.trip ?? null
 }
 
 /** Every squad walks until vehicles exist. */

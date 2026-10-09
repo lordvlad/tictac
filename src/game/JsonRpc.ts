@@ -76,3 +76,18 @@ export const RpcMethods = {
   rightClickFacing: 'tictac/system/render/rightClickFacing',
   ready: 'tictac/system/session/ready',
 } as const satisfies Record<NetworkMessage['type'], string>
+
+/** A match message as the notification that carries it. */
+export function frameOf(message: NetworkMessage): JsonRpcNotification {
+  const params = { ...message } as Record<string, unknown>
+  delete params.type
+  return { jsonrpc: '2.0', method: RpcMethods[message.type], params }
+}
+
+/** The match message a notification's method and params carry, or null for a method that is not one. */
+export function messageOf(method: string, params: Record<string, unknown>): NetworkMessage | null {
+  for (const [type, name] of Object.entries(RpcMethods)) {
+    if (name === method) return { ...params, type } as NetworkMessage
+  }
+  return null
+}

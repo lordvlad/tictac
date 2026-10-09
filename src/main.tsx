@@ -33,11 +33,12 @@ import {
 import { captureMoment, restoreMoment, type Rewindable } from './game/Rewind'
 import { Squads } from './game/Squads'
 import { TurnManager } from './game/TurnManager'
+import { type EncounterPromptHandle, mountEncounterPrompt } from './hud/EncounterPrompt'
 import { FpsCounter } from './hud/FpsCounter'
 import { FullscreenPrompt } from './hud/FullscreenPrompt'
 import { Hud } from './hud/Hud'
 import { LoadoutScreen } from './hud/LoadoutScreen'
-import { openMap } from './hud/MapScreen'
+import { closeMap, openMap } from './hud/MapScreen'
 import { InterruptedOverlay } from './hud/menu/InterruptedOverlay'
 import { StartMenu } from './hud/menu/StartMenu'
 import { PlaybackControls } from './hud/PlaybackControls'
@@ -88,13 +89,27 @@ function connectionToServer(): ServerConnection {
   if (server && server.state.kind !== 'closed') return server
   server?.close()
   server = new ServerConnection(matchServerFor(new URL(window.location.href)))
+  encounterPrompt?.follow(server)
   return server
 }
 
 function leaveServer(): void {
   server?.close()
   server = null
+  encounterPrompt?.follow(null)
 }
+
+/**
+ * The join prompt for a fight on the road (`ITEM-048`), mounted once the game
+ * has loaded and following whichever connection the window has.
+ */
+let encounterPrompt: EncounterPromptHandle | null = null
+
+/** The start menu on screen, if any: how something that is not the menu puts it away. */
+let openMenu: (() => void) | null = null
+
+/** The map on screen, from opening to its close having finished. */
+let mapOpen: Promise<void> | null = null
 
 const ASSETS: Asset[] = [
   { name: 'character', type: 'gltfModel', path: `${baseUrl}character.glb` },
@@ -123,6 +138,15 @@ game.resources.on('loaded', () => {
   // back on exit, and the counter measures frames wherever the game is drawing.
   new FullscreenPrompt()
   new FpsCounter()
+  encounterPrompt = mountEncounterPrompt({
+    // A fight is taken over from the menu or the map. In a match or a replay
+    // there is nothing to take it over from: the player is already somewhere
+    // the prompt has no business, and the AI plays it.
+    available: () => openMenu !== null || mapOpen !== null,
+    take: takeEncounter,
+    showFeed: () => void showMap(),
+  })
+  if (server) encounterPrompt.follow(server)
   showMenu()
 })
 
@@ -164,9 +188,11 @@ function showMenu(notice?: string): void {
   const root = createRoot(container)
 
   const closeMenu = () => {
+    if (openMenu === closeMenu) openMenu = null
     root.unmount()
     container.remove()
   }
+  openMenu = closeMenu
 
   /**
    * Who a signed-in player deploys (`[ITEM-042]`): chosen from the roster
@@ -248,18 +274,61 @@ function showMenu(notice?: string): void {
           throw err
         }
       }}
-      onOpenMap={async () => {
-        // The game's own canvas is covered by the map, which draws its own
-        // frames: two render loops would share the GPU for nothing.
-        const resume = pauseRendering(Game.instance())
-        try {
-          await openMap(connectionToServer(), baseUrl)
-        } finally {
-          resume()
-        }
-      }}
+      onOpenMap={showMap}
     />,
   )
+}
+
+/**
+ * Open the map over everything else, once: asking again while it is open
+ * (the join prompt's link to the feed) is the same map.
+ */
+function showMap(): Promise<void> {
+  mapOpen ??= (async () => {
+    // The game's own canvas is covered by the map, which draws its own
+    // frames: two render loops would share the GPU for nothing.
+    const resume = pauseRendering(Game.instance())
+    try {
+      await openMap(connectionToServer(), baseUrl, (recording) => void playBack(recording))
+    } finally {
+      resume()
+      mapOpen = null
+    }
+  })()
+  return mapOpen
+}
+
+/** Watch a fight from the return feed: the map and the menu give way to the replay, and its end is a page reload to the menu like any other. */
+async function playBack(recording: CombatRecording): Promise<void> {
+  closeMap()
+  await mapOpen
+  openMenu?.()
+  try {
+    startPlayback(recording)
+  } catch (error) {
+    console.error('[tictac] could not play the recording back', error)
+    flashNotice('That fight could not be played back.')
+  }
+}
+
+/**
+ * Take a fight on the road over (`ITEM-048`): the seat the server held
+ * for this player, resumed exactly as a window taking back its match does.
+ * Works from the menu or the map, which give way to the match once the
+ * room's log has arrived; rejects, with the server's own reason, if the
+ * seat is no longer to be had (the AI has it).
+ */
+async function takeEncounter(roomId: string): Promise<void> {
+  const network = new NetworkManager()
+  try {
+    const seat = await network.enterRoom(connectionToServer(), { kind: 'resume', roomId })
+    closeMap()
+    await mapOpen
+    await takeSeat(network, seat, {}, () => openMenu?.())
+  } catch (err) {
+    network.dispose()
+    throw err
+  }
 }
 
 

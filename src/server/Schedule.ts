@@ -63,19 +63,29 @@ export class Schedule {
   /**
    * The alarm went off: run every moment due by now, earliest first, each
    * removed before its handler runs so the handler can set the next one, then
-   * arm for whatever is left.
+   * arm for whatever is left. The earliest is looked for again after every
+   * handler, so a moment a handler sets that falls before the others still
+   * due runs before them: time order holds across everything, not only
+   * within what was due when the alarm went off.
    */
   fire(): Promise<void> {
     this.firing = this.firing.then(async () => {
       const now = this.host.now()
-      const ready = [...this.due.values()].filter((due) => due.at <= now).sort((a, b) => a.at - b.at)
-      for (const due of ready) {
+      for (let due = this.earliestBy(now); due; due = this.earliestBy(now)) {
         this.due.delete(keyOf(due.kind, due.id))
         await this.handlers.get(due.kind)?.(due.id, due.at)
       }
       this.arm()
     })
     return this.firing
+  }
+
+  private earliestBy(now: number): Due | null {
+    let earliest: Due | null = null
+    for (const due of this.due.values()) {
+      if (due.at <= now && (earliest === null || due.at < earliest.at)) earliest = due
+    }
+    return earliest
   }
 
   private arm(): void {

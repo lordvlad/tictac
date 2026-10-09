@@ -70,6 +70,38 @@ export function matchServerFor(page: URL): string {
  */
 export const MAP_TILE_MAX_ZOOM = 14
 
+/**
+ * Wild encounters on the road (`ITEM-048`, GDD-WORLD §5.1). Tuning, not
+ * rules: nothing here is part of a match, and a change moves how often a
+ * squad is found, never what a fight does.
+ */
+export const ENCOUNTER = {
+  /**
+   * The chance that something finds a squad for each hour it spends travelling
+   * at a normal pace through an area of danger 1. No area has a danger yet,
+   * so every area is 1 (`DANGER_EVERYWHERE`). An hour at 15% makes a five-hour
+   * walk about a 55% chance of at least one fight.
+   */
+  perHour: 0.15,
+  /** How the pace scales it: a cautious squad is found half as often, a flat-out one half again as much. */
+  pace: { cautious: 0.5, normal: 1, flatOut: 1.5 },
+  /** No stretch is ever more than this likely to find somebody, however long or dangerous. */
+  ceiling: 0.9,
+  /** The danger of every area, until areas have one. */
+  dangerEverywhere: 1,
+  /** How long an online player has to take a fight before the AI plays it for them. */
+  joinWindowMs: 60_000,
+  /** How many entries the return feed shows. */
+  feedLimit: 50,
+  /**
+   * After this turn an AI seat stops waiting out a stalemate and gets out of
+   * the fight (`AiPlayer`): about one fight in a hundred between two AIs never
+   * ends otherwise. The balance sweep's own cap, so what the numbers measure
+   * is what a fight is.
+   */
+  turnLimit: 40,
+} as const
+
 /** Grid is GRID_SIZE x GRID_SIZE tiles. */
 export const GRID_SIZE = 36
 

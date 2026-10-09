@@ -1,6 +1,7 @@
 import { Accounts } from './Accounts'
 import type { Db } from './db/Db'
 import { migrate } from './db/migrate'
+import { Encounters } from './Encounters'
 import { MatchStore } from './MatchStore'
 import { RoomStore } from './RoomStore'
 import { Rosters } from './Rosters'
@@ -42,6 +43,7 @@ export interface Persistence {
   accounts: Accounts
   rosters: Rosters
   squads: Squads
+  encounters: Encounters
   /** The passkeys' relying party, which a server also publishes the related origins of (`RelatedOrigins.ts`). */
   party: RelyingParty
   close(): Promise<void>
@@ -73,6 +75,7 @@ export async function persistenceOverDb(
     accounts: new Accounts(db, rosters, squads, party),
     rosters,
     squads,
+    encounters: new Encounters(db),
     party,
     close: () => db.close(),
   }
