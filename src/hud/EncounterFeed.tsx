@@ -110,7 +110,7 @@ export function EncounterFeed({
             return (
               <li key={entry.id} className={`map-feed-row ${line.tone}`}>
                 <div>
-                  <b>{line.result}</b> · {line.aliens}
+                  <b>{line.result}</b> · {line.opponent}
                   {entry.at > seenAt && <span className="map-badge">new</span>}
                 </div>
                 <div className="map-hint">

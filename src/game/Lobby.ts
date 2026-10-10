@@ -126,5 +126,11 @@ export interface LobbyView {
     control: SeatControl
     /** The server's clock, in ms, when a `reserved` seat passes to the AI; null otherwise. */
     joinBy: number | null
+    /**
+     * Whose squad this seat is fighting when it is an encounter: the other
+     * player's name, or null for aliens and for every ordinary match. What a
+     * window that connects after `encounter/started` words its prompt by.
+     */
+    against: string | null
   } | null
 }

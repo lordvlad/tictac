@@ -14,11 +14,11 @@ import {
   type RpcPushes,
 } from '../game/Rpc'
 import { MY_VERSION, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
-import type { EncounterContact, EncounterOpened } from './EncounterPort'
+import type { EncounterContact, EncounterOpened, MeetingContact, MeetingOpened } from './EncounterPort'
 import type { MatchStore } from './MatchStore'
 import { hashSeatKey, Room, type Client, type RefereeVerdict, type RoomOptions } from './Room'
 import type { RoomStore } from './RoomStore'
-import type { Rosters } from './Rosters'
+import type { RosterMember, Rosters } from './Rosters'
 
 /**
  * The match server's rooms, and who is in which.
@@ -65,11 +65,12 @@ import type { Rosters } from './Rosters'
  * the bundle it started on, while opening, joining and watching require the
  * server's own build.
  *
- * **A fight on the road is a room the server opens** (`openEncounter`): the
- * player's seat in it is *reserved* for them until the join window closes and
- * then the AI's, a seat they hold is the AI's the moment its grace runs out,
- * and nobody but the player ever sees the room. While the AI has their seat
- * the player is refused it, and may only watch.
+ * **A fight on the road is a room the server opens** (`openEncounter`, and
+ * `openMeeting` for two players' squads): the player's seat in it is
+ * *reserved* for them until the join window closes and then the AI's, a seat
+ * they hold is the AI's the moment its grace runs out, and nobody but the
+ * players ever sees the room. While the AI has their seat the player is
+ * refused it, and may only watch.
  */
 
 /** How long a seat is held for its window after its socket drops. */
@@ -99,8 +100,8 @@ export interface LobbyOptions {
   now?: () => number
   /** The seed of a fight's map: system randomness, unless a test needs the fight to be the same one twice. */
   mapSeed?: () => number
-  /** Called when a player takes a fight the server kept for them, before the AI did (`room`'s id). */
-  onEncounterTaken?: (roomId: string) => void
+  /** Called when a player takes a fight the server kept for them, before the AI did (`room`'s id, and the player). */
+  onEncounterTaken?: (roomId: string, playerId: string) => void
 }
 
 /**
@@ -148,7 +149,7 @@ export class Lobby {
   private readonly rosters: Rosters | undefined
   private readonly now: () => number
   private readonly mapSeed: () => number
-  private readonly onEncounterTaken: ((roomId: string) => void) | undefined
+  private readonly onEncounterTaken: ((roomId: string, playerId: string) => void) | undefined
   private readonly log: (message: string) => void
   private disposed = false
 
@@ -235,42 +236,31 @@ export class Lobby {
    */
   async openEncounter(contact: EncounterContact): Promise<EncounterOpened> {
     const { player } = contact
-    if (!this.rosters) throw new Error('this lobby keeps no rosters, so there is no squad to find on the road')
+    const { rosters } = this
+    if (!rosters) throw new Error('this lobby keeps no rosters, so there is no squad to find on the road')
     await this.idle()
-    const party = (await this.rosters.active(player.id))
-      .filter((member) => member.downtime === 0)
-      .slice(0, SQUAD_SIZE)
+    const party = await fit(rosters, player.id)
     if (this.disposed) throw new Error('the lobby has stopped')
     // Weighed after every wait, and acted on without another: nothing may
     // seat the player between this check and the room being in the map.
     if (this.seatOf(player.id)) return { opened: false, passedFor: 'busy' }
     if (party.length === 0) return { opened: false, passedFor: 'nobodyFit' }
 
-    const kit = defaultLoadout(party.length)
-    const humans: Deployment[] = party.map((member, i) => ({
-      characterId: member.characterId,
-      sheet: member.sheet,
-      loadout: kit[i]!,
-      state: { hp: member.hp, fatigue: member.fatigue },
-    }))
     const aliens = dealAliens(contact.alienSeed, Math.min(SQUAD_SIZE, Math.max(1, party.length + contact.sizeOffset)))
-    const seed = this.mapSeed()
-    const header: RecordingHeader = {
-      version: RECORDING_VERSION,
-      seed,
-      seedLabel: String(seed),
-      source: 'live',
-      createdAt: new Date(this.now()).toISOString(),
-      turnCap: null,
-      squads: { [Faction.Blue]: humans, [Faction.Red]: aliens },
-      controllers: { [Faction.Blue]: 'human', [Faction.Red]: 'ai' },
-    }
+    const header = this.composed(
+      { [Faction.Blue]: deployed(party), [Faction.Red]: aliens },
+      { [Faction.Blue]: 'human', [Faction.Red]: 'ai' },
+    )
 
-    const window = this.windows.get(player.id)
-    const joinBy = window && !window.gone ? this.now() + ENCOUNTER.joinWindowMs : null
+    const joinBy = this.joinByFor(player.id)
     const room = new Room(this.freshId(), this.version, this.roomOptions)
     this.rooms.set(room.id, room)
-    room.openEncounter(header, player, joinBy)
+    // The player's side is theirs to take or the AI's to play, on `stand`
+    // until the AI is given a standing order for fights with aliens too.
+    room.openEncounter(header, {
+      [Faction.Blue]: { player, joinBy, standing: 'stand' },
+      [Faction.Red]: { player: null, joinBy: null, standing: 'stand' },
+    })
     this.log(
       `room ${room.id}: ${player.name} met ${aliens.length} aliens on the road with ${party.length}, ` +
         (joinBy === null ? 'offline, the AI plays their side' : `online, theirs to take until ${joinBy}`),
@@ -278,6 +268,7 @@ export class Lobby {
     if (joinBy !== null) {
       this.tell(player.id, 'tictac/api/encounter/started', {
         roomId: room.id,
+        against: null,
         joinBy,
         at: contact.at,
         place: contact.place,
@@ -285,6 +276,67 @@ export class Lobby {
     }
     this.changed()
     return { opened: true, roomId: room.id, aliens: aliens.length, joinBy }
+  }
+
+  /**
+   * Open the fight two players' squads make when they meet (`ITEM-053`,
+   * GDD-WORLD §5.5), or say why there is none.
+   *
+   * Each side is composed as an encounter's party is — the first `SQUAD_SIZE`
+   * fit members by slot, read from the roster rows so that the room's check of
+   * both squads against both rosters (`Room.verifyRosters`) passes — and a
+   * player with a seat in any room, or nobody fit, is busy or absent for the
+   * pair: the meeting does not happen and, as the caller records nothing for a
+   * pass, neither player hears of it. Presence is per side: a player with a
+   * window bound is told, and has the join window to take their seat; the
+   * other's seat is the AI's at once, playing to their standing order.
+   *
+   * Both rosters are read before either seat is looked at, and the seats are
+   * weighed after the last wait, so nothing can seat either player between
+   * this check and the room being in the map.
+   */
+  async openMeeting(contact: MeetingContact): Promise<MeetingOpened> {
+    const { blue, red } = contact
+    const { rosters } = this
+    if (!rosters) throw new Error('this lobby keeps no rosters, so there is no squad to meet on the road')
+    await this.idle()
+    const [blueParty, redParty] = await Promise.all([fit(rosters, blue.player.id), fit(rosters, red.player.id)])
+    if (this.disposed) throw new Error('the lobby has stopped')
+    if (this.seatOf(blue.player.id) || this.seatOf(red.player.id)) return { opened: false, passedFor: 'busy' }
+    if (blueParty.length === 0 || redParty.length === 0) return { opened: false, passedFor: 'nobodyFit' }
+
+    const header = this.composed(
+      { [Faction.Blue]: deployed(blueParty), [Faction.Red]: deployed(redParty) },
+      { [Faction.Blue]: 'human', [Faction.Red]: 'human' },
+    )
+    const blueJoinBy = this.joinByFor(blue.player.id)
+    const redJoinBy = this.joinByFor(red.player.id)
+    const room = new Room(this.freshId(), this.version, this.roomOptions)
+    this.rooms.set(room.id, room)
+    room.openEncounter(header, {
+      [Faction.Blue]: { player: blue.player, joinBy: blueJoinBy, standing: blue.standing },
+      [Faction.Red]: { player: red.player, joinBy: redJoinBy, standing: red.standing },
+    })
+    this.log(
+      `room ${room.id}: ${blue.player.name} (${blueParty.length}) met ${red.player.name} (${redParty.length}) on the road; ` +
+        `${blue.player.name} ${blueJoinBy === null ? 'is offline, the AI plays their side' : `has until ${blueJoinBy}`}, ` +
+        `${red.player.name} ${redJoinBy === null ? 'is offline, the AI plays their side' : `has until ${redJoinBy}`}`,
+    )
+    for (const [mine, theirs, joinBy] of [
+      [blue, red, blueJoinBy],
+      [red, blue, redJoinBy],
+    ] as const) {
+      if (joinBy === null) continue
+      this.tell(mine.player.id, 'tictac/api/encounter/started', {
+        roomId: room.id,
+        against: theirs.player.name,
+        joinBy,
+        at: contact.at,
+        place: contact.place,
+      })
+    }
+    this.changed()
+    return { opened: true, roomId: room.id, blueJoinBy, redJoinBy }
   }
 
   /** A socket connected: served from now on, and closed with the server, whatever it goes on to ask. */
@@ -524,7 +576,7 @@ export class Lobby {
         seated = room.watch(client)
       } else {
         seated = room.takeBack(client, held.faction, intent.kind !== 'resume')
-        if (control === 'reserved') this.onEncounterTaken?.(room.id)
+        if (control === 'reserved' && player) this.onEncounterTaken?.(room.id, player.id)
       }
     } else {
       switch (intent.kind) {
@@ -677,7 +729,14 @@ export class Lobby {
     const held = player ? this.seatOf(player.id) : null
     if (!held) return null
     const { room, faction } = held
-    return { roomId: room.id, faction, phase: room.phase, control: room.controlOf(faction)!, joinBy: room.joinByOf(faction) }
+    return {
+      roomId: room.id,
+      faction,
+      phase: room.phase,
+      control: room.controlOf(faction)!,
+      joinBy: room.joinByOf(faction),
+      against: room.againstOf(faction),
+    }
   }
 
   /**
@@ -735,4 +794,54 @@ export class Lobby {
     while (this.rooms.has(id))
     return id
   }
+
+  /** The moment the seat a player is told of passes to the AI: the join window from now for one with a window bound, null for one who is not here to be asked. */
+  private joinByFor(playerId: string): number | null {
+    const window = this.windows.get(playerId)
+    return window && !window.gone ? this.now() + ENCOUNTER.joinWindowMs : null
+  }
+
+  /** The header of a fight the server composes: a map from system randomness, a live source, and no turn cap. */
+  private composed(squads: RecordingHeader['squads'], controllers: RecordingHeader['controllers']): RecordingHeader {
+    // The seed of the map comes from system randomness, not from anything the
+    // contact rolled: the map is not part of what the contact decided.
+    const seed = this.mapSeed()
+    return {
+      version: RECORDING_VERSION,
+      seed,
+      seedLabel: String(seed),
+      source: 'live',
+      createdAt: new Date(this.now()).toISOString(),
+      turnCap: null,
+      squads,
+      controllers,
+    }
+  }
+}
+
+/**
+ * Who a squad on the road fields: the first `SQUAD_SIZE` active members by
+ * slot who are not in the medical bay, until a travelling party can be chosen
+ * (GDD-WORLD §5.4). A member deployed in a live room would be excluded too,
+ * but a player holds one seat at a time (`Lobby.seatOf`), so such a member can
+ * only belong to a player who is busy, and that is a pass in itself.
+ */
+async function fit(rosters: Rosters, playerId: string): Promise<RosterMember[]> {
+  return (await rosters.active(playerId)).filter((member) => member.downtime === 0).slice(0, SQUAD_SIZE)
+}
+
+/**
+ * A party as the header states it, composed *from* the roster rows: which is
+ * what lets the room's check of the squad against the roster
+ * (`Room.verifyRosters`) pass byte for byte, since nothing can change a row
+ * between the two once no live room holds these members.
+ */
+function deployed(party: readonly RosterMember[]): Deployment[] {
+  const kit = defaultLoadout(party.length)
+  return party.map((member, i) => ({
+    characterId: member.characterId,
+    sheet: member.sheet,
+    loadout: kit[i]!,
+    state: { hp: member.hp, fatigue: member.fatigue },
+  }))
 }

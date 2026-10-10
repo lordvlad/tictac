@@ -34,6 +34,12 @@ export interface Env {
    * `/.well-known/webauthn` lends the relying party id to.
    */
   RELYING_PARTY_ORIGINS?: string
+  /**
+   * The trial switch for squads of different players meeting on the road
+   * (`ITEM-053`, GDD-WORLD §5.5): `off` stops every meeting from the next
+   * check on, anything else (unset included) allows them.
+   */
+  PLAYER_ENCOUNTERS?: string
 }
 
 /**

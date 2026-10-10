@@ -4,7 +4,9 @@ import { type LatLng, type Pace, positionAt, type TravelState } from '../core/Tr
 import type { CombatRecording } from '../game/Recording'
 import type { Squad, SquadOrder } from '../game/Rpc'
 import type { ServerConnection } from '../game/ServerConnection'
+import type { StandingOrder } from '../sim/Policy'
 import { EncounterFeed } from './EncounterFeed'
+import { STANDING_ORDERS } from './EncounterView'
 import type { WorldMap } from './map/WorldMap'
 
 /**
@@ -90,6 +92,7 @@ function MapView({
   const [picked, setPicked] = useState<Picked | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [standingBusy, setStandingBusy] = useState(false)
   /** A clock tick for the status line; the map redraws on its own loop. */
   const [now, setNow] = useState(() => connection.now())
 
@@ -157,6 +160,19 @@ function MapView({
     return () => window.clearInterval(timer)
   }, [squad])
 
+  const stand = async (order: StandingOrder) => {
+    setStandingBusy(true)
+    try {
+      const answer = await connection.request('tictac/api/squad/standing', { order })
+      setSquad(answer.squad)
+      setProblem(null)
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : 'That standing order did not reach the squad.')
+    } finally {
+      setStandingBusy(false)
+    }
+  }
+
   const give = async (order: SquadOrder) => {
     setPicked(null)
     setBusy(true)
@@ -201,6 +217,32 @@ function MapView({
               {option.label}
             </button>
           ))}
+        </div>
+        <div className="map-standing">
+          <div className="map-subtitle">When you are away</div>
+          <div className="map-paces" role="radiogroup" aria-label="When you are away">
+            {STANDING_ORDERS.map((option) => (
+              <button
+                key={option.order}
+                type="button"
+                role="radio"
+                aria-checked={squad?.standing === option.order}
+                className={squad?.standing === option.order ? 'map-pace chosen' : 'map-pace'}
+                disabled={!squad || standingBusy}
+                onClick={() => void stand(option.order)}
+                title={option.meaning}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {squad && (
+            <div className="map-hint">{STANDING_ORDERS.find((option) => option.order === squad.standing)?.meaning}</div>
+          )}
+          <div className="map-hint">
+            The AI plays your squad to this when you are not there or do not take the fight. Aliens and other
+            players do not see it.
+          </div>
         </div>
         <div className="map-hint">Right-click the map to send the squad there.</div>
         <div className="map-actions">

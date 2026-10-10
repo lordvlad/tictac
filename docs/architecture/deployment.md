@@ -303,6 +303,16 @@ file the same functions are imported from.
   and nothing else. Credentials (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`) live in a
   git-ignored `.env`, sourced into the shell before running this command — never committed, and
   not read by anything else in the repo.
+- **`PLAYER_ENCOUNTERS`** (`wrangler.jsonc` `vars`, `on` as shipped) is the trial switch for
+  fights between players (`ITEM-053`, GDD-WORLD §5.3 and §5.5). The Durable Object reads it at the
+  moment of every meeting check (`env.PLAYER_ENCOUNTERS !== 'off'`), so setting it to `off` stops
+  meetings from the next check on with no new code: in the Cloudflare dashboard (Workers →
+  Settings → Variables) or with `bun run cf:deploy --var PLAYER_ENCOUNTERS:off`. **The next
+  deploy puts it back** to what `wrangler.jsonc` says (`on`), because a deploy replaces the
+  Worker's variables: to keep meetings off across deploys, change `wrangler.jsonc` too. A meeting
+  already scheduled does nothing when it fires while the switch is off; the next route a squad is
+  given, or the next restart, finds the pair again once it is on. Aliens (`ITEM-048`) are
+  unaffected. The Bun server has `--player-encounters=off` (`serve-match.ts`).
 - **`bun run typecheck:cf`** (wired into `bun run lint`) — `workers/tsconfig.json` typechecks
   `workers/` in isolation, with `@cloudflare/workers-types` and no DOM lib. It is excluded from
   the root `tsconfig.json`'s `include` for the same reason `src/game`/`src/hud` never import

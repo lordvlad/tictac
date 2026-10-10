@@ -270,6 +270,41 @@ These are the decisions `ITEM-048` builds on, each naming the code it changes.
    checkpoint), the squad stops there, and going through is its own order — the hand-off
    (`ownerOf`, `src/server/Owner.ts`). Inside a zone, routes stay straight lines.
 
+### 5.5 When two players' squads meet (`ITEM-053`)
+
+The decisions §5.3 left open, settled for the first build:
+
+1. **A meeting is two squads coming within 1 km of each other** (`ENCOUNTER.meetingRangeKm`,
+   the same as the least distance between two starts). It counts when the distance *crosses*
+   into range, never when two squads already are within it: after a fight both squads stand
+   where it happened, and they do not fight again until one has left range and come back. A
+   resting squad is a point, and engageable (the trial); a travelling one moves along its legs
+   in straight lines at its pace, so the first moment two routes come within range is solved
+   directly (`src/core/Meetings.ts`), with no sampling.
+2. **When it is found.** Whenever a route is set (an order, or an arrival that changes what a
+   squad is doing) the server checks that squad's route against every other squad's, schedules
+   the earliest meeting for each pair, and replaces whatever it had scheduled for that squad.
+   When the moment comes it checks again against the routes as they are then. One server, all
+   squads: a straight scan, since there is nothing yet to shard (`ITEM-046`).
+3. **Either squad busy means no meeting.** A squad that holds a live match (one match per
+   player) or has nobody fit to field cannot be engaged; the meeting does not happen and is
+   recorded for nobody. They passed in the night.
+4. **Who is Blue** is decided from the pair and the moment (`hash`), so it can be audited and
+   favours neither the one who moved nor the one who waited.
+5. **Presence is per side, as with aliens (§5.2).** Each player who is online gets the join
+   window (60 s) and a push naming who they met; one who is offline has their seat played by the
+   AI at once, and a player whose window lapses or whose seat drops has it taken the same way.
+   Both sides settle their rosters, growth included.
+6. **The AI fights to a standing order the player set** (`squad/standing`): `stand` (fight),
+   `cautious` (get out after the first wound or death), `opportunist` (size the enemy up and
+   decide) or `evade` (get out at once). It is stored with the squad and is `stand` until set.
+   The AI playing an alien squad, or a player who is present, takes no order.
+7. **The trial switch** is the server variable `PLAYER_ENCOUNTERS`: `off` stops every meeting
+   from the next check on, `on` (the default) allows them. It is read when a meeting is checked,
+   so changing it needs no deploy of new code.
+8. **Both players' feeds** show the fight, with the other player's name. Neither sees the other's
+   standing order or route.
+
 ## 6. Not designed yet
 
 - **Fog of war on the map.** The prior art's model (reveal along the route actually travelled,

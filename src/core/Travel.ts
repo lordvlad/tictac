@@ -21,8 +21,8 @@
  * the whole map.
  */
 
-const HOUR_MS = 3_600_000
-const EARTH_RADIUS_KM = 6371
+export const HOUR_MS = 3_600_000
+export const EARTH_RADIUS_KM = 6371
 
 export interface LatLng {
   lat: number
@@ -321,7 +321,7 @@ export function checkpoints(waypoints: readonly Waypoint[], trip: string): Check
 }
 
 /** A leg of the route being travelled, timed. */
-interface TimedLeg {
+export interface TimedLeg {
   from: LatLng
   to: LatLng
   start: number
@@ -330,7 +330,7 @@ interface TimedLeg {
 }
 
 /** The route ahead, timed from the last departure; null for a squad at rest. */
-function timedRoute(waypoints: readonly Waypoint[]): { departed: Departure; legs: TimedLeg[] } | null {
+export function timedRoute(waypoints: readonly Waypoint[]): { departed: Departure; legs: TimedLeg[] } | null {
   const { past, future } = split(waypoints)
   const origin = past.at(-1)
   if (!origin?.departed || future.length === 0) return null

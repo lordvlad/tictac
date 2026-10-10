@@ -2811,6 +2811,27 @@ canvas {
   color: var(--hud-accent);
 }
 
+/* The order the AI plays the squad to while its player is away (`ITEM-053`). Four buttons, so two rows. */
+.map-standing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.map-subtitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hud-text);
+}
+
+.map-standing .map-paces {
+  flex-wrap: wrap;
+}
+
+.map-standing .map-pace {
+  flex: 1 1 40%;
+}
+
 .map-orders {
   position: absolute;
   display: flex;

@@ -42,6 +42,11 @@ export interface GameServerOptions {
   tiles?: TileHandler
   /** The clock squads travel by; the wall clock and `setTimeout` unless a test turns it. */
   clock?: ServerClock
+  /**
+   * Whether squads of different players can meet (`ITEM-053`): the trial
+   * switch, read at every check; on unless this says otherwise.
+   */
+  playerEncounters?: () => boolean
 }
 
 /** Time, and a way to be woken at one: what the Durable Object's alarm is here. */
@@ -73,8 +78,8 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
     // seat for its player until a moment on it.
     now: () => clock.now(),
     schedule: (fn, ms) => clock.schedule(fn, ms),
-    onEncounterTaken: (roomId) => {
-      persistence.encounters.markTaken(roomId).catch((error: unknown) => log(`could not record that ${roomId} was taken: ${String(error)}`))
+    onEncounterTaken: (roomId, playerId) => {
+      persistence.encounters.markTaken(roomId, playerId).catch((error: unknown) => log(`could not record that ${roomId} was taken: ${String(error)}`))
     },
     onVerdict: (verdict) => {
       log(`verdict on ${verdict.matchId}: ${verdict.reason}`)
@@ -109,6 +114,8 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
     now: () => clock.now(),
     tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
     openEncounter: (contact) => lobby.openEncounter(contact),
+    openMeeting: (meeting) => lobby.openMeeting(meeting),
+    playerEncounters: options.playerEncounters,
     log,
   })
   await journeys.restore()

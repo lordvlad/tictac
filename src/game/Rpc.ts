@@ -1,6 +1,7 @@
 import type { CharacterSheet } from '../core/Characters'
 import type { LatLng, Pace, Waypoint } from '../core/Travel'
 import type { EncounterEntry, EncounterStarted } from './Encounter'
+import type { StandingOrder } from '../sim/Policy'
 import type { CombatRecording } from './Recording'
 import type { LobbyView, Seated, ServerIntent } from './Lobby'
 
@@ -50,6 +51,12 @@ export interface Player {
 export interface Squad {
   id: string
   waypoints: Waypoint[]
+  /**
+   * What the AI fights to when it plays this squad because its player is away
+   * (`ITEM-053`, GDD-WORLD §5.3). Set by the player (`squad/standing`); `stand`
+   * until they do.
+   */
+  standing: StandingOrder
 }
 
 /**
@@ -170,6 +177,13 @@ export interface RpcApi {
    * already on the move, anything but "go here" to one at rest.
    */
   'tictac/api/squad/order': { params: { order: SquadOrder }; result: { squad: Squad } }
+  /**
+   * Set what the AI fights to when it plays this squad for an absent player:
+   * fight (`stand`), get out after the first wound or death (`cautious`), size
+   * the enemy up (`opportunist`), or get out at once (`evade`). Answers the
+   * squad as `squad/get` does, and pushes `squad/changed`.
+   */
+  'tictac/api/squad/standing': { params: { order: StandingOrder }; result: { squad: Squad } }
   /**
    * What found this player's squad on the road, newest first, and how each
    * fight ended (`ITEM-048`). Refused `signInFirst` to an anonymous socket.

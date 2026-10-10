@@ -253,7 +253,16 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
     // What is written down is the drawn start and nothing else: no column
     // holds where the connection was.
     const rows = await persistence.db.query<Record<string, unknown>>`SELECT * FROM squads`
-    expect(Object.keys(rows[0]!).sort()).toEqual(['created_at', 'id', 'player_id', 'start_lat_e6', 'start_lng_e6', 'waypoints'])
+    // `standing` is the player's own setting (`squad/standing`), not a place.
+    expect(Object.keys(rows[0]!).sort()).toEqual([
+      'created_at',
+      'id',
+      'player_id',
+      'standing',
+      'start_lat_e6',
+      'start_lng_e6',
+      'waypoints',
+    ])
     expect(JSON.stringify(rows)).not.toContain('35.6895')
     expect(JSON.stringify(rows)).not.toContain('139.6917')
 

@@ -33,6 +33,8 @@ export type SeatControl = 'player' | 'reserved' | 'ai'
  */
 export interface EncounterStarted {
   roomId: string
+  /** Another player's name when the fight is against their squad (`ITEM-053`); null for aliens. */
+  against: string | null
   /** The server's clock (`clock/now`), in ms: after this the AI plays the seat. */
   joinBy: number
   /** When the contact happened. */
@@ -59,6 +61,8 @@ export interface EncounterEntry {
   playedBy: 'you' | 'ai' | null
   /** The match, to watch back (`tictac/api/match/recording`); null when there was no fight. */
   matchId: string | null
-  /** How many aliens it was. */
+  /** How many aliens it was; 0 for a fight against another player. */
   aliens: number
+  /** Another player's name when it was their squad (`ITEM-053`); null for aliens. */
+  against: string | null
 }

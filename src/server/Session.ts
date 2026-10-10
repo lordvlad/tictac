@@ -4,6 +4,7 @@ import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification, type JsonRpcRe
 import type { ServerIntent } from '../game/Lobby'
 import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type SignedIn, type SquadOrder } from '../game/Rpc'
 import type { Transport } from '../game/Transport'
+import type { StandingOrder } from '../sim/Policy'
 import { OLDEST_SERVED_PROTOCOL, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
 import { Refusal, type Lobby } from './Lobby'
 import type { Persistence } from './Persistence'
@@ -305,6 +306,10 @@ export class Sessions {
       const player = signedIn(session).player
       reply({ squad: await this.journeys.order(player.id, session.place, orderOf(params.order)) })
     },
+    'tictac/api/squad/standing': async (session, params, reply) => {
+      const player = signedIn(session).player
+      reply({ squad: await this.journeys.standing(player.id, session.place, standingOf(params.order)) })
+    },
     'tictac/api/encounter/feed': async (session, _params, reply) => {
       reply({ entries: await this.persistence.encounters.feed(signedIn(session).player.id, ENCOUNTER.feedLimit) })
     },
@@ -446,6 +451,15 @@ function orderOf(value: unknown): SquadOrder {
     default:
       throw new Refusal(RPC_ERRORS.invalidParams, 'That order is not one a squad takes.')
   }
+}
+
+/** Every order a squad's AI can fight to, so that one added to `StandingOrder` is added here. */
+const STANDING_ORDERS: Record<StandingOrder, true> = { stand: true, cautious: true, opportunist: true, evade: true }
+
+/** The order a `squad/standing` states. Peer input: checked, not trusted. */
+function standingOf(value: unknown): StandingOrder {
+  if (typeof value === 'string' && Object.hasOwn(STANDING_ORDERS, value)) return value as StandingOrder
+  throw new Refusal(RPC_ERRORS.invalidParams, 'That is not a standing order: stand, cautious, opportunist or evade.')
 }
 
 /** A point on the map: finite, latitude within ±90, longitude within ±180. */

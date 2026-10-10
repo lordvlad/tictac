@@ -383,16 +383,16 @@ describe('a fight found for a player who is online', () => {
     expect(joinBy).toBe(START + ENCOUNTER.joinWindowMs)
 
     expect(ada.pushed.filter((push) => push.method === 'tictac/api/encounter/started').map((push) => push.params)).toEqual([
-      { roomId, joinBy, at: START, place },
+      { roomId, against: null, joinBy, at: START, place },
     ])
     // Kept for her, not yet hers: the panel offers it rather than taking it over.
-    expect(w.lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'reserved', joinBy })
+    expect(w.lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'reserved', joinBy, against: null })
     expect(w.taken).toEqual([])
 
     const seated = await ada.request('tictac/api/room/enter', { intent: { kind: 'resume', roomId } })
     expect(seated).toMatchObject({ roomId, faction: Faction.Blue, phase: 'playing', redirected: false })
     expect(w.taken).toEqual([roomId])
-    expect(w.lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'player', joinBy: null })
+    expect(w.lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'player', joinBy: null, against: null })
 
     // She plays Blue's first turn from the log the room handed her; the AI's
     // aliens answer through the same referee.
@@ -425,7 +425,7 @@ describe('a fight found for a player who is online', () => {
     // Everything below is asked in this same turn, since the fight plays out
     // in the next ones: what the lobby answers is what it answers *now*.
     w.fire(ENCOUNTER.joinWindowMs)
-    expect(w.lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'ai', joinBy: null })
+    expect(w.lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'ai', joinBy: null, against: null })
     const late = [ada.enter({ kind: 'resume', roomId }), ada.enter({ kind: 'open' })].map((asked) =>
       asked.then(
         () => null,
@@ -521,7 +521,7 @@ describe('a fight and a server that restarts', () => {
     const second = await w.serve()
     const room = second.room(roomId)!
     expect(room.judged).toBe(true)
-    expect(second.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'player', joinBy: null })
+    expect(second.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'player', joinBy: null, against: null })
     expect(room.controlOf(Faction.Red)).toBe('ai')
     expect(room.digest()).toEqual(host.digest())
 
@@ -589,6 +589,7 @@ describe('a fight and a server that restarts', () => {
       phase: 'playing',
       control: 'reserved',
       joinBy: adas.joinBy!,
+      against: null,
     })
     // The window runs out where it always would have.
     await w.clock.advance(ENCOUNTER.joinWindowMs - 30_000)

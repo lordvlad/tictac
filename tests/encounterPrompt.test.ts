@@ -9,10 +9,15 @@ import {
   autoResumes,
   feedLine,
   formatCountdown,
+  lapsedNote,
+  offerNote,
+  offerQuestion,
   placeLabel,
   promptFor,
+  STANDING_ORDERS,
   unseenCount,
 } from '../src/hud/EncounterView'
+import type { StandingOrder } from '../src/sim/Policy'
 import { handClock, handServer } from './support/handServer'
 
 /**
@@ -31,9 +36,16 @@ const you = (overrides: Partial<You>): You => ({
   phase: 'playing',
   control: 'player',
   joinBy: null,
+  against: null,
   ...overrides,
 })
-const STARTED: EncounterStarted = { roomId: 'r1', joinBy: 100_000, at: 40_000, place: { lat: 1, lng: 2 } }
+const STARTED: EncounterStarted = {
+  roomId: 'r1',
+  against: null,
+  joinBy: 100_000,
+  at: 40_000,
+  place: { lat: 1, lng: 2 },
+}
 
 describe('the countdown', () => {
   test('reads as a clock, rounds up so 0:00 means over, and never goes negative', () => {
@@ -52,6 +64,7 @@ describe('the join prompt', () => {
       kind: 'offer',
       roomId: 'r1',
       joinBy: 100_000,
+      against: null,
     })
     expect(promptFor({ pushed: STARTED, you: null, now: 99_999 })?.kind).toBe('offer')
     expect(promptFor({ pushed: STARTED, you: null, now: 100_000 })).toBeNull()
@@ -63,15 +76,21 @@ describe('the join prompt', () => {
       kind: 'offer',
       roomId: 'r1',
       joinBy: 100_000,
+      against: null,
     })
   })
 
   test('once the time is up the AI is fighting, whether or not the server has said so yet', () => {
     const reserved = you({ control: 'reserved', joinBy: 100_000 })
-    expect(promptFor({ pushed: STARTED, you: reserved, now: 100_000 })).toEqual({ kind: 'ai', roomId: 'r1' })
+    expect(promptFor({ pushed: STARTED, you: reserved, now: 100_000 })).toEqual({
+      kind: 'ai',
+      roomId: 'r1',
+      against: null,
+    })
     expect(promptFor({ pushed: STARTED, you: you({ control: 'ai' }), now: 130_000 })).toEqual({
       kind: 'ai',
       roomId: 'r1',
+      against: null,
     })
   })
 
@@ -84,6 +103,43 @@ describe('the join prompt', () => {
   test('nothing is asked when there is nothing', () => {
     expect(promptFor({ pushed: null, you: null, now: 0 })).toBeNull()
     expect(promptFor({ pushed: null, you: undefined, now: 0 })).toBeNull()
+  })
+
+  test('names the other player when the push does, or when only the seat knows', () => {
+    const met = { ...STARTED, against: 'Ada' }
+    expect(promptFor({ pushed: met, you: undefined, now: 50_000 })).toEqual({
+      kind: 'offer',
+      roomId: 'r1',
+      joinBy: 100_000,
+      against: 'Ada',
+    })
+    const reserved = you({ control: 'reserved', joinBy: 100_000, against: 'Ada' })
+    expect(promptFor({ pushed: null, you: reserved, now: 70_000 })).toMatchObject({ kind: 'offer', against: 'Ada' })
+    expect(promptFor({ pushed: met, you: reserved, now: 100_000 })).toEqual({ kind: 'ai', roomId: 'r1', against: 'Ada' })
+    expect(promptFor({ pushed: null, you: reserved, now: 100_000 })).toMatchObject({ kind: 'ai', against: 'Ada' })
+  })
+
+  test('a push about another room does not name its opponent for this seat', () => {
+    const other = { ...STARTED, roomId: 'other', against: 'Grace' }
+    const reserved = you({ control: 'reserved', joinBy: 100_000, against: 'Ada' })
+    expect(promptFor({ pushed: other, you: reserved, now: 70_000 })).toMatchObject({ against: 'Ada' })
+  })
+
+  test('the words ask about the squad that came, and do not mention aliens for a player', () => {
+    expect(offerQuestion(null)).toBe('Aliens found your squad — take the fight?')
+    expect(offerQuestion('Ada')).toBe('Ada’s squad came within range — take the fight?')
+    expect(offerNote(null)).not.toContain('standing order')
+    expect(offerNote('Ada')).toContain('standing order')
+    expect(lapsedNote(null)).not.toContain('standing order')
+    expect(lapsedNote('Ada')).toContain('standing order')
+    for (const text of [offerQuestion('Ada'), offerNote('Ada'), lapsedNote('Ada')]) expect(text).not.toMatch(/alien/i)
+  })
+})
+
+describe('the standing orders', () => {
+  test('every order the AI knows is offered exactly once', () => {
+    const known: StandingOrder[] = ['cautious', 'evade', 'opportunist', 'stand']
+    expect(STANDING_ORDERS.map((option) => option.order).sort()).toEqual(known)
   })
 })
 
@@ -114,6 +170,7 @@ describe('the return feed', () => {
     playedBy: 'you',
     matchId: 'm1',
     aliens: 3,
+    against: null,
   }
 
   test('says when, where, how many, who played, and how it ended', () => {
@@ -123,7 +180,7 @@ describe('the return feed', () => {
       result: 'Won',
       tone: 'won',
       played: 'You played',
-      aliens: '3 aliens',
+      opponent: '3 aliens',
       matchId: 'm1',
     })
   })
@@ -137,6 +194,34 @@ describe('the return feed', () => {
     expect(line.result).toBe(text)
     expect(line.tone).toBe(tone)
     expect(line.matchId).toBe('m1')
+  })
+
+  test.each([
+    ['won', 'Won', 'you', 'You played'],
+    ['lost', 'Lost', 'you', 'You played'],
+    ['won', 'Won', 'ai', 'The AI played for you'],
+    ['lost', 'Lost', 'ai', 'The AI played for you'],
+    ['inProgress', 'In progress', 'you', 'You are playing'],
+    ['inProgress', 'In progress', 'ai', 'The AI is playing for you'],
+  ] as const)('a fight against a player, %s, played by %s: "vs Ada", never "0 aliens"', (result, text, playedBy, played) => {
+    const line = feedLine({ ...base, result, playedBy, aliens: 0, against: 'Ada' }, NOW)
+    expect(line.result).toBe(text)
+    expect(line.opponent).toBe('vs Ada')
+    expect(line.played).toBe(played)
+    expect(line.matchId).toBe('m1')
+  })
+
+  test.each([
+    ['nobodyFit', 'Passed by: nobody fit'],
+    ['busy', 'Passed by: you were busy'],
+  ] as const)('a meeting with a player passed by for %s still names them', (passedFor, text) => {
+    const line = feedLine(
+      { ...base, result: 'passedBy', passedFor, playedBy: null, matchId: null, aliens: 0, against: 'Ada' },
+      NOW,
+    )
+    expect(line.result).toBe(text)
+    expect(line.opponent).toBe('vs Ada')
+    expect(line.played).toBeNull()
   })
 
   test.each([
@@ -170,7 +255,7 @@ describe('the return feed', () => {
   )
 
   test('one alien is not "1 aliens"', () => {
-    expect(feedLine({ ...base, aliens: 1 }, NOW).aliens).toBe('1 alien')
+    expect(feedLine({ ...base, aliens: 1 }, NOW).opponent).toBe('1 alien')
   })
 
   test('relative times use the largest whole unit, and a clock slightly ahead is "just now"', () => {

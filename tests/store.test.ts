@@ -243,7 +243,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       judged: true,
       encounter: false,
       sides: { [Faction.Blue]: null, [Faction.Red]: null },
-      blue: { playerId: 'A', name: 'Ada', keyHash: 'hash-of-blue', control: 'player', joinBy: null },
+      blue: { playerId: 'A', name: 'Ada', keyHash: 'hash-of-blue', control: 'player', joinBy: null, standing: 'stand' },
       red: null,
     })
 
@@ -261,7 +261,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
         judged: false,
         sides: { [Faction.Blue]: { playerId: 'A', characterIds: ['c1', 'c2'] }, [Faction.Red]: null },
         blue: { ...waiting.blue, keyHash: 'rotated' },
-        red: { playerId: null, name: null, keyHash: 'hash-of-red', control: 'player', joinBy: null },
+        red: { playerId: null, name: null, keyHash: 'hash-of-red', control: 'player', joinBy: null, standing: 'stand' },
       }
       await store.rooms.save(later)
       expect(await store.rooms.live()).toEqual([later])
@@ -269,7 +269,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       await store.close()
     })
 
-    test('who moves each seat, the deadline of a reserved one, and whether the server opened the room come back as written', async () => {
+    test('who moves each seat, what its AI fights to, the deadline of a reserved one, and whether the server opened the room come back as written', async () => {
       const store = await freshPersistence(url)
       // A millisecond clock is far past what Postgres's INTEGER holds, which is
       // why the deadline is kept as a timestamp: it has to come back exactly.
@@ -278,8 +278,8 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
         ...room('fight', '2026-10-08T09:00:00.000Z'),
         phase: 'playing',
         encounter: true,
-        blue: { playerId: 'A', name: 'Ada', keyHash: 'hash-of-blue', control: 'reserved', joinBy },
-        red: { playerId: null, name: null, keyHash: 'hash-of-red', control: 'ai', joinBy: null },
+        blue: { playerId: 'A', name: 'Ada', keyHash: 'hash-of-blue', control: 'reserved', joinBy, standing: 'cautious' },
+        red: { playerId: null, name: null, keyHash: 'hash-of-red', control: 'ai', joinBy: null, standing: 'evade' },
       }
       await store.rooms.save(fight)
       expect(await store.rooms.live()).toEqual([fight])

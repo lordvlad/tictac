@@ -39,7 +39,9 @@ map on the deployed Worker.
 On 2026-10-09 the map's closer zooms were built (`[ITEM-067]`: tiles to z14 pulled from the planet
 the first time they are looked at). Wild alien encounters on the road (`[ITEM-048]`) were built the same day: the server opens the
 fight, an AI seat plays the aliens and any absent player, and an online player gets a 60 s join
-window. Fights between players (`[ITEM-053]`) come next.
+window. Fights between players (`[ITEM-053]`) followed: squads meet within 1 km, the AI plays an
+absent player's squad to a standing order they set, and a switch (`PLAYER_ENCOUNTERS`) turns it
+off without new code.
 
 **How the client reaches its server.** One address, `MATCH_SERVER_URL` in `src/config.ts` (the
 Cloudflare Worker); the menu has no address to type. A page served from this machine may add
@@ -48,8 +50,7 @@ ignored.
 
 ---
 ## 📋 Ready — pull in this order
-1. `[ITEM-053]` Player encounters on the road — offline squads engageable, on trial; routes
-   checked against every other squad's when set.
+Nothing is ready: the queue is empty. What is left is in the backlog below and in "Left open".
 
 ## 🧊 Backlog — not yet queued
 - `[ITEM-046]` Region-sharded Durable Objects — depends on the shared world having load to
@@ -92,6 +93,15 @@ ignored.
   its z8 archive).
 - **ITEM-063**: `squads` is one row per player *for now* (`squads_player`); captives, alien squads
   and a player with several squads widen it, and `[ITEM-048]`/`[ITEM-053]` lean on that.
+- **ITEM-053** (built; seen in Chromium against the Bun server, not yet on the deployed Worker):
+  (1) every squad is scanned for each route written, which is fine for a few players and not for
+  many (`[ITEM-046]`); (2) a meeting that cannot open because a squad is busy is not retried: the
+  pair is next found when one of them is given a new route; (3) the AI's standing order is stored
+  per squad, not per trip, and an order changed mid-fight changes nothing already being fought;
+  (4) a sleeping squad is a target by design and this is on trial: whether it stays is a decision
+  for after players have met; (5) the AI that plays an absent squad is the balance sweep's policy,
+  so it fights to measure guns and its weaknesses cost real characters; (6) nothing stops a player
+  parking a squad next to another's route to farm it — no cooldown, no zones yet.
 - **ITEM-048** (built; seen in Chromium against the Bun server and over RPC, not yet on the
   deployed Worker): (1) a crash between a room opening and its `encounters` row being written
   could open two rooms for one contact; (2) a fight whose room ends without a result row reads

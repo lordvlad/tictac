@@ -334,7 +334,7 @@ describe('The return feed', () => {
     await row(3, 4_000, 'lost', null)
     await settledMatch(persistence, 'won', Faction.Blue, playerId, null)
     await settledMatch(persistence, 'lost', Faction.Red, playerId, null)
-    await persistence.encounters.markTaken('won')
+    await persistence.encounters.markTaken('won', playerId)
 
     const entries = await w.feed()
     expect(entries.map((entry) => entry.result)).toEqual(['lost', 'won', 'inProgress', 'passedBy'])
@@ -349,7 +349,7 @@ describe('The return feed', () => {
 
   test('a player taking the seat before the row is written is still recorded as having played', async () => {
     const w = await walker(() => 'unused', (persistence) => contacts(persistence, PASSED))
-    await w.persistence.encounters.markTaken('quick')
+    await w.persistence.encounters.markTaken('quick', w.playerId)
     await w.persistence.encounters.record({
       squadId: w.squadId, playerId: w.playerId, trip: 't', checkpoint: 0, at: 1, place: w.home, aliens: 1, roomId: 'quick', passedFor: null,
     })

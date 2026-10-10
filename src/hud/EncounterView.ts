@@ -1,6 +1,7 @@
 import type { LatLng } from '../core/Travel'
 import type { EncounterEntry, EncounterResult, EncounterStarted, PassedFor } from '../game/Encounter'
 import type { LobbyView } from '../game/Lobby'
+import type { StandingOrder } from '../sim/Policy'
 
 /**
  * What a window says about the wild encounters on the road (`ITEM-048`): the
@@ -40,9 +41,9 @@ export function placeLabel(place: LatLng): string {
 /** The question the join prompt is asking right now, if any. */
 export type Prompt =
   /** A fight is theirs to take until `joinBy` (the server's clock). */
-  | { kind: 'offer'; roomId: string; joinBy: number }
+  | { kind: 'offer'; roomId: string; joinBy: number; against: string | null }
   /** The window passed, or the AI already sits: the AI is fighting for the squad. */
-  | { kind: 'ai'; roomId: string }
+  | { kind: 'ai'; roomId: string; against: string | null }
 
 /**
  * What to ask the player, from what this window knows.
@@ -63,19 +64,52 @@ export function promptFor(input: {
   if (you) {
     // A seat the player holds is a match, not a question.
     if (you.control === 'player') return null
+    // The push names who it was and wins; a window that connected after it has the seat's own word.
+    const against = pushed?.roomId === you.roomId ? pushed.against : you.against
     if (you.control === 'reserved' && you.joinBy !== null && now < you.joinBy) {
-      return { kind: 'offer', roomId: you.roomId, joinBy: you.joinBy }
+      return { kind: 'offer', roomId: you.roomId, joinBy: you.joinBy, against }
     }
     // Reserved and past its time, or already the AI's. A window that was
     // never asked (it connected with the AI already seated) is not told
     // again here: the server panel and the feed say so.
     const asked = you.control === 'reserved' || pushed?.roomId === you.roomId
-    return asked ? { kind: 'ai', roomId: you.roomId } : null
+    return asked ? { kind: 'ai', roomId: you.roomId, against } : null
   }
   // No seat in the lobby's view yet: the push's own word, while it holds.
-  if (pushed && now < pushed.joinBy) return { kind: 'offer', roomId: pushed.roomId, joinBy: pushed.joinBy }
+  if (pushed && now < pushed.joinBy) {
+    return { kind: 'offer', roomId: pushed.roomId, joinBy: pushed.joinBy, against: pushed.against }
+  }
   return null
 }
+
+/** The question the prompt asks: who found the squad, or whose squad came within range. */
+export function offerQuestion(against: string | null): string {
+  return against === null
+    ? 'Aliens found your squad — take the fight?'
+    : `${against}’s squad came within range — take the fight?`
+}
+
+/** What the prompt says happens if the time runs out: against a player, the AI plays to the standing order they set. */
+export function offerNote(against: string | null): string {
+  return against === null
+    ? 'If the time runs out, the AI plays it for you.'
+    : 'If the time runs out, the AI plays it for you, to your standing order.'
+}
+
+/** What the lapsed prompt says about the fight the AI took: against a player it is played to the standing order (GDD-WORLD §5.3). */
+export function lapsedNote(against: string | null): string {
+  return against === null
+    ? 'You can watch it back from the feed once it is under way.'
+    : 'It fights to your standing order. You can watch it back from the feed once it is under way.'
+}
+
+/** The orders the AI can play a squad to while its player is away, in the order they are offered. */
+export const STANDING_ORDERS: readonly { order: StandingOrder; label: string; meaning: string }[] = [
+  { order: 'stand', label: 'Stand', meaning: 'Fight' },
+  { order: 'cautious', label: 'Cautious', meaning: 'Fight, but get out after the first wound or death' },
+  { order: 'opportunist', label: 'Opportunist', meaning: 'Size the enemy up, then decide' },
+  { order: 'evade', label: 'Evade', meaning: 'Get out at once' },
+]
 
 /**
  * Whether the server panel takes a seat back by itself (`resume`) on
@@ -108,7 +142,8 @@ export interface FeedLine {
   tone: 'won' | 'lost' | 'plain'
   /** Who played the player's side; null when there was no fight. */
   played: string | null
-  aliens: string
+  /** Who it was: `vs <name>` for another player's squad, the alien count otherwise. */
+  opponent: string
   /** The match to watch back, if there was one. */
   matchId: string | null
 }
@@ -126,7 +161,8 @@ export function feedLine(entry: EncounterEntry, now: number): FeedLine {
     result,
     tone: entry.result === 'won' ? 'won' : entry.result === 'lost' ? 'lost' : 'plain',
     played,
-    aliens: entry.aliens === 1 ? '1 alien' : `${entry.aliens} aliens`,
+    // A player fight has no aliens in it, so "0 aliens" is never an answer.
+    opponent: entry.against !== null ? `vs ${entry.against}` : entry.aliens === 1 ? '1 alien' : `${entry.aliens} aliens`,
     matchId: entry.matchId,
   }
 }

@@ -94,6 +94,12 @@ export const ENCOUNTER = {
   /** How many entries the return feed shows. */
   feedLimit: 50,
   /**
+   * How close two squads must come to meet (`ITEM-053`): the same as the least
+   * distance between two starts (`START_SEPARATION_KM`), so two squads that
+   * could not have started together are near enough to fight.
+   */
+  meetingRangeKm: 1,
+  /**
    * After this turn an AI seat stops waiting out a stalemate and gets out of
    * the fight (`AiPlayer`): about one fight in a hundred between two AIs never
    * ends otherwise. The balance sweep's own cap, so what the numbers measure

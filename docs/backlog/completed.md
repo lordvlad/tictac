@@ -3217,6 +3217,68 @@ settlement (GDD-WORLD §5, with the room and roster decisions of §5.4).
       the push to a real window): after a deploy.
 ---
 
+### [ITEM-053] Player Encounters on the Road
+**Completed Date:** 2026-10-09  
+**Type:** Feature  
+**Milestone:** Unscheduled (taken up after M5)  
+
+#### Why
+The "PvP" in PvPvE: two squads whose routes cross can fight. Travel carries on while players are
+away, so most crossings involve at least one absent player. Decisions are in GDD-WORLD §5.5.
+
+#### Key Changes
+- **`src/core/Meetings.ts`**: `firstContact(a, b, from, rangeKm)` solves, not samples, the first
+  moment two routes come within range, as a quadratic per stretch between leg boundaries in a
+  local flat frame. A crossing rule: a pair already within range (after a fight) meets nobody
+  until one has left and come back. Under a centimetre of the true distance at 1 km.
+- **Meetings in the schedule** (`Journeys`, kind `MEETING`, keyed by the sorted pair): every
+  route written replaces that squad's meetings; at the due moment the pair is solved again
+  against current routes, so a route changed beforehand moves or cancels the meeting. A straight
+  scan of all squads, which `ITEM-046` replaces.
+- **`Lobby.openMeeting`**: the room of `ITEM-048` with a human each side (`controllers: Blue
+  human, Red human`), both parties composed from roster rows so both rosters are checked and both
+  settle, growth included. Blue is decided from the pair and the moment. Each seat is reserved
+  (the online player is pushed `encounter/started` naming the other) or the AI's at once.
+  Both squads halt where they stood. A squad holding a match, or with nobody fit, is passed by
+  and nothing is recorded.
+- **Standing orders** (`squad/standing`, migration 10): what the AI fights to for an absent
+  player or a lapsed window: `stand`, `cautious`, `opportunist` or `evade`; `stand` until set.
+  Copied into the room per seat so a restore plays on as the room was.
+- **The trial switch** `PLAYER_ENCOUNTERS` (`wrangler.jsonc`, `on`): read at every scheduling and
+  firing; `off` stops meetings with no new code (a later deploy puts it back to what the file
+  says). Bun server: `--player-encounters=off`.
+- **Client**: a "When you are away" control in the map panel; the prompt and feed name who you
+  met (`LobbyView.you.against` for a window that connects after the push).
+
+#### Measured
+- `tests/meetings.test.ts` (35), `meetingTravel.test.ts` (16), `meetingRooms.test.ts` (18),
+  `encounterPrompt.test.ts` and the updated lobby, store, session, restart and accounts tests:
+  1,039 tests pass; lint, build and `typecheck:cf` clean. Covered: head-on, overtaking, tangent,
+  re-entry, the antimeridian and a seeded randomised comparison against 1 s sampling; a
+  rerouted squad moving or cancelling a meeting; all three presence cases settling both rosters;
+  `evade` getting out at once and `stand` fighting on; busy and nobody-fit passes; the switch;
+  restart with a scheduled meeting and mid-meeting; determinism.
+- In Chromium against the Bun server with a clock the script turned: an offline player
+  (standing `stand`) walked to a resting online one; 15 s in, the window's prompt read
+  *"Sleeper23's squad came within range — take the fight?"* and the feed *In progress · vs
+  Sleeper23*; **Take the fight** put the player in as Blue with four soldiers, the server's AI
+  played the other side's turn and handed back at Turn 2; a retreat settled. Afterwards, over
+  RPC: the online player's feed read *lost · vs Sleeper23 · played by you*, the offline player's
+  *won · vs Walker · played by the AI*, both squads rested where they stood, and the offline
+  player could fetch the 33-event recording (`controllers` human/human).
+- The switch on that server: off, the offline player walked onto the other and no meeting
+  opened; on, after leaving range and returning, a meeting opened (feed 1 → 2).
+
+#### Acceptance Criteria
+- [x] Two squads whose routes cross within range meet at the computed moment; a route changed
+      beforehand moves or cancels the meeting.
+- [x] Each of the three presence cases plays and settles both rosters (tests; in Chromium: one
+      online, one away).
+- [x] Engaging offline squads can be switched off without a deploy of new code.
+- [ ] Not yet seen on the deployed Worker (the meeting alarm under `ctx.storage.setAlarm`, the
+      variable read from the Worker's environment): after a deploy.
+---
+
 ## Rejected — kept for the reasoning
 
 Items that were designed and then turned down. They stay here because the argument is the

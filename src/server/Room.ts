@@ -12,6 +12,7 @@ import type { Player } from '../game/Rpc'
 import { compareDigests, type Divergence, type StateDigest } from '../game/StateDigest'
 import { loopback, type Transport } from '../game/Transport'
 import { MatchHost } from '../sim/MatchHost'
+import type { StandingOrder } from '../sim/Policy'
 import type { PeerVersion } from '../version'
 import { AiSeat } from './AiSeat'
 import type { MatchStore, StoredMatch } from './MatchStore'
@@ -57,13 +58,16 @@ import type { Rosters } from './Rosters'
  * from then on (`witness`).
  *
  * **An encounter room** is the one a server opens itself, for a fight on the
- * road (`openEncounter`, `ITEM-048`): already playing, unlisted, and never
- * ended for want of a human. Every seat has a controller (`SeatControl`) —
- * the player's window, the AI, or *reserved*: kept for a player who has not
- * arrived, until a deadline — and the AI sits down in any seat nobody is
- * going to. It is a client of the room like any window (`AiSeat`), so what it
- * sends is judged the way a human's is. Whose a seat *is* stays on the seat
- * (`player`) whoever moves it, because that is whose roster the match settles.
+ * road (`openEncounter`, `ITEM-048`, `ITEM-053`): already playing, unlisted,
+ * and never ended for want of a human. Every seat has a controller
+ * (`SeatControl`) — the player's window, the AI, or *reserved*: kept for a
+ * player who has not arrived, until a deadline — and the AI sits down in any
+ * seat nobody is going to. It is a client of the room like any window
+ * (`AiSeat`), so what it sends is judged the way a human's is. Whose a seat
+ * *is* stays on the seat (`player`) whoever moves it, because that is whose
+ * roster the match settles. A fight against aliens has one player's seat and
+ * the game's own; a meeting of two squads has a player's in each, and each
+ * seat's AI plays to its own player's standing order.
  */
 
 /** What the referee decided about a match, for a caller that wants to watch. */
@@ -156,6 +160,18 @@ interface Seat {
   deadline: (() => void) | null
   /** The AI sitting in the seat, while `control` is `ai`; its end of the loopback is `client`. */
   ai: AiSeat | null
+  /** What the AI fights to when it moves this seat: the player's standing order when the room was opened; `stand` for aliens. */
+  order: StandingOrder
+}
+
+/** One side of a room the server opens (`Room.openEncounter`). */
+export interface EncounterSide {
+  /** Whose side it is, whoever moves it: a player's squad. Null for the game's own aliens, which the AI plays from the start. */
+  player: Player | null
+  /** The server's clock, in ms, when the AI takes the seat if its player has not; null for a player who is not here to be asked (and for aliens). */
+  joinBy: number | null
+  /** What the AI fights to if it moves this side (`StandingOrder`). */
+  standing: StandingOrder
 }
 
 export class Room {
@@ -262,6 +278,16 @@ export class Room {
     return this.seats[faction]?.joinBy ?? null
   }
 
+  /**
+   * The name of the player whose squad `faction`'s is up against, in a room
+   * the server opened for a meeting of two squads (`ITEM-053`); null for
+   * aliens, whose seat is nobody's, and for every ordinary match.
+   */
+  againstOf(faction: Faction): string | null {
+    if (!this.encounterRoom) return null
+    return this.seats[faction === Faction.Blue ? Faction.Red : Faction.Blue]?.player?.name ?? null
+  }
+
   /** The seat a signed-in player holds here, while the room is not over. */
   seatOf(playerId: string): Faction | null {
     if (this.over) return null
@@ -346,25 +372,29 @@ export class Room {
   }
 
   /**
-   * Open a fight the server composed on the road (`ITEM-048`): the match
-   * already playing from `header`, with `player` as Blue and the game's own
-   * aliens as Red.
+   * Open a fight the server composed on the road (`ITEM-048`, `ITEM-053`): the
+   * match already playing from `header`, with a side for each seat.
    *
-   * Blue is kept for `player` until `joinBy` (the server's clock, in ms) and
-   * the AI plays it after; null is a player who is not here to be asked, and
-   * the AI sits down at once. Red is the AI's from the start. Both seats are
-   * set before the match starts, and the room never waits for a host to state
-   * its opening (`start` is otherwise Blue's `matchHeader`): nobody's window
-   * is in it, so there is nobody to ask.
+   * A seat whose side has a player is kept for them until its `joinBy` (the
+   * server's clock, in ms) and the AI plays it after; a `joinBy` of null is a
+   * player who is not here to be asked, and the AI sits down at once. A side
+   * with no player is the aliens', the AI's from the start. All seats are set
+   * before the match starts, and the room never waits for a host to state its
+   * opening (`start` is otherwise Blue's `matchHeader`): nobody's window is in
+   * it, so there is nobody to ask.
    */
-  openEncounter(header: RecordingHeader, player: Player, joinBy: number | null): void {
+  openEncounter(header: RecordingHeader, sides: Record<Faction, EncounterSide>): void {
     this.encounterRoom = true
-    this.seats[Faction.Blue] = newSeat(player, { plain: mintSeatKey() })
-    this.seats[Faction.Red] = newSeat(null, { plain: mintSeatKey() })
+    for (const faction of FACTIONS) {
+      const side = sides[faction]
+      this.seats[faction] = { ...newSeat(side.player, { plain: mintSeatKey() }), order: side.standing }
+    }
     this.start(header)
-    this.sitAi(Faction.Red)
-    if (joinBy === null) this.sitAi(Faction.Blue)
-    else this.reserve(Faction.Blue, joinBy)
+    for (const faction of FACTIONS) {
+      const { player, joinBy } = sides[faction]
+      if (player === null || joinBy === null) this.sitAi(faction)
+      else this.reserve(faction, joinBy)
+    }
   }
 
   /**
@@ -388,6 +418,7 @@ export class Room {
       ...newSeat(held.playerId ? { id: held.playerId, name: held.name ?? held.playerId } : null, { hash: held.keyHash }),
       control: held.control,
       joinBy: held.joinBy,
+      order: held.standing,
     })
     this.seats[Faction.Blue] = seat(stored.blue)
     this.seats[Faction.Red] = stored.red && seat(stored.red)
@@ -687,6 +718,7 @@ export class Room {
     const [mine, theirs] = loopback()
     seat.ai = new AiSeat(faction, mine, {
       log: this.options.log,
+      order: seat.order,
       turnLimit: ENCOUNTER.turnLimit,
       // A bug, and one that would hold the player to a seat nothing moves for
       // good — every other request of theirs is refused while the AI has it.
@@ -767,6 +799,7 @@ export class Room {
         keyHash: 'plain' in held.key ? await hashSeatKey(held.key.plain) : held.key.hash,
         control: held.control,
         joinBy: held.joinBy,
+        standing: held.order,
       }
     }
     return {
@@ -1168,5 +1201,5 @@ function departure(seat: Seat, phase: RoomPhase): string {
 
 /** A seat nobody has taken yet, for `player`; `client` is who sits in it already, if anybody. */
 function newSeat(player: Player | null, key: Seat['key'], client: Client | null = null): Seat {
-  return { player, client, grace: null, key, control: 'player', joinBy: null, deadline: null, ai: null }
+  return { player, client, grace: null, key, control: 'player', joinBy: null, deadline: null, ai: null, order: 'stand' }
 }

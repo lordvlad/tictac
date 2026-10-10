@@ -2,12 +2,13 @@ import { createRoot } from 'react-dom/client'
 import type { EncounterStarted } from '../game/Encounter'
 import type { LobbyView } from '../game/Lobby'
 import type { ServerConnection } from '../game/ServerConnection'
-import { formatCountdown, type Prompt, promptFor } from './EncounterView'
+import { formatCountdown, lapsedNote, offerNote, offerQuestion, type Prompt, promptFor } from './EncounterView'
 
 /**
- * The question a fight on the road asks (`ITEM-048`, decision 5): aliens
- * found the squad and the match is already a room, held for this player
- * until `joinBy`; after that the AI plays it.
+ * The question a fight on the road asks (`ITEM-048`, decision 5; `ITEM-053`
+ * for another player's squad): something found the squad and the match is
+ * already a room, held for this player until `joinBy`; after that the AI
+ * plays it.
  *
  * Mounted on `<body>` above every screen, the map included, because it can
  * come at any moment and must work from wherever the player is: taking the
@@ -148,7 +149,7 @@ function PromptView({
     return (
       <div className="enc-prompt" role="status">
         <div className="enc-title">The AI is fighting for your squad</div>
-        <div className="enc-note">You can watch it back from the feed once it is under way.</div>
+        <div className="enc-note">{lapsedNote(prompt.against)}</div>
         {problem && <div className="enc-problem">{problem}</div>}
         <div className="enc-actions">
           <button type="button" onClick={onFeed}>
@@ -162,15 +163,15 @@ function PromptView({
     )
   }
   return (
-    <div className="enc-prompt" role="alertdialog" aria-label="Aliens found your squad">
-      <div className="enc-title">Aliens found your squad — take the fight?</div>
+    <div className="enc-prompt" role="alertdialog" aria-label={offerQuestion(prompt.against)}>
+      <div className="enc-title">{offerQuestion(prompt.against)}</div>
       <div className="enc-count">{formatCountdown(remaining)}</div>
       <div className="enc-actions">
         <button type="button" className="enc-take" disabled={busy} onClick={onTake}>
           Take the fight
         </button>
       </div>
-      <div className="enc-note">If the time runs out, the AI plays it for you.</div>
+      <div className="enc-note">{offerNote(prompt.against)}</div>
       {problem && <div className="enc-problem">{problem}</div>}
     </div>
   )

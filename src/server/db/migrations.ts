@@ -293,4 +293,27 @@ export const MIGRATIONS: readonly Migration[] = [
       'CREATE INDEX encounters_room ON encounters (room_id)',
     ],
   },
+  {
+    id: 10,
+    name: 'player encounters',
+    up: [
+      // What the AI fights to when it plays this squad for an absent player
+      // (`ITEM-053`, GDD-WORLD §5.5): one of `StandingOrder`, `stand` until the
+      // player sets one. Every squad that exists before this stands and fights.
+      "ALTER TABLE squads ADD COLUMN standing TEXT NOT NULL DEFAULT 'stand'",
+      // The same order, per seat, in the room a meeting opens: what each AI
+      // seat plays to, as it was when the two squads met, so a restored room
+      // plays on exactly as the room it was and a player changing their order
+      // mid-fight does not change what is already being fought. Every earlier
+      // seat stands (an alien's, and a player's in a fight with aliens).
+      "ALTER TABLE rooms ADD COLUMN blue_standing TEXT NOT NULL DEFAULT 'stand'",
+      "ALTER TABLE rooms ADD COLUMN red_standing TEXT NOT NULL DEFAULT 'stand'",
+      // A meeting is a row of this table for each of the two players, keyed
+      // like a contact is: `trip` is `<pair>@<moment>` (`meetingKey`) and
+      // `checkpoint` is 0, so the same UNIQUE makes a meeting recorded once.
+      // `opponent_player_id` is the other player, whose name the feed shows;
+      // null for every fight against aliens and for a contact passed by.
+      'ALTER TABLE encounters ADD COLUMN opponent_player_id TEXT',
+    ],
+  },
 ]

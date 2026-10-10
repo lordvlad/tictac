@@ -236,6 +236,7 @@ refused `401` *sign in first* on a socket nobody signed in on.
 | `roster/recruit` | `{}` | `{ member }` — `400` if the roster is already full |
 | `squad/get` | `{}` | `{ squad }` — its id and waypoint list (§5a) |
 | `squad/order` | `{ order }` | `{ squad }` — the new route ([ARCH-WORLD](world.md)) |
+| `squad/standing` | `{ order }` | `{ squad }` — the AI's standing order for the squad (§5b) |
 | `encounter/feed` | `{}` | `{ entries }` — the player's encounters, newest first (§5b) |
 | `match/recording` | `{ matchId }` | `{ recording }` — a match the player was in (§5b) |
 
@@ -450,6 +451,18 @@ nothing writes no row — it is a function of its key, so a row would only be a 
 | `aliens` | how many came; 0 when passed by |
 | `room_id` | the fight's room, which is its match id; null when passed by (`encounters_room`) |
 | `played_by_you` | 1 when the player took the seat inside the join window (`Encounters.markTaken`, from the lobby's `onEncounterTaken`); 0 when the AI played it |
+
+**Fights between players** (`ITEM-053`, migration 10, GDD-WORLD §5.5) are rows of this table too,
+one for each of the two players, so each has the fight in their own feed. `trip` is
+`<pair>@<moment>` (`meetingKey`, the two squad ids sorted, and when they came within range) and
+`checkpoint` is 0, so the same `UNIQUE` records a meeting once, even if the alarm fires again
+after a restart. `opponent_player_id` is the other player, whose name the feed shows as
+`against`; it is null for every fight against aliens and for a contact passed by. `aliens` is 0.
+
+The same migration adds `squads.standing` (`TEXT`, `stand` until the player sets one) and, per
+seat, `rooms.blue_standing` / `red_standing`: the order each AI seat in a meeting plays to, as it
+was when the squads met, so a restored room plays on as the room it was and a player changing
+their order mid-fight changes nothing already being fought.
 
 How a fight ended is not copied here: the feed joins `match_results` on `room_id`. No result yet
 is `inProgress`; a winner of Blue is `won`. The human side is always Blue in an encounter.

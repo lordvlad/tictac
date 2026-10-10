@@ -1,6 +1,7 @@
 import type { Faction } from '../config'
 import type { SeatControl } from '../game/Encounter'
 import type { RoomPhase } from '../game/Lobby'
+import type { StandingOrder } from '../sim/Policy'
 import type { PeerVersion } from '../version'
 import type { Db } from './db/Db'
 
@@ -27,6 +28,8 @@ import type { Db } from './db/Db'
  * What an encounter room (`ITEM-048`) adds is who moves each seat and whether
  * the room is the server's own: a restarted server sits the AI back down in
  * the seats it held, and lets a reserved seat run out the deadline it had.
+ * A meeting of two players (`ITEM-053`) adds what each seat's AI plays to, so
+ * a seat that is re-attached fights as it did.
  */
 
 /** A seat as the store keeps it. */
@@ -40,6 +43,8 @@ export interface StoredSeat {
   control: SeatControl
   /** The server's clock, in ms, when a `reserved` seat passes to the AI; null otherwise. */
   joinBy: number | null
+  /** What the AI fights to when it moves this seat (`Seat.order`). */
+  standing: StandingOrder
 }
 
 /** A side whose squad the referee checked against the roster, which is who a settlement credits. */
@@ -84,6 +89,8 @@ interface RoomRow {
   red_control: string
   blue_join_by: string | null
   red_join_by: string | null
+  blue_standing: string
+  red_standing: string
 }
 
 export class RoomStore {
@@ -95,13 +102,13 @@ export class RoomStore {
     await this.db.query`
       INSERT INTO rooms (id, build, protocol, phase, created_at, judged, sides,
                          blue_player_id, blue_name, blue_key_hash, red_player_id, red_name, red_key_hash,
-                         encounter, blue_control, red_control, blue_join_by, red_join_by)
+                         encounter, blue_control, red_control, blue_join_by, red_join_by, blue_standing, red_standing)
       VALUES (${room.id}, ${room.version.build}, ${room.version.protocol}, ${room.phase}, ${room.createdAt},
               ${room.judged ? 1 : 0}, ${JSON.stringify(room.sides)},
               ${blue.playerId}, ${blue.name}, ${blue.keyHash},
               ${red?.playerId ?? null}, ${red?.name ?? null}, ${red?.keyHash ?? null},
               ${room.encounter ? 1 : 0}, ${blue.control}, ${red?.control ?? 'player'},
-              ${isoOf(blue.joinBy)}, ${isoOf(red?.joinBy ?? null)})
+              ${isoOf(blue.joinBy)}, ${isoOf(red?.joinBy ?? null)}, ${blue.standing}, ${red?.standing ?? 'stand'})
       ON CONFLICT (id) DO UPDATE SET
         phase = excluded.phase, judged = excluded.judged, sides = excluded.sides,
         blue_player_id = excluded.blue_player_id, blue_name = excluded.blue_name,
@@ -109,7 +116,8 @@ export class RoomStore {
         red_name = excluded.red_name, red_key_hash = excluded.red_key_hash,
         encounter = excluded.encounter, blue_control = excluded.blue_control,
         red_control = excluded.red_control, blue_join_by = excluded.blue_join_by,
-        red_join_by = excluded.red_join_by`
+        red_join_by = excluded.red_join_by, blue_standing = excluded.blue_standing,
+        red_standing = excluded.red_standing`
   }
 
   /** The room is over: settled or aborted. Its match, if it had one, stays in the `MatchStore`. */
@@ -134,6 +142,7 @@ export class RoomStore {
         keyHash: row.blue_key_hash,
         control: row.blue_control as SeatControl,
         joinBy: msOf(row.blue_join_by),
+        standing: row.blue_standing as StandingOrder,
       },
       red:
         row.red_key_hash === null
@@ -144,6 +153,7 @@ export class RoomStore {
               keyHash: row.red_key_hash,
               control: row.red_control as SeatControl,
               joinBy: msOf(row.red_join_by),
+              standing: row.red_standing as StandingOrder,
             },
     }))
   }

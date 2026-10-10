@@ -36,7 +36,15 @@
     // it stops short of; each tile is built once and kept in `MAP_TILES` under
     // `demand/20261007/` (`[ITEM-067]`, deployment.md §6.4). Change both
     // together: a different build's tiles would not match the archive's.
-    "MAP_SOURCE_URL": "https://build.protomaps.com/20261007.pmtiles"
+    "MAP_SOURCE_URL": "https://build.protomaps.com/20261007.pmtiles",
+    // The trial switch for squads of different players meeting on the road
+    // (`[ITEM-053]`, GDD-WORLD §5.5): `on` lets them, and the AI plays an
+    // absent player's squad to its standing order. Set it to `off` — in the
+    // dashboard, or `wrangler deploy --var PLAYER_ENCOUNTERS:off` — to stop
+    // every meeting from the next check on, with no new code. A later deploy
+    // puts back whatever is written here, so change this too to make `off`
+    // stick (docs/architecture/deployment.md).
+    "PLAYER_ENCOUNTERS": "on"
   },
   // How many tiles one client may make the server build per minute: a pan
   // over ground already built is free. `namespace_id` is any number you pick.

@@ -1,5 +1,6 @@
 import { distanceKm, type LatLng } from '../core/Travel'
 import type { Player, Squad } from '../game/Rpc'
+import type { StandingOrder } from '../sim/Policy'
 import type { Db } from './db/Db'
 
 /**
@@ -68,6 +69,15 @@ export function drawAround(anchor: LatLng, radiusKm: number, random: () => numbe
   }
 }
 
+/** A squad as its row states it. `standing` is only ever written from a `StandingOrder` (`setStanding`, the column's default). */
+function squadOf(row: { id: string; waypoints: string; standing: string }): Squad {
+  return {
+    id: row.id,
+    waypoints: JSON.parse(row.waypoints) as Squad['waypoints'],
+    standing: row.standing as StandingOrder,
+  }
+}
+
 export class Squads {
   constructor(
     private readonly db: Db,
@@ -78,38 +88,36 @@ export class Squads {
 
   /** The player's squad, or null for one who has none yet. */
   async of(playerId: string): Promise<Squad | null> {
-    const rows = await this.db.query<{ id: string; waypoints: string }>`
-      SELECT id, waypoints FROM squads WHERE player_id = ${playerId}`
+    const rows = await this.db.query<{ id: string; waypoints: string; standing: string }>`
+      SELECT id, waypoints, standing FROM squads WHERE player_id = ${playerId}`
     const row = rows[0]
-    return row ? { id: row.id, waypoints: JSON.parse(row.waypoints) as Squad['waypoints'] } : null
+    return row ? squadOf(row) : null
   }
 
   /** A squad by its id, with the player it belongs to; null for one that does not exist. */
   async byId(id: string): Promise<{ player: Player; squad: Squad } | null> {
-    const rows = await this.db.query<{ player_id: string; name: string; waypoints: string }>`
-      SELECT s.player_id, p.name, s.waypoints FROM squads s JOIN players p ON p.id = s.player_id WHERE s.id = ${id}`
+    const rows = await this.db.query<{ player_id: string; name: string; waypoints: string; standing: string }>`
+      SELECT s.player_id, p.name, s.waypoints, s.standing
+        FROM squads s JOIN players p ON p.id = s.player_id WHERE s.id = ${id}`
     const row = rows[0]
-    return row
-      ? {
-          player: { id: row.player_id, name: row.name },
-          squad: { id, waypoints: JSON.parse(row.waypoints) as Squad['waypoints'] },
-        }
-      : null
+    return row ? { player: { id: row.player_id, name: row.name }, squad: squadOf({ ...row, id }) } : null
   }
 
   /** Every squad, for a starting server to schedule what each has due. */
   async all(): Promise<{ playerId: string; squad: Squad }[]> {
-    const rows = await this.db.query<{ id: string; player_id: string; waypoints: string }>`
-      SELECT id, player_id, waypoints FROM squads`
-    return rows.map((row) => ({
-      playerId: row.player_id,
-      squad: { id: row.id, waypoints: JSON.parse(row.waypoints) as Squad['waypoints'] },
-    }))
+    const rows = await this.db.query<{ id: string; player_id: string; waypoints: string; standing: string }>`
+      SELECT id, player_id, waypoints, standing FROM squads`
+    return rows.map((row) => ({ playerId: row.player_id, squad: squadOf(row) }))
   }
 
   /** Write `squad`'s route. The start columns never change: a start is where it began. */
   async save(squad: Squad): Promise<void> {
     await this.db.query`UPDATE squads SET waypoints = ${JSON.stringify(squad.waypoints)} WHERE id = ${squad.id}`
+  }
+
+  /** Write what the AI fights to when it plays `squadId` for an absent player (`ITEM-053`). */
+  async setStanding(squadId: string, order: StandingOrder): Promise<void> {
+    await this.db.query`UPDATE squads SET standing = ${order} WHERE id = ${squadId}`
   }
 
   /**
@@ -123,6 +131,7 @@ export class Squads {
     const squad: Squad = {
       id: crypto.randomUUID(),
       waypoints: [{ kind: 'past', lat: start.lat, lng: start.lng, arrival: created.getTime(), departed: null }],
+      standing: 'stand',
     }
     await tx.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at)
                    VALUES (${squad.id}, ${playerId}, ${JSON.stringify(squad.waypoints)},

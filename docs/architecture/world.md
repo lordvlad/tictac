@@ -169,6 +169,83 @@ the room. Whoever played, the human side settles through `Rosters.settle` like a
 wounds, deaths, carried-out, and growth — and the aliens' side, which has no roster, is skipped as an
 anonymous side is.
 
+### 3c. Meetings: finding them
+
+Two players' squads meet when their routes bring them within `ENCOUNTER.meetingRangeKm` of each
+other ([GDD-WORLD §5.5](../design/gdd/world-and-travel.md)). `firstContact(a, b, from, rangeKm)`
+(`src/core/Meetings.ts`) finds when: headless and pure, it reads two waypoint lists and a moment —
+never the clock — and returns the first moment at or after `from` at which the pair crosses into
+range, with the midpoint of the two squads there, or `null`. Solved, not sampled.
+
+**The model** is the map's (`src/core/Travel.ts`): a squad at rest is a point for all time; a
+travelling one moves in a straight line in latitude and longitude along each planned leg, timed
+from its route's last departure at its gait, and rests at its last future waypoint once it has
+arrived. Past waypoints are history. The route is taken *as planned*: a route that changes later
+is the caller's business, who asks again with the new one.
+
+**The solving.** Time is cut wherever either squad's leg starts or ends. Between two cuts both
+move linearly, so their separation (east and north, in kilometres, in a flat frame at the pair's
+mean latitude, east-west scaled by its cosine, longitude the short way round the antimeridian) is
+linear in time and `distance = range` is a quadratic: its first root is the entry. The cosine
+changes along a long leg, so the frame is taken at the answer itself and the quadratic solved
+again until the root stops moving, a few rounds.
+
+**The crossing rule.** A meeting is a *crossing*: the pair must have been out of range just
+before. A pair already within range at `from` — two squads standing where a fight happened — meets
+nobody until one has left range and come back, and then it is the re-entry that is found. Within
+range is `distance <= range` with a slack of a billionth of it (a micrometre at 1 km), so a touch
+that is exact — closest approach equal to the range, or a leg ending exactly at it — counts, by the
+geometry and not by the last bit of a float. Two squads at rest never meet.
+
+**What comes back.** `at` is a whole millisecond (the solved moment rounded up, so the pair is
+within range at it) and never before `from`. It does not depend on `from`: every figure is anchored
+at the routes' own leg boundaries, so the same two routes give the same `at` whatever `from`
+precedes it, and a check made from `at - 1` finds `at` again, bit for bit. `place` is the midpoint
+of the two squads at `at`.
+
+**Accuracy.** The flat frame differs from the sphere by about `(d / (6371 km · cos φ))² / 24` of
+the separation `d`: micrometres at 1 km at 49°, under a millimetre up to 87°, 1.6 mm at 10 km. The
+rounding to a millisecond adds a few millimetres of walking. The haversine distance between the
+squads at `at` is within a centimetre of the range at 1 km (`tests/meetings.test.ts` pins it,
+against sampling every second as well). Not followed: a pair that circles the globe from one
+another within a single stretch between cuts, 360° of relative longitude, which no walk does.
+
+### 3d. Meetings: scheduling and the fight
+
+`Journeys` keeps a third schedule kind, `MEETING`, keyed by the pair (`<a>|<b>`, the two squad ids
+sorted). Whenever a squad's route is written — an order, a `stop`, an arrival, a contact that
+halts it — every meeting that involves it is replaced: for each other squad on the server it asks
+`firstContact` (§3c) from now on and schedules the earliest, or clears the pair. That is a scan of
+every squad (O(n) per route written, O(n²) once at `restore`), which is what `ITEM-046` replaces
+when there is a world worth sharding. Nothing here is cached beyond the schedule itself, which is
+rebuilt from `squads` at startup.
+
+At the due moment the pair is solved again against the routes as they are then: either may have
+changed since, and each change has already rescheduled, so this is a check of a schedule that is
+not trusted, not a second way to find meetings. If they still meet, `Lobby.openMeeting` is asked
+for the fight. One that opens halts **both** squads where they stood at that moment (so each
+stands at the place it was, not at the midpoint), writes a feed row for each player (`against`
+names the other; persistence.md §5b), and reschedules both from the halt: they are in range of
+each other, so they do not meet again until one has left and come back. One that cannot open — a
+squad holds a live match, or has nobody fit — is written down for nobody and the squads carry on:
+they passed in the night.
+
+**Who is Blue** is the first draw of a generator seeded from the pair and the moment, so it can be
+audited and favours neither the squad that moved nor the one that waited.
+
+**The room** is `openEncounter`'s (§3b) with a human on each side: `controllers: { Blue: 'human',
+Red: 'human' }`, both parties composed from their roster rows, so both rosters are checked and
+both settle, growth included. Each seat is `reserved` for its player (pushed `encounter/started`
+with `against`) or held by the AI at once; each AI seat plays to the standing order stored with
+its squad (`squad/standing`), copied into the room when it opens. Two players present play it
+through the referee like any two-player match, with no AI in either seat; a seat whose window
+lapses or whose player drops goes to the AI, to that seat's order, while the other player keeps
+theirs.
+
+**The switch.** `playerEncounters` (the `PLAYER_ENCOUNTERS` variable; deployment.md §5) is read at
+every scheduling and at every firing. Off, nothing is scheduled and a pending meeting does nothing
+when it fires.
+
 ### Hosts
 
 | Host | Clock | Alarm |
@@ -209,6 +286,14 @@ takeover as any window resuming its match. `ServerPanel` takes a seat over by it
 `control: 'player'`. The map's panel lists what happened while the player was away
 (`encounter/feed`) and plays a fight back from `match/recording`
 ([ARCH-RENDERING §4](rendering.md)).
+
+**Meeting another player (`ITEM-053`).** The same two ways tell a window, and the prompt names
+who: `EncounterStarted.against` (and `LobbyView.you.against`, for a window that connected after the
+push) is the other player's name, null for aliens, and the question reads *"<name>'s squad came
+within range — take the fight?"*. The map's panel has the **standing order** the AI plays the
+squad to while its player is away (`Squad.standing`; `squad/standing { order }`, answered with the
+squad and pushed in `squad/changed`); it is the player's own setting and no other player sees it.
+The feed reads *vs <name>* for a player (`EncounterEntry.against`) and the alien count otherwise.
 
 ## 6. Pushes
 

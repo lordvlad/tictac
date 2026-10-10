@@ -243,50 +243,6 @@ R2, `map-tiles/world.pmtiles`, is not a world map but Stuttgart only (lon 8.9–
 
 ---
 
-### [ITEM-053] Player Encounters on the Road
-**Type:** Feature
-**Priority:** P3
-**Status:** Ready — designed ([GDD-WORLD](../design/gdd/world-and-travel.md) §5); the travel
-scheduler (`ITEM-064`) and the server-opened room with an AI seat (`ITEM-048`) are built
-**Milestone:** Unscheduled
-
-#### Why
-The "PvP" in PvPvE: two squads whose routes cross can fight. Travel carries on while players
-are away, so most crossings will involve at least one absent player.
-
-#### Change
-1. **Finding each other.** Every leg is a straight line at constant speed, so two squads'
-   closest approach is solved directly. When a route is set, the server checks it against every
-   other squad in the same zone, schedules a meeting if they come within engagement range, and
-   re-checks when it fires. Within one Durable Object only: no cross-DO matches
-   ([RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) §6.4).
-2. **Who plays** follows `ITEM-048`: live for whoever is present (join window), the AI to its
-   player's standing order for whoever is not, fought out on the server if nobody is. Both
-   sides are rostered and both settle.
-3. **Offline squads can be engaged — on trial.** Ships enabled behind a server switch; feedback
-   decides whether it stays. Zone rules (places where an absent squad cannot be engaged) wait for
-   zones.
-
-#### Affected Files
-- Travel's scheduler (`ITEM-064`, which keeps a due moment of any kind so a planned meeting
-  fits), the referee's AI seating (`ITEM-048`), `src/server/Room.ts`
-
-#### P2P / Simulation Impact
-- None on match rules. The meeting check is geometry over waypoints, outside any match.
-
-#### Acceptance Criteria
-- [ ] Two squads whose routes cross within range meet at the computed moment; a route changed
-      beforehand moves or cancels the meeting.
-- [ ] Each of the three presence cases plays and settles both rosters.
-- [ ] Engaging offline squads can be switched off without a deploy of new code.
-
-#### Risks & Mitigations
-- **Risk:** a sleeping squad is a target; griefing.
-- **Mitigation:** standing orders including evade (`ITEM-052`), travel pace, the switch, and zone
-  rules once zones exist.
-
----
-
 ### [ITEM-054] Capture and Rescue
 **Type:** Feature
 **Priority:** P3

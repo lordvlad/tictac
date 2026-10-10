@@ -151,8 +151,14 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   panel takes it over once (`resume`); when it is still being set up elsewhere, a warning says that acting here abandons it.
 - **The world map** (`src/hud/MapScreen.tsx`, `ITEM-065`) is opened from the match-server panel
   by a signed-in player (**Open the Map**) and closed back to it. Its React panel holds the
-  squad's status, the pace (cautious, normal, flat out) and Stop; a right-click on the map offers
-  the verbs that fit (*Go here* at rest; *Go here now / first / next* travelling), sent as
+  squad's status, the pace (cautious, normal, flat out), *When you are away* — the standing order
+  the AI plays the squad to (*Stand*: fight; *Cautious*: fight, but get out after the first wound
+  or death; *Opportunist*: size the enemy up, then decide; *Evade*: get out at once), read from
+  `Squad.standing`, sent as `squad/standing`, and refreshed from the answer and from
+  `squad/changed`; its hint says the AI plays to it when the player is not there or does not take
+  the fight, and that aliens and other players do not see it (`ITEM-053`) — and Stop; a
+  right-click on the map offers the verbs that fit (*Go here* at rest; *Go here now / first /
+  next* travelling), sent as
   `squad/order` ([ARCH-WORLD](world.md)). It is mounted on `<body>` like the loadout screen,
   because `#ui` lets only buttons take the pointer, and while it is open `main.tsx` sets the
   engine's per-frame `renderer.update` aside (`pauseRendering` in `src/engine.ts`) so the game's
@@ -183,13 +189,16 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
     screen — z-index 30000, over the map's 20000 — and follows the window's `ServerConnection`
     (`connectionToServer` and `leaveServer` hand it over). It is asked by `encounter/started`
     (`watchEncounters`) and equally by `LobbyView.you.control === 'reserved'`, which is how a
-    window that connected after the push learns the same. *"Aliens found your squad — take the
-    fight?"* counts down to `joinBy` on the server's clock (`connection.now()`), with **Take the
+    window that connected after the push learns the same (`LobbyView.you.against` carries the
+    name there; the push's own `against` wins when both exist). *"Aliens found your squad — take
+    the fight?"* counts down to `joinBy` on the server's clock (`connection.now()`), with **Take the
     fight** and the note that the AI plays it for you if the time runs out. Taking it is the
     server panel's `resume` path — `room/enter { kind: 'resume', roomId }` then `takeSeat` — run
     by `takeEncounter` in `main.tsx`, which puts the map away first (`closeMap`) and the menu once
     the room's log is in; a refusal ("the AI has it") is shown on the prompt. At the deadline it
-    becomes *"The AI is fighting for your squad"* with a link to the feed. It is shown only from
+    becomes *"The AI is fighting for your squad"* with a link to the feed. Against another player
+    (`ITEM-053`) the question is *"<name>'s squad came within range — take the fight?"* and both
+    notes say the AI plays it *to your standing order*. It is shown only from
     the menu or the map (`available`): in a match or a replay the player is not somewhere a seat
     can be taken over from, and the AI plays it.
   - **The panel's rule.** `ServerPanel`'s one-shot takeover (`youPlaying`) resumes only a seat
@@ -198,7 +207,8 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   - **The return feed** (`EncounterFeed.tsx`), under *While you were away* in the map's panel:
     `encounter/feed`, newest first, one line each — when (relative, server time), where
     (rounded coordinates; there is no geocoder), *Won / Lost / In progress / Passed by: nobody
-    fit | you were busy*, who played, how many aliens — read when the map opens, when the socket
+    fit | you were busy*, who played, who it was — *vs <name>* for another player's squad, the
+    number of aliens otherwise, never *0 aliens* — read when the map opens, when the socket
     comes back, and on `encounter/started` and `squad/changed`. Lines newer than the last time
     the feed was closed (kept per server in `localStorage`) carry a *new* badge. **Watch** reads
     `match/recording { matchId }`, parses it as a recording file is parsed (`parseRecording`), and

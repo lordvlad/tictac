@@ -359,6 +359,7 @@ On a fresh socket, in this order:
 | `squad/get` | `{}` | `{ squad: { id, waypoints } }` — a player from before squads is placed on first asking | `401` |
 | `clock/now` | `{}` | `{ now }` — the server's clock, the one its travel schedule runs by; a window measures its offset on every socket that opens (`ServerConnection.now()`) | — |
 | `squad/order` | `{ order }` (`SquadOrder`, [ARCH-WORLD §2](world.md)) | `{ squad }`, and `squad/changed` to the player's window | `401`; `-32602` a malformed order; `409` a verb that does not fit (*already on the move*, *not on the move*) |
+| `squad/standing` | `{ order }`: `stand`, `cautious`, `opportunist` or `evade` | `{ squad }` (with its `standing`), and `squad/changed` — what the AI fights to when it plays this squad because its player is away or lets the join window lapse ([GDD-WORLD §5.5](../design/gdd/world-and-travel.md)) | `401`; `-32602` not one of the four |
 | `encounter/feed` | `{}` | `{ entries: EncounterEntry[] }` — what found the player's squad on the road, newest first, at most `ENCOUNTER.feedLimit`; each says how it ended (`inProgress`, `won`, `lost`, `passedBy` and why), who played the player's side and which match to watch back ([ARCH-WORLD §3a](world.md)) | `401` |
 | `match/recording` | `{ matchId }` | `{ recording: { header, events } }` — a match the player was in, running or settled, in the shape a replay plays | `401`; `-32602` no `matchId`; `403` *you were not in that match*; `410` no such match |
 | `lobby/subscribe` | `{}` | the `LobbyView` now, then `lobby/changed` pushes | — |

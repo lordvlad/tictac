@@ -5,6 +5,7 @@
  *   bun scripts/serve-match.ts
  *   bun scripts/serve-match.ts --db=sqlite://matches.sqlite --rp-id=localhost --origins=http://localhost:5173
  *   bun scripts/serve-match.ts --tiles=out/tiles/planet-z8-20261007.pmtiles
+ *   bun scripts/serve-match.ts --player-encounters=off
  *
  * A thin CLI: it reads flags, opens the database and starts the server. What it
  * knows about the game it knows through `GameServer`, which knows it through
@@ -19,6 +20,11 @@
  * `--tiles` serves `/tiles/{z}/{x}/{y}.mvt` from a local PMTiles archive, as
  * the Worker does from R2 (`scripts/build-planet-tiles.ts` makes one); without
  * it the server has no tile route.
+ *
+ * `--player-encounters=off` is the trial switch for squads of different
+ * players meeting on the road (`ITEM-053`): no meeting is found or opened, and
+ * the Worker's `PLAYER_ENCOUNTERS` variable does the same there. `on` is the
+ * default.
  *
  * Reachability is the honest cost of a WebSocket. A page served over `https`
  * may not open an insecure socket, so a public referee needs a host and a
@@ -50,13 +56,20 @@ if (tilesPath && !(await Bun.file(tilesPath).exists())) {
 }
 const tiles = tilesPath ? tileHandler(blobSource(Bun.file(tilesPath), tilesPath)) : undefined
 
+const playerEncounters = arg('player-encounters') ?? 'on'
+if (playerEncounters !== 'on' && playerEncounters !== 'off') {
+  console.error(`[referee] --player-encounters is on or off, not ${playerEncounters}`)
+  process.exit(1)
+}
+
 const persistence = await openPersistence(databaseUrl, party)
-const server = await startGameServer({ persistence, port, tiles })
+const server = await startGameServer({ persistence, port, tiles, playerEncounters: () => playerEncounters === 'on' })
 
 console.info(`[referee] watching on ${server.url} — build ${BUILD_ID}, protocol ${PROTOCOL_VERSION}`)
 console.info(`[referee] database: ${databaseUrl}`)
 console.info(`[referee] passkeys for ${party.id}, from ${party.origins.join(', ')}`)
 console.info(`[referee] map tiles: ${tilesPath ?? 'none (--tiles=<archive.pmtiles>)'}`)
+console.info(`[referee] player encounters: ${playerEncounters}`)
 
 process.on('SIGINT', () => {
   void (async () => {
