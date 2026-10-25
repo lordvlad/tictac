@@ -45,3 +45,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # A session token for a production test account: a bearer credential, never committed.
 .watch/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*

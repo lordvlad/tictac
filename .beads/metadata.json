@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "tictac",
+  "project_id": "5507e9cf-0e51-46a7-a4aa-45da17cef650"
+}
