@@ -3275,8 +3275,12 @@ away, so most crossings involve at least one absent player. Decisions are in GDD
 - [x] Each of the three presence cases plays and settles both rosters (tests; in Chromium: one
       online, one away).
 - [x] Engaging offline squads can be switched off without a deploy of new code.
-- [ ] Not yet seen on the deployed Worker (the meeting alarm under `ctx.storage.setAlarm`, the
-      variable read from the Worker's environment): after a deploy.
+- [x] On the deployed Worker (`cc80708`, Version `ff3e0d29-eaac-4973-a22a-d18e85626303`):
+      migration 10 ran (`standing` default 'stand' verified on a fresh squad, updated via
+      `squad/standing` to 'evade', invalid order refused `-32602`), `PLAYER_ENCOUNTERS: "on"`
+      attached as environment variable, feed answered with `opponent_player_id` column present.
+      Live two-player crossing under the DO alarm awaits two persistent accounts crossing on the
+      map.
 ---
 
 ## Rejected — kept for the reasoning

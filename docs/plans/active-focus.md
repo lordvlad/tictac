@@ -93,7 +93,7 @@ Nothing is ready: the queue is empty. What is left is in the backlog below and i
   its z8 archive).
 - **ITEM-063**: `squads` is one row per player *for now* (`squads_player`); captives, alien squads
   and a player with several squads widen it, and `[ITEM-048]`/`[ITEM-053]` lean on that.
-- **ITEM-053** (built; seen in Chromium against the Bun server, not yet on the deployed Worker):
+- **ITEM-053** (built; seen in Chromium against the Bun server; migration 10, `squad/standing`, and `PLAYER_ENCOUNTERS` verified live on the deployed Worker):
   (1) every squad is scanned for each route written, which is fine for a few players and not for
   many (`[ITEM-046]`); (2) a meeting that cannot open because a squad is busy is not retried: the
   pair is next found when one of them is given a new route; (3) the AI's standing order is stored
