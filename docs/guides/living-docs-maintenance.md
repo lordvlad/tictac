@@ -120,11 +120,11 @@ tags: ["ecs", "networking"]
 2. Document context, evidence from code, alternatives evaluated, decision rationale, and consequences.
 3. Once accepted and implemented, mark status as `implemented` and update `docs/design/adr/README.md`.
 
-### Trigger 5: Backlog & Kanban Task Management
-- Active work items are tracked in `docs/backlog/active-backlog.md` following `docs/schemas/backlog-template.md`.
+### Trigger 5: Backlog & Task Management
+- Active issues and tasks are managed in Beads (`.beads/`), queryable with `bd list` and `bd ready`.
+- Milestone and feature specifications are detailed in `docs/backlog/active-backlog.md` cross-referenced with Beads IDs.
 - Active WIP and pull-queue priorities are highlighted in `docs/plans/active-focus.md`.
 - Completed work moves to `docs/backlog/completed.md` with verification notes and PR/commit references.
-
 ---
 
 ## 5. Automated Verification Checklist

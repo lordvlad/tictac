@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M5 The Shared World"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-10-08"
+lastReviewed: "2026-10-28"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -52,12 +52,12 @@ ignored.
 ## 📋 Ready — pull in this order
 Nothing is ready: the queue is empty. What is left is in the backlog below and in "Left open".
 
-## 🧊 Backlog — not yet queued
-- `[ITEM-046]` Region-sharded Durable Objects — depends on the shared world having load to
+## 🧊 Backlog — not yet queued (tracked in Beads: `bd list`)
+- `[ITEM-046]` (`tictac-dwq`) Region-sharded Durable Objects — depends on the shared world having load to
   shard.
-- `[ITEM-047]` Uncap the roster (bench grows with bases/vehicles, squad cap set per combat) —
+- `[ITEM-047]` (`tictac-0al`) Uncap the roster (bench grows with bases/vehicles, squad cap set per combat) —
   depends on the base/vehicle economy and a scenario/mission system, neither built.
-- `[ITEM-054]` Capture and rescue — an idea; the left-behind of a retreat are lost until then.
+- `[ITEM-054]` (`tictac-bvf`) Capture and rescue — an idea; the left-behind of a retreat are lost until then.
 
 ## ⚠️ Left open by finished work
 - **ITEM-068**: Firefox does not support related origins, so a Firefox player cannot sign in from
@@ -73,10 +73,6 @@ Nothing is ready: the queue is empty. What is left is in the backlog below and i
 - **ITEM-065**: the map screen has no automated test (the controller and map need a DOM and
   WebGL); it was checked in Chromium, locally and on Pages. The code under it is covered by the
   `Travel`, `Journeys` and `ServerConnection` tests. Safari is untested.
-- **ITEM-064 / ITEM-059**: protocol 6's keyed-resume path (`Sessions.resume6`, `resumeOf6`,
-  `Upgrade.url`, the gate branch and the protocol-6 branch of `Lobby.replace`; the list is in
-  `Session.ts`) is kept for one release so a match in progress finishes across the deploy; delete
-  it when `OLDEST_SERVED_PROTOCOL` reaches 7 — it is still 6.
 - **ITEM-045 / ITEM-063**: on the Durable Object, `Db.transaction` does not roll back when its
   body throws (`workers/DoSqliteDb.ts`; Cloudflare's synchronous transaction cannot wrap an
   `await`ing body). A migration that fails partway leaves its rows for a human to fix, and so

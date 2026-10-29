@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-10-07"
+lastReviewed: "2026-10-28"
 appliesTo:
   - "src/**"
   - "workers/**"
@@ -20,14 +20,14 @@ tags: ["backlog", "tasks", "active"]
 
 # Active Backlog
 
-**The specification of every open item** — why it is wanted, what changes, and how we will know
-it is done. It is not ordered and says nothing about what happens next: that is the
-[focus board](../plans/active-focus.md). Finished and rejected items move to the
-[archive](./completed.md).
+**The specification of open backlog items.** Active task management and issue tracking have
+migrated to **Beads** (`bd`), backed by a local Dolt database (`.beads/`). Run `bd list` to view
+issues and `bd ready` for actionable work.
 
+Finished and rejected items move to the [archive](./completed.md).
 ---
 
-### [ITEM-046] Region-Sharded Durable Objects
+### [ITEM-046] Region-Sharded Durable Objects (`tictac-dwq`)
 **Type:** Infrastructure
 **Priority:** P3
 **Status:** Backlog — a design only ([RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md)); not started, and not startable yet (see Why)
@@ -124,7 +124,7 @@ See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; su
 
 ---
 
-### [ITEM-047] Uncap the Roster: Bench Grows With Bases and Vehicles, Squad Cap Is Per-Combat
+### [ITEM-047] Uncap the Roster: Bench Grows With Bases and Vehicles, Squad Cap Is Per-Combat (`tictac-0al`)
 **Type:** Feature
 **Priority:** P3
 **Status:** Backlog — a design only ([GDD-OVERVIEW](../design/gdd/overview.md) §3,
@@ -243,7 +243,7 @@ R2, `map-tiles/world.pmtiles`, is not a world map but Stuttgart only (lon 8.9–
 
 ---
 
-### [ITEM-054] Capture and Rescue
+### [ITEM-054] Capture and Rescue (`tictac-bvf`)
 **Type:** Feature
 **Priority:** P3
 **Status:** Backlog — an idea, not designed

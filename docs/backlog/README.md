@@ -3,7 +3,7 @@ title: "Engineering & Product Backlog Overview"
 id: "BACKLOG-INDEX"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-09-14"
+lastReviewed: "2026-10-28"
 appliesTo:
   - "docs/backlog/**"
 relatedDocs:
@@ -31,11 +31,12 @@ stateDiagram-v2
     Ready --> Dropped
 ```
 
-### Document Map
-- [Active Backlog](./active-backlog.md): the specification of every open item — why, change, acceptance. Unordered.
-- [Focus Board](../plans/active-focus.md): what is in flight and the order the Ready items are pulled in. No specifications.
+### Document Map & Tooling
+- **Beads (`bd`)**: Active issues are tracked in the Dolt-backed beads database (`.beads/`). Run `bd list` or `bd ready`.
+- [Active Backlog](./active-backlog.md): detailed specifications of open roadmap items cross-referenced with beads IDs.
+- [Focus Board](../plans/active-focus.md): what is in flight, pull queue priorities, and caveats left open by finished work.
 - [Completed Archive](./completed.md): closed items — what was delivered, measured and left open, and rejected items with their reasoning.
 
 ### Item ID Convention
-All work items follow a single, unified sequential key:
-- `ITEM-001`, `ITEM-002`, `ITEM-003`, ... across all categories (architecture, features, balance, refactoring, UI).
+- Architectural & milestone feature items use sequential IDs (`ITEM-001`, `ITEM-002`, ...).
+- Granular tasks and issues tracked in beads use the `tictac-<hash>` issue prefix (e.g. `tictac-dwq`, `tictac-0al`).

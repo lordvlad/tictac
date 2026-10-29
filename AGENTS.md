@@ -32,8 +32,8 @@ Welcome to **TicTac (No Way Home)**. This document establishes guidelines, archi
 - Therefore: **only the rules may draw from the match stream**, and they must draw the same numbers in the same order on both sides. Setup (dealing squads) and presentation (tracer scatter, smoke) take their own randomness. Enforced by `tests/determinism.test.ts`.
 - Disagreement is no longer a wrong number applied quietly; it is a desynchronisation, reported by the state digest exchanged at every handover.
 
-### 4. Component Dirty-State Synchronization
-- Replicated entity state changes travel via `World.syncDirty()`, which diffs serialized component state against previous snapshots and broadcasts JSON-RPC `componentUpdate` frames.
+### 4. Pure Intent Lockstep (ADR-0004)
+- Match simulation replicates strictly through intent commands (`NetworkMessage`), not component diffs. Both peers and the referee simulate the match deterministically from the command stream.
 
 ### 5. Pure Bun Runtime & Asynchronous File I/O Only
 - The codebase runs strictly on **Bun**. Do not design for or introduce Node.js polyfills/shims.
@@ -69,8 +69,9 @@ bun run build
 
 ### Kanban & Backlog Standards
 - **Hobby-First Governance**: Planning uses a pull-based Kanban workflow (`Backlog` → `Ready` → `In Progress` → `Completed`) organized around capability milestones (`M1` to `M5`).
+- **Issue Tracking via Beads (`bd`)**: Active issues and tasks are tracked in the local Dolt-backed Beads database (`.beads/`). Run `bd list` to view issues and `bd ready` for unblocked work.
+- **Single Backlog Sequence**: Milestone and feature specifications use sequential IDs (`ITEM-001`, `ITEM-002`, ...), specified in `docs/backlog/active-backlog.md` and cross-referenced with Beads IDs (`tictac-<hash>`).
 - **No Time Estimates or Sprints**: Work is prioritized by technical elegance, dependency ordering, and player value without artificial deadlines or time estimates.
-- **Single Backlog Sequence**: All tasks use a single, unified ID sequence (`ITEM-001`, `ITEM-002`, `ITEM-003`, ...) tracked in `docs/backlog/active-backlog.md` and archived in `docs/backlog/completed.md`.
 - **No `owner` Field**: Backlog items, ADRs, RFCs, and document frontmatter do not track individual owner fields.
 - **Active Focus**: The current work-in-progress and next items in the pull queue are listed in `docs/plans/active-focus.md`.
 
