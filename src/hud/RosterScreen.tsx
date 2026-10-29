@@ -154,6 +154,13 @@ export class RosterScreen {
     return this.picked.promise
   }
 
+  /** Close the screen without choosing a squad, rejecting the `pick` promise. */
+  dismiss(): void {
+    if (this.disposed) return
+    this.picked.reject(new Error('Roster selection dismissed.'))
+    this.dispose()
+  }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true

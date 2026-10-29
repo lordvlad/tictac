@@ -159,12 +159,6 @@ export class Rosters {
       if (already.length > 0) return
 
       const sides = result.sides
-      await tx.query`INSERT INTO match_results (match_id, winner, blue_player, red_player, settled_at)
-                     VALUES (${result.matchId}, ${result.winner},
-                             ${sides[Faction.Blue]?.playerId ?? null},
-                             ${sides[Faction.Red]?.playerId ?? null},
-                             ${new Date().toISOString()})`
-
       for (const side of [sides[Faction.Blue], sides[Faction.Red]]) {
         if (!side) continue
         for (const [slot, fate] of side.fates.entries()) {
@@ -174,6 +168,15 @@ export class Rosters {
         }
         await this.rest(tx, side.playerId, new Set(side.characterIds))
       }
+
+      // Inserted last so that on engines without rollback (e.g. DoSqliteDb on
+      // Cloudflare Durable Objects), an error during character recording or
+      // resting does not leave an idempotency marker that prevents retry.
+      await tx.query`INSERT INTO match_results (match_id, winner, blue_player, red_player, settled_at)
+                     VALUES (${result.matchId}, ${result.winner},
+                             ${sides[Faction.Blue]?.playerId ?? null},
+                             ${sides[Faction.Red]?.playerId ?? null},
+                             ${new Date().toISOString()})`
     })
   }
 

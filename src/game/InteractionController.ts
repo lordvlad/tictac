@@ -3,7 +3,7 @@ import { Raycaster, Vector2, Vector3 } from 'three'
 import type { EngineContext } from '../engine'
 import { CAM, Faction, FACTION_INFO, LEVEL_HEIGHT } from '../config'
 import { VisState } from '../core/Visibility'
-import { clientToNdc } from '../core/screen'
+import { clientToNdc } from '../camera/screen'
 import { type Tile, tileEquals } from '../core/Grid'
 import { doorAhead } from '../core/Doors'
 import type { Soldier } from '../entities/Soldier'
@@ -39,16 +39,16 @@ import { roughly } from '../core/Noise'
 import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
-import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
+import type { World } from '../ecs/World'
 import {
   MovementSystem,
   CombatSystem,
   CommandSystem,
   GroundSystem,
   ItemSystem,
-  RenderSystem,
   WallSystem,
 } from '../ecs/systems'
+import { RenderSystem } from '../render/RenderSystem'
 import { type Carried, type Command, type CommandOrigin, isCommand } from '../ecs/systems/CommandSystem'
 import { MELEE } from '../core/Melee'
 import { ITEMS, type ItemId, itemTargetsAlly } from '../core/Items'
@@ -340,26 +340,6 @@ export class InteractionController {
       this.refreshHud()
     }
 
-    if (network && network.mode !== 'local') {
-      // Each side owns its own squad. The host additionally owns everything
-      // shared: the rule tables on the global entity, and the terrain. Walls
-      // belong to no faction, so without naming an authority neither peer
-      // would ever replicate a change to one.
-      const wallEntities = new Set(this.wallSystem.entityIds)
-      network.bindWorld(this.world, (entityId) => {
-        if (entityId === GLOBAL_ENTITY_ID) return network.mode !== 'join'
-        if (wallEntities.has(entityId) || entityId === this.groundSystem.entity) return network.mode !== 'join'
-        return squads.byEntityId(entityId)?.faction === network.myFaction
-      })
-      // Peer state landed in components; the view has to catch up with it.
-      network.onComponentUpdate = () => {
-        this.recomputeVisibility()
-        this.renderOverlay()
-        this.battlefield.flush()
-        this.refreshHud()
-        this.debug.refresh()
-      }
-    }
 
     this.planner = new MovementPlanner(battlefield.grid, squads, engine)
     this.shoot = new ShootPlanner(battlefield.grid, squads, engine)

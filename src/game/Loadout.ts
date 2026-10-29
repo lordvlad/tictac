@@ -4,6 +4,8 @@ import { AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { ItemId } from '../core/Items'
 import { ROLES, RoleId, roleAllowsAttachment, roleAllowsItem, roleAllowsWeapon } from '../core/Roles'
+import { defaultLoadout, type SquadLoadout, type UnitLoadout } from '../core/Loadout'
+export { defaultLoadout, type SquadLoadout, type UnitLoadout }
 import type { Soldier } from '../entities/Soldier'
 
 /**
@@ -17,30 +19,6 @@ import type { Soldier } from '../entities/Soldier'
  * item by forgetting a decrement.
  */
 
-/**
- * One squad member's chosen kit.
- *
- * Attachments are a list rather than a count map: a rail either carries one of
- * a thing or it does not, and the weapon refuses a second of the same kind.
- */
-export interface UnitLoadout {
-  weaponId: WeaponId
-  ammoId: AmmoId
-  grenades: Record<GrenadeId, number>
-  items: Record<ItemId, number>
-  attachments: AttachmentId[]
-  /**
-   * The sidearm slot, beside the primary weapon rather than instead of it.
-   * {@link MeleeId.Fists} is the empty slot: nothing to carry, always there.
-   */
-  sidearm: MeleeId
-  /**
-   * What this member has trained for. Gates which crate rows they may draw
-   * from ({@link ROLES}) and grants the one trait that training earns them.
-   * {@link RoleId.Rifleman} is the empty slot: no gate, no trait.
-   */
-  role: RoleId
-}
 
 /** What the whole squad has to share out, by id. */
 export interface Inventory {
@@ -57,9 +35,6 @@ export interface Inventory {
    */
   sidearms: Record<MeleeId, number>
 }
-
-/** The squad's kit, one entry per `squadIndex`. */
-export type SquadLoadout = UnitLoadout[]
 
 /**
  * The crate.
@@ -125,36 +100,6 @@ export const DEMO_INVENTORY: Inventory = {
 /** Grenade cap, so one soldier cannot hoover up the whole pouch. */
 export const LOADOUT_LIMITS = { grenadesPerUnit: 3 } as const
 
-/**
- * The spread the squad has always deployed with, as a valid starting point —
- * for the first `size` members, which is fewer than a full squad when a kept
- * roster has an empty slot.
- */
-export function defaultLoadout(size = SQUAD_SIZE): SquadLoadout {
-  const weapons = [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun] as const
-  return weapons.slice(0, size).map((weaponId) => ({
-    weaponId,
-    ammoId: AmmoId.Standard,
-    grenades: {
-      [GrenadeId.Frag]: 1,
-      [GrenadeId.Flash]: 0,
-      [GrenadeId.Smoke]: 0,
-      [GrenadeId.Stone]: 0,
-      [GrenadeId.Incendiary]: 0,
-    },
-    items: {
-      [ItemId.StimPack]: 0,
-      [ItemId.FirstAidKit]: 0,
-      [ItemId.NullweaveVest]: 0,
-      [ItemId.PlateCarrier]: 0,
-      [ItemId.RepairKit]: 0,
-      [ItemId.Keys]: 0,
-    },
-    attachments: [],
-    sidearm: MeleeId.Fists,
-    role: RoleId.Rifleman,
-  }))
-}
 
 /** The pool minus everything the squad is holding. Never negative. */
 export function remaining(loadout: SquadLoadout, pool: Inventory = DEMO_INVENTORY): Inventory {

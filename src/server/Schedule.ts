@@ -42,7 +42,10 @@ export class Schedule {
   /** One firing at a time: a timer that goes off while a slow firing is still writing waits for it. */
   private firing: Promise<void> = Promise.resolve()
 
-  constructor(private readonly host: ScheduleHost) {}
+  constructor(
+    private readonly host: ScheduleHost,
+    private readonly log: (message: string) => void = (message) => console.warn(`[schedule] ${message}`),
+  ) {}
 
   /** Who handles moments of `kind`. */
   handle(kind: string, handler: DueHandler): void {
@@ -69,14 +72,27 @@ export class Schedule {
    * within what was due when the alarm went off.
    */
   fire(): Promise<void> {
-    this.firing = this.firing.then(async () => {
-      const now = this.host.now()
-      for (let due = this.earliestBy(now); due; due = this.earliestBy(now)) {
-        this.due.delete(keyOf(due.kind, due.id))
-        await this.handlers.get(due.kind)?.(due.id, due.at)
-      }
-      this.arm()
-    })
+    this.firing = this.firing
+      .catch(() => {})
+      .then(async () => {
+        try {
+          const now = this.host.now()
+          for (let due = this.earliestBy(now); due; due = this.earliestBy(now)) {
+            this.due.delete(keyOf(due.kind, due.id))
+            try {
+              await this.handlers.get(due.kind)?.(due.id, due.at)
+            } catch (error) {
+              this.log(
+                `handler '${due.kind}' for ${due.id} failed: ${
+                  error instanceof Error ? error.stack ?? error.message : String(error)
+                }`,
+              )
+            }
+          }
+        } finally {
+          this.arm()
+        }
+      })
     return this.firing
   }
 

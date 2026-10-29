@@ -115,7 +115,7 @@ Systems execute business logic across entities on each tick or action:
 - **`TurnSystem`**: Manages round handovers, resets AP pools, decrements status durations.
 - **`WallSystem`**: Updates structural integrity and occlusion of destructible barricades.
 - **`GroundSystem`**: The one writer of what is on the ground — fire, smoke, ash, crates burned away (`GroundComponent`, one entity for the map) — and of the grid's dense index over it (`Grid.fire`, `Grid.smoke`, surfaces, blocks), which the rules read on every step and sight line. Implements `core/Fire`'s `Ground` port; a change that arrives from outside (replication, a rewind) bumps the component's revision and `update` rebuilds the index from the generated map plus the component.
-- **`RenderSystem`**: Reads component state (`PositionComponent`, `StanceComponent`) and updates corresponding 3D view representations.
+- **`RenderSystem`** (`src/render/RenderSystem.ts`): Presentation-layer ECS system. Reads component state (`PositionComponent`, `StanceComponent`, `HealthComponent`) to drive 3D view representations.
 
 ---
 

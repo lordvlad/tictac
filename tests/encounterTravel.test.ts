@@ -356,6 +356,27 @@ describe('The return feed', () => {
     expect((await w.feed())[0]).toMatchObject({ playedBy: 'you' })
   })
 
+  test('markTaken in-memory set is bounded to prevent memory leaks', async () => {
+    const w = await walker(() => 'unused', (persistence) => contacts(persistence, PASSED))
+    // Fill beyond capacity
+    for (let i = 0; i < 550; i++) {
+      await w.persistence.encounters.markTaken(`room-${i}`, w.playerId)
+    }
+    // Oldest entries (e.g. room-0) should have been evicted from in-memory map
+    await w.persistence.encounters.record({
+      squadId: w.squadId, playerId: w.playerId, trip: 't-old', checkpoint: 0, at: 1, place: w.home, aliens: 1, roomId: 'room-0', passedFor: null,
+    })
+    // Recent entries (e.g. room-549) should still be retained in in-memory map
+    await w.persistence.encounters.record({
+      squadId: w.squadId, playerId: w.playerId, trip: 't-recent', checkpoint: 0, at: 2, place: w.home, aliens: 1, roomId: 'room-549', passedFor: null,
+    })
+    const feed = await w.feed()
+    const oldEntry = feed.find((e) => e.matchId === 'room-0')
+    const recentEntry = feed.find((e) => e.matchId === 'room-549')
+    expect(oldEntry?.playedBy).toBe('ai')
+    expect(recentEntry?.playedBy).toBe('you')
+  })
+
   test('shows a player only their own, and only to a signed-in window', async () => {
     const w = await walker(() => 'unused', (persistence) => contacts(persistence, PASSED))
     await w.persistence.encounters.record({

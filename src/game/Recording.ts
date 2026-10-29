@@ -9,7 +9,8 @@ import { ITEMS, type ItemId } from '../core/Items'
 import { ROLES, RoleId } from '../core/Roles'
 import type { ResolvedHit } from './Combat'
 import { RpcMethods } from './JsonRpc'
-import type { UnitLoadout } from './Loadout'
+import { defaultLoadout, type Deployment, type DeploymentState, type UnitLoadout } from '../core/Loadout'
+export type { Deployment, DeploymentState }
 import type { NetworkMessage } from './NetworkManager'
 
 /**
@@ -59,33 +60,6 @@ import type { NetworkMessage } from './NetworkManager'
  */
 export const RECORDING_VERSION = 6
 
-/**
- * Session state for one deployed soldier: what a match starts them on top of
- * their sheet. A bag on purpose — HP today, fatigue next (`[ITEM-039]`),
- * room for whatever comes after without another wire shape.
- */
-export interface DeploymentState {
-  hp?: number
-  fatigue?: number
-}
-
-/**
- * One soldier, fully stated: who they are, what they carry, and what state a
- * match starts them in — sheet, kit and session state travel together rather
- * than as three arrays a caller has to keep in step by hand.
- */
-export interface Deployment {
-  /** Present only for a kept roster (`[ITEM-042]`); absent for a rolled squad. */
-  characterId?: string
-  sheet: CharacterSheet
-  /**
-   * Absent when this soldier's stated kit could not be read (a peer on a
-   * newer build naming a weapon this one does not know): they deploy on the
-   * stock spread, the same as a soldier nobody ever equipped.
-   */
-  loadout?: UnitLoadout
-  state?: DeploymentState
-}
 
 export interface RecordingHeader {
   version: number

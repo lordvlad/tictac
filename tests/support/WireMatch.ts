@@ -1,9 +1,9 @@
-import { Faction } from '../config'
-import { NetworkManager, type NetworkMessage } from '../game/NetworkManager'
-import type { CombatRecording } from '../game/Recording'
-import { heldTokens, ServerConnection } from '../game/ServerConnection'
-import type { StateDigest } from '../game/StateDigest'
-import { SimMatch, type MatchOutcome, type MatchSetup } from './SimMatch'
+import { Faction } from '../../src/config'
+import { NetworkManager, type NetworkMessage } from '../../src/game/NetworkManager'
+import type { CombatRecording } from '../../src/game/Recording'
+import { heldTokens, ServerConnection } from '../../src/game/ServerConnection'
+import type { StateDigest } from '../../src/game/StateDigest'
+import { SimMatch, type MatchOutcome, type MatchSetup } from '../../src/sim/SimMatch'
 
 /**
  * `simulate`, but the same command stream travels through a real referee

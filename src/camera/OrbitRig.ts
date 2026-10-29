@@ -1,7 +1,7 @@
 import { Euler, Matrix4, type PerspectiveCamera, Vector2, Vector3 } from 'three'
 import { CAM, LEVEL_HEIGHT } from '../config'
 import { clamp, smoothstep } from '../core/math'
-import { clientToNdc } from '../core/screen'
+import { clientToNdc } from './screen'
 import { CameraInput, type CameraRigTarget } from './CameraInput'
 import { GroundPicker } from './GroundPicker'
 

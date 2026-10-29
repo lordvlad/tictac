@@ -2,7 +2,7 @@ import type { Subprocess } from 'bun'
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { RpcMethods } from '../src/game/JsonRpc'
 import { STOCK_PLAN } from '../src/sim/Balance'
-import { simulateOverWire } from '../src/sim/WireMatch'
+import { simulateOverWire } from './support/WireMatch'
 import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
 import { softwareAuthenticator } from './support/authenticator'
 import type { LatLng } from '../src/core/Travel'
@@ -31,7 +31,7 @@ import type { LatLng } from '../src/core/Travel'
  * the `Bun.serve` lobby treats them — the same `Sessions`, `Lobby` and
  * `Persistence`, now behind a Cloudflare `WebSocket` and `ctx.storage.sql`.
  * And, past a single relayed frame: a whole decisive match, driven by
- * `src/sim/WireMatch.ts`, settles through this object's own independent
+ * `tests/support/WireMatch.ts`, settles through this object's own independent
  * recomputation exactly as it does headless — the part that needed two real
  * browsers before, now proved without either.
  */
@@ -327,7 +327,7 @@ describe('The planted Cloudflare deployment', () => {
 
   test('a whole simulated match reaches settlement through the Durable Object, not just a few moves', async () => {
     // Every other test here proves a socket, a sign-in, a passkey — pieces of
-    // the wire. This proves the referee itself: driven by `src/sim/WireMatch.ts`,
+    // the wire. This proves the referee itself: driven by `tests/support/WireMatch.ts`,
     // a real `SimMatch` plays a decisive match against its own rules, then the
     // exact same commands travel to this deployment's `MatchDurableObject`
     // over a real WebSocket. Its `Room` recomputes every one of them

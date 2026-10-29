@@ -1,8 +1,8 @@
-import { System } from '../System'
-import type { World } from '../World'
-import { StanceComponent } from '../components/StanceComponent'
-import { HealthComponent } from '../components/HealthComponent'
-import type { SoldierView } from '../../render/SoldierView'
+import { System } from '../ecs/System'
+import type { World } from '../ecs/World'
+import { StanceComponent } from '../ecs/components/StanceComponent'
+import { HealthComponent } from '../ecs/components/HealthComponent'
+import type { SoldierView } from './SoldierView'
 
 /**
  * Reflects component state in the scene: mesh transforms every frame, and the

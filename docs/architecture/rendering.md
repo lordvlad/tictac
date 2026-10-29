@@ -6,7 +6,7 @@ status: "active"
 lastReviewed: "2026-10-08"
 appliesTo:
   - "src/render/**"
-  - "src/ecs/systems/RenderSystem.ts"
+  - "src/render/RenderSystem.ts"
   - "src/hud/MapScreen.tsx"
   - "src/hud/map/WorldMap.ts"
 relatedDocs:
@@ -21,7 +21,7 @@ tags: ["rendering", "threejs", "animation", "views", "particles"]
 
 The game's visual presentation runs in the browser using **Three.js** and `@mavonengine/core`:
 - **Engine Context (`src/engine.ts`)**: Narrow interface providing access to `scene`, `camera`, `canvas`, and loaded `assets`.
-- **RenderSystem (`src/ecs/systems/RenderSystem.ts`)**: The single ECS system responsible for bridging component state into 3D transforms, animation playback, and mesh visibility.
+- **RenderSystem (`src/render/RenderSystem.ts`)**: The presentation ECS system responsible for bridging component state into 3D transforms, animation playback, and mesh visibility.
 
 ---
 

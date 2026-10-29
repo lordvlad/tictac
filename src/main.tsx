@@ -111,6 +111,8 @@ let openMenu: (() => void) | null = null
 /** The map on screen, from opening to its close having finished. */
 let mapOpen: Promise<void> | null = null
 
+/** The roster screen on screen, if any: dismissed if an encounter takes over. */
+let openRoster: RosterScreen | null = null
 const ASSETS: Asset[] = [
   { name: 'character', type: 'gltfModel', path: `${baseUrl}character.glb` },
   ...Object.values(WeaponId).map(
@@ -142,7 +144,7 @@ game.resources.on('loaded', () => {
     // A fight is taken over from the menu or the map. In a match or a replay
     // there is nothing to take it over from: the player is already somewhere
     // the prompt has no business, and the AI plays it.
-    available: () => openMenu !== null || mapOpen !== null,
+    available: () => (openMenu !== null || mapOpen !== null) && openRoster === null,
     take: takeEncounter,
     showFeed: () => void showMap(),
   })
@@ -202,17 +204,21 @@ function showMenu(notice?: string): void {
   const pickSquad = async (account: Account | null): Promise<Picked> => {
     if (!account) return {}
     const roster = await account.roster()
-    // An empty roster has nobody to send, and the referee would refuse it
-    // anyway; recruit first.
     if (roster.length === 0) {
       throw new Error('Nobody is left on your roster. Recruit before deploying.')
     }
-    const picked = await new RosterScreen(roster, () => account.recruit()).pick()
-    return {
-      sheets: picked.map((entry) => entry.sheet),
-      hp: picked.map((entry) => entry.hp),
-      fatigue: picked.map((entry) => entry.fatigue),
-      characterIds: picked.map((entry) => entry.characterId),
+    const screen = new RosterScreen(roster, () => account.recruit())
+    openRoster = screen
+    try {
+      const picked = await screen.pick()
+      return {
+        sheets: picked.map((entry) => entry.sheet),
+        hp: picked.map((entry) => entry.hp),
+        fatigue: picked.map((entry) => entry.fatigue),
+        characterIds: picked.map((entry) => entry.characterId),
+      }
+    } finally {
+      if (openRoster === screen) openRoster = null
     }
   }
 
@@ -322,6 +328,7 @@ async function takeEncounter(roomId: string): Promise<void> {
   const network = new NetworkManager()
   try {
     const seat = await network.enterRoom(connectionToServer(), { kind: 'resume', roomId })
+    openRoster?.dismiss()
     closeMap()
     await mapOpen
     await takeSeat(network, seat, {}, () => openMenu?.())
@@ -762,8 +769,8 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
 
   network.onDisconnected = (reason) => {
     showInterrupted(reason, () => {
-      controller.dispose()
-      hud.dispose()
+      replaced = true
+      disposeScene(scene)
       network.dispose()
     })
   }
@@ -825,8 +832,7 @@ function watchMatch(network: NetworkManager, seat: Seated): void {
   const leave = (): void => {
     left = true
     bar.dispose()
-    scene?.controller.dispose()
-    scene?.hud.dispose()
+    if (scene) disposeScene(scene)
     network.dispose()
   }
   const bar = new SpectatorBar(() => {

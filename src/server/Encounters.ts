@@ -75,10 +75,10 @@ export class Encounters {
   /**
    * Seats a player took before their row was written (`roomId|playerId`): the
    * room is opened and the player told before the row exists, so a quick
-   * window can beat it.
+   * window can beat it. Capped so unrecorded rooms cannot leak memory.
    */
-  private readonly taken = new Set<string>()
-
+  private readonly taken = new Map<string, number>()
+  private static readonly MAX_TAKEN = 500
   constructor(private readonly db: Db) {}
 
   /** What was done about the contact at this checkpoint, or null when nothing was: it is new. */
@@ -92,7 +92,8 @@ export class Encounters {
 
   /** Write a contact down. A second write of the same checkpoint changes nothing. */
   async record(contact: EncounterRecord): Promise<void> {
-    const takenAlready = contact.roomId !== null && this.taken.delete(`${contact.roomId}|${contact.playerId}`)
+    const key = contact.roomId !== null ? `${contact.roomId}|${contact.playerId}` : null
+    const takenAlready = key !== null && this.taken.delete(key)
     await this.db.query`
       INSERT INTO encounters (id, squad_id, player_id, trip, checkpoint, found_at, lat_e6, lng_e6,
                               aliens, room_id, passed_for, played_by_you, opponent_player_id)
@@ -104,7 +105,13 @@ export class Encounters {
 
   /** `playerId` took their seat in this room themselves: it was theirs, not the AI's, who played their side. */
   async markTaken(roomId: string, playerId: string): Promise<void> {
-    this.taken.add(`${roomId}|${playerId}`)
+    const key = `${roomId}|${playerId}`
+    this.taken.delete(key)
+    this.taken.set(key, Date.now())
+    if (this.taken.size > Encounters.MAX_TAKEN) {
+      const oldest = this.taken.keys().next().value
+      if (oldest !== undefined) this.taken.delete(oldest)
+    }
     await this.db.query`UPDATE encounters SET played_by_you = 1 WHERE room_id = ${roomId} AND player_id = ${playerId}`
   }
 

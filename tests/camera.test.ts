@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { PerspectiveCamera, Vector3 } from 'three'
 import { CameraInput, type CameraRigTarget } from '../src/camera/CameraInput'
 import { OrbitRig } from '../src/camera/OrbitRig'
+import { clientToNdc } from '../src/camera/screen'
 import { CAM } from '../src/config'
 import { installCanvasStub } from './support/dom'
 
@@ -269,5 +270,37 @@ describe('over-the-shoulder framing', () => {
     expect(rig.distance).toBeCloseTo(CAM.distStart, 1)
 
     rig.dispose()
+  })
+})
+
+describe('clientToNdc', () => {
+  test('converts viewport coordinates to NDC (-1 to 1, y-up)', () => {
+    const canvas = document.createElement('canvas')
+    canvas.getBoundingClientRect = () => ({
+      left: 100,
+      top: 50,
+      width: 800,
+      height: 600,
+      right: 900,
+      bottom: 650,
+      x: 100,
+      y: 50,
+      toJSON: () => {},
+    })
+
+    // Top-left: (-1, 1)
+    const tl = clientToNdc(canvas, 100, 50)
+    expect(tl.x).toBeCloseTo(-1, 5)
+    expect(tl.y).toBeCloseTo(1, 5)
+
+    // Center: (0, 0)
+    const center = clientToNdc(canvas, 500, 350)
+    expect(center.x).toBeCloseTo(0, 5)
+    expect(center.y).toBeCloseTo(0, 5)
+
+    // Bottom-right: (1, -1)
+    const br = clientToNdc(canvas, 900, 650)
+    expect(br.x).toBeCloseTo(1, 5)
+    expect(br.y).toBeCloseTo(-1, 5)
   })
 })

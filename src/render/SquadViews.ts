@@ -1,6 +1,6 @@
 import type { Faction } from '../config'
 import type { UnitRef } from '../core/Combatant'
-import type { RenderSystem } from '../ecs/systems'
+import type { RenderSystem } from './RenderSystem'
 import type { EngineContext } from '../engine'
 import type { Squads } from '../game/Squads'
 import { SoldierView } from './SoldierView'

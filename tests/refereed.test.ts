@@ -21,7 +21,7 @@ import { Sessions } from '../src/server/Session'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'
-import { simulateOverWire, type WireMatchResult } from '../src/sim/WireMatch'
+import { simulateOverWire, type WireMatchResult } from './support/WireMatch'
 
 /**
  * A match server on a real socket, in-process, and windows that talk to it
@@ -93,7 +93,7 @@ async function lobbyOnASocket() {
               for (const handler of closers) handler('closed')
             },
           })
-          sessions.attach(transport, { url: ws.data.url })
+          sessions.attach(transport, {})
         },
         message(ws, message) {
           sockets.get(ws)?.deliver(String(message))
@@ -385,7 +385,7 @@ describe('Two clients playing through a match server', () => {
     // one that reuses that instead of scripting a handful of moves by hand,
     // to reach the part the other tests in this file do not: a real winner,
     // over a real socket, refereed by a *second*, independent recomputation
-    // of the same match (`src/sim/WireMatch.ts`).
+    // of the same match (`tests/support/WireMatch.ts`).
     const { lobby, store, url, window, stop } = await lobbyOnASocket()
 
     let seed = 5000

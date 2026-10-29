@@ -1,6 +1,5 @@
 import { ENCOUNTER } from '../config'
-import { defaultLoadout } from '../game/Loadout'
-import type { Deployment } from '../game/Recording'
+import { defaultLoadout, type Deployment } from './Loadout'
 import { rollSquadSheets } from './Characters'
 import { hashSeed, Rng } from './rng'
 import { checkpoints, type Pace, type Waypoint } from './Travel'
