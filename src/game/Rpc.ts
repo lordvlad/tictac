@@ -70,6 +70,7 @@ export type SquadOrder =
   | { kind: 'goHereNow'; to: LatLng; pace: Pace }
   | { kind: 'goHereFirst'; to: LatLng }
   | { kind: 'goHereNext'; to: LatLng }
+  | { kind: 'crossBorder'; to: LatLng; destinationRegion: string }
   | { kind: 'stop' }
 
 /**
@@ -218,6 +219,23 @@ export interface RpcApi {
    * held for its grace.
    */
   'tictac/api/room/leave': { params: Record<string, never>; result: null }
+  /**
+   * Arrive at the destination Durable Object during a two-phase region handover (RFC-0002).
+   * Confirms the client has opened its second socket on the target DO, validating
+   * the handover ticket and committing authority transfer.
+   */
+  'tictac/api/region/arrive': {
+    params: { handoverId: string; token: string; squadId: string }
+    result: { committed: boolean; targetRegion: string }
+  }
+  /**
+   * Explicitly cancel an in-flight handover from the client side if the secondary
+   * connection fails or is aborted.
+   */
+  'tictac/api/region/cancelHandover': {
+    params: { handoverId: string; reason: string }
+    result: { cancelled: boolean }
+  }
 }
 
 export type RpcMethod = keyof RpcApi
@@ -246,6 +264,26 @@ export interface RpcPushes {
    * (`EncounterStarted`). Sent to their one window.
    */
   'tictac/api/encounter/started': EncounterStarted
+  /**
+   * Pushed by the source Durable Object when a squad crossing a border begins
+   * the two-phase handover (RFC-0002 / tictac-dwq). Instructs the client to open
+   * a secondary connection to `targetUrl` while keeping the primary connection alive.
+   */
+  'tictac/api/region/handoverOffer': {
+    handoverId: string
+    targetRegion: string
+    targetUrl: string
+    token: string
+    expiresAt: number
+  }
+  /**
+   * Pushed by the source Durable Object once the destination DO has confirmed arrival
+   * via 2PC DO-to-DO RPC. Signals that the primary socket can now close cleanly.
+   */
+  'tictac/api/region/handoverComplete': {
+    handoverId: string
+    targetRegion: string
+  }
 }
 
 export type RpcPush = keyof RpcPushes

@@ -236,6 +236,9 @@ export class Journeys {
         return detour(waypoints, order.to, now)
       case 'goHereNext':
         return addStop(waypoints, order.to, now)
+      case 'crossBorder':
+        // Routes to the border checkpoint, where travel halts for 2PC handover (RFC-0002 §2 / tictac-dwq)
+        return redirect(waypoints, order.to, onFoot('normal'), now, this.mintTrip())
       case 'stop':
         return stop(waypoints, now)
     }

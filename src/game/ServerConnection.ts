@@ -114,9 +114,21 @@ export function browserTokens(url: string): TokenStore {
   const parsed = new URL(url)
   const protocol = parsed.protocol === 'wss:' ? 'https:' : parsed.protocol === 'ws:' ? 'http:' : parsed.protocol
   const key = `tictac.session:${protocol}//${parsed.host}`
+  const storage =
+    'localStorage' in globalThis && typeof (globalThis as Record<string, unknown>).localStorage === 'object'
+      ? ((globalThis as Record<string, unknown>).localStorage as {
+          getItem(key: string): string | null
+          setItem(key: string, value: string): void
+          removeItem(key: string): void
+        } | null)
+      : null
   return {
-    get: () => localStorage.getItem(key),
-    set: (token) => (token === null ? localStorage.removeItem(key) : localStorage.setItem(key, token)),
+    get: () => storage?.getItem(key) ?? null,
+    set: (token) => {
+      if (!storage) return
+      if (token === null) storage.removeItem(key)
+      else storage.setItem(key, token)
+    },
   }
 }
 
@@ -226,8 +238,9 @@ export class ServerConnection {
   private readonly encounterListeners = new Set<(started: RpcPushes['tictac/api/encounter/started']) => void>()
   private lobbyView: LobbyView | null = null
   private readonly listeners = new Set<() => void>()
+  private secondaryConnection: ServerConnection | null = null
+  private readonly handoverListeners = new Set<(event: { kind: 'offered' | 'complete'; targetRegion: string }) => void>()
 
-  /** Who this socket is bound to, by the server's own answer. */
   player: Player | null = null
   /**
    * Why the stored token did not sign this window in, when the reason is not
@@ -302,6 +315,14 @@ export class ServerConnection {
       },
     )
     return promise
+  }
+
+  /**
+   * Listen for region handovers (RFC-0002 / tictac-dwq).
+   */
+  onHandover(listener: (event: { kind: 'offered' | 'complete'; targetRegion: string }) => void): () => void {
+    this.handoverListeners.add(listener)
+    return () => this.handoverListeners.delete(listener)
   }
 
   /**
@@ -670,6 +691,16 @@ export class ServerConnection {
           listener(params as unknown as RpcPushes['tictac/api/encounter/started'])
         }
         return
+      case 'tictac/api/region/handoverOffer': {
+        const offer = params as unknown as RpcPushes['tictac/api/region/handoverOffer']
+        void this.handleHandoverOffer(offer)
+        return
+      }
+      case 'tictac/api/region/handoverComplete': {
+        const complete = params as unknown as RpcPushes['tictac/api/region/handoverComplete']
+        this.handleHandoverComplete(complete)
+        return
+      }
     }
     if (frame.method === RpcMethods.abort && !socket.entered) {
       // The version gate: this page cannot talk to this server at all, and
@@ -686,6 +717,46 @@ export class ServerConnection {
     for (const handler of room.frames) handler(frame)
   }
 
+  /**
+   * Handle two-phase region handover offer (RFC-0002 / tictac-dwq).
+   * Opens a secondary socket to targetUrl without dropping the current primary socket.
+   */
+  private async handleHandoverOffer(offer: RpcPushes['tictac/api/region/handoverOffer']): Promise<void> {
+    for (const listener of this.handoverListeners) listener({ kind: 'offered', targetRegion: offer.targetRegion })
+    try {
+      const secondary = new ServerConnection(offer.targetUrl, {
+        connect: this.connect,
+        schedule: this.schedule,
+        tokens: this.tokens,
+        giveUpMs: this.giveUpMs,
+      })
+      this.secondaryConnection = secondary
+      // Arrive on target DO over the secondary socket
+      await secondary.request('tictac/api/region/arrive', {
+        handoverId: offer.handoverId,
+        token: offer.token,
+        squadId: this.player?.id ?? '',
+      })
+    } catch (error) {
+      // If secondary connection or arrive fails, cancel handover on primary socket
+      if (this.socket && !this.socket.done) {
+        void this.call(this.socket, 'tictac/api/region/cancelHandover', {
+          handoverId: offer.handoverId,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      }
+      this.secondaryConnection?.close()
+      this.secondaryConnection = null
+    }
+  }
+
+  private handleHandoverComplete(complete: RpcPushes['tictac/api/region/handoverComplete']): void {
+    for (const listener of this.handoverListeners) listener({ kind: 'complete', targetRegion: complete.targetRegion })
+    // Primary socket is now cleanly closed as target connection is fully authoritative
+    if (this.socket) {
+      this.socket.transport.close()
+    }
+  }
   /** Let go of `socket`: nothing it says is read again, and whatever was asked on it is told `reason`. */
   private abandon(socket: Socket, reason: string): void {
     socket.done = true

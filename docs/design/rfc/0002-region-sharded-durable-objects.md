@@ -2,8 +2,8 @@
 title: "RFC 0002: Region-Sharded Durable Objects"
 id: "RFC-0002"
 type: "rfc"
-status: "proposed"
-lastReviewed: "2026-10-03"
+status: "accepted"
+lastReviewed: "2026-10-28"
 appliesTo:
   - "workers/**"
   - "src/server/Persistence.ts"
@@ -85,13 +85,19 @@ visible or reachable from up close either.
 straight; a route that would cross a border is cut at the crossing, where the squad stops, and
 going through is an order of its own — the hand-off this section describes.
 
-**The hand-off is the source's responsibility.** The Durable Object currently holding a
-connection initiates its hand-off to the destination when a crossing happens — not an external
-orchestrator, and not the destination reaching in to pull the connection over. §4 is the shape
-of what it hands off.
+**The hand-off is a Two-Phase Commit (2PC) over dual client sockets.** The source Durable Object
+must not purge the client's session, presence, or held entities until arrival at the target Durable
+Object is confirmed. For the duration of the transition, the client keeps two active WebSocket connections:
+1. Source DO initiates a reservation on Target DO (`prepareHandover`) and pushes `tictac/api/region/handoverOffer`
+   to the client with a single-use ticket.
+2. Client opens a secondary connection to Target DO without closing its primary socket, and calls
+   `tictac/api/region/arrive`.
+3. Target DO verifies the ticket and commits arrival via DO-to-DO confirmation (`confirmArrival`).
+4. Source DO receives arrival confirmation, purges local squad authority, and pushes
+   `tictac/api/region/handoverComplete` to the primary socket, which closes cleanly.
+5. If Target DO is unreachable or times out, client cancels and Source DO retains authority.
 
 **A partition is redrawn at the game's own natural disconnect windows, proactively rather than
-reactively, and the same trigger runs in both directions.** At roughly 80% of whatever §6.1's
 capacity signal measures — deliberately before the instance is actually struggling, not after —
 a new Durable Object is created to own a piece freshly cut from the busy one. From that moment,
 every *new* arrival is routed to whichever of the two now owns its location; there is nothing to
