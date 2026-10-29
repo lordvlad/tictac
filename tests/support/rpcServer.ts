@@ -93,7 +93,7 @@ export function rpcServer(
 
   const window = (place: LatLng | null = null): Window => {
     const [page, socket] = loopback()
-    sessions.attach(socket, { url: 'ws://rpc.test/', place })
+    sessions.attach(socket, { place })
     const pending = new Map<number, (answer: Answer) => void>()
     const pushes: JsonRpcNotification[] = []
     let lastId = 0

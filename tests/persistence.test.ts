@@ -18,7 +18,7 @@ import type { Player } from '../src/game/Rpc'
 import { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
 import type { RefereeVerdict } from '../src/server/Room'
-import type { RosterMember } from '../src/server/Rosters'
+import type { MatchSettlement, RosterMember } from '../src/server/Rosters'
 import { MatchHost } from '../src/sim/MatchHost'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
@@ -491,6 +491,55 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
 
     expect(await persistence.rosters.active('A')).toEqual(once)
     expect(once[0]!.matches).toBe(1)
+    await persistence.close()
+  })
+
+  test('a settlement that fails before match_results is inserted allows a retry', async () => {
+    const persistence = await freshPersistence(url)
+    const { a } = await enlisted(persistence)
+
+    // An un-inserted match_id causes died_in foreign key constraint to fail
+    const failingResult: MatchSettlement = {
+      matchId: 'failing-match',
+      winner: Faction.Blue,
+      sides: {
+        [Faction.Blue]: {
+          playerId: 'A',
+          characterIds: [a[0]!.characterId],
+          fates: [{ kind: 'died', hp: 0, deeds: noDeeds() }],
+        },
+        [Faction.Red]: null,
+      },
+    }
+
+    // died_in references matches(id), so settling without a matches row throws SQLite foreign key error
+    await expect(persistence.rosters.settle(failingResult)).rejects.toThrow()
+
+    // Because match_results is inserted last, no row exists in match_results
+    const records = await persistence.db.query<{ match_id: string }>`
+      SELECT match_id FROM match_results WHERE match_id = ${'failing-match'}`
+    expect(records.length).toBe(0)
+    // Create the matches row so foreign keys for match_results succeed
+    await persistence.db.query`
+      INSERT INTO matches (id, header, created_at, seed_label)
+      VALUES (${'failing-match'}, ${'{}'}, ${new Date().toISOString()}, ${'test'})`
+
+    // Now a valid retry can settle successfully
+    const validResult: MatchSettlement = {
+      ...failingResult,
+      sides: {
+        [Faction.Blue]: {
+          playerId: 'A',
+          characterIds: [a[0]!.characterId],
+          fates: [{ kind: 'survived', sheet: a[0]!.sheet, hp: 50, deeds: noDeeds() }],
+        },
+        [Faction.Red]: null,
+      },
+    }
+    await persistence.rosters.settle(validResult)
+    const settled = await persistence.db.query<{ match_id: string }>`
+      SELECT match_id FROM match_results WHERE match_id = ${'failing-match'}`
+    expect(settled.length).toBe(1)
 
     await persistence.close()
   })

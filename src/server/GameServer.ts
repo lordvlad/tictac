@@ -29,6 +29,7 @@ export interface GameServer {
   url: string
   lobby: Lobby
   journeys: Journeys
+  sessions: Sessions
   stop(): Promise<void>
 }
 
@@ -95,18 +96,21 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   // The Durable Object's one alarm, as a timer: the schedule asks for one
   // moment at a time, and each new ask replaces the last.
   let cancelAlarm: (() => void) | null = null
-  const schedule: Schedule = new Schedule({
-    now: () => clock.now(),
-    arm: (at) => {
-      cancelAlarm?.()
-      cancelAlarm =
-        at === null
-          ? null
-          : clock.schedule(() => {
-              schedule.fire().catch((error: unknown) => log(`the travel schedule failed: ${String(error)}`))
-            }, Math.max(0, at - clock.now()))
+  const schedule: Schedule = new Schedule(
+    {
+      now: () => clock.now(),
+      arm: (at) => {
+        cancelAlarm?.()
+        cancelAlarm =
+          at === null
+            ? null
+            : clock.schedule(() => {
+                schedule.fire().catch((error: unknown) => log(`the travel schedule failed: ${String(error)}`))
+              }, Math.max(0, at - clock.now()))
+      },
     },
-  })
+    (message) => log(`[schedule] ${message}`),
+  )
   const journeys = new Journeys({
     squads: persistence.squads,
     encounters: persistence.encounters,
@@ -153,7 +157,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
       open(ws) {
         const transport = socketTransport(ws, log)
         sockets.set(ws, transport)
-        sessions.attach(transport, { url: ws.data.url })
+        sessions.attach(transport, {})
         log('a client connected')
       },
       message(ws, message) {
@@ -169,6 +173,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
     url: String(server.url),
     lobby,
     journeys,
+    sessions,
     /** Stops serving. Rooms still live stay in the database for the next server to restore; the database is the caller's. */
     stop: async () => {
       cancelAlarm?.()

@@ -55,15 +55,8 @@ describe('What this build says about itself', () => {
     expect(MY_VERSION).toEqual({ protocol: PROTOCOL_VERSION, build: 'dev' })
   })
 
-  test('the server keeps serving the protocol before its own', () => {
-    // A ratchet, not a restatement: a deploy replaces the server while
-    // browsers keep running the previous bundle, and those windows reconnect
-    // to finish the matches they were in. A protocol bump that left the
-    // server unable to speak the protocol before would strand every one of
-    // those matches, so the constant is held to "the one before" here and a
-    // bump has to bring the server's half of it along. 6 is the floor because
-    // nothing older can take a seat back at all.
-    expect(OLDEST_SERVED_PROTOCOL).toBe(Math.max(6, PROTOCOL_VERSION - 1))
+  test('the oldest served protocol is protocol 7 now that protocol 6 is retired', () => {
+    expect(OLDEST_SERVED_PROTOCOL).toBe(7)
   })
 })
 

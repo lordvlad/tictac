@@ -6,6 +6,8 @@ import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type Sign
 import type { Transport } from '../game/Transport'
 import type { StandingOrder } from '../sim/Policy'
 import { OLDEST_SERVED_PROTOCOL, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
+import type { HandoverCoordinator } from './Handover'
+import { HandoverCoordinator as HandoverCoordinatorImpl } from './Handover'
 import { Refusal, type Lobby } from './Lobby'
 import type { Persistence } from './Persistence'
 import type { Journeys } from './Journeys'
@@ -37,8 +39,6 @@ import { AuthError } from './WebAuthn'
 
 /** What a host knows about a socket from the request that opened it. */
 export interface Upgrade {
-  /** The url it was opened at. Read for nothing but a protocol-6 page's keyed resume (`resumeOf6`). */
-  url: string
   /** Where it came from, when the host can say (`request.cf` on Cloudflare); never on the Bun server. */
   place?: LatLng | null
 }
@@ -49,6 +49,8 @@ export interface SessionsOptions {
   persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>
   /** Squads on the move: the orders a window gives. */
   journeys: Journeys
+  /** Handover coordinator for cross-region transfers (RFC-0002). */
+  handover?: HandoverCoordinator
   /** The clock travel runs by (`clock/now`); the wall clock unless a host or a test says otherwise. */
   now?: () => number
   /** Called for anything worth a line in a server log. */
@@ -66,8 +68,6 @@ interface Session {
    * off anything the page says, and written down nowhere.
    */
   readonly place: LatLng | null
-  /** The seat a protocol-6 page's url takes back. Goes with protocol 6 (`resume6`). */
-  readonly resume6: { roomId: string; seatKey: string } | null
   /** Every request not yet answered, one after another: each starts when the one before it is done. */
   queue: Promise<void>
 }
@@ -91,6 +91,7 @@ export class Sessions {
   private readonly lobby: Lobby
   private readonly persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>
   private readonly journeys: Journeys
+  readonly handover: HandoverCoordinator
   private readonly now: () => number
   private readonly log: (message: string) => void
 
@@ -98,6 +99,7 @@ export class Sessions {
     this.lobby = options.lobby
     this.persistence = options.persistence
     this.journeys = options.journeys
+    this.handover = options.handover ?? new HandoverCoordinatorImpl({ log: options.log })
     this.now = options.now ?? (() => Date.now())
     this.log = options.log ?? ((message) => console.info(`[session] ${message}`))
   }
@@ -109,7 +111,6 @@ export class Sessions {
       client,
       account: null,
       place: upgrade.place ?? null,
-      resume6: resumeOf6(upgrade.url),
       queue: Promise.resolve(),
     }
     this.lobby.arrive(client)
@@ -146,7 +147,6 @@ export class Sessions {
     if (frame.method !== RpcMethods.hello) return
     // Both fields were read and checked by the gate a line ago.
     session.client.version = { protocol: Number(stated.protocol), build: String(stated.build) }
-    if (session.client.version.protocol < this.lobby.version.protocol) void this.resume6(session)
   }
 
   /**
@@ -155,44 +155,19 @@ export class Sessions {
    *
    * This server's protocol is admitted at any build: a page still running
    * the build before a deploy has a match to finish here, so what a page may
-   * start is weighed when it asks (`Lobby.enter`), not here. The protocol
-   * before (`OLDEST_SERVED_PROTOCOL`) is admitted only to take back the seat
-   * its url names — the one thing a protocol-6 page could still be doing.
+   * start is weighed when it asks (`Lobby.enter`), not here. Any other
+   * protocol is refused by the gate.
    */
-  private admission(session: Session, stated: unknown): string | null {
+  private admission(_session: Session, stated: unknown): string | null {
     const mine = this.lobby.version
     const refusal = versionRefusal(stated, mine, SERVER_VOICES)
     if (!refusal || typeof stated !== 'object' || stated === null) return refusal
     const { protocol, build } = stated as Partial<PeerVersion>
     if (typeof build !== 'string' || build.length === 0) return refusal
     if (protocol === mine.protocol) return null
-    const served = typeof protocol === 'number' && protocol >= OLDEST_SERVED_PROTOCOL && protocol < mine.protocol
-    return served && session.resume6 ? null : refusal
+    return refusal
   }
 
-  /**
-   * A protocol-6 page taking its seat back with the key in its url, the way
-   * protocol 6 always did it: answered with a `seated` notification and the
-   * log, or turned away with an `abort` it can show.
-   *
-   * Served for one release, so that a match in progress when protocol 7 was
-   * deployed finishes across that deploy. Delete this, the branch of `gate`
-   * that calls it, `resumeOf6`, `Upgrade.url` and the protocol-6 branch of
-   * `Lobby.replace` once `OLDEST_SERVED_PROTOCOL` reaches 7.
-   */
-  private async resume6(session: Session): Promise<void> {
-    const { client, resume6 } = session
-    try {
-      await this.lobby.enter(client, { kind: 'resume', ...resume6! }, (seated) =>
-        client.transport.send({ jsonrpc: '2.0', method: RpcMethods.seated, params: { ...seated } }),
-      )
-    } catch (error) {
-      if (!(error instanceof Refusal)) {
-        this.log(`a protocol-6 resume failed: ${error instanceof Error ? error.stack : String(error)}`)
-      }
-      this.lobby.turnAway(client, error instanceof Refusal ? error.message : FAILED)
-    }
-  }
 
   /**
    * One request: answered exactly once, after every request before it on
@@ -337,6 +312,19 @@ export class Sessions {
       this.lobby.leave(session.client)
       reply(null)
     },
+    'tictac/api/region/arrive': (session, params, reply) => {
+      const handoverId = text(params, 'handoverId')
+      const token = text(params, 'token')
+      const squadId = text(params, 'squadId')
+      this.handover.arrive(handoverId, token, squadId)
+      reply({ committed: true, targetRegion: 'confirmed' })
+    },
+    'tictac/api/region/cancelHandover': (_session, params, reply) => {
+      const handoverId = text(params, 'handoverId')
+      const reason = text(params, 'reason')
+      this.handover.cancel(handoverId, reason)
+      reply({ cancelled: true })
+    },
   }
 
   /**
@@ -423,18 +411,6 @@ function intentOf(value: unknown): ServerIntent {
   throw new Refusal(RPC_ERRORS.invalidParams, NO_INTENT)
 }
 
-/**
- * The seat a protocol-6 page's url asks to take back
- * (`?intent=resume&room=…&seat=…`), or null for any other url. Goes with
- * protocol 6 (`Sessions.resume6`).
- */
-function resumeOf6(url: string): { roomId: string; seatKey: string } | null {
-  const params = URL.parse(url)?.searchParams
-  if (params?.get('intent') !== 'resume') return null
-  const roomId = params.get('room')
-  const seatKey = params.get('seat')
-  return usable(roomId) && usable(seatKey) ? { roomId, seatKey } : null
-}
 
 /** The order a `squad/order` states. Peer input: checked, not trusted. */
 function orderOf(value: unknown): SquadOrder {

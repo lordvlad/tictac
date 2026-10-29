@@ -122,23 +122,10 @@ describe('One window per player', () => {
   })
 })
 
-describe('A page on the protocol before this one', () => {
+describe('A page on an older protocol', () => {
   const PREVIOUS = { protocol: PROTOCOL_VERSION - 1, build: MY_VERSION.build }
 
-  test('may take back the seat its url names, the way it always did', async () => {
-    const { lobby } = await harness()
-    const { blue, roomId } = await seatBoth(lobby, null, null)
-    const seatKey = keyOf(blue)
-    blue.close()
-
-    const old = await connect(lobby, null, { kind: 'resume', roomId, seatKey }, { version: PREVIOUS })
-
-    // Answered as protocol 6 is: a `seated` notification, not a response.
-    expect(old.of('seated')[0]).toMatchObject({ roomId, faction: Faction.Blue, seatKey })
-    expect(old.closed).toBe(false)
-  })
-
-  test('may do nothing else', async () => {
+  test('is refused at the version gate: protocol 6 compatibility is retired', async () => {
     const { lobby } = await harness()
     const old = await connect(lobby, null, null, { version: PREVIOUS, hello: false })
     old.send({ type: 'hello', ...PREVIOUS })

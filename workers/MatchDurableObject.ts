@@ -84,13 +84,16 @@ export class MatchDurableObject extends DurableObject<Env> {
       // The object's one alarm is the travel schedule's: armed for the
       // earliest moment any squad has due, and kept in storage, so it fires
       // even if this instance was evicted in between.
-      this.schedule = new Schedule({
-        now: () => Date.now(),
-        arm: (at) => {
-          if (at === null) void ctx.storage.deleteAlarm()
-          else void ctx.storage.setAlarm(at)
+      this.schedule = new Schedule(
+        {
+          now: () => Date.now(),
+          arm: (at) => {
+            if (at === null) void ctx.storage.deleteAlarm()
+            else void ctx.storage.setAlarm(at)
+          },
         },
-      })
+        (message) => this.log(`[schedule] ${message}`),
+      )
       const journeys = new Journeys({
         squads: this.persistence.squads,
         encounters: this.persistence.encounters,
@@ -135,7 +138,7 @@ export class MatchDurableObject extends DurableObject<Env> {
     server.addEventListener('error', () => {
       transport.closed('the socket errored')
     })
-    this.sessions.attach(transport, { url: request.url, place: placeOf(request.cf) })
+    this.sessions.attach(transport, { place: placeOf(request.cf) })
     this.log('a client connected')
     return new Response(null, { status: 101, webSocket: client })
   }

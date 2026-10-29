@@ -37,9 +37,7 @@
  *
  * 7: one socket per window carries everything (`src/game/Rpc.ts`): signing
  * in, the roster, the lobby and taking a seat are JSON-RPC requests on it,
- * and the HTTP API is gone. A protocol-6 window still finishes the match it
- * is in — it comes back with `intent=resume` in its url, the one thing
- * protocol 6 says in a url that this server still reads.
+ * and the HTTP API is gone.
  */
 export const PROTOCOL_VERSION = 7
 
@@ -55,12 +53,10 @@ export const PROTOCOL_VERSION = 7
  * and speaks each socket's dialect back to it. Opening, joining or watching a
  * room still requires the current protocol and the room's own build.
  *
- * `PROTOCOL_VERSION - 1` — the one before — except that nothing before 6 can
- * reconnect to a room at all, so 6 is the floor. Bumping the protocol means
- * keeping the server speaking the previous one; `tests/version.test.ts`
- * holds this constant to that.
+ * Protocol 7 is the floor: the protocol-6 keyed-resume compatibility shim
+ * has been deleted.
  */
-export const OLDEST_SERVED_PROTOCOL = Math.max(6, PROTOCOL_VERSION - 1)
+export const OLDEST_SERVED_PROTOCOL = 7
 
 /**
  * The commit this bundle was built from, or `dev` when it was not built.

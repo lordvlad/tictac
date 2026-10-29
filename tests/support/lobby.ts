@@ -152,9 +152,7 @@ export async function connect(
     pending.clear()
   })
 
-  const older = version.protocol < PROTOCOL_VERSION
-  const url = older && intent?.kind === 'resume' ? `ws://lobby.test/?intent=resume&room=${intent.roomId}&seat=${intent.seatKey}` : 'ws://lobby.test/'
-  sessions.attach(theirs, { url })
+  sessions.attach(theirs, {})
 
   const send = (message: NetworkMessage): void => {
     const params = { ...message } as Record<string, unknown>
@@ -166,6 +164,7 @@ export async function connect(
     params: RpcParams<M>,
     read?: (result: RpcResult<M>) => void,
   ): Promise<RpcResult<M>> => {
+    if (closed) return Promise.reject(new Error('the socket closed'))
     const id = ++lastId
     const waiting = Promise.withResolvers<unknown>()
     pending.set(id, { waiting, read: read as ((result: unknown) => void) | undefined })
@@ -195,12 +194,6 @@ export async function connect(
   }
   if (!hello) return connection
   send({ type: 'hello', ...version })
-  if (older) {
-    // A protocol-6 page asks for nothing: its url said it all, and the
-    // answer is a notification. Wait for it.
-    await answered(connection)
-    return connection
-  }
   try {
     if (player) {
       known.set(player.id, player)

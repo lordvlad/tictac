@@ -20,12 +20,10 @@ import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
 import { loopback, type Transport } from '../src/game/Transport'
 import { SocketTransport } from '../src/game/SocketTransport'
 import {
-  componentUpdateMethod,
   isJsonRpcFrame,
   type JsonRpcFrame,
   type JsonRpcNotification,
   type JsonRpcRequest,
-  parseComponentUpdateMethod,
   RpcMethods,
 } from '../src/game/JsonRpc'
 
@@ -54,17 +52,6 @@ describe('JSON-RPC framing', () => {
     expect(isJsonRpcFrame({ method: 'x' })).toBe(false)
     expect(isJsonRpcFrame(null)).toBe(false)
     expect(isJsonRpcFrame('2.0')).toBe(false)
-  })
-
-  test('component method names round-trip', () => {
-    expect(componentUpdateMethod('health')).toBe('tictac/component/health/update')
-    expect(parseComponentUpdateMethod('tictac/component/health/update')).toBe('health')
-  })
-
-  test('system commands are not mistaken for component updates', () => {
-    for (const method of Object.values(RpcMethods)) {
-      expect(parseComponentUpdateMethod(method)).toBeNull()
-    }
   })
 
   test('every command type has a method', () => {
@@ -218,140 +205,6 @@ describe('Command transport', () => {
   })
 })
 
-describe('Component replication', () => {
-  /** Own everything unless a test says otherwise. */
-  const ownAll = () => true
-
-  test('a component mutation is transmitted without being announced', () => {
-    const { net, sent } = peered()
-    const world = new World()
-    net.bindWorld(world, ownAll)
-
-    const entity = world.createEntity()
-    const health = world.addComponent(entity, new HealthComponent(100, 100))
-    sent.length = 0
-
-    health.hp = 55
-    world.syncDirty()
-
-    expect(sent).toEqual([
-      {
-        jsonrpc: '2.0',
-        method: 'tictac/component/health/update',
-        params: { entityId: entity, hp: 55, maxHp: 100, withdrawn: false },
-      },
-    ])
-  })
-
-  test('a global rules edit rides the same channel as unit state', () => {
-    const { net, sent } = peered()
-    const world = new World()
-    createGlobalRules(world)
-    net.bindWorld(world, ownAll)
-    sent.length = 0
-
-    const original = RULES.moveSpeed
-    try {
-      RULES.moveSpeed = 9
-      world.syncDirty()
-    } finally {
-      RULES.moveSpeed = original
-    }
-
-    const frame = sent.find((f) => f.method === componentUpdateMethod(MatchRulesComponent.componentName))
-    expect(frame).toBeDefined()
-    expect((frame!.params as Record<string, unknown>).moveSpeed).toBe(9)
-  })
-
-  test('local play replicates nothing', () => {
-    const { net, sent } = peered('local')
-    const world = new World()
-    net.bindWorld(world, ownAll)
-
-    const entity = world.createEntity()
-    world.addComponent(entity, new HealthComponent(100, 100))
-
-    expect(sent).toEqual([])
-  })
-
-  test('state for an entity this peer does not own is never transmitted', () => {
-    const { net, sent } = peered()
-    const world = new World()
-    const mine = world.createEntity()
-    const theirs = world.createEntity()
-    net.bindWorld(world, (entityId) => entityId === mine)
-
-    const ours = world.addComponent(mine, new HealthComponent(100, 100))
-    const foreign = world.addComponent(theirs, new HealthComponent(100, 100))
-    sent.length = 0
-
-    ours.hp = 50
-    foreign.hp = 50
-    world.syncDirty()
-
-    expect(sent.map((f) => (f.params as Record<string, unknown>).entityId)).toEqual([mine])
-  })
-
-  test('a peer may not rewrite state this side is authoritative for', () => {
-    const { net, send } = peered()
-    const world = new World()
-    const mine = world.createEntity()
-    net.bindWorld(world, (entityId) => entityId === mine)
-    world.addComponent(mine, new HealthComponent(100, 100))
-
-    send({
-      jsonrpc: '2.0',
-      method: componentUpdateMethod('health'),
-      params: { entityId: mine, hp: 1, maxHp: 100 },
-    })
-
-    expect(world.getComponent(mine, HealthComponent)?.hp).toBe(100)
-  })
-
-  test('an inbound component update lands in the world and is not echoed', () => {
-    const { net, sent, send } = peered('join')
-    const world = new World()
-    const theirs = world.createEntity()
-    net.bindWorld(world, () => false)
-    world.addComponent(theirs, new HealthComponent(100, 100))
-    sent.length = 0
-
-    let notified = false
-    net.onComponentUpdate = () => {
-      notified = true
-    }
-
-    send({
-      jsonrpc: '2.0',
-      method: componentUpdateMethod('health'),
-      params: { entityId: theirs, hp: 30, maxHp: 100 },
-    })
-    world.syncDirty()
-
-    expect(world.getComponent(theirs, HealthComponent)?.hp).toBe(30)
-    expect(notified).toBe(true)
-    expect(sent).toEqual([])
-  })
-
-  test('an update for an unknown entity is dropped quietly', () => {
-    const { net, send } = peered('join')
-    const world = new World()
-    net.bindWorld(world, () => false)
-
-    let notified = false
-    net.onComponentUpdate = () => {
-      notified = true
-    }
-
-    send({
-      jsonrpc: '2.0',
-      method: componentUpdateMethod('health'),
-      params: { entityId: 999, hp: 30, maxHp: 100 },
-    })
-
-    expect(notified).toBe(false)
-  })
-})
 
 describe('The start handshake carries each peer its own squad', () => {
   test('a squad sent with `ready` arrives as the sheets and kit that were sent', async () => {
@@ -897,11 +750,6 @@ describe('A spectator', () => {
     expect(net.isMyTurn(Faction.Red)).toBe(false)
 
     // Everything a seat would have put on the wire, through every door it has.
-    const world = new World()
-    net.bindWorld(world, () => true)
-    const health = world.addComponent(world.createEntity(), new HealthComponent(100, 100))
-    health.hp = 55
-    world.syncDirty()
     net.send({ type: 'endTurn', faction: Faction.Blue })
     net.send({ type: 'ready', squad: [] })
     net.sendRpc(notify(RpcMethods.digest, { digest: {} }))

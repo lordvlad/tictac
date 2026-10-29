@@ -145,15 +145,11 @@ with `whenSettled`, because it fingerprints the world *after* them.
 uneven frame rates, and requires the replay's final digest; with the gate
 removed, the peer's shots are refused.
 
-### 3. Component Dirty State Synchronization
-- `componentUpdate/<EntityId>/<ComponentName>`: emitted by `World.syncDirty()`
-  for state the sender is authoritative for. Both sides now simulate, so
-  ownership decides who may transmit what: `bindWorld` takes a predicate, each
-  peer sends only its own faction's units, and an inbound update for an entity
-  this side owns is dropped. Without that, two simulating peers would overwrite
-  each other mid-step.
-- `health` carries `withdrawn` (protocol 4): a unit that got off the field alive by retreating.
-  Both peers set it from the same `retreat`, and the digest compares it like hit points.
+### 3. Full-Knowledge Lockstep (ADR-0004)
+Under ADR-0004 full-knowledge lockstep, only intent travels on the wire (`NetworkMessage`).
+Both peers resolve every command through the same rules from one seeded stream per match.
+No component diffs or outcomes are broadcast during a match, eliminating race conditions
+between command animation queues and remote property mutations.
 
 ## 4. Agreement, and what happens when it fails
 
@@ -454,14 +450,8 @@ Every room records the build and protocol it was opened under.
   player's seat in a match being played is in a room of another build: binding the socket would
   retire the window that can finish the match. The page keeps its token, since a page that can
   finish it should find the token where it was left, and shows the reason.
-- **Protocol 6** (`OLDEST_SERVED_PROTOCOL`, `max(6, PROTOCOL_VERSION − 1)`) is admitted for one
-  thing: the keyed resume a protocol-6 page puts in the url it opens the socket at
-  (`?intent=resume&room=…&seat=…`, `resumeOf6`), so a match in progress when protocol 7 was
-  deployed finishes across that deploy. It is answered the protocol-6 way (`Sessions.resume6`):
-  a `seated` notification and the log, or an `abort` and a close; a protocol-6 window being
-  replaced is sent `abort` rather than `session/replaced`. Any other protocol-6 socket is
-  refused at the gate. This path — `resume6`, `resumeOf6`, `Upgrade.url` and the protocol-6
-  branch of `Lobby.replace` — is deleted once `OLDEST_SERVED_PROTOCOL` reaches 7.
+- **Protocol 6 compatibility is retired**: `OLDEST_SERVED_PROTOCOL` is 7. Sockets must speak
+  protocol 7.
 
 ### What goes where
 

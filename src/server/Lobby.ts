@@ -671,17 +671,7 @@ export class Lobby {
     const previous = this.windows.get(player.id)
     if (!previous || previous === client) return
     this.windows.delete(player.id)
-    if (previous.version && previous.version.protocol < this.version.protocol) {
-      // Protocol 6 has no `session/replaced`, and is told the way it always
-      // was. Goes with the protocol-6 path in `Session.ts`.
-      previous.transport.send({
-        jsonrpc: '2.0',
-        method: RpcMethods.abort,
-        params: { reason: SESSION_REPLACED, side: null },
-      })
-    } else {
-      previous.transport.send({ jsonrpc: '2.0', method: SESSION_REPLACED_PUSH, params: { reason: SESSION_REPLACED } })
-    }
+    previous.transport.send({ jsonrpc: '2.0', method: SESSION_REPLACED_PUSH, params: { reason: SESSION_REPLACED } })
     this.forget(previous)
     previous.transport.close()
     this.log(`${player.name} moved to a new window`)

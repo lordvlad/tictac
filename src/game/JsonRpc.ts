@@ -35,19 +35,6 @@ export function isJsonRpcFrame(data: unknown): data is JsonRpcFrame {
   return typeof data === 'object' && data !== null && (data as JsonRpcFrame).jsonrpc === '2.0'
 }
 
-const COMPONENT_METHOD_PREFIX = 'tictac/component/'
-
-/** `health` -> `tictac/component/health/update` */
-export function componentUpdateMethod(componentName: string): string {
-  return `${COMPONENT_METHOD_PREFIX}${componentName}/update`
-}
-
-/** `tictac/component/health/update` -> `health`; null for anything else. */
-export function parseComponentUpdateMethod(method: string): string | null {
-  if (!method.startsWith(COMPONENT_METHOD_PREFIX) || !method.endsWith('/update')) return null
-  const name = method.slice(COMPONENT_METHOD_PREFIX.length, -'/update'.length)
-  return name.length > 0 && !name.includes('/') ? name : null
-}
 
 /**
  * System commands, keyed by {@link NetworkMessage} type so the mapping cannot

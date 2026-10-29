@@ -19,7 +19,7 @@ appliesTo:
   - "src/server/Lobby.ts"
   - "src/server/Session.ts"
   - "src/server/RoomStore.ts"
-  - "src/sim/WireMatch.ts"
+  - "tests/support/WireMatch.ts"
   - "src/server/Tiles.ts"
   - "src/server/RelatedOrigins.ts"
   - "scripts/build-planet-tiles.ts"
@@ -362,7 +362,7 @@ alarm, read back from the stored route; a token nobody issued is a `401` error a
 the socket stays open; an anonymous socket is still welcome; and a frame that is not JSON-RPC is
 silently dropped rather than crashing the connection or being relayed — the specific
 behaviour that distinguishes the current, real referee from this deployment's first-pass bare
-relay. Past a single relayed frame, `src/sim/WireMatch.ts` elevates `SimMatch` — already able to
+relay. Past a single relayed frame, `tests/support/WireMatch.ts` elevates `SimMatch` — already able to
 play a whole decisive match deterministically, both sides, in milliseconds — to send that exact
 command stream through two real `NetworkManager`s connected to this deployment instead of only
 applying it in memory: a `tests/cloudflare.test.ts` scenario drives a full match this way and
@@ -372,7 +372,7 @@ same decisive winner — the proof that needed two real browsers before, now had
 `ITEM-045` repeated these checks against the real deploy, not only `wrangler dev` — a real
 passkey registration and socket (over the HTTP API of the time) against
 `https://tictac-match-server.waldemar-reusch.workers.dev`, and a whole decisive match driven
-through it anonymously by `src/sim/WireMatch.ts` with no abort (which, at the time, said less
+through it anonymously by `tests/support/WireMatch.ts` with no abort (which, at the time, said less
 than it looked: see §2.4). What remains open: the match
 above is anonymous; a *registered* match, whose roster is checked afterward via `roster/list`,
 needs `SimMatch` or its wire harness to deploy a squad sourced from a real

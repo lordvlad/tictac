@@ -3,7 +3,6 @@ import { sanitizeSheet } from '../core/Characters'
 import type { GrenadeId, ShotMode } from '../core/Arsenal'
 import type { DoorVerb } from '../core/Doors'
 import type { ItemId } from '../core/Items'
-import type { World } from '../ecs/World'
 import { isCommand } from '../ecs/systems/CommandSystem'
 import { canonical } from '../core/digest'
 import {
@@ -22,10 +21,8 @@ import { MY_VERSION, versionRefusal } from '../version'
 import {
   type JsonRpcFrame,
   type JsonRpcNotification,
-  componentUpdateMethod,
   frameOf,
   messageOf,
-  parseComponentUpdateMethod,
   RpcMethods,
 } from './JsonRpc'
 import {
@@ -108,10 +105,8 @@ export interface PeerSquad {
 /**
  * Commands: things one peer asks the other to *do*.
  *
- * Everything a command changes is component state, and component state
- * replicates itself through {@link World.syncDirty}. Commands exist only for
- * the parts that cannot be inferred from a diff — the dice rolls behind a
- * shot, and the intent to start walking a particular route.
+ * Under ADR-0004 full-knowledge lockstep, only intent travels on the wire.
+ * Both sides simulate deterministically from the same seeded stream.
  */
 export type NetworkMessage =
   // Both first frames state the build they came from: the host's `init` and
@@ -259,8 +254,6 @@ export class NetworkManager {
   private readonly held: NetworkMessage[] = []
   onConnected: (() => void) | null = null
   onDisconnected: ((reason?: string) => void) | null = null
-  /** Fired after peer state has been written into the world. */
-  onComponentUpdate: (() => void) | null = null
   /**
    * The socket to the match server dropped and this window is trying to get
    * its seat back; fired once per try, counting from 1. Nothing is reported
@@ -276,8 +269,6 @@ export class NetworkManager {
 
   /** Set once a peer has been turned away; nothing it sends is read again. */
   private refused = false
-  private world: World | null = null
-  private owns: (entityId: number) => boolean = () => true
   private readonly peerReady = Promise.withResolvers<PeerSquad>()
 
   /** Where to come back to after a drop, once a match server has seated this window. */
@@ -338,26 +329,6 @@ export class NetworkManager {
     this.matchLog.promise.catch(() => {})
   }
 
-  /**
-   * Replicate component mutations for the entities this peer owns.
-   *
-   * Both peers run the same simulation, so without an owner each side would
-   * broadcast its own guess at every unit and the two would overwrite each
-   * other mid-step. `owns` names the authority: its answer is the only state
-   * that travels, and state for anything else is only ever received.
-   */
-  bindWorld(world: World, owns: (entityId: number) => boolean): void {
-    this.world = world
-    this.owns = owns
-    world.onComponentChanged((entityId, componentName, data) => {
-      if (this.mode === 'local' || !this.owns(entityId)) return
-      this.sendRpc({
-        jsonrpc: '2.0',
-        method: componentUpdateMethod(componentName),
-        params: { entityId, ...data },
-      })
-    })
-  }
 
   /**
    * Play over `transport`: every channel arrives here.
@@ -552,16 +523,6 @@ export class NetworkManager {
     const { method } = frame
     const params = (frame as JsonRpcNotification).params as Record<string, unknown>
 
-    const componentName = parseComponentUpdateMethod(method)
-    if (componentName) {
-      if (typeof params.entityId !== 'number') return
-      // A peer never gets to rewrite state this side is authoritative for.
-      if (this.owns(params.entityId)) return
-      if (this.world?.applyRemote(params.entityId, componentName, params)) {
-        this.onComponentUpdate?.()
-      }
-      return
-    }
 
     // An abort is the referee (or a peer) saying the match has stopped being
     // one match, and it is the only frame that arrives already carrying its
