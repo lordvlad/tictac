@@ -11,9 +11,9 @@ import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
-import { Squads } from '../src/game/Squads'
+import { Squads } from '../src/rules/Squads'
 import { stockSquads } from './support/squads'
-import { TurnManager } from '../src/game/TurnManager'
+import { TurnManager } from '../src/rules/TurnManager'
 import type { Soldier } from '../src/entities/Soldier'
 
 const ear = (x: number, y: number, hearing = 1): Ear => ({

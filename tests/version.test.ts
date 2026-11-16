@@ -6,9 +6,10 @@ import {
   SERVER_VOICES,
   versionRefusal,
 } from '../src/version'
-import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
-import { RpcMethods, type JsonRpcFrame } from '../src/game/JsonRpc'
-import { loopback } from '../src/game/Transport'
+import { NetworkManager } from '../src/game/NetworkManager'
+import { type NetworkMessage } from '../src/wire/NetworkMessage'
+import { RpcMethods, type JsonRpcFrame } from '../src/wire/JsonRpc'
+import { loopback } from '../src/wire/Transport'
 
 /** A manager with nothing attached yet, watching what it decides. */
 function harness(mode: 'host' | 'join' = 'host') {

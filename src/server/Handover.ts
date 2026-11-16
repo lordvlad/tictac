@@ -2,7 +2,7 @@ import type { ServerClock } from './Clock'
 import { Refusal } from './Lobby'
 import type { RegionDirectory } from './Owner'
 import type { Squads } from './Squads'
-import { RPC_ERRORS } from '../game/Rpc'
+import { RPC_ERRORS } from '../wire/Rpc'
 
 /**
  * Two-Phase Commit Handover Coordinator (RFC-0002 / tictac-dwq).

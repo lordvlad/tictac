@@ -5,7 +5,7 @@ import { ShotMode } from '../src/core/Arsenal'
 import { NO_FX, type CombatFx } from '../src/core/Combatant'
 import { Grid } from '../src/core/Grid'
 import { Rng } from '../src/core/rng'
-import { executeShot } from '../src/game/Combat'
+import { executeShot } from '../src/rules/Combat'
 import { drawnImpact } from '../src/render/Tracers'
 import { headlessSoldier } from './support/soldier'
 

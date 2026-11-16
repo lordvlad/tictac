@@ -4,7 +4,7 @@ import type { MoraleBreak } from '../core/Morale'
 import type { Attribute, Deeds } from '../core/Progression'
 import type { GroundCovered } from './Ground'
 import { WeaponId } from '../core/Arsenal'
-import type { CombatRecording } from '../game/Recording'
+import type { CombatRecording } from '../wire/Recording'
 import { type MatchOutcome, SimMatch, type SquadPlan, type WeaponTally } from './SimMatch'
 
 /** The stock spread, which is what the loadout screen opens on. */

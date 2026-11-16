@@ -1,7 +1,7 @@
 import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
-import { SESSION_REPLACED, type Player } from '../src/game/Rpc'
+import { SESSION_REPLACED, type Player } from '../src/wire/Rpc'
 import { Lobby } from '../src/server/Lobby'
 import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
 import { connect, keyOf, roomOf, seatBoth } from './support/lobby'

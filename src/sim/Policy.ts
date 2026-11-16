@@ -11,29 +11,15 @@ import type { ThrowTarget } from '../core/Throw'
 import { fromBehind, headingToward } from '../core/Facing'
 import { effectiveWeapon, expectedRoundDamage, meleeChance, meleeWeapon, resolveDamage } from '../core/Ballistics'
 import type { Soldier } from '../entities/Soldier'
-import { blastOn, canMelee, canShoot, shotApCost, shotBreakdown, throwFlight } from '../game/Combat'
-import { moveBudget, stepCostFor } from '../game/Movement'
-import type { NetworkMessage } from '../game/NetworkManager'
-import { canWatch } from '../game/Overwatch'
+import { blastOn, canMelee, canShoot, shotApCost, shotBreakdown, throwFlight } from '../rules/Combat'
+import { moveBudget, stepCostFor } from '../rules/Movement'
+import type { NetworkMessage } from '../wire/NetworkMessage'
+import type { StandingOrder } from '../wire/Rpc'
+import { canWatch } from '../rules/Overwatch'
 import type { Applied, Carried } from '../ecs/systems/CommandSystem'
 import { Intel } from './Intel'
 import type { MatchHost } from './MatchHost'
 import { chooseDestination, type Spacing } from './Tactics'
-
-/**
- * What a side fights to (GDD combat §2.8, `ITEM-052`): when, if ever, it
- * pulls back to its way out and retreats.
- *
- * - `stand`: never. Fights to the end — the sweep's instrument.
- * - `cautious`: pulls out after its first wound or death.
- * - `opportunist`: fights while it believes it is winning; pulls out once the
- *   enemies it knows of outnumber it, or it is down to half its health.
- * - `evade`: pulls out at once.
- *
- * Decided from what the side holds of itself and what its {@link Intel} has
- * seen of the enemy, never from the enemy's true state.
- */
-export type StandingOrder = 'stand' | 'cautious' | 'opportunist' | 'evade'
 
 /**
  * The hit chance a unit will settle for rather than keep closing.

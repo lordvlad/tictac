@@ -47,7 +47,7 @@ nothing here draws from a match's dice.
 ## 2. Orders
 
 A window sends `tictac/api/squad/order { order }` ([ARCH-NETWORKING §8](networking.md)) with
-one of the five verbs, as a `SquadOrder` (`src/game/Rpc.ts`):
+one of the five verbs, as a `SquadOrder` (`src/wire/Rpc.ts`):
 
 | `kind` | GDD verb | Fits | Route afterwards |
 |---|---|---|---|

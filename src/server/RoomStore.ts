@@ -1,7 +1,7 @@
 import type { Faction } from '../config'
-import type { SeatControl } from '../game/Encounter'
-import type { RoomPhase } from '../game/Lobby'
-import type { StandingOrder } from '../sim/Policy'
+import type { SeatControl } from '../wire/Encounter'
+import type { RoomPhase } from '../wire/Lobby'
+import type { StandingOrder } from '../wire/Rpc'
 import type { PeerVersion } from '../version'
 import type { Db } from './db/Db'
 

@@ -1,6 +1,6 @@
-import type { JsonRpcFrame, JsonRpcRequest } from '../../src/game/JsonRpc'
-import { RpcMethods } from '../../src/game/JsonRpc'
-import { loopback, type Transport } from '../../src/game/Transport'
+import type { JsonRpcFrame, JsonRpcRequest } from '../../src/wire/JsonRpc'
+import { RpcMethods } from '../../src/wire/JsonRpc'
+import { loopback, type Transport } from '../../src/wire/Transport'
 
 export interface HandClock {
   schedule(fn: () => void, ms: number): () => void

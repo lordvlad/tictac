@@ -1,9 +1,10 @@
 import { Faction } from '../config'
-import { isCommand } from '../ecs/systems/CommandSystem'
-import type { NetworkMessage } from '../game/NetworkManager'
-import { compareDigests, type Divergence } from '../game/StateDigest'
+import { isCommand } from '../rules/Command'
+import type { NetworkMessage } from '../wire/NetworkMessage'
+import { compareDigests, type Divergence } from '../rules/StateDigest'
 import type { MatchHost } from './MatchHost'
-import { Policy, type StandingOrder } from './Policy'
+import { Policy } from './Policy'
+import type { StandingOrder } from '../wire/Rpc'
 
 /**
  * How much the AI minds standing near its own squad, in expected hit points per

@@ -1,9 +1,23 @@
 import type { CharacterSheet } from '../core/Characters'
 import type { LatLng, Pace, Waypoint } from '../core/Travel'
 import type { EncounterEntry, EncounterStarted } from './Encounter'
-import type { StandingOrder } from '../sim/Policy'
 import type { CombatRecording } from './Recording'
 import type { LobbyView, Seated, ServerIntent } from './Lobby'
+
+/**
+ * What a side fights to (GDD combat §2.8, `ITEM-052`): when, if ever, it
+ * pulls back to its way out and retreats.
+ *
+ * - `stand`: never. Fights to the end — the sweep's instrument.
+ * - `cautious`: pulls out after its first wound or death.
+ * - `opportunist`: fights while it believes it is winning; pulls out once the
+ *   enemies it knows of outnumber it, or it is down to half its health.
+ * - `evade`: pulls out at once.
+ *
+ * Decided from what the side holds of itself and what its `Intel` (`sim/Intel`)
+ * has seen of the enemy, never from the enemy's true state.
+ */
+export type StandingOrder = 'stand' | 'cautious' | 'opportunist' | 'evade'
 
 /**
  * Everything a window asks a match server, over the one socket it holds
@@ -205,7 +219,7 @@ export interface RpcApi {
   'tictac/api/lobby/subscribe': { params: Record<string, never>; result: LobbyView }
   'tictac/api/lobby/unsubscribe': { params: Record<string, never>; result: null }
   /**
-   * Take a seat or a spectator's place (`src/game/Lobby.ts` for what each
+   * Take a seat or a spectator's place (`src/wire/Lobby.ts` for what each
    * intent means and the rules that redirect or refuse it). The answer is
    * where the server put this socket; a seat in a match being played, and a
    * spectator of one, are then sent the match's `log` notification, and the

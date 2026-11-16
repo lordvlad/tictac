@@ -200,7 +200,7 @@ player's tool so far; the policy does not sneak.
 **Morale** (2026-09-24, same blocks): mirror 601 / 568 / 31, from 593 / 568 / 39 with glass
 and the stone. About one break a match (0.28–0.37 each of panic, frenzy and freeze per
 block). The policy does nothing about morale: a broken unit is run by the rules at the handover
-(`game/Breakdown`) inside `MatchHost.apply`, which settles until the applier's queue is empty
+(`rules/Breakdown`) inside `MatchHost.apply`, which settles until the applier's queue is empty
 as well as until nobody is walking, and the policy's own turn loop finds it with no points. The
 report's `morale:` line counts breaks per match.
 

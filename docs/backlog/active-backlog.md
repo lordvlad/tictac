@@ -160,7 +160,7 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
    whatever each held base/vehicle contributes) instead of the constant. Depends on the
    base/vehicle economy shipping a capacity number per holding first.
 3. **Squad deploy cap becomes situational, not constant.** `SQUAD_SIZE` (`src/config.ts`) stops
-   being a flat 4; `Room.verifyRosters`, `deploymentsFrom` (`src/game/Recording.ts`), the
+   being a flat 4; `Room.verifyRosters`, `deploymentsFrom` (`src/wire/Recording.ts`), the
    default count of `rollSquadSheets` (`src/core/Characters.ts`), and `RosterScreen`'s toggle need a
    per-match cap supplied by whatever starts the combat (a scenario, a mission, a PvP queue),
    defaulting to *something* when nothing states one. Depends on a scenario/mission system that
@@ -175,7 +175,7 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
 - `src/config.ts` (`ROSTER.size`, `SQUAD_SIZE`)
 - `src/server/Accounts.ts` (`register` deals two)
 - `src/core/Characters.ts` (`rollSquadSheets` default count)
-- `src/game/Recording.ts` (`deploymentsFrom` bound)
+- `src/wire/Recording.ts` (`deploymentsFrom` bound)
 - `src/server/Rosters.ts` (`recruit`)
 - `src/server/Room.ts` (`verifyRosters`)
 - `src/hud/RosterScreen.ts` (deploy toggle, defaulting, empty-slot rendering)

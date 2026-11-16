@@ -1,6 +1,6 @@
 import type { Faction } from '../config'
-import type { CombatRecording, RecordedEvent } from '../game/Recording'
-import { compareDigests, type Divergence, type StateDigest } from '../game/StateDigest'
+import type { CombatRecording, RecordedEvent } from '../wire/Recording'
+import { compareDigests, type Divergence, type StateDigest } from '../rules/StateDigest'
 import { MatchHost, type MatchHostOptions, type UnitState } from './MatchHost'
 
 /**

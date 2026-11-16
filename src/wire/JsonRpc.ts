@@ -1,4 +1,4 @@
-import type { NetworkMessage } from './NetworkManager'
+import type { NetworkMessage } from '../wire/NetworkMessage'
 
 export interface JsonRpcNotification<T = Record<string, unknown>> {
   jsonrpc: '2.0'

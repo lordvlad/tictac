@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { MatchHost } from '../src/sim/MatchHost'
-import { parseRecording } from '../src/game/Recording'
+import { parseRecording } from '../src/wire/Recording'
 import { Faction } from '../src/config'
 import { ShotMode, WeaponId } from '../src/core/Arsenal'
 import { AmmoId } from '../src/core/Arsenal'
-import type { CombatRecording } from '../src/game/Recording'
+import type { CombatRecording } from '../src/wire/Recording'
 import { SimMatch, type MatchOutcome, type SquadPlan } from '../src/sim/SimMatch'
 import { replay, replayIsReproducible } from '../src/sim/Replay'
 

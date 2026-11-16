@@ -30,7 +30,7 @@ import {
   removeItem,
   unfitAttachment,
   setRole,
-} from '../game/Loadout'
+} from '../rules/Loadout'
 import { defaultLoadout, type SquadLoadout, type UnitLoadout } from '../core/Loadout'
 import { Icon } from './Icon'
 import { LoadoutScene } from '../render/LoadoutScene'

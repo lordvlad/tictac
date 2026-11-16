@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
-import type { JsonRpcFrame, JsonRpcRequest } from '../src/game/JsonRpc'
-import { RpcMethods } from '../src/game/JsonRpc'
-import type { LobbyView, Seated } from '../src/game/Lobby'
-import { RPC_ERRORS, SESSION_REPLACED } from '../src/game/Rpc'
+import type { JsonRpcFrame, JsonRpcRequest } from '../src/wire/JsonRpc'
+import { RpcMethods } from '../src/wire/JsonRpc'
+import type { LobbyView, Seated } from '../src/wire/Lobby'
+import { RPC_ERRORS, SESSION_REPLACED } from '../src/wire/Rpc'
 import {
   heldTokens,
   NO_ANSWER,

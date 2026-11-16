@@ -1,10 +1,10 @@
 import { ENCOUNTER } from '../config'
 import { SPEED_KMH, type LatLng, type Pace } from '../core/Travel'
-import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification, type JsonRpcRequest } from '../game/JsonRpc'
-import type { ServerIntent } from '../game/Lobby'
-import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type SignedIn, type SquadOrder } from '../game/Rpc'
-import type { Transport } from '../game/Transport'
-import type { StandingOrder } from '../sim/Policy'
+import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification, type JsonRpcRequest } from '../wire/JsonRpc'
+import type { ServerIntent } from '../wire/Lobby'
+import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type SignedIn, type SquadOrder } from '../wire/Rpc'
+import type { Transport } from '../wire/Transport'
+import type { StandingOrder } from '../wire/Rpc'
 import { SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
 import type { ServerClock } from './Clock'
 import { HandoverCoordinator } from './Handover'
@@ -18,7 +18,7 @@ import { AuthError } from './WebAuthn'
 
 /**
  * One socket per window, and everything the window asks over it
- * (`src/game/Rpc.ts`).
+ * (`src/wire/Rpc.ts`).
  *
  * A socket states its build first (`hello`), and is version-gated on it
  * exactly as before. After that it asks: requests with ids, each answered

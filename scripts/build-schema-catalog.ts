@@ -18,7 +18,7 @@
  * truth that itself drifts, which is the exact failure mode this file exists
  * to close.
  *
- * - `NetworkMessage` (`src/game/NetworkManager.ts`), read off the TypeScript
+ * - `NetworkMessage` (`src/wire/NetworkMessage.ts` and `src/rules/Command.ts`), read off the TypeScript
  *   parse tree — see `schemaCatalog.ts`.
  * - Every replicated component (`src/ecs/components/index.ts`), by
  *   instantiating one with its constructor defaults and reflecting the *keys*

@@ -1,7 +1,7 @@
 import { PLAYBACK } from '../config'
-import type { CombatRecording } from './Recording'
-import type { NetworkMessage } from './NetworkManager'
-import type { Moment, Rewindable } from './Rewind'
+import type { CombatRecording } from '../wire/Recording'
+import type { NetworkMessage } from '../wire/NetworkMessage'
+import type { Moment, Rewindable } from '../rules/Rewind'
 
 export type PlaybackSpeed = 0.5 | 1 | 2
 

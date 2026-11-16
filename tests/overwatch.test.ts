@@ -8,10 +8,10 @@ import { WallKind } from '../src/core/Walls'
 import { matchDice, Rng } from '../src/core/rng'
 import { createGlobalRules } from '../src/ecs/globals'
 import { World } from '../src/ecs/World'
-import { canWatch, reactToArrival, watchCost } from '../src/game/Overwatch'
-import { Squads } from '../src/game/Squads'
+import { canWatch, reactToArrival, watchCost } from '../src/rules/Overwatch'
+import { Squads } from '../src/rules/Squads'
 import { stockSquads } from './support/squads'
-import { settleTurn } from '../src/game/Turn'
+import { settleTurn } from '../src/rules/Turn'
 
 /** Two squads in the open, one watcher and one walker. */
 function field() {

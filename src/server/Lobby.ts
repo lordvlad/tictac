@@ -1,10 +1,10 @@
 import { ENCOUNTER, Faction, SQUAD_SIZE } from '../config'
 import { dealAliens } from '../core/Encounters'
-import { toBase64Url } from '../game/Base64Url'
-import type { JsonRpcFrame, JsonRpcNotification } from '../game/JsonRpc'
+import { toBase64Url } from '../wire/Base64Url'
+import type { JsonRpcFrame, JsonRpcNotification } from '../wire/JsonRpc'
 import { defaultLoadout, type Deployment } from '../core/Loadout'
-import type { LobbyRoom, LobbyView, Seated, ServerIntent } from '../game/Lobby'
-import { RECORDING_VERSION, type RecordingHeader } from '../game/Recording'
+import type { LobbyRoom, LobbyView, Seated, ServerIntent } from '../wire/Lobby'
+import { RECORDING_VERSION, type RecordingHeader } from '../wire/Recording'
 import {
   RPC_ERRORS,
   SESSION_REPLACED,
@@ -13,7 +13,7 @@ import {
   type RpcPush,
   type RpcPushes,
   type SessionEnded,
-} from '../game/Rpc'
+} from '../wire/Rpc'
 import { MY_VERSION, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
 import type { ServerClock } from './Clock'
 import type { EncounterContact, EncounterOpened, MeetingContact, MeetingOpened } from './EncounterPort'
@@ -27,7 +27,7 @@ import type { RosterMember, Rosters } from './Rosters'
  *
  * A window holds one socket to the server for as long as it is on it
  * (`Session.ts`), and asks over it to enter a room — open one, join one,
- * watch one, or take back a seat (`src/game/Lobby.ts`) — and to leave it
+ * watch one, or take back a seat (`src/wire/Lobby.ts`) — and to leave it
  * again. Entering puts the socket in one room, as one seat or as a spectator,
  * and answers where (`Seated`); everything after that is the room's
  * (`Room.ts`): the same refereed conversation a match always had. A request

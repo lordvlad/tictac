@@ -9,7 +9,7 @@ appliesTo:
   - "src/config.ts"
   - "src/core/Traits.ts"
   - "src/core/Morale.ts"
-  - "src/game/Breakdown.ts"
+  - "src/rules/Breakdown.ts"
 relatedDocs:
   - "docs/design/gdd/combat-mechanics.md"
 tags: ["progression", "rpg", "squads", "roster", "attributes", "morale"]

@@ -10,11 +10,11 @@ appliesTo:
   - "src/core/Ballistics.ts"
   - "src/core/Visibility.ts"
   - "src/core/Cover.ts"
-  - "src/game/Combat.ts"
+  - "src/rules/Combat.ts"
   - "src/core/Fire.ts"
   - "src/core/Surfaces.ts"
   - "src/core/Morale.ts"
-  - "src/game/Breakdown.ts"
+  - "src/rules/Breakdown.ts"
   - "src/core/Traits.ts"
   - "src/core/Items.ts"
   - "src/core/Roles.ts"
@@ -206,7 +206,7 @@ Rifleman — chosen per member on the loadout screen (`UnitLoadout.role`, stampe
 `applyUnitLoadout`, replicated the same way the rest of the loadout is: both peers already
 hold the full `SquadLoadout` from the `ready` handshake). A `RoleSpec` narrows which weapon,
 attachment and item ids `canEquipWeapon`/`canFitAttachment`/`canAddItem`
-(`src/game/Loadout.ts`) will approve — absent means every row in the crate, as before roles
+(`src/rules/Loadout.ts`) will approve — absent means every row in the crate, as before roles
 existed — and names the one trait the role's training earns, folded in with `TraitSource.Role`
 the moment it is picked. Changing role drops whatever the new role cannot cover: the weapon
 falls back to the role's first allowed choice (its rail trimmed like a downgrade), and
@@ -286,7 +286,7 @@ grenade cap (`applyUnitLoadout`).
 ### Throws
 A throw is aimed at a tile **and a storey** — the `throwGrenade` command's `targetTile` and
 `targetLevel` — and resolved where it lands (`src/core/Throw.ts`, numbers in `THROW`).
-`throwFlight` (`game/Combat`) first strays the aim — `scatterAim`, two draws from the match
+`throwFlight` (`rules/Combat`) first strays the aim — `scatterAim`, two draws from the match
 stream, sideways then along: up to `THROW.across` (0.36, about 20°) of the length sideways and
 `THROW.along` (0.2) short or long, both times `aimError`, the same training-and-status
 multiplier a shot's error uses — then flies it with `flyThrow`:
@@ -367,7 +367,7 @@ teamplayer's company. Temperament is on the sheet (`CharacterSheet.temperament`,
 above draws, so a match in which nobody was shaken draws what it drew before morale existed.
 
 A frozen unit's points go to zero (taken, not spent: exhaustion does not see them). Panicking
-and frenzied units are then run by the rules (`src/game/Breakdown.ts`), one command at a time,
+and frenzied units are then run by the rules (`src/rules/Breakdown.ts`), one command at a time,
 each asked for after the last was carried out and walked, with the origin `rules`. The runs go
 to the *front* of the applier's queue: a peer's commands for the turn can already be waiting
 behind the handover, and they were decided after the runs, on the peer that made them.

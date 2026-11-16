@@ -158,7 +158,7 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
 - **The match-server panel is the lobby.** `ServerPanel.tsx` keeps the account
   line and the passkey ceremony over the window's one `ServerConnection` (`connectionToServer()`,
   taken when the panel opens), and below them the room list,
-  pushed by the server through `ServerConnection.watchLobby` (`src/game/Lobby.ts`) and never
+  pushed by the server through `ServerConnection.watchLobby` (`src/wire/Lobby.ts`) and never
   polled; the subscription ends when the panel unmounts. `LobbyList.tsx` draws the rooms in two
   sections by what a visitor can do with them — *waiting for an opponent* (Join) and *in
   progress* (Watch; a seat held for a dropped player reads "reconnecting…") — inside a scrolling

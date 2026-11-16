@@ -6,8 +6,8 @@ import { TraitId } from './Traits'
 /**
  * What a unit does when its nerve goes.
  *
- * - **Panic**: the rules take it over and it runs (`game/Breakdown`).
- * - **Frenzy**: the rules take it over and it charges (`game/Breakdown`).
+ * - **Panic**: the rules take it over and it runs (`rules/Breakdown`).
+ * - **Frenzy**: the rules take it over and it charges (`rules/Breakdown`).
  * - **Freeze**: its points drop to zero, and it does nothing.
  *
  * A freeze is the mild end; further gone, a unit runs or charges as its

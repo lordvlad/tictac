@@ -1,7 +1,7 @@
 import type { LatLng } from '../core/Travel'
-import type { EncounterEntry, EncounterResult, EncounterStarted, PassedFor } from '../game/Encounter'
-import type { LobbyView } from '../game/Lobby'
-import type { StandingOrder } from '../sim/Policy'
+import type { EncounterEntry, EncounterResult, EncounterStarted, PassedFor } from '../wire/Encounter'
+import type { LobbyView } from '../wire/Lobby'
+import type { StandingOrder } from '../wire/Rpc'
 
 /**
  * What a window says about the wild encounters on the road (`ITEM-048`): the

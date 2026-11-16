@@ -15,7 +15,7 @@ import { reachable, routeTo } from '../core/Pathfinding'
 import { MELEE } from '../core/Melee'
 import { fromBehind } from '../core/Facing'
 import { eyesOf, hasLineOfSight, sees } from '../core/Visibility'
-import { shotApCost } from '../game/Combat'
+import { shotApCost } from '../rules/Combat'
 
 /**
  * Where to stand, for the sweep's policy.

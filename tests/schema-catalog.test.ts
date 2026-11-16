@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { RpcMethods } from '../src/game/JsonRpc'
+import { RpcMethods } from '../src/wire/JsonRpc'
 import { PROTOCOL_VERSION } from '../src/version'
 import {
   commandShapes,

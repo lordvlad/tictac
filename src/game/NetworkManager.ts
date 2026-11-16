@@ -1,15 +1,12 @@
 import { Faction, SQUAD_SIZE } from '../config'
 import { sanitizeSheet } from '../core/Characters'
-import type { GrenadeId, ShotMode } from '../core/Arsenal'
-import type { DoorVerb } from '../core/Doors'
-import type { ItemId } from '../core/Items'
-import { isCommand } from '../ecs/systems/CommandSystem'
+import { isCommand } from '../rules/Command'
 import { canonical } from '../core/digest'
-import { deploymentStateFrom, parseRecording, unitLoadoutFrom, type RecordedEvent, type RecordingHeader } from './Recording'
+import { deploymentStateFrom, parseRecording, unitLoadoutFrom, type RecordingHeader } from '../wire/Recording'
 import type { Deployment, UnitLoadout } from '../core/Loadout'
-import type { RoomPhase, Seated, ServerIntent } from './Lobby'
+import type { RoomPhase, Seated, ServerIntent } from '../wire/Lobby'
 import type { ServerConnection } from './ServerConnection'
-import type { StateDigest } from './StateDigest'
+import type { MatchLog, NetworkMessage } from '../wire/NetworkMessage'
 import { MY_VERSION, versionRefusal } from '../version'
 import {
   type JsonRpcFrame,
@@ -17,13 +14,13 @@ import {
   frameOf,
   messageOf,
   RpcMethods,
-} from './JsonRpc'
+} from '../wire/JsonRpc'
 import {
   hostDataChannel,
   joinDataChannel,
   type DataChannelHost,
 } from './DataChannelTransport'
-import type { Transport } from './Transport'
+import type { Transport } from '../wire/Transport'
 
 /**
  * Which side of a match this manager speaks for.
@@ -33,13 +30,6 @@ import type { Transport } from './Transport'
  * component update — ever leaves it (`sendRpc`).
  */
 export type NetworkMode = 'local' | 'host' | 'join' | 'spectate'
-
-/** A match so far, as a match server states it to a socket taking a seat in it or watching it. */
-export interface MatchLog {
-  matchId: string
-  header: RecordingHeader
-  events: RecordedEvent[]
-}
 
 const ROOM_PHASES: readonly RoomPhase[] = ['waiting', 'deploying', 'playing']
 
@@ -87,125 +77,6 @@ function wireCopy(command: NetworkMessage): NetworkMessage {
 export interface PeerSquad {
   squad: Deployment[]
 }
-
-/**
- * One unit's share of an attack, exactly as the acting peer resolved it.
- *
- * The receiving peer holds only the *stock* copy of the sender's weapons and
- * grenades — the chosen loadout is stamped before replication starts — so an
- * attack's numbers travel with it and are applied verbatim.
- */
-/**
- * Commands: things one peer asks the other to *do*.
- *
- * Under ADR-0004 full-knowledge lockstep, only intent travels on the wire.
- * Both sides simulate deterministically from the same seeded stream.
- */
-export type NetworkMessage =
-  // Both first frames state the build they came from: the host's `init` and
-  // the joiner's `hello`. A match between two different builds is refused
-  // before it starts — see `src/version.ts`.
-  | { type: 'init'; seed: number; seedLabel: string; protocol: number; build: string }
-  | { type: 'hello'; protocol: number; build: string }
-  /**
-   * A fingerprint of the sender's whole world, sent immediately before it hands
-   * over. Not an intent: it asks the other side to *do* nothing, and it is not
-   * recorded, because a replay derives its state rather than checking it.
-   */
-  | { type: 'digest'; digest: StateDigest }
-  /**
-   * The opening position, stated to a referee.
-   *
-   * A referee refights the match from its intents, so it needs what the
-   * intents are *about*: the seed, both squads' people and both squads' kit.
-   * None of that is derivable from the stream — a loadout reaches a peer as
-   * replicated component state, which is state its owner is authoritative for
-   * rather than something anybody declared — so a refereed match declares it
-   * once, at the start.
-   */
-  | { type: 'matchHeader'; header: RecordingHeader }
-  /**
-   * The match so far: its opening position and every intent the referee has
-   * accepted. Sent by a match server to a socket that is seated in a match
-   * already playing, or watching one — which is how a second window takes a
-   * match over and how a spectator catches up (`src/game/Lobby.ts`). Follows
-   * the answer to `room/enter` (`src/game/Rpc.ts`), never asked for itself.
-   */
-  | { type: 'log'; matchId: string; header: RecordingHeader; events: RecordedEvent[] }
-  /**
-   * The match is over because it stopped being one match.
-   *
-   * Named side and stated reason, because "desynchronised" is not something a
-   * player can act on — and because a verdict nobody can read is indistinguishable
-   * from a crash.
-   */
-  | { type: 'abort'; reason: string; side: Faction | null }
-  | { type: 'moveUnit'; faction: Faction; squadIndex: number; path: { x: number; y: number }[] }
-  | {
-      type: 'fireShot'
-      shooterFaction: Faction
-      shooterIndex: number
-      targetFaction: Faction
-      targetIndex: number
-      mode: ShotMode
-    }
-  /** `targetLevel`: the storey of the tile aimed at, so a roofed tile is a room or its roof (`throwsLow`). */
-  | {
-      type: 'throwGrenade'
-      shooterFaction: Faction
-      shooterIndex: number
-      kind: GrenadeId
-      targetTile: { x: number; y: number }
-      targetLevel: number
-    }
-  | { type: 'reload'; faction: Faction; squadIndex: number }
-  /** Strike an adjacent enemy with the sidearm. Intent only, like a shot. */
-  | {
-      type: 'meleeAttack'
-      attackerFaction: Faction
-      attackerIndex: number
-      targetFaction: Faction
-      targetIndex: number
-    }
-  | { type: 'toggleCover'; faction: Faction; squadIndex: number }
-  /**
-   * Hold fire for the other side's turn.
-   *
-   * An intent like any other, and notably *only* an intent: the reactions it
-   * provokes are resolved by both peers from the path the mover declares, so
-   * nothing about a reaction ever travels.
-   */
-  | { type: 'overwatch'; faction: Faction; squadIndex: number }
-  | { type: 'endUnitTurn'; faction: Faction; squadIndex: number }
-  // The target is optional because most uses are on the carrier: a frame with
-  // no target named, or naming a unit this side cannot find, is a self-use.
-  | { type: 'useItem'; faction: Faction; squadIndex: number; itemId: ItemId; targetFaction?: Faction; targetIndex?: number }
-  | { type: 'endTurn'; faction: Faction }
-  /**
-   * The whole side tries to get out (`core/Retreat`): everyone on its way out
-   * goes, everyone else is left behind. Intent only — the roll is the rules',
-   * from the match's dice, on every side.
-   */
-  | { type: 'retreat'; faction: Faction }
-  /** Work the door on `edge`, beside the unit: open, close, unlock or force it (`core/Doors`). */
-  | { type: 'operateDoor'; faction: Faction; squadIndex: number; edge: number; verb: DoorVerb }
-  | { type: 'rightClickFacing'; faction: Faction; squadIndex: number; x: number; z: number }
-  /**
-   * This side has finished equipping: its people, what they are carrying, and
-   * what state they start in — one entry per soldier.
-   *
-   * The kit rides along because a referee refights the match from its intents
-   * and a loadout is not one of them — it reaches a *peer* as replicated
-   * component state, which is state its owner is authoritative for rather than
-   * something anybody declared. Both sides know who they brought at exactly
-   * this moment, and not before.
-   *
-   * State's `hp` is the same reasoning applied to wounds: absent everywhere
-   * except a kept server match, where a starting HP has to be something both
-   * peers and the referee agree on before the first digest, or the referee
-   * accuses an honest client of a foul.
-   */
-  | { type: 'ready'; squad: Deployment[] }
 
 export class NetworkManager {
   /** The channel this side plays over, once there is one. */

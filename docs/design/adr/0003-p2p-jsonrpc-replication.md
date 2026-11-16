@@ -6,7 +6,7 @@ status: "implemented"
 lastReviewed: "2026-09-14"
 appliesTo:
   - "src/game/NetworkManager.ts"
-  - "src/game/JsonRpc.ts"
+  - "src/wire/JsonRpc.ts"
   - "src/ecs/World.ts"
 relatedDocs:
   - "docs/architecture/networking.md"
@@ -38,7 +38,7 @@ Tactical online play requires low-latency synchronization across browser clients
 ---
 
 ## Decision Outcome
-**Chosen Architecture:** PeerJS WebRTC DataChannels formatted with standard JSON-RPC 2.0 frames (`src/game/JsonRpc.ts`) and a dual-tier replication model.
+**Chosen Architecture:** PeerJS WebRTC DataChannels formatted with standard JSON-RPC 2.0 frames (`src/wire/JsonRpc.ts`) and a dual-tier replication model.
 
 ### 1. Component Dirty-State Replication — superseded by [ADR-0004](./0004-full-knowledge-lockstep.md)
 > **Superseded.** Commit 4b37ffb removed the wire component diffs and the dead machinery

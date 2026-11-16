@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
-import type { NetworkMessage } from '../src/game/NetworkManager'
+import type { NetworkMessage } from '../src/wire/NetworkMessage'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { MatchHost } from '../src/sim/MatchHost'
-import { Policy, type StandingOrder } from '../src/sim/Policy'
+import { Policy } from '../src/sim/Policy'
+import { type StandingOrder } from '../src/wire/Rpc'
 import { replay } from '../src/sim/Replay'
 import { SimMatch } from '../src/sim/SimMatch'
 

@@ -3,7 +3,7 @@ import { ENCOUNTER, Faction } from '../src/config'
 import { rollSquadSheets } from '../src/core/Characters'
 import { Rng } from '../src/core/rng'
 import { defaultLoadout, type Deployment } from '../src/core/Loadout'
-import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
+import { RECORDING_VERSION, type RecordingHeader } from '../src/wire/Recording'
 import { AiPlayer } from '../src/sim/AiPlayer'
 import { MatchHost } from '../src/sim/MatchHost'
 

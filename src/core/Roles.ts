@@ -24,7 +24,7 @@ export type RoleId = (typeof RoleId)[keyof typeof RoleId]
  *
  * `weapons`/`attachments`/`items` absent means unrestricted — the row reads
  * exactly as it does without a role. Present, they are the *only* ids
- * `canEquipWeapon`, `canFitAttachment` and `canAddItem` (`game/Loadout`) will
+ * `canEquipWeapon`, `canFitAttachment` and `canAddItem` (`rules/Loadout`) will
  * approve for a unit holding this role, on top of the usual stock check.
  */
 export interface RoleSpec {

@@ -1,5 +1,5 @@
-import { isJsonRpcFrame, type JsonRpcFrame } from './JsonRpc'
-import type { Transport } from './Transport'
+import { isJsonRpcFrame, type JsonRpcFrame } from '../wire/JsonRpc'
+import type { Transport } from '../wire/Transport'
 
 /**
  * A `WebSocket` behind the frame port, for talking to a refereed match.

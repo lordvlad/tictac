@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
-import type { EncounterStarted } from '../game/Encounter'
-import type { LobbyView } from '../game/Lobby'
+import type { EncounterStarted } from '../wire/Encounter'
+import type { LobbyView } from '../wire/Lobby'
 import type { ServerConnection } from '../game/ServerConnection'
 import { formatCountdown, lapsedNote, offerNote, offerQuestion, type Prompt, promptFor } from './EncounterView'
 

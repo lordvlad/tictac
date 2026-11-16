@@ -1,10 +1,10 @@
 import type { Faction } from '../config'
-import { frameOf, messageOf, type JsonRpcFrame, type JsonRpcNotification } from '../game/JsonRpc'
-import type { NetworkMessage } from '../game/NetworkManager'
-import type { Transport } from '../game/Transport'
+import { frameOf, messageOf, type JsonRpcFrame, type JsonRpcNotification } from '../wire/JsonRpc'
+import type { NetworkMessage } from '../wire/NetworkMessage'
+import type { Transport } from '../wire/Transport'
 import { AiPlayer } from '../sim/AiPlayer'
 import { MatchHost } from '../sim/MatchHost'
-import type { StandingOrder } from '../sim/Policy'
+import type { StandingOrder } from '../wire/Rpc'
 
 /**
  * The game's own player, in a seat of a room (`ITEM-048`).

@@ -19,9 +19,9 @@ import {
   equipWeapon,
   fitAttachment,
   remaining,
-} from '../src/game/Loadout'
+} from '../src/rules/Loadout'
 import { defaultLoadout } from '../src/core/Loadout'
-import { unitLoadoutFrom } from '../src/game/Recording'
+import { unitLoadoutFrom } from '../src/wire/Recording'
 import type { Soldier } from '../src/entities/Soldier'
 
 /**

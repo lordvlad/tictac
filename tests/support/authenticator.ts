@@ -1,4 +1,4 @@
-import { toBase64Url } from '../../src/game/Base64Url'
+import { toBase64Url } from '../../src/wire/Base64Url'
 
 /**
  * A passkey, in software.

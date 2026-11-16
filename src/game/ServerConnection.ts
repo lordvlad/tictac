@@ -1,6 +1,6 @@
 import { MY_VERSION } from '../version'
-import { type JsonRpcFrame, type JsonRpcNotification, RpcMethods } from './JsonRpc'
-import type { LobbyView, Seated, ServerIntent } from './Lobby'
+import { type JsonRpcFrame, type JsonRpcNotification, RpcMethods } from '../wire/JsonRpc'
+import type { LobbyView, Seated, ServerIntent } from '../wire/Lobby'
 import {
   RPC_ERRORS,
   type Player,
@@ -10,12 +10,12 @@ import {
   type RpcResult,
   type SessionEnded,
   type SignedIn,
-} from './Rpc'
+} from '../wire/Rpc'
 import { SocketTransport } from './SocketTransport'
-import type { Transport } from './Transport'
+import type { Transport } from '../wire/Transport'
 
 /**
- * A window's one socket to its match server (`ITEM-060`, `src/game/Rpc.ts`).
+ * A window's one socket to its match server (`ITEM-060`, `src/wire/Rpc.ts`).
  *
  * Opened when the window needs the server — the server panel opening — and
  * kept until the window leaves it: signing in, the roster, the lobby and the

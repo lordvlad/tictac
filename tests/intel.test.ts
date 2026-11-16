@@ -7,9 +7,9 @@ import { Grid } from '../src/core/Grid'
 import { World } from '../src/ecs/World'
 import { SightedComponent, TraitsComponent } from '../src/ecs/components'
 import { TraitId } from '../src/core/Traits'
-import { fireWeapon, throwGrenade } from '../src/game/Combat'
-import { Squads } from '../src/game/Squads'
-import { settleTurn } from '../src/game/Turn'
+import { fireWeapon, throwGrenade } from '../src/rules/Combat'
+import { Squads } from '../src/rules/Squads'
+import { settleTurn } from '../src/rules/Turn'
 import { matchDice } from '../src/core/rng'
 
 function field(): { world: World; grid: Grid; squads: Squads } {

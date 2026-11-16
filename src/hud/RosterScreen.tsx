@@ -1,7 +1,7 @@
 import { createRoot, type Root } from 'react-dom/client'
 import { ROSTER, SQUAD_SIZE } from '../config'
 import { maxHpOf } from '../core/Characters'
-import type { RosterEntry } from '../game/Rpc'
+import type { RosterEntry } from '../wire/Rpc'
 import { Icon } from './Icon'
 
 interface RosterViewProps {

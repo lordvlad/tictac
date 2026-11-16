@@ -4,7 +4,7 @@ import { AIM, COVER, RULES } from '../config'
 import { AMMO, AmmoId, GRENADES, GrenadeId, STATUSES, type StatusKind, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ITEMS, ItemId } from '../core/Items'
 import type { Soldier } from '../entities/Soldier'
-import { applyStatus } from '../game/Combat'
+import { applyStatus } from '../rules/Combat'
 import { Icon } from './Icon'
 
 /** A group of live values the panel can edit. */

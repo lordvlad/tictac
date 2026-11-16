@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import type { EncounterEntry, EncounterResult, EncounterStarted, PassedFor } from '../src/game/Encounter'
-import type { JsonRpcFrame } from '../src/game/JsonRpc'
-import type { LobbyView } from '../src/game/Lobby'
+import type { EncounterEntry, EncounterResult, EncounterStarted, PassedFor } from '../src/wire/Encounter'
+import type { JsonRpcFrame } from '../src/wire/JsonRpc'
+import type { LobbyView } from '../src/wire/Lobby'
 import { heldTokens, ServerConnection } from '../src/game/ServerConnection'
 import { Faction } from '../src/config'
 import {
@@ -17,7 +17,7 @@ import {
   STANDING_ORDERS,
   unseenCount,
 } from '../src/hud/EncounterView'
-import type { StandingOrder } from '../src/sim/Policy'
+import type { StandingOrder } from '../src/wire/Rpc'
 import { handClock, handServer } from './support/handServer'
 
 /**

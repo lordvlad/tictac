@@ -1,6 +1,6 @@
 import { sanitizeSheet } from '../core/Characters'
-import { fromBase64Url, toBase64Url } from './Base64Url'
-import type { Player, RosterEntry } from './Rpc'
+import { fromBase64Url, toBase64Url } from '../wire/Base64Url'
+import type { Player, RosterEntry } from '../wire/Rpc'
 import type { ServerConnection } from './ServerConnection'
 
 /**
@@ -11,7 +11,7 @@ import type { ServerConnection } from './ServerConnection'
  * play, which still rolls a fresh squad and writes nothing anywhere.
  *
  * Everything here is a request on the window's one connection to that server
- * (`ServerConnection`, `src/game/Rpc.ts`). What is left on this side is the
+ * (`ServerConnection`, `src/wire/Rpc.ts`). What is left on this side is the
  * part only a browser can do — the passkey ceremony itself — and reading what
  * comes back as this build reads it. Who the window is signed in as is the
  * connection's to know (`connection.player`): it presents the stored token on

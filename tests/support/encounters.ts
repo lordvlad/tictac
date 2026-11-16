@@ -1,5 +1,5 @@
 import type { LatLng } from '../../src/core/Travel'
-import type { PassedFor } from '../../src/game/Encounter'
+import type { PassedFor } from '../../src/wire/Encounter'
 import type { Encounters } from '../../src/server/Encounters'
 
 /** A contact as a test states it: what was found, and what was done about it. */

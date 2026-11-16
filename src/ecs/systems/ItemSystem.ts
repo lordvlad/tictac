@@ -2,7 +2,7 @@ import { System } from '../System'
 import { STATUSES } from '../../core/Arsenal'
 import { UtilityId } from '../../core/Characters'
 import { ITEMS, type ItemId, itemApCost } from '../../core/Items'
-import { applyStatus } from '../../game/Combat'
+import { applyStatus } from '../../rules/Combat'
 import type { Soldier } from '../../entities/Soldier'
 
 /**

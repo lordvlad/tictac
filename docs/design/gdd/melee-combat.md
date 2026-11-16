@@ -7,7 +7,7 @@ lastReviewed: "2026-09-19"
 appliesTo:
   - "src/core/Arsenal.ts"
   - "src/core/Ballistics.ts"
-  - "src/game/Combat.ts"
+  - "src/rules/Combat.ts"
 relatedDocs:
   - "docs/design/gdd/combat-mechanics.md"
   - "docs/design/gdd/noise-and-stealth.md"

@@ -6,10 +6,10 @@ import { WallKind } from '../../core/Walls'
 import { hear, lookAround } from '../../core/Awareness'
 import { headingToward } from '../../core/Facing'
 import type { Soldier } from '../../entities/Soldier'
-import type { GrenadeResult, ShotResult } from '../../game/Combat'
-import type { NetworkMessage } from '../../game/NetworkManager'
-import type { Squads } from '../../game/Squads'
-import type { TurnManager } from '../../game/TurnManager'
+import type { GrenadeResult, ShotResult } from '../../rules/Combat'
+import type { Command } from '../../rules/Command'
+import type { Squads } from '../../rules/Squads'
+import type { TurnManager } from '../../rules/TurnManager'
 import { System } from '../System'
 import type { World } from '../World'
 import type { CombatSystem } from './CombatSystem'
@@ -23,54 +23,13 @@ import type { GrenadeSpec } from '../../core/Arsenal'
 import { faceToward, Side, type Tile } from '../../core/Grid'
 import { cannotWorkDoor, doorAfter, doorApCost, type DoorVerb } from '../../core/Doors'
 import { cannotRetreat, leaversOf, retreatChance, watchersOf } from '../../core/Retreat'
-import { brokenStep } from '../../game/Breakdown'
+import { brokenStep } from '../../rules/Breakdown'
 
 /**
  * Most commands the rules issue for one broken unit in one turn. Each one
  * spends points or ends the run, so this is a guard against a bug, not a rule.
  */
 const BROKEN_STEPS = 32
-
-/** The messages that change the world. Everything else on the wire is session or diagnosis. */
-export type Command = Extract<
-  NetworkMessage,
-  {
-    type:
-      | 'moveUnit'
-      | 'fireShot'
-      | 'meleeAttack'
-      | 'throwGrenade'
-      | 'reload'
-      | 'toggleCover'
-      | 'overwatch'
-      | 'useItem'
-      | 'operateDoor'
-      | 'endUnitTurn'
-      | 'endTurn'
-      | 'retreat'
-      | 'rightClickFacing'
-  }
->
-
-const COMMAND_TYPES: ReadonlySet<string> = new Set<Command['type']>([
-  'moveUnit',
-  'fireShot',
-  'meleeAttack',
-  'throwGrenade',
-  'reload',
-  'toggleCover',
-  'overwatch',
-  'useItem',
-  'operateDoor',
-  'endUnitTurn',
-  'endTurn',
-  'retreat',
-  'rightClickFacing',
-])
-
-export function isCommand(message: NetworkMessage): message is Command {
-  return COMMAND_TYPES.has(message.type)
-}
 
 /**
  * Where a command came from.
@@ -415,7 +374,7 @@ export class CommandSystem extends System {
   }
 
   /**
-   * One command for a broken unit (`game/Breakdown`), then — once it has been
+   * One command for a broken unit (`rules/Breakdown`), then — once it has been
    * carried out and walked — the next, ahead of anything else waiting. Ends
    * the unit's turn when there is nothing left it would do.
    */

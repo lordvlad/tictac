@@ -3,7 +3,7 @@ import { StatusKind, WEAPONS, type Weapon, WeaponId } from '../src/core/Arsenal'
 import type { StatusState } from '../src/core/Ballistics'
 import { Faction } from '../src/config'
 import type { Casualty, CombatFx, HitMark } from '../src/core/Combatant'
-import { applyHitEffects } from '../src/game/Combat'
+import { applyHitEffects } from '../src/rules/Combat'
 
 /** A casualty that also carries the weapon the applier must never consult. */
 interface StubUnit extends Casualty {

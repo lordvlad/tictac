@@ -15,7 +15,7 @@
  * Exits non-zero when an intent is refused or two runs of one file disagree,
  * so it can be a check rather than a thing to read.
  */
-import { parseRecording } from '../src/game/Recording'
+import { parseRecording } from '../src/wire/Recording'
 import { replay, replayIsReproducible } from '../src/sim/Replay'
 
 const path = process.argv[2]

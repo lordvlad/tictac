@@ -13,8 +13,8 @@
  */
 
 import { Peer, type DataConnection } from 'peerjs'
-import { isJsonRpcFrame, type JsonRpcFrame } from './JsonRpc'
-import type { Transport } from './Transport'
+import { isJsonRpcFrame, type JsonRpcFrame } from '../wire/JsonRpc'
+import type { Transport } from '../wire/Transport'
 
 /** The frame a message carries, or null when it does not carry one. */
 function decodeFrame(data: unknown): JsonRpcFrame | null {

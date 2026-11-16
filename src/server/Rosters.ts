@@ -2,7 +2,7 @@ import { Faction, FATIGUE, HEALING, MEDICAL_BAY, ROSTER, WOUNDS } from '../confi
 import { characterSheet, derive, maxHpOf, sanitizeSheet, type CharacterSheet } from '../core/Characters'
 import { mergeDeeds, noDeeds, type Deeds } from '../core/Progression'
 import { Rng } from '../core/rng'
-import type { UnitFate } from '../game/MatchEnd'
+import type { UnitFate } from '../rules/MatchEnd'
 import type { ServerClock } from './Clock'
 import { Batch, type Db } from './db/Db'
 import { AuthError } from './WebAuthn'

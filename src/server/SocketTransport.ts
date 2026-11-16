@@ -1,5 +1,5 @@
-import { isJsonRpcFrame, type JsonRpcFrame } from '../game/JsonRpc'
-import type { Transport } from '../game/Transport'
+import { isJsonRpcFrame, type JsonRpcFrame } from '../wire/JsonRpc'
+import type { Transport } from '../wire/Transport'
 
 /** A server-side socket's transport, and the two calls its host makes into it. */
 export interface ServerSocket extends Transport {

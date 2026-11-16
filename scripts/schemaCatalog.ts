@@ -36,7 +36,14 @@ import {
   WeaponComponent,
 } from '../src/ecs/components'
 
-export const NETWORK_MANAGER = 'src/game/NetworkManager.ts'
+/**
+ * Where `NetworkMessage`'s variants are declared: the wire's session frames, and
+ * the commands the rules own (`NetworkMessage = SessionMessage | Command`).
+ */
+export const NETWORK_MESSAGE_SOURCES: readonly { path: string; alias: string }[] = [
+  { path: 'src/wire/NetworkMessage.ts', alias: 'SessionMessage' },
+  { path: 'src/rules/Command.ts', alias: 'Command' },
+]
 
 /** One default instance of every component this build replicates. */
 export const REPLICATED_COMPONENTS: readonly Component[] = [
@@ -72,45 +79,47 @@ export interface WireShapeCatalog {
 }
 
 /**
- * Every `NetworkMessage` variant's fields, read off the union's own text.
+ * Every `NetworkMessage` variant's fields, read off the unions' own text.
  *
  * No type-checker: every variant is already an object type literal in the
  * source, so its property signatures are read straight off the parse tree —
  * name, optionality, and the declared type's own text, never hand-copied.
  */
 export async function commandShapes(
-  path: string = NETWORK_MANAGER,
+  sources: readonly { path: string; alias: string }[] = NETWORK_MESSAGE_SOURCES,
 ): Promise<Record<string, Record<string, string>>> {
-  const text = await Bun.file(path).text()
-  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true)
-
-  let union: ts.UnionTypeNode | null = null
-  source.forEachChild((node) => {
-    if (ts.isTypeAliasDeclaration(node) && node.name.text === 'NetworkMessage' && ts.isUnionTypeNode(node.type)) {
-      union = node.type
-    }
-  })
-  if (!union) throw new Error(`could not find the NetworkMessage union in ${path}`)
-
   const shapes: Record<string, Record<string, string>> = {}
-  for (const member of (union as ts.UnionTypeNode).types) {
-    if (!ts.isTypeLiteralNode(member)) {
-      throw new Error(`a NetworkMessage variant in ${path} is not an object literal type`)
-    }
-    const fields: Record<string, string> = {}
-    let variant: string | null = null
-    for (const member2 of member.members) {
-      if (!ts.isPropertySignature(member2) || !member2.type) continue
-      const name = member2.name.getText(source)
-      const typeText = member2.type.getText(source).replace(/\s+/g, ' ').trim()
-      fields[name] = member2.questionToken ? `optional ${typeText}` : typeText
-      if (name === 'type' && ts.isLiteralTypeNode(member2.type) && ts.isStringLiteral(member2.type.literal)) {
-        variant = member2.type.literal.text
+  for (const { path, alias } of sources) {
+    const text = await Bun.file(path).text()
+    const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true)
+
+    let union: ts.UnionTypeNode | null = null
+    source.forEachChild((node) => {
+      if (ts.isTypeAliasDeclaration(node) && node.name.text === alias && ts.isUnionTypeNode(node.type)) {
+        union = node.type
       }
+    })
+    if (!union) throw new Error(`could not find the ${alias} union in ${path}`)
+
+    for (const member of (union as ts.UnionTypeNode).types) {
+      if (!ts.isTypeLiteralNode(member)) {
+        throw new Error(`a NetworkMessage variant in ${path} is not an object literal type`)
+      }
+      const fields: Record<string, string> = {}
+      let variant: string | null = null
+      for (const member2 of member.members) {
+        if (!ts.isPropertySignature(member2) || !member2.type) continue
+        const name = member2.name.getText(source)
+        const typeText = member2.type.getText(source).replace(/\s+/g, ' ').trim()
+        fields[name] = member2.questionToken ? `optional ${typeText}` : typeText
+        if (name === 'type' && ts.isLiteralTypeNode(member2.type) && ts.isStringLiteral(member2.type.literal)) {
+          variant = member2.type.literal.text
+        }
+      }
+      if (!variant) throw new Error(`a NetworkMessage variant in ${path} has no literal "type" field`)
+      if (Object.hasOwn(shapes, variant)) throw new Error(`two NetworkMessage variants are both named "${variant}"`)
+      shapes[variant] = fields
     }
-    if (!variant) throw new Error(`a NetworkMessage variant in ${path} has no literal "type" field`)
-    if (Object.hasOwn(shapes, variant)) throw new Error(`two NetworkMessage variants are both named "${variant}"`)
-    shapes[variant] = fields
   }
   return shapes
 }

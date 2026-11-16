@@ -132,7 +132,7 @@ tags: ["ecs", "networking"]
 Automated verification runs via `bun run lint` (which executes `tsc --noEmit` and `scripts/lint-docs.ts` concurrently):
 
 - [ ] **Frontmatter Validity**: `lastReviewed` date is set to today's date if doc was updated.
-- [ ] **File Path Accuracy**: All referenced file paths (e.g. `src/game/Combat.ts`) exist.
+- [ ] **File Path Accuracy**: All referenced file paths (e.g. `src/rules/Combat.ts`) exist.
 - [ ] **Cross-link Integrity**: Relative Markdown links between documents are valid and resolve.
 - [ ] **JSON Schema Syntax**: All schemas in `docs/schemas/` parse without error.
 - [ ] **Generated Catalogue in Step**: `bun test tests/catalog.test.ts` passes, i.e. the status,

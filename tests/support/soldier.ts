@@ -8,7 +8,7 @@ import { MeleeId } from '../../src/core/Melee'
 import { Rng } from '../../src/core/rng'
 import { World } from '../../src/ecs/World'
 import { Soldier } from '../../src/entities/Soldier'
-import { applyUnitLoadout } from '../../src/game/Loadout'
+import { applyUnitLoadout } from '../../src/rules/Loadout'
 import { RoleId } from '../../src/core/Roles'
 
 export interface SoldierSpec {

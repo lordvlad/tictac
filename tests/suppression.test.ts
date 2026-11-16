@@ -5,7 +5,7 @@ import { statusStacks } from '../src/core/Ballistics'
 import { characterSheet } from '../src/core/Characters'
 import { Rng } from '../src/core/rng'
 import type { Soldier } from '../src/entities/Soldier'
-import { applyStatus, suppress, tickStatuses } from '../src/game/Combat'
+import { applyStatus, suppress, tickStatuses } from '../src/rules/Combat'
 import { headlessSoldier } from './support/soldier'
 
 function unit(faction: Faction = Faction.Blue): Soldier {

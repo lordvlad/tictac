@@ -1,7 +1,7 @@
 import type { LatLng } from '../core/Travel'
-import type { PassedFor } from '../game/Encounter'
-import type { Player } from '../game/Rpc'
-import type { StandingOrder } from '../sim/Policy'
+import type { PassedFor } from '../wire/Encounter'
+import type { Player } from '../wire/Rpc'
+import type { StandingOrder } from '../wire/Rpc'
 
 /**
  * What the travel scheduler hands the lobby when something finds a squad

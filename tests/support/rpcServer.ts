@@ -1,6 +1,6 @@
-import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../../src/game/JsonRpc'
+import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../../src/wire/JsonRpc'
 import type { LatLng, PastWaypoint } from '../../src/core/Travel'
-import { loopback } from '../../src/game/Transport'
+import { loopback } from '../../src/wire/Transport'
 import { WALL_CLOCK, type ServerClock } from '../../src/server/Clock'
 import type { OpenEncounter, OpenMeeting } from '../../src/server/EncounterPort'
 import { Journeys } from '../../src/server/Journeys'

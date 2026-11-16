@@ -6,8 +6,8 @@ status: "accepted"
 lastReviewed: "2026-09-17"
 appliesTo:
   - "src/game/NetworkManager.ts"
-  - "src/game/JsonRpc.ts"
-  - "src/game/Recording.ts"
+  - "src/wire/JsonRpc.ts"
+  - "src/wire/Recording.ts"
   - "src/ecs/World.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"

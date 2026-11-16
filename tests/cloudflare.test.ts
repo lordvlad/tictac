@@ -1,6 +1,6 @@
 import type { Subprocess } from 'bun'
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { RpcMethods } from '../src/game/JsonRpc'
+import { RpcMethods } from '../src/wire/JsonRpc'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { simulateOverWire } from './support/WireMatch'
 import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'

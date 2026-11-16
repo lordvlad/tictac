@@ -19,8 +19,8 @@ import {
   stop,
   type Waypoint,
 } from '../core/Travel'
-import { RPC_ERRORS, type Player, type Squad, type SquadOrder } from '../game/Rpc'
-import type { StandingOrder } from '../sim/Policy'
+import { RPC_ERRORS, type Player, type Squad, type SquadOrder } from '../wire/Rpc'
+import type { StandingOrder } from '../wire/Rpc'
 import type { ServerClock } from './Clock'
 import type { Accounts } from './Accounts'
 import { meetingKey, type Encounters } from './Encounters'

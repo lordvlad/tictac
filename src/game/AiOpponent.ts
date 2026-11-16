@@ -4,9 +4,10 @@ import type { Rng } from '../core/rng'
 import { AiPlayer } from '../sim/AiPlayer'
 import { MatchHost } from '../sim/MatchHost'
 import { defaultLoadout, type Deployment } from '../core/Loadout'
-import { NetworkManager, type NetworkMessage } from './NetworkManager'
-import { reportDivergence } from './StateDigest'
-import { loopback, type Transport } from './Transport'
+import { NetworkManager } from './NetworkManager'
+import type { NetworkMessage } from '../wire/NetworkMessage'
+import { reportDivergence } from '../rules/StateDigest'
+import { loopback, type Transport } from '../wire/Transport'
 
 /** A turn of the event loop, so the page draws what has been decided so far. */
 function breathe(): Promise<void> {

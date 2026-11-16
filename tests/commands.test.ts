@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { WeaponId } from '../src/core/Arsenal'
-import { isCommand } from '../src/ecs/systems/CommandSystem'
+import { isCommand } from '../src/rules/Command'
 import { MatchHost } from '../src/sim/MatchHost'
 import { SimMatch } from '../src/sim/SimMatch'
 import { replay } from '../src/sim/Replay'

@@ -31,10 +31,10 @@ import { AttachmentId } from '../src/core/Attachments'
 import { ItemId } from '../src/core/Items'
 import { MeleeId } from '../src/core/Melee'
 import { formatReport, sweep } from '../src/sim/Balance'
-import type { CombatRecording } from '../src/game/Recording'
+import type { CombatRecording } from '../src/wire/Recording'
 import type { MapOptions } from '../src/core/MapGenerator'
 import type { SquadPlan } from '../src/sim/SimMatch'
-import type { StandingOrder } from '../src/sim/Policy'
+import type { StandingOrder } from '../src/wire/Rpc'
 
 /** The standing orders a sweep can give a side (`src/sim/Policy.ts`). */
 const ORDERS: Record<StandingOrder, StandingOrder> = {

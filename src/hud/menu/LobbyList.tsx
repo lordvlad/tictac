@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { LobbyRoom, LobbySeat, LobbyView } from '../../game/Lobby'
+import type { LobbyRoom, LobbySeat, LobbyView } from '../../wire/Lobby'
 import { MENU_COLOURS, MenuButton, MenuGroup } from './controls'
 
 /**

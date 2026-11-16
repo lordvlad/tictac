@@ -94,7 +94,7 @@ Systems execute business logic across entities on each tick or action:
 
 - **`CommandSystem`**: The one door through which anything changes the world. Every command —
   the player's clicks, the other player's messages, a replay, the referee, the sweep's policy —
-  is a `Command` (the world-changing subset of `NetworkMessage`) applied by `apply(command,
+  is a `Command` (`src/rules/Command.ts`, the world-changing subset of `NetworkMessage`) applied by `apply(command,
   origin)`, which looks the units up, calls the system that owns the rule, and reports
   `onApplied` / `onRefused`. It also owns the reaction trigger: `MovementSystem.onStep` →
   `CombatSystem.reactTo` — and the ears: every step, shot, loud blow and grenade is a `Noise`
@@ -107,7 +107,7 @@ Systems execute business logic across entities on each tick or action:
   `local`, a refusal is a finding from anywhere but `local`, and `rules` — what the rules made
   a broken unit do — is the one origin a broken unit takes a command from. At a handover it
   rolls the incoming side's morale (`core/Morale`, `onMorale`) and queues each panicking or
-  frenzied unit's run (`game/Breakdown`), one command at a time ahead of anything else; a
+  frenzied unit's run (`rules/Breakdown`), one command at a time ahead of anything else; a
   `local` command is refused while the queue holds anything, so a player's order can never land
   between two of those steps on one screen and after them on the other. `rules` commands are
   neither sent nor recorded: every side, a replay and the referee derive them again.

@@ -7,8 +7,8 @@ import { statusStacks } from '../../core/Ballistics'
 import type { Tile } from '../../core/Grid'
 import type { Grid } from '../../core/Grid'
 import type { Soldier } from '../../entities/Soldier'
-import type { Squads } from '../../game/Squads'
-import { canWatch, reactToArrival, watchCost } from '../../game/Overwatch'
+import type { Squads } from '../../rules/Squads'
+import { canWatch, reactToArrival, watchCost } from '../../rules/Overwatch'
 import { NO_FX, type CombatFx } from '../../core/Combatant'
 import { MELEE } from '../../core/Melee'
 import { type Noise, shotLoudness } from '../../core/Noise'
@@ -27,7 +27,7 @@ import { executeMelee,
   type ResolvedHit,
   type ShotResult,
   throwGrenade,
-} from '../../game/Combat'
+} from '../../rules/Combat'
 
 /** Rounds of a shot that went past: what suppresses, and what shakes. */
 function misses(result: ShotResult): number {

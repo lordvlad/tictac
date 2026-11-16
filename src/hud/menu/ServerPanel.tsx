@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { Account } from '../../game/Account'
-import type { LobbyView, ServerIntent } from '../../game/Lobby'
+import type { LobbyView, ServerIntent } from '../../wire/Lobby'
 import type { ServerConnection } from '../../game/ServerConnection'
 import { autoResumes } from '../EncounterView'
 import {

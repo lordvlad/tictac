@@ -7,10 +7,9 @@ import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
 import { type CharacterSheet, sanitizeSheet } from '../core/Characters'
 import { ITEMS, type ItemId } from '../core/Items'
 import { ROLES, RoleId } from '../core/Roles'
-import type { ResolvedHit } from './Combat'
 import { RpcMethods } from './JsonRpc'
 import type { Deployment, DeploymentState, UnitLoadout } from '../core/Loadout'
-import type { NetworkMessage } from './NetworkManager'
+import type { NetworkMessage } from './NetworkMessage'
 
 /**
  * A match, written down as the commands that produced it.
@@ -106,9 +105,6 @@ export interface CombatRecording {
   events: RecordedEvent[]
 }
 
-/** Where the recorder reads the turn context it stamps onto each event. */
-export type RecordingClock = () => { turn: number; faction: Faction }
-
 /**
  * Commands that describe the session rather than the fight.
  *
@@ -116,7 +112,7 @@ export type RecordingClock = () => { turn: number; faction: Faction }
  * holds both. Replaying either would mean a handshake with nobody on the other
  * end of it.
  */
-const SESSION_COMMANDS: Partial<Record<NetworkMessage['type'], true>> = {
+export const SESSION_COMMANDS: Partial<Record<NetworkMessage['type'], true>> = {
   init: true,
   hello: true,
   ready: true,
@@ -124,49 +120,6 @@ const SESSION_COMMANDS: Partial<Record<NetworkMessage['type'], true>> = {
   matchHeader: true,
   log: true,
   abort: true,
-}
-
-export class Recorder {
-  private readonly events: RecordedEvent[] = []
-
-  constructor(
-    private readonly header: RecordingHeader,
-    private readonly clock: RecordingClock,
-  ) {}
-
-  get eventCount(): number {
-    return this.events.length
-  }
-
-  /**
-   * Append a command.
-   *
-   * Copied structurally, because a caller is free to reuse the object it
-   * handed over — and a recording that aliased live state would rewrite its
-   * own past.
-   */
-  record(command: NetworkMessage): void {
-    if (SESSION_COMMANDS[command.type]) return
-    const { turn, faction } = this.clock()
-    this.events.push({
-      seq: this.events.length,
-      turn,
-      faction,
-      command: structuredClone(command),
-    })
-  }
-
-  clear(): void {
-    this.events.length = 0
-  }
-
-  toJSON(): CombatRecording {
-    return { header: this.header, events: this.events }
-  }
-
-  filename(): string {
-    return `tictac-${this.header.source}-${this.header.seedLabel}-${this.events.length}.json`
-  }
 }
 
 // -----------------------------------------------------------------------------

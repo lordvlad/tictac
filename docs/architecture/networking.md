@@ -6,12 +6,12 @@ status: "active"
 lastReviewed: "2026-10-07"
 appliesTo:
   - "src/game/NetworkManager.ts"
-  - "src/game/JsonRpc.ts"
-  - "src/game/Rpc.ts"
+  - "src/wire/JsonRpc.ts"
+  - "src/wire/Rpc.ts"
   - "src/game/ServerConnection.ts"
-  - "src/game/Lobby.ts"
-  - "src/game/Recording.ts"
-  - "src/game/Squads.ts"
+  - "src/wire/Lobby.ts"
+  - "src/wire/Recording.ts"
+  - "src/rules/Squads.ts"
   - "src/server/Session.ts"
   - "src/server/Lobby.ts"
   - "src/server/Room.ts"
@@ -52,7 +52,7 @@ sequenceDiagram
 
 ## 2. Wire Protocol: JSON-RPC 2.0 Notifications
 
-All messages over the WebRTC DataChannel use JSON-RPC 2.0 frames (`src/game/JsonRpc.ts`).
+All messages over the WebRTC DataChannel use JSON-RPC 2.0 frames (`src/wire/JsonRpc.ts`).
 A command carries what a player **decided**, never what it produced:
 
 ```json
@@ -84,9 +84,14 @@ against state they both hold. See
   own randomness, because a draw from the match stream moves every later roll
   in the match and a peer cannot know how many sparks the other side drew.
   Enforced by `tests/determinism.test.ts`.
-- **No float two engines may disagree about can feed a decision.** `Math.hypot`
-  and `Math.atan2` are refused in the rules layers: `sqrt` is correctly rounded
-  by IEEE 754 and those two are implementation-defined. `distance()` and
+- **No float two engines may disagree about can feed a decision.** Library
+  maths (`hypot`, `atan2`, `sin`, `cos`, `pow`, ...) is refused in the rules
+  layers except in files `tests/determinism.test.ts` lists with a reason:
+  `sqrt` is correctly rounded by IEEE 754 and those are implementation-defined.
+  The same test refuses `Date.now`, `performance.now` and `new Date()` in the
+  headless layers and `src/server` (only `src/server/Clock.ts` reads the wall
+  clock), and replays one intent log through two `MatchHost`s asserting equal
+  digests, dice included, at every turn. `distance()` and
   `facingYaw()` in `src/core/math.ts` replace them; a facing is quantised
   because it is replicated *and* digested.
 - **Identical entity ids.** A command addresses a unit by faction and slot, but
@@ -160,7 +165,7 @@ With no outcomes on the wire, nothing about an attack can arrive *wrong* — but
 two peers can still drift apart, and nothing about a single action would reveal
 it. The check is therefore about state rather than about messages:
 
-- **A state digest at every handover** (`src/game/StateDigest.ts`). Soldiers are
+- **A state digest at every handover** (`src/rules/StateDigest.ts`). Soldiers are
   hashed per component, so a mismatch names the unit and the component;
   everything else folds into one number for terrain and one for the rule tables,
   because there are hundreds of wall entities and a hash per wall per turn would
@@ -204,7 +209,7 @@ Which means running a file is the same exercise as receiving a match, and that
 is how the receiving side gets tested without two browsers and a signalling
 broker: `src/sim/Replay.ts` and `bun run replay <file>`.
 
-- **Format** (`src/game/Recording.ts`): `{ header, events[] }`, version
+- **Format** (`src/wire/Recording.ts`): `{ header, events[] }`, version
   `RECORDING_VERSION = 5` (bumped four times: to 2 when edge deployment became
   the game's layout, since the same seed now builds a different map and a
   version-1 file must not be refought on terrain it was never fought on; to 3
@@ -249,7 +254,7 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   `InteractionController.busy` — walking, or the applier's queue not yet empty — before the next
   event, and a restored frame clears the queue, which was about the moment being left.
 - **Stepping back** is not replay: no command is invertible. `Playback` keeps a `Moment`
-  (`src/game/Rewind.ts` holds the types) at every event boundary and puts one back with
+  (`src/rules/Rewind.ts` holds the types) at every event boundary and puts one back with
   `restoreMoment`, which is private to `src/game/Playback.ts`: a rewind presents a recording and
   is never a move in live play. A
   moment is four things, and playing on from a restored one reaches the match the file
@@ -279,8 +284,8 @@ match (`ITEM-012`), that silent drift is a roster nobody can audit.
 checks, the serialised shape of both things that travel:
 
 - **Every `NetworkMessage` variant**, read off the union's own parse tree in
-  `src/game/NetworkManager.ts` — no type-checker needed, since each variant is
-  already an object type literal, and no hand-copy, since a hand-copied shape
+  `src/wire/NetworkMessage.ts` (the session frames) and `src/rules/Command.ts` (the
+  commands) — no type-checker needed, since each variant is already an object type literal, and no hand-copy, since a hand-copied shape
   is a second source of truth that itself drifts.
 - **Every replicated component**, by instantiating one with its constructor
   defaults and reflecting the keys `serialize()` actually returns.
@@ -316,12 +321,12 @@ A match server (`src/server/GameServer.ts` behind `Bun.serve`, or the one Durabl
 joined it) and any number of spectators, plus the referee's own recomputation of the match —
 the version gate, roster verification, recording, settlement and attribution that used to be
 a single-use `Referee` watching one match for the life of the process. The shapes both sides
-share are in `src/game/Lobby.ts`.
+share are in `src/wire/Lobby.ts`.
 
 ### One socket per window
 
 A window holds one WebSocket to its match server for as long as it is on it, and everything it
-says to the server travels over it as JSON-RPC 2.0 (`src/game/Rpc.ts`): signing in, the roster,
+says to the server travels over it as JSON-RPC 2.0 (`src/wire/Rpc.ts`): signing in, the roster,
 the lobby, entering and leaving a room, and the match itself. A request (`id` set) gets exactly
 one response, and the requests on one socket are answered in the order they arrived
 (`Sessions`, `src/server/Session.ts`), so a window may send `signIn` and `room/enter` back to
@@ -570,7 +575,7 @@ server opens itself, already `playing`, from a header it composes: `Lobby.openEn
 player, joinBy)` sets both seats and starts the match in one go — `Room.start` is otherwise Blue's
 `matchHeader`, and nobody's window is in this room to send one.
 
-- **A seat has a controller: who moves it** (`SeatControl`, `src/game/Encounter.ts`). `player` is a
+- **A seat has a controller: who moves it** (`SeatControl`, `src/wire/Encounter.ts`). `player` is a
   window, or the window that holds its key; `reserved` is kept for a player who has not arrived,
   until a deadline; `ai` is the AI's. It is the seat's `control`, apart from its `player`, which is
   whose seat it *is* and so whose roster the match settles: a seat the AI plays for an absent
@@ -586,7 +591,7 @@ player, joinBy)` sets both seats and starts the match in one go — `Room.start`
   whenever it is that side's turn, deferred one turn of the microtask queue so that it never answers
   from inside the frame that handed it the turn. It draws no randomness, the match's dice least of
   all. It does not use `NetworkManager`, which would bring the browser's WebRTC library into a
-  Worker; `frameOf` and `messageOf` (`src/game/JsonRpc.ts`) are all it needs of the wire.
+  Worker; `frameOf` and `messageOf` (`src/wire/JsonRpc.ts`) are all it needs of the wire.
 - **Two AI seats are a fight in milliseconds.** With nobody present both seats are the AI's and
   the whole fight is the microtask queue — no timer waits on a wall clock — recorded and settled
   by the same room that records and settles a played one. The price of needing no timer is that

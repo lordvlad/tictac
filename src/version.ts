@@ -35,11 +35,11 @@
  * 5: `throwGrenade` carries `targetLevel`, the storey aimed at, which decides
  * whether the throw is lobbed or thrown low under a roof.
  *
- * 6: a match server holds many rooms (`src/game/Lobby.ts`). A socket states
+ * 6: a match server holds many rooms (`src/wire/Lobby.ts`). A socket states
  * what it wants in its url, and the server's first frame is `seated`; a
  * protocol-5 client would connect, never be seated, and wait forever.
  *
- * 7: one socket per window carries everything (`src/game/Rpc.ts`): signing
+ * 7: one socket per window carries everything (`src/wire/Rpc.ts`): signing
  * in, the roster, the lobby and taking a seat are JSON-RPC requests on it,
  * and the HTTP API is gone.
  *

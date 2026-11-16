@@ -1,11 +1,11 @@
 import { Faction } from '../config'
-import type { NetworkMessage } from '../game/NetworkManager'
+import type { NetworkMessage } from '../wire/NetworkMessage'
 import {
   RECORDING_VERSION,
   type CombatRecording,
   type RecordedEvent,
   type RecordingHeader,
-} from '../game/Recording'
+} from '../wire/Recording'
 import { Batch, type Db } from './db/Db'
 
 /**

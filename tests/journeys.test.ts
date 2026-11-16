@@ -1,7 +1,7 @@
 import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { checkpoints, distanceKm, plannedArrivals, positionAt, type PastWaypoint, type Waypoint } from '../src/core/Travel'
-import { RPC_ERRORS, type Squad } from '../src/game/Rpc'
+import { RPC_ERRORS, type Squad } from '../src/wire/Rpc'
 import { Journeys } from '../src/server/Journeys'
 import { regionDirectory } from '../src/server/Owner'
 import type { Persistence } from '../src/server/Persistence'

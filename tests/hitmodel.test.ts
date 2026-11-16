@@ -13,7 +13,7 @@ import { Grid } from '../src/core/Grid'
 import { MeleeId } from '../src/core/Melee'
 import type { Roll } from '../src/core/rng'
 import { CoverLevel } from '../src/core/Walls'
-import { executeShot } from '../src/game/Combat'
+import { executeShot } from '../src/rules/Combat'
 import { headlessSoldier } from './support/soldier'
 
 /** A person-shaped nobody: every modifier at zero, standard kit. */

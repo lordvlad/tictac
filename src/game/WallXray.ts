@@ -3,7 +3,7 @@ import { WALL_XRAY } from '../config'
 import { smoothstep } from '../core/math'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Blocks } from '../render/Blocks'
-import type { Squads } from './Squads'
+import type { Squads } from '../rules/Squads'
 
 /**
  * Fades the walls standing between the camera and any character — friend or foe

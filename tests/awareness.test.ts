@@ -13,9 +13,9 @@ import { WallComponent } from '../src/ecs/components'
 import { createGlobalRules } from '../src/ecs/globals'
 import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
-import { Squads } from '../src/game/Squads'
+import { Squads } from '../src/rules/Squads'
 import { stockSquads } from './support/squads'
-import { TurnManager } from '../src/game/TurnManager'
+import { TurnManager } from '../src/rules/TurnManager'
 import type { Tile } from '../src/core/Grid'
 
 const heading = (dx: number, dy: number) => HEADINGS.findIndex(([x, y]) => x === dx && y === dy)

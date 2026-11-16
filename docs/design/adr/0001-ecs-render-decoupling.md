@@ -8,7 +8,7 @@ appliesTo:
   - "src/ecs/**"
   - "src/entities/Soldier.ts"
   - "src/render/**"
-  - "src/game/Combat.ts"
+  - "src/rules/Combat.ts"
 relatedDocs:
   - "docs/architecture/ecs.md"
   - "docs/architecture/rendering.md"
@@ -27,7 +27,7 @@ tags: ["ecs", "render", "decoupling", "headless"]
 ## Context & Problem Statement
 Originally, gameplay entities directly inherited 3D rendering primitives:
 - `Soldier` inherited `Entity3D`, binding identity, animation mixers, and Three.js materials to HP, AP, and position data.
-- Game rules resolvers in `src/game/Combat.ts` and `src/ecs/systems/CombatSystem.ts` directly imported `Tracers` and render FX.
+- Game rules resolvers in `src/rules/Combat.ts` and `src/ecs/systems/CombatSystem.ts` directly imported `Tracers` and render FX.
 - Building a match required an active WebGL canvas, Three.js scene, and `OrbitRig` camera instance.
 - Automated tests had to mock WebGL canvas contexts (`installCanvasStub`) to test simple movement and shooting math.
 
@@ -46,7 +46,7 @@ Originally, gameplay entities directly inherited 3D rendering primitives:
 ### Phase 1: Narrow Ports (Completed)
 - Introduced `UnitRef` (identity), `Casualty` (the state a resolved hit is applied to) and `Combatant` (`src/core/Combatant.ts`) defining only what game resolvers read (hp, armor, statuses, weapon, ammo, tile, position, proficiency, evasion, crit props).
 - Introduced `CombatFx` for FX execution — `tracer`, `shoot`, `hit` — allowing headless execution with a no-op port (`NO_FX`). `FocusPort`/`NO_FOCUS` does the same for the camera.
-- Removed all `src/render/` imports from `src/game/Combat.ts` and `src/ecs/systems/CombatSystem.ts`.
+- Removed all `src/render/` imports from `src/rules/Combat.ts` and `src/ecs/systems/CombatSystem.ts`.
 
 ### Phase 2: Data / View Unit Split (Completed)
 - `Soldier` is purely data over components.

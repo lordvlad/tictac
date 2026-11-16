@@ -1,6 +1,6 @@
 import { distanceKm, type LatLng } from '../core/Travel'
-import type { Squad } from '../game/Rpc'
-import type { StandingOrder } from '../sim/Policy'
+import type { Squad } from '../wire/Rpc'
+import type { StandingOrder } from '../wire/Rpc'
 import type { ServerClock } from './Clock'
 import { Batch, type Db } from './db/Db'
 

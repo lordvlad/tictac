@@ -1,8 +1,9 @@
 import { Faction } from '../../src/config'
-import { NetworkManager, type NetworkMessage } from '../../src/game/NetworkManager'
-import type { CombatRecording } from '../../src/game/Recording'
+import { NetworkManager } from '../../src/game/NetworkManager'
+import { type NetworkMessage } from '../../src/wire/NetworkMessage'
+import type { CombatRecording } from '../../src/wire/Recording'
 import { heldTokens, ServerConnection } from '../../src/game/ServerConnection'
-import type { StateDigest } from '../../src/game/StateDigest'
+import type { StateDigest } from '../../src/rules/StateDigest'
 import { SimMatch, type MatchOutcome, type MatchSetup } from '../../src/sim/SimMatch'
 
 /**

@@ -4,7 +4,7 @@ import { AmmoId, WEAPONS, WeaponId } from '../src/core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../src/core/Attachments'
 import { Grid } from '../src/core/Grid'
 import { World } from '../src/ecs/World'
-import { Squads } from '../src/game/Squads'
+import { Squads } from '../src/rules/Squads'
 
 function squads(): Squads {
   const world = new World()

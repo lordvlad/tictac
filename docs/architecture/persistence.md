@@ -8,10 +8,10 @@ appliesTo:
   - "src/server/**"
   - "scripts/serve-match.ts"
   - "src/game/Account.ts"
-  - "src/game/Rpc.ts"
-  - "src/game/Base64Url.ts"
-  - "src/game/MatchEnd.ts"
-  - "src/game/Recording.ts"
+  - "src/wire/Rpc.ts"
+  - "src/wire/Base64Url.ts"
+  - "src/rules/MatchEnd.ts"
+  - "src/wire/Recording.ts"
   - "src/core/Characters.ts"
   - "src/hud/RosterScreen.ts"
   - "src/config.ts"
@@ -99,7 +99,7 @@ constructor — `openPersistence(clock, url, party)` /
 `persistenceOverDb(db, clock, party)` — so timestamps written to rows, session
 and challenge lifetimes, and migration stamps read the same hands as the
 lobby, the journeys and the handover coordinator. `Date.now` appears only in
-the wall-clock factory (`tests/serverClock.test.ts` scans `src/server` and
+the wall-clock factory (`tests/determinism.test.ts` scans `src/server` and
 `workers`).
 
 ### Portability rules
@@ -275,7 +275,7 @@ Durable Object) and `startGameServer` serve it, from the same handler.
 
 Accounts and rosters are JSON-RPC requests on the window's one socket
 ([ARCH-NETWORKING §8](networking.md) has the order on a fresh socket and every
-refusal); the shapes are in `src/game/Rpc.ts`. A method that needs a player is
+refusal); the shapes are in `src/wire/Rpc.ts`. A method that needs a player is
 refused `401` *sign in first* on a socket nobody signed in on.
 
 | Method (`tictac/api/…`) | Params | Result |
@@ -355,7 +355,7 @@ behaviour change `ITEM-038` makes to a live match, and the reason
 `PROTOCOL_VERSION` and `RECORDING_VERSION` both moved for it (and moved again
 for `ITEM-043` and `ITEM-041`, each for its own reshaping of the same header).
 
-**After the match.** `settlement()` in `src/game/MatchEnd.ts` is pure and reads
+**After the match.** `settlement()` in `src/rules/MatchEnd.ts` is pure and reads
 the referee's own world the moment a side has nobody left on the field — wiped
 out, or withdrawn by a retreat (`ITEM-051`). Every fate carries the unit's HP at
 that moment and this match's own `Deeds` (the service record `ITEM-004` already
@@ -448,7 +448,7 @@ refusal, not a substitute for it. An empty slot renders a **Recruit** button
 in its place, calling `roster/recruit` and splicing the answer
 straight into the list. The pick becomes the `characterId` the client states
 on each `Deployment` it sends. `Account.roster()` reads `RosterEntry`
-(`src/game/Rpc.ts`), the client's mirror of `RosterMember`, rather than the
+(`src/wire/Rpc.ts`), the client's mirror of `RosterMember`, rather than the
 server's type — `src/game`/`src/hud` never import `src/server/`, even for a
 type.
 

@@ -5,7 +5,7 @@ import type { Faction } from '../config'
  *
  * A match server holds many rooms. A room is one match: two seats (Blue opens
  * it, Red joins it) and any number of spectators. Which room a window is in,
- * and in what role, is decided when it asks (`room/enter`, `src/game/Rpc.ts`)
+ * and in what role, is decided when it asks (`room/enter`, `src/wire/Rpc.ts`)
  * and stated back in the answer (`Seated`). Everything after that is the same
  * JSON-RPC conversation a match always had, scoped to the room, on the same
  * socket — which outlives the room: leaving one is not hanging up.

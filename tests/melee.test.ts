@@ -11,8 +11,8 @@ import { WallKind } from '../src/core/Walls'
 import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import type { Soldier } from '../src/entities/Soldier'
-import { canMelee, executeMelee } from '../src/game/Combat'
-import { Squads } from '../src/game/Squads'
+import { canMelee, executeMelee } from '../src/rules/Combat'
+import { Squads } from '../src/rules/Squads'
 import { stockSquads } from './support/squads'
 
 function sheet(strength = 5): CharacterSheet {

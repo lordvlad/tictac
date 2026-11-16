@@ -1,6 +1,6 @@
 import { Faction } from '../config'
 import type { LatLng } from '../core/Travel'
-import type { EncounterEntry, PassedFor } from '../game/Encounter'
+import type { EncounterEntry, PassedFor } from '../wire/Encounter'
 import { Batch, type Db } from './db/Db'
 
 /**

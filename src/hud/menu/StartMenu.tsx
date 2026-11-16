@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { ServerIntent } from '../../game/Lobby'
+import type { ServerIntent } from '../../wire/Lobby'
 import type { ServerConnection } from '../../game/ServerConnection'
 import { BUILD_ID } from '../../version'
 import { MENU_COLOURS, MenuButton, MenuGroup } from './controls'
@@ -41,7 +41,7 @@ export interface StartMenuProps {
   leaveServer: () => void
   /**
    * Into a room on the match server — open one, join one, watch one,
-   * or take back this player's own (`src/game/Lobby.ts`). Resolves once the
+   * or take back this player's own (`src/wire/Lobby.ts`). Resolves once the
    * match, loadout or spectator view has taken over; rejects with a reason a
    * player can read.
    */

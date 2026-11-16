@@ -11,7 +11,7 @@ import { hashSeed, Rng } from './core/rng'
 import { WeaponId } from './core/Arsenal'
 import { createGlobalRules } from './ecs/globals'
 import { TurnSystem } from './ecs/systems'
-import { isCommand } from './ecs/systems/CommandSystem'
+import { isCommand } from './rules/Command'
 import { World } from './ecs/World'
 import { createEngineContext, type EngineContext, onEachFrame, pauseRendering } from './engine'
 import './game.css'
@@ -21,15 +21,16 @@ import { ServerConnection } from './game/ServerConnection'
 import { AiOpponent } from './game/AiOpponent'
 import { Battlefield } from './game/Battlefield'
 import { InteractionController } from './game/InteractionController'
-import type { Seated } from './game/Lobby'
-import { winnerOf } from './game/MatchEnd'
-import { type MatchLog, NetworkManager, type NetworkMessage } from './game/NetworkManager'
+import type { Seated } from './wire/Lobby'
+import { winnerOf } from './rules/MatchEnd'
+import { NetworkManager } from './game/NetworkManager'
+import { type MatchLog, type NetworkMessage } from './wire/NetworkMessage'
 import { Playback } from './game/Playback'
-import { type CombatRecording, parseRecording, RECORDING_VERSION, type RecordingHeader } from './game/Recording'
+import { type CombatRecording, parseRecording, RECORDING_VERSION, type RecordingHeader } from './wire/Recording'
 import type { Deployment } from './core/Loadout'
-import type { Rewindable } from './game/Rewind'
-import { Squads } from './game/Squads'
-import { TurnManager } from './game/TurnManager'
+import type { Rewindable } from './rules/Rewind'
+import { Squads } from './rules/Squads'
+import { TurnManager } from './rules/TurnManager'
 import { type EncounterPromptHandle, mountEncounterPrompt } from './hud/EncounterPrompt'
 import { FpsCounter } from './hud/FpsCounter'
 import { FullscreenPrompt } from './hud/FullscreenPrompt'
@@ -493,7 +494,7 @@ interface Picked {
 }
 
 /**
- * Go wherever the match server put this socket (`src/game/Lobby.ts`).
+ * Go wherever the match server put this socket (`src/wire/Lobby.ts`).
  *
  * Resolves once the menu has gone and something has taken its place — the
  * loadout screen, the match, the watcher's view — and rejects with a reason

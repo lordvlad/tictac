@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { NetworkManager, type NetworkMessage, type NetworkMode, type Resync } from '../src/game/NetworkManager'
+import { NetworkManager, type NetworkMode, type Resync } from '../src/game/NetworkManager'
+import { type NetworkMessage } from '../src/wire/NetworkMessage'
 import { CONNECTION_LOST, heldTokens, ServerConnection } from '../src/game/ServerConnection'
 import { handClock, handServer, type HandClock, type HandServer, type HandSocket } from './support/handServer'
 import { World } from '../src/ecs/World'
@@ -9,15 +10,15 @@ import { GrenadeId, ShotMode, StatusKind, WeaponId } from '../src/core/Arsenal'
 import { derive, rollSquadSheets } from '../src/core/Characters'
 import { defaultLoadout } from '../src/core/Loadout'
 import { MeleeId } from '../src/core/Melee'
-import { canMelee, type ShotResult } from '../src/game/Combat'
-import type { Seated } from '../src/game/Lobby'
-import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
+import { canMelee, type ShotResult } from '../src/rules/Combat'
+import type { Seated } from '../src/wire/Lobby'
+import { RECORDING_VERSION, type RecordingHeader } from '../src/wire/Recording'
 import { MatchHost } from '../src/sim/MatchHost'
 import { TraitId } from '../src/core/Traits'
 import { Rng } from '../src/core/rng'
 import { HealthComponent, MatchRulesComponent } from '../src/ecs/components'
 import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
-import { loopback, type Transport } from '../src/game/Transport'
+import { loopback, type Transport } from '../src/wire/Transport'
 import { SocketTransport } from '../src/game/SocketTransport'
 import {
   isJsonRpcFrame,
@@ -25,7 +26,7 @@ import {
   type JsonRpcNotification,
   type JsonRpcRequest,
   RpcMethods,
-} from '../src/game/JsonRpc'
+} from '../src/wire/JsonRpc'
 
 /**
  * A manager on one end of a linked pair: everything it puts on the wire, and a

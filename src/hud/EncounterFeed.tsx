@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { EncounterEntry } from '../game/Encounter'
-import { type CombatRecording, parseRecording } from '../game/Recording'
+import type { EncounterEntry } from '../wire/Encounter'
+import { type CombatRecording, parseRecording } from '../wire/Recording'
 import type { ServerConnection } from '../game/ServerConnection'
 import { feedLine, unseenCount } from './EncounterView'
 
