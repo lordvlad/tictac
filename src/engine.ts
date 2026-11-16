@@ -38,6 +38,18 @@ export function pauseRendering(game: Game): () => void {
   }
 }
 
+/**
+ * Run `callback` on every frame until the returned function is called.
+ *
+ * Every screen that ticks a match registers one, and a match rebuilt in place
+ * must not leave the old one ticking, so registration and its undoing are one
+ * call rather than a flag the callback checks.
+ */
+export function onEachFrame(game: Game, callback: (delta: number) => void): () => void {
+  game.onUpdate(callback)
+  return () => game.unregisterOnUpdate(callback)
+}
+
 export function createEngineContext(game: Game): EngineContext {
   return {
     scene: game.scene,

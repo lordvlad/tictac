@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { AmmoId, ShotMode, WeaponId } from '../src/core/Arsenal'
 import { Faction } from '../src/config'
@@ -34,7 +35,7 @@ function recorded(seed: number): CombatRecording {
 
 async function harness(seed = 4242) {
   const recording = recorded(seed)
-  const persistence = await openPersistence()
+  const persistence = await openPersistence(WALL_CLOCK)
   const verdicts: RefereeVerdict[] = []
   const lobby = new Lobby({
     matches: persistence.matches,
@@ -42,7 +43,7 @@ async function harness(seed = 4242) {
     onVerdict: (v) => verdicts.push(v),
     log: () => {},
     // A dropped seat is held on a clock nothing here ever runs out.
-    schedule: () => () => {},
+    clock: { now: WALL_CLOCK.now, schedule: () => () => {} },
   })
   return { recording, store: persistence.matches, persistence, lobby, verdicts }
 }

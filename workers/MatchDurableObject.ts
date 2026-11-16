@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import { WALL_CLOCK } from '../src/server/Clock'
 import { Journeys } from '../src/server/Journeys'
 import { Lobby } from '../src/server/Lobby'
 import {
@@ -11,7 +12,7 @@ import type { LatLng } from '../src/core/Travel'
 import { Schedule } from '../src/server/Schedule'
 import { Sessions } from '../src/server/Session'
 import { socketTransport } from '../src/server/SocketTransport'
-import { dbOverSqlStorage } from './DoSqliteDb'
+import { dbOverStorage } from './DoSqliteDb'
 import type { Env } from './index'
 
 /**
@@ -62,8 +63,13 @@ export class MatchDurableObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     ctx.blockConcurrencyWhile(async () => {
-      this.persistence = await persistenceOverDb(dbOverSqlStorage(ctx.storage.sql), relyingPartyOf(env))
+      // One clock for everything this object constructs. Its alarm is the
+      // travel schedule's (below); the timers a seat's grace runs on are the
+      // runtime's own, as they always were.
+      const clock = WALL_CLOCK
+      this.persistence = await persistenceOverDb(dbOverStorage(ctx.storage), clock, relyingPartyOf(env))
       this.lobby = new Lobby({
+        clock,
         matches: this.persistence.matches,
         rooms: this.persistence.rooms,
         rosters: this.persistence.rosters,
@@ -86,7 +92,7 @@ export class MatchDurableObject extends DurableObject<Env> {
       // even if this instance was evicted in between.
       this.schedule = new Schedule(
         {
-          now: () => Date.now(),
+          now: () => clock.now(),
           arm: (at) => {
             if (at === null) void ctx.storage.deleteAlarm()
             else void ctx.storage.setAlarm(at)
@@ -98,7 +104,7 @@ export class MatchDurableObject extends DurableObject<Env> {
         squads: this.persistence.squads,
         encounters: this.persistence.encounters,
         schedule: this.schedule,
-        now: () => Date.now(),
+        clock,
         tell: (playerId, squad) => this.lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
         openEncounter: (contact) => this.lobby.openEncounter(contact),
         openMeeting: (meeting) => this.lobby.openMeeting(meeting),
@@ -107,7 +113,7 @@ export class MatchDurableObject extends DurableObject<Env> {
         log: this.log,
       })
       await journeys.restore()
-      this.sessions = new Sessions({ lobby: this.lobby, persistence: this.persistence, journeys, log: this.log })
+      this.sessions = new Sessions({ lobby: this.lobby, persistence: this.persistence, journeys, clock, log: this.log })
     })
   }
 

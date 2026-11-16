@@ -4,8 +4,7 @@ import { AmmoId, GRENADES, GrenadeId, WEAPONS, WeaponId } from '../core/Arsenal'
 import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { ItemId } from '../core/Items'
 import { ROLES, RoleId, roleAllowsAttachment, roleAllowsItem, roleAllowsWeapon } from '../core/Roles'
-import { defaultLoadout, type SquadLoadout, type UnitLoadout } from '../core/Loadout'
-export { defaultLoadout, type SquadLoadout, type UnitLoadout }
+import type { SquadLoadout, UnitLoadout } from '../core/Loadout'
 import type { Soldier } from '../entities/Soldier'
 
 /**

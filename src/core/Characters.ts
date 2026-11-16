@@ -257,11 +257,12 @@ export function characterSheet(rng: Rng): CharacterSheet {
  * kept roster deals more (`ROSTER.size`, `ITEM-042`) so resting someone is a
  * choice, not merely absence.
  *
- * Seeded off the clock by default: two peers must *not* deal the same people,
- * and nothing about a squad needs to be reproducible from the match seed. Takes
- * an `Rng` so a test can pin it.
+ * `rng` is required: this file is headless and has no entropy of its own. A
+ * caller that wants two peers to deal different people passes per-peer setup
+ * entropy (`main.tsx` `setupRng`); one that wants a reproducible squad passes a
+ * stream derived from a seed.
  */
-export function rollSquadSheets(rng: Rng = new Rng(Date.now() >>> 0), count = SQUAD_SIZE): CharacterSheet[] {
+export function rollSquadSheets(rng: Rng, count = SQUAD_SIZE): CharacterSheet[] {
   const sheets: CharacterSheet[] = []
   for (let i = 0; i < count; i++) sheets.push(characterSheet(rng))
   return sheets

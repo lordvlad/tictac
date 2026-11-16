@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Rng } from '../src/core/rng'
 import { distanceKm, type LatLng } from '../src/core/Travel'
@@ -57,7 +58,7 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
     for (let i = 0; i < count; i++) {
       const id = `p${i}`
       await db.query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${id}, ${new Date(0).toISOString()})`
-      const squad = await squads.place(db, id, anchor)
+      const squad = await squads.place(id, anchor)
       starts.push(squad.waypoints[0]!)
     }
     return starts
@@ -82,7 +83,7 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
     const lines: string[] = []
     // Every draw lands on the same spot, so the second player can never be
     // a kilometre clear of the first.
-    const stuck = new Squads(persistence.db, () => new Date(0), () => 0.5, (line) => lines.push(line))
+    const stuck = new Squads(persistence.db, { now: () => 0, schedule: WALL_CLOCK.schedule }, () => 0.5, (line) => lines.push(line))
     const starts = await placed(stuck, persistence.db, 2, null)
 
     expect(starts[1]).toEqual(starts[0])

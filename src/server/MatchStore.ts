@@ -6,7 +6,7 @@ import {
   type RecordedEvent,
   type RecordingHeader,
 } from '../game/Recording'
-import type { Db } from './db/Db'
+import { Batch, type Db } from './db/Db'
 
 /**
  * Where matches are kept, as the intents that produced them.
@@ -114,7 +114,21 @@ export class MatchStore {
    */
   async append(id: string, event: UnsequencedEvent): Promise<RecordedEvent> {
     await this.requireMatch(id)
-    return this.insert(this.db, id, event)
+    // Serialised rather than kept, so a caller is free to reuse the command
+    // object it handed over — the same reason `Recorder.record` clones.
+    const command = JSON.stringify(event.command)
+    // The sequence number is chosen inside the statement, so there is no
+    // window between reading the end of a log and writing to it. `MAX(seq) + 1`
+    // cannot leave a gap, the primary key cannot take a duplicate, and
+    // together that is the whole guarantee.
+    const rows = await this.db.query<SeqRow>`
+      INSERT INTO events (match_id, seq, turn, faction, command)
+      VALUES (${id}, (SELECT COALESCE(MAX(seq) + 1, 0) FROM events WHERE match_id = ${id}),
+              ${event.turn}, ${event.faction}, ${command})
+      RETURNING seq`
+    const row = rows[0]
+    if (!row) throw new Error(`match ${id}: the log refused an event`)
+    return { seq: Number(row.seq), turn: event.turn, faction: event.faction, command: event.command }
   }
 
   /**
@@ -126,11 +140,20 @@ export class MatchStore {
    */
   async appendAll(id: string, events: readonly UnsequencedEvent[]): Promise<RecordedEvent[]> {
     await this.requireMatch(id)
-    return this.db.transaction(async (tx) => {
-      const written: RecordedEvent[] = []
-      for (const event of events) written.push(await this.insert(tx, id, event))
-      return written
+    const [end] = await this.db.query<SeqRow>`SELECT COALESCE(MAX(seq) + 1, 0) AS seq FROM events WHERE match_id = ${id}`
+    // Numbered here, because a batch cannot read what it wrote a moment ago.
+    // The primary key is what keeps this honest: an append that slipped in
+    // since the read makes the whole batch fail and roll back, not renumber.
+    let next = Number(end?.seq ?? 0)
+    const batch = new Batch()
+    const written = events.map((event): RecordedEvent => {
+      const seq = next++
+      batch.query`INSERT INTO events (match_id, seq, turn, faction, command)
+                  VALUES (${id}, ${seq}, ${event.turn}, ${event.faction}, ${JSON.stringify(event.command)})`
+      return { seq, turn: event.turn, faction: event.faction, command: event.command }
     })
+    await this.db.transaction(batch)
+    return written
   }
 
   /**
@@ -181,29 +204,6 @@ export class MatchStore {
        ORDER BY m.created_at DESC, m.id DESC
        LIMIT ${limit}`
     return rows.map((row) => ({ ...row, events: Number(row.events) }))
-  }
-
-  /**
-   * The one place a row is written, so {@link append} and {@link appendAll}
-   * cannot disagree about how an event is numbered.
-   *
-   * The sequence number is chosen inside the statement, so there is no window
-   * between reading the end of a log and writing to it. `MAX(seq) + 1` cannot
-   * leave a gap, the primary key cannot take a duplicate, and together that is
-   * the whole guarantee.
-   */
-  private async insert(db: Db, id: string, event: UnsequencedEvent): Promise<RecordedEvent> {
-    // Serialised rather than kept, so a caller is free to reuse the command
-    // object it handed over — the same reason `Recorder.record` clones.
-    const command = JSON.stringify(event.command)
-    const rows = await db.query<SeqRow>`
-      INSERT INTO events (match_id, seq, turn, faction, command)
-      VALUES (${id}, (SELECT COALESCE(MAX(seq) + 1, 0) FROM events WHERE match_id = ${id}),
-              ${event.turn}, ${event.faction}, ${command})
-      RETURNING seq`
-    const row = rows[0]
-    if (!row) throw new Error(`match ${id}: the log refused an event`)
-    return { seq: Number(row.seq), turn: event.turn, faction: event.faction, command: event.command }
   }
 
   private async requireMatch(id: string): Promise<void> {

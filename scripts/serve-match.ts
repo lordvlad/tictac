@@ -33,6 +33,7 @@
  * The same applies to passkeys: `--rp-id` must be the domain the page is served
  * from, and `--origins` must list it.
  */
+import { WALL_CLOCK } from '../src/server/Clock'
 import { startGameServer } from '../src/server/GameServer'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import type { RelyingParty } from '../src/server/Persistence'
@@ -62,8 +63,9 @@ if (playerEncounters !== 'on' && playerEncounters !== 'off') {
   process.exit(1)
 }
 
-const persistence = await openPersistence(databaseUrl, party)
-const server = await startGameServer({ persistence, port, tiles, playerEncounters: () => playerEncounters === 'on' })
+// One clock for the database's stores and the server on top of them.
+const persistence = await openPersistence(WALL_CLOCK, databaseUrl, party)
+const server = await startGameServer({ persistence, clock: WALL_CLOCK, port, tiles, playerEncounters: () => playerEncounters === 'on' })
 
 console.info(`[referee] watching on ${server.url} — build ${BUILD_ID}, protocol ${PROTOCOL_VERSION}`)
 console.info(`[referee] database: ${databaseUrl}`)

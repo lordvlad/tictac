@@ -15,12 +15,12 @@ import {
   canEquipSidearm,
   canEquipWeapon,
   canFitAttachment,
-  defaultLoadout,
   equipSidearm,
   equipWeapon,
   fitAttachment,
   remaining,
 } from '../src/game/Loadout'
+import { defaultLoadout } from '../src/core/Loadout'
 import { unitLoadoutFrom } from '../src/game/Recording'
 import type { Soldier } from '../src/entities/Soldier'
 

@@ -118,18 +118,20 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
       rosters: persistence.rosters,
       log: (message) => logs.push(message),
       graceMs: GRACE,
-      now: () => START + clock.now,
+      clock: {
+        now: () => START + clock.now,
+        schedule: (fn, ms) => {
+          if (!manual) return clock.schedule(fn, ms)
+          const timer = { fn, ms, live: true }
+          timers.push(timer)
+          return () => {
+            timer.live = false
+          }
+        },
+      },
       mapSeed: () => state.mapSeed,
       onVerdict: (verdict) => verdicts.push(verdict),
       onEncounterTaken: (roomId, playerId) => taken.push(`${roomId}|${playerId}`),
-      schedule: (fn, ms) => {
-        if (!manual) return clock.schedule(fn, ms)
-        const timer = { fn, ms, live: true }
-        timers.push(timer)
-        return () => {
-          timer.live = false
-        }
-      },
     })
     await lobby.restore()
     state.lobby = lobby
@@ -169,7 +171,7 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
     async enlist(player, size = SQUAD_SIZE, seed = 5) {
       await persistence.db
         .query`INSERT INTO players (id, name, created_at) VALUES (${player.id}, ${player.name}, ${'2026-01-01T00:00:00Z'})`
-      await persistence.rosters.enlist(persistence.db, player.id, rollSquadSheets(new Rng(seed), size))
+      await persistence.rosters.enlist(player.id, rollSquadSheets(new Rng(seed), size))
     },
     async roster(player) {
       return persistence.db.query<RosterRow>`SELECT character_id, slot, status, sheet, matches, hp, deeds, downtime, died_in
@@ -785,8 +787,8 @@ describe('two squads on the road, end to end', () => {
     const marks: Promise<void>[] = []
     const server = rpcServer(persistence, undefined, {
       openMeeting: 'lobby',
+      schedule: (fn, ms) => clock.schedule(fn, ms),
       lobby: {
-        schedule: (fn, ms) => clock.schedule(fn, ms),
         mapSeed: () => 3,
         graceMs: GRACE,
         onEncounterTaken: (roomId, playerId) => marks.push(persistence.encounters.markTaken(roomId, playerId)),

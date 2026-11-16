@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import {
   getPartitions,
@@ -7,18 +8,19 @@ import {
   setPartitions,
   type RegionPartition,
 } from '../src/server/Owner'
-import { HandoverCoordinator } from '../src/server/Handover'
+import { HANDOVER_TIMEOUT_MS, HandoverCoordinator } from '../src/server/Handover'
 import { ServerConnection } from '../src/game/ServerConnection'
 import { startGameServer } from '../src/server/GameServer'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import type { JsonRpcFrame } from '../src/game/JsonRpc'
+import { turnedClock } from './support/turnedClock'
 
 describe('Region Partitions & DO Naming (src/server/Owner.ts)', () => {
   test('defaults to singleton partition', () => {
     resetPartitions()
     expect(getPartitions()).toHaveLength(1)
     expect(ownerOfCoord({ lat: 48.77, lng: 9.18 })).toBe('singleton')
-    expect(ownerOf({ id: 'squad-1' })).toBe('singleton')
+    expect(ownerOf({ id: 'squad-1' }, 0)).toBe('singleton')
   })
 
   test('spatial lookup routes coordinate to corresponding DO partition', () => {
@@ -49,8 +51,9 @@ describe('Region Partitions & DO Naming (src/server/Owner.ts)', () => {
 
 describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () => {
   test('happy path: prepare -> initiate -> arrive -> confirm', () => {
-    const sourceCoordinator = new HandoverCoordinator()
-    const targetCoordinator = new HandoverCoordinator()
+    const clock = turnedClock()
+    const sourceCoordinator = new HandoverCoordinator({ clock })
+    const targetCoordinator = new HandoverCoordinator({ clock })
 
     const handoverId = 'h-1234'
     const squadId = 'squad-42'
@@ -63,7 +66,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
       playerId,
       squadId,
       token,
-      expiresAt: Date.now() + 10_000,
+      expiresAt: 10_000,
     })
     expect(prep.prepared).toBe(true)
 
@@ -91,13 +94,13 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
   })
 
   test('arrival rejected on token mismatch or squad mismatch', () => {
-    const target = new HandoverCoordinator()
+    const target = new HandoverCoordinator({ clock: turnedClock() })
     target.prepare({
       handoverId: 'h-1',
       playerId: 'p-1',
       squadId: 'sq-1',
       token: 'valid-token',
-      expiresAt: Date.now() + 10_000,
+      expiresAt: 10_000,
     })
 
     expect(() => target.arrive('h-1', 'bad-token', 'sq-1')).toThrow(/mismatch/)
@@ -105,7 +108,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
   })
 
   test('cancelled handover prevents confirmation and purges state', () => {
-    const source = new HandoverCoordinator()
+    const source = new HandoverCoordinator({ clock: turnedClock() })
     source.initiate({
       handoverId: 'h-abort',
       playerId: 'p-1',
@@ -124,7 +127,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
   })
 
   test('exponential backoff advances on consecutive failures and halts at max attempts', () => {
-    const source = new HandoverCoordinator()
+    const source = new HandoverCoordinator({ clock: turnedClock() })
     const squadId = 'sq-backoff'
     const delays = [2000, 5000, 10000, 30000, 60000]
 
@@ -159,15 +162,48 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
     expect(finalRes.retryable).toBe(false)
     expect(finalRes.attempts).toBe(5)
   })
+
+  test('an offer the target never saw claimed lapses on the clock, not on a sleep', () => {
+    const clock = turnedClock(1_000)
+    const target = new HandoverCoordinator({ clock })
+    target.prepare({ handoverId: 'h-late', playerId: 'p-1', squadId: 'sq-1', token: 'tok', expiresAt: clock.now() + HANDOVER_TIMEOUT_MS })
+
+    clock.advance(HANDOVER_TIMEOUT_MS)
+    // Exactly at the expiry the ticket is still good.
+    expect(target.arrive('h-late', 'tok', 'sq-1').squadId).toBe('sq-1')
+
+    target.prepare({ handoverId: 'h-later', playerId: 'p-1', squadId: 'sq-1', token: 'tok', expiresAt: clock.now() + HANDOVER_TIMEOUT_MS })
+    clock.advance(HANDOVER_TIMEOUT_MS + 1)
+    expect(() => target.arrive('h-later', 'tok', 'sq-1')).toThrow(/expired/)
+  })
+
+  test('an outgoing handover stops being pending once its ttl has run out', () => {
+    const clock = turnedClock()
+    const source = new HandoverCoordinator({ clock })
+    source.initiate({
+      handoverId: 'h-ttl',
+      playerId: 'p-1',
+      squadId: 'sq-1',
+      sourceRegion: 'region-w',
+      targetRegion: 'region-e',
+      targetUrl: 'ws://target',
+      token: 'tok',
+      ttlMs: 5_000,
+    })
+    clock.advance(5_000)
+    expect(source.isPending('h-ttl')).toBe(true)
+    clock.advance(1)
+    expect(source.isPending('h-ttl')).toBe(false)
+  })
 })
 
 describe('Dual-Socket Client Handover over Real GameServer', () => {
   test('client handles handoverOffer push, connects secondary socket, and arrives', async () => {
-    const persistence1 = await openPersistence()
-    const persistence2 = await openPersistence()
+    const persistence1 = await openPersistence(WALL_CLOCK)
+    const persistence2 = await openPersistence(WALL_CLOCK)
 
-    const server1 = await startGameServer({ persistence: persistence1, port: 0, log: () => {} })
-    const server2 = await startGameServer({ persistence: persistence2, port: 0, log: () => {} })
+    const server1 = await startGameServer({ persistence: persistence1, clock: WALL_CLOCK, port: 0, log: () => {} })
+    const server2 = await startGameServer({ persistence: persistence2, clock: WALL_CLOCK, port: 0, log: () => {} })
 
     const ws1 = server1.url.replace('http', 'ws')
     const ws2 = server2.url.replace('http', 'ws')

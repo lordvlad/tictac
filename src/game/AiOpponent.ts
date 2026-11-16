@@ -1,10 +1,10 @@
 import { Faction } from '../config'
 import { rollSquadSheets } from '../core/Characters'
+import type { Rng } from '../core/rng'
 import { AiPlayer } from '../sim/AiPlayer'
 import { MatchHost } from '../sim/MatchHost'
-import { defaultLoadout } from './Loadout'
+import { defaultLoadout, type Deployment } from '../core/Loadout'
 import { NetworkManager, type NetworkMessage } from './NetworkManager'
-import type { Deployment } from './Recording'
 import { reportDivergence } from './StateDigest'
 import { loopback, type Transport } from './Transport'
 
@@ -38,18 +38,19 @@ export class AiOpponent {
   private player: AiPlayer | null = null
   private closed = false
 
-  private constructor() {}
+  private constructor(private readonly setup: Rng) {}
 
   /**
-   * Sit down across from `network`, which must be about to host.
+   * Sit down across from `network`, which must be about to host. `setup` is the
+   * entropy the squad it brings is dealt from, per peer and not the match seed.
    *
    * Attached before the host announces the match, because the announcement is
    * delivered synchronously and an opponent that is not there yet misses it.
    */
-  static join(network: NetworkManager): void {
+  static join(network: NetworkManager, setup: Rng): void {
     const [mine, theirs] = loopback()
     network.attach(mine)
-    new AiOpponent().sit(theirs)
+    new AiOpponent(setup).sit(theirs)
   }
 
   private sit(transport: Transport): void {
@@ -70,7 +71,7 @@ export class AiOpponent {
 
   /** Send the squad this side brings. A fresh roll, with the stock kit. */
   private deploy(): void {
-    const sheets = rollSquadSheets()
+    const sheets = rollSquadSheets(this.setup)
     const loadout = defaultLoadout(sheets.length)
     const squad: Deployment[] = sheets.map((sheet, i) => ({ sheet, loadout: loadout[i]! }))
     this.network.send({ type: 'ready', squad })

@@ -3,8 +3,6 @@ import { fromBase64Url, toBase64Url } from './Base64Url'
 import type { Player, RosterEntry } from './Rpc'
 import type { ServerConnection } from './ServerConnection'
 
-export type { Player, RosterEntry } from './Rpc'
-
 /**
  * The player's account on one match server, from the browser's side.
  *

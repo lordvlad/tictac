@@ -1,13 +1,14 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
 import { rollSquadSheets } from '../src/core/Characters'
 import { Rng } from '../src/core/rng'
 import { isJsonRpcFrame, type JsonRpcFrame } from '../src/game/JsonRpc'
 import { isCommand } from '../src/ecs/systems/CommandSystem'
-import { defaultLoadout } from '../src/game/Loadout'
+import { defaultLoadout, type Deployment } from '../src/core/Loadout'
 import type { Seated } from '../src/game/Lobby'
 import { NetworkManager, type NetworkMessage, type Resync } from '../src/game/NetworkManager'
-import { RECORDING_VERSION, type Deployment, type RecordingHeader } from '../src/game/Recording'
+import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
 import type { Player } from '../src/game/Rpc'
 import { heldTokens, ServerConnection } from '../src/game/ServerConnection'
 import { PROTOCOL_VERSION } from '../src/version'
@@ -44,7 +45,7 @@ import { simulateOverWire, type WireMatchResult } from './support/WireMatch'
  * found where the old one was.
  */
 async function lobbyOnASocket() {
-  const persistence = await openPersistence()
+  const persistence = await openPersistence(WALL_CLOCK)
   const store = persistence.matches
   const verdicts: RefereeVerdict[] = []
   const accounts = {
@@ -52,7 +53,7 @@ async function lobbyOnASocket() {
       token.startsWith('id-') ? { id: token, name: token.slice(3) } : null,
   }
   const newLobby = () =>
-    new Lobby({ matches: store, rooms: persistence.rooms, log: () => {}, onVerdict: (verdict) => verdicts.push(verdict) })
+    new Lobby({ matches: store, rooms: persistence.rooms, log: () => {}, clock: WALL_CLOCK, onVerdict: (verdict) => verdicts.push(verdict) })
   let lobby = newLobby()
   const sessionsOver = (over: Lobby) =>
     new Sessions({
@@ -63,6 +64,7 @@ async function lobbyOnASocket() {
       >,
       // Nothing here travels.
       journeys: {} as Journeys,
+      clock: WALL_CLOCK,
       log: () => {},
     })
   let sessions = sessionsOver(lobby)

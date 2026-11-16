@@ -175,9 +175,9 @@ what it is: the rules, in the page, with nothing in between.
   serves static assets and a WebSocket upgrade (everything a window asks travels over that one
   socket, [ARCH-NETWORKING §8](../../architecture/networking.md)), and runs the same
   `Lobby`/`Sessions`/`Persistence` the Bun process does, over a `Db` adapter
-  (`workers/DoSqliteDb.ts`) that is honest about the one thing it does not do — roll back a
-  failed multi-statement transaction — because `ctx.storage.sql`'s transaction primitive cannot
-  run the async code every caller of `Db.transaction` is written in. GitHub Pages remains the
+  (`workers/DoSqliteDb.ts`) whose `transaction` takes a batch of writes and runs it inside
+  `ctx.storage.transactionSync`, so it rolls back on a failed step as the Bun adapter does
+  ([ARCH-PERSISTENCE §1](../../architecture/persistence.md)). GitHub Pages remains the
   default way the client itself is served either way — this is a hosting option for the
   referee, not a replacement for it. The single instance is deliberate and deliberately
   temporary: [RFC-0002](./0002-region-sharded-durable-objects.md) is the plan for replacing it

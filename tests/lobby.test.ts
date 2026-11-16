@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
 import type { Player } from '../src/game/Rpc'
@@ -23,7 +24,7 @@ const WINDOW = 'You opened TicTac in another window; this one was disconnected.'
 const RECORDING = decisive()
 
 async function harness() {
-  const persistence = await openPersistence()
+  const persistence = await openPersistence(WALL_CLOCK)
   /** Every hold the lobby started, and whether it has been called off. */
   const holds: { fn: () => void; ms: number; cancelled: boolean }[] = []
   const lobby = new Lobby({
@@ -31,12 +32,15 @@ async function harness() {
     rooms: persistence.rooms,
     log: () => {},
     graceMs: 5_000,
-    schedule: (fn, ms) => {
-      const hold = { fn, ms, cancelled: false }
-      holds.push(hold)
-      return () => {
-        hold.cancelled = true
-      }
+    clock: {
+      now: WALL_CLOCK.now,
+      schedule: (fn, ms) => {
+        const hold = { fn, ms, cancelled: false }
+        holds.push(hold)
+        return () => {
+          hold.cancelled = true
+        }
+      },
     },
   })
   /** Let every hold still running run out. */

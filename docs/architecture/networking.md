@@ -249,7 +249,7 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   (`src/game/Rewind.ts`) at every event boundary and puts one back with `restoreMoment`. A
   moment is four things, and playing on from a restored one reaches the match the file
   records only if all four come back: the soldiers' components (`World.snapshot`, restored
-  with echoes suppressed and the dirty diff re-baselined, as `applyRemote` does); every wall's
+  by `deserialize`; nothing observes components changing); every wall's
   kind, one byte each (`WallSystem.kinds`), since a round through a window breaks it; the
   ground entity (fire, smoke, ash, crates burned away — `GroundSystem` rebuilds the grid from
   it); and the position of the match's dice (`Rng.snapshot`), since every roll depends on all
@@ -433,11 +433,13 @@ it.
 
 Every room records the build and protocol it was opened under.
 
-- **The `hello`** must state the server's own protocol (`PROTOCOL_VERSION`), at any build: a
-  page still on the build before a deploy has a match to finish here, so what a page may start
-  is weighed when it asks, not at the gate. Anything else is refused as in §5 (*Protocol
-  mismatch: the match server speaks protocol 7, this page speaks protocol 5. …*) with `abort`,
-  and the socket is closed.
+- **The `hello`** is the only first word a socket may say, and it must state the server's own
+  protocol (`PROTOCOL_VERSION`), at any build: a page still on the build before a deploy has a
+  match to finish here, so what a page may start is weighed when it asks, not at the gate. Any
+  other protocol, a `hello` that states nothing usable, or any other first notification (an
+  `init` included) is refused as in §5 (*Protocol mismatch: the match server speaks protocol 7,
+  this page speaks protocol 5. …*, or the reload text for a page that reports no version) with
+  `abort`, and the socket is closed.
 - **`open`, `join` and `watch`** start something on this server, so they take its own build
   (`409` *Build mismatch: the match server is running build b, this page is running build a.
   …*). `join` and `watch` also need the room's build to be the page's (`409` *That match was

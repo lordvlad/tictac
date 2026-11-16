@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
 import type { LobbyView } from '../src/game/Lobby'
@@ -19,8 +20,8 @@ import { softwareAuthenticator } from './support/authenticator'
  */
 
 async function serve(graceMs?: number) {
-  const persistence = await openPersistence()
-  const server = await startGameServer({ persistence, port: 0, log: () => {}, graceMs })
+  const persistence = await openPersistence(WALL_CLOCK)
+  const server = await startGameServer({ persistence, clock: WALL_CLOCK, port: 0, log: () => {}, graceMs })
   const ws = server.url.replace('http', 'ws')
   return {
     persistence,
@@ -151,8 +152,8 @@ describe('The match server on a real port', () => {
   })
 
   test('a room outlives the server: a new one on the same database takes it up, and the window gets its seat back', async () => {
-    const persistence = await openPersistence()
-    const options = { persistence, port: 0, log: () => {} }
+    const persistence = await openPersistence(WALL_CLOCK)
+    const options = { persistence, clock: WALL_CLOCK, port: 0, log: () => {} }
     const first = await startGameServer(options)
     const before = new ServerConnection(first.url.replace('http', 'ws'), { tokens: heldTokens() })
     const opened = await enter(before, { kind: 'open' })

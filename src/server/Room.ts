@@ -15,6 +15,7 @@ import { MatchHost } from '../sim/MatchHost'
 import type { StandingOrder } from '../sim/Policy'
 import type { PeerVersion } from '../version'
 import { AiSeat } from './AiSeat'
+import type { ServerClock } from './Clock'
 import type { MatchStore, StoredMatch } from './MatchStore'
 import type { RoomStore, StoredRoom, StoredSeat, VerifiedSide } from './RoomStore'
 import type { Rosters } from './Rosters'
@@ -127,10 +128,12 @@ export interface RoomOptions {
   log: (message: string) => void
   /** How long a seat is held for its window after its socket drops. */
   graceMs: number
-  /** Run `fn` after `ms`; the answer cancels it. Injected so a test can be the clock. */
-  schedule: (fn: () => void, ms: number) => () => void
-  /** The server's clock, in ms (`clock/now`): what a reserved seat's deadline is read against. */
-  now: () => number
+  /**
+   * The host's one clock: what a reserved seat's deadline is read against
+   * (`clock/now`), and what runs a grace period or a join window out. A test
+   * turns it by hand.
+   */
+  clock: ServerClock
   /** Called when what a lobby view shows changes without a frame to say so: a seat passing to the AI on a timer. */
   onChanged: () => void
   /**
@@ -230,7 +233,7 @@ export class Room {
     /** The build and protocol the room was opened under; only a page on the same build plays in it. */
     readonly version: PeerVersion,
     private readonly options: RoomOptions,
-    readonly createdAt: string = new Date().toISOString(),
+    readonly createdAt: string = new Date(options.clock.now()).toISOString(),
   ) {}
 
   get phase(): RoomPhase {
@@ -653,7 +656,7 @@ export class Room {
     this.options.log(
       `room ${this.id}: holding ${seat.player?.name ?? 'an anonymous player'}'s seat for ${this.options.graceMs} ms`,
     )
-    seat.grace = this.options.schedule(() => {
+    seat.grace = this.options.clock.schedule(() => {
       seat.grace = null
       if (this.encounterRoom) this.passToAi(faction)
       else this.end(departure(seat, this.phaseNow))
@@ -670,7 +673,7 @@ export class Room {
     const seat = this.seats[faction]
     if (!seat) return
     if (seat.control === 'ai') this.sitAi(faction)
-    else if (seat.control === 'reserved') this.reserve(faction, seat.joinBy ?? this.options.now())
+    else if (seat.control === 'reserved') this.reserve(faction, seat.joinBy ?? this.options.clock.now())
     else this.hold(faction)
   }
 
@@ -679,12 +682,12 @@ export class Room {
     const seat = this.seats[faction]!
     seat.control = 'reserved'
     seat.joinBy = joinBy
-    const left = joinBy - this.options.now()
+    const left = joinBy - this.options.clock.now()
     if (left <= 0) {
       this.passToAi(faction)
       return
     }
-    seat.deadline = this.options.schedule(() => {
+    seat.deadline = this.options.clock.schedule(() => {
       seat.deadline = null
       this.passToAi(faction)
     }, left)

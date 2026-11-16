@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../../src/server/Clock'
 import type { Db } from '../../src/server/db/Db'
 import { openDb, openPersistence } from '../../src/server/db/BunSqlDb'
 import type { Persistence } from '../../src/server/Persistence'
@@ -40,5 +41,5 @@ export async function freshDb(url: string): Promise<Db> {
 /** A reset database, open, migrated and behind every store. */
 export async function freshPersistence(url: string): Promise<Persistence> {
   await resetDatabase(url)
-  return openPersistence(url)
+  return openPersistence(WALL_CLOCK, url)
 }

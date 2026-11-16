@@ -55,13 +55,6 @@ class TickSpy extends System {
   }
 }
 
-/** Collect every change the world broadcasts. */
-function recorder(world: World) {
-  const seen: { entityId: number; name: string; data: Record<string, unknown> }[] = []
-  world.onComponentChanged((entityId, name, data) => seen.push({ entityId, name, data }))
-  return seen
-}
-
 describe('World', () => {
   test('allocates and destroys entities', () => {
     const world = new World()
@@ -123,90 +116,56 @@ describe('World', () => {
 
     expect(spy.ticks).toBe(2)
   })
+
+  test('a removed system stops ticking and leaves the count as it was', () => {
+    const world = new World()
+    const before = world.systemCount
+    const spy = new TickSpy()
+    world.addSystem(spy)
+    world.update(0.016)
+
+    world.removeSystem(spy)
+    world.update(0.016)
+
+    expect(spy.ticks).toBe(1)
+    expect(world.systemCount).toBe(before)
+  })
 })
 
-describe('World change replication', () => {
-  test('broadcasts a mutation nobody announced', () => {
+describe('World snapshot and restore', () => {
+  test('restore puts back what a snapshot took, nested state included', () => {
     const world = new World()
     const entity = world.createEntity()
     const counter = world.addComponent(entity, new Counter(1))
-    const seen = recorder(world)
+    const inventory = world.addComponent(entity, new InventoryComponent())
+    const frame = world.snapshot([entity])
+    const frags = inventory.grenades[GrenadeId.Frag]
 
     counter.value = 7
-    world.syncDirty()
-
-    expect(seen).toEqual([{ entityId: entity, name: 'counter', data: { value: 7 } }])
-  })
-
-  test('stays silent when nothing changed', () => {
-    const world = new World()
-    const entity = world.createEntity()
-    world.addComponent(entity, new Counter(1))
-    const seen = recorder(world)
-
-    world.syncDirty()
-    world.syncDirty()
-
-    expect(seen).toEqual([])
-  })
-
-  test('reports a component only once per distinct value', () => {
-    const world = new World()
-    const entity = world.createEntity()
-    const counter = world.addComponent(entity, new Counter(1))
-    const seen = recorder(world)
-
-    counter.value = 2
-    world.syncDirty()
-    world.syncDirty()
-
-    expect(seen.length).toBe(1)
-  })
-
-  test('detects nested mutation, not just reassignment', () => {
-    const world = new World()
-    const entity = world.createEntity()
-    const inventory = world.addComponent(entity, new InventoryComponent())
-    const seen = recorder(world)
-
     inventory.grenades[GrenadeId.Frag] += 3
-    world.syncDirty()
+    world.restore(frame)
 
-    expect(seen.length).toBe(1)
-    expect((seen[0]!.data.grenades as Record<string, number>)[GrenadeId.Frag]).toBe(4)
+    expect(counter.value).toBe(1)
+    expect(inventory.grenades[GrenadeId.Frag]).toBe(frags)
   })
 
-  test('applyRemote writes peer state without echoing it back', () => {
+  test('restore skips an entity or component that is gone', () => {
     const world = new World()
-    const entity = world.createEntity()
-    world.addComponent(entity, new HealthComponent(100, 100))
-    const seen = recorder(world)
+    const kept = world.createEntity()
+    const dropped = world.createEntity()
+    const counter = world.addComponent(kept, new Counter(1))
+    world.addComponent(kept, new Marker())
+    world.addComponent(dropped, new Counter(5))
+    const frame = world.snapshot([kept, dropped])
 
-    expect(world.applyRemote(entity, 'health', { hp: 40, maxHp: 100 })).toBe(true)
-    world.syncDirty()
+    counter.value = 9
+    world.removeComponent(kept, Marker)
+    world.destroyEntity(dropped)
+    world.restore(frame)
 
-    expect(world.getComponent(entity, HealthComponent)?.hp).toBe(40)
-    expect(seen).toEqual([])
-  })
-
-  test('applyRemote reports failure for an unknown component', () => {
-    const world = new World()
-    const entity = world.createEntity()
-
-    expect(world.applyRemote(entity, 'health', { hp: 1 })).toBe(false)
-  })
-
-  test('a local change after a remote one is still replicated', () => {
-    const world = new World()
-    const entity = world.createEntity()
-    const health = world.addComponent(entity, new HealthComponent(100, 100))
-    const seen = recorder(world)
-
-    world.applyRemote(entity, 'health', { hp: 40, maxHp: 100 })
-    health.hp = 10
-    world.syncDirty()
-
-    expect(seen).toEqual([{ entityId: entity, name: 'health', data: { hp: 10, maxHp: 100, withdrawn: false } }])
+    expect(counter.value).toBe(1)
+    expect(world.hasComponent(kept, Marker)).toBe(false)
+    expect(world.hasEntity(dropped)).toBe(false)
   })
 })
 

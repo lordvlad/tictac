@@ -333,7 +333,7 @@ describe('Walls in the ECS', () => {
     expect(world.getComponent(walls.entityAt(edge)!, WallComponent)!.kind).toBe(WallKind.None)
   })
 
-  test('a wall change arriving from a peer reaches the grid', () => {
+  test('a wall put back by a rewind reaches the grid', () => {
     const grid = new Grid(10)
     grid.setWall(3, 3, Side.North, WallKind.Solid)
     const world = new World()
@@ -344,31 +344,11 @@ describe('Walls in the ECS', () => {
     const edge = grid.edgeId(3, 3, Side.North)
     const entityId = walls.entityAt(edge)!
 
-    // What NetworkManager does with an inbound component frame.
-    world.applyRemote(entityId, WallComponent.componentName, { edge, kind: WallKind.None })
+    world.restore([{ entityId, components: { [WallComponent.componentName]: { edge, kind: WallKind.None } } }])
     // The grid is an index over the components, so it catches up on tick.
     expect(grid.wallAt(3, 3, Side.North)).toBe(WallKind.Solid)
     world.update(0)
     expect(grid.wallAt(3, 3, Side.North)).toBe(WallKind.None)
-  })
-
-  test('a wall mutation is broadcast like any other component', () => {
-    const grid = new Grid(10)
-    grid.setWall(3, 3, Side.North, WallKind.Glass)
-
-    const world = new World()
-    const walls = new WallSystem(grid)
-    walls.spawnFromGrid(world)
-
-    const seen: Array<{ name: string; data: Record<string, unknown> }> = []
-    world.onComponentChanged((_id, name, data) => seen.push({ name, data }))
-
-    walls.setKind(world, grid.edgeId(3, 3, Side.North), WallKind.None)
-    world.syncDirty()
-
-    const wallFrames = seen.filter((f) => f.name === WallComponent.componentName)
-    expect(wallFrames.length).toBe(1)
-    expect(wallFrames[0]!.data.kind).toBe(WallKind.None)
   })
 })
 describe('Storey-relative sight and parapets', () => {

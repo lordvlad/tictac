@@ -4,10 +4,10 @@ import { rollSquadSheets } from '../src/core/Characters'
 import { Rng } from '../src/core/rng'
 import { isCommand } from '../src/ecs/systems/CommandSystem'
 import { AiOpponent } from '../src/game/AiOpponent'
-import { defaultLoadout } from '../src/game/Loadout'
+import { defaultLoadout, type Deployment } from '../src/core/Loadout'
 import { NetworkManager, type NetworkMessage } from '../src/game/NetworkManager'
 import { compareDigests } from '../src/game/StateDigest'
-import { RECORDING_VERSION, type Deployment, type RecordingHeader } from '../src/game/Recording'
+import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
 import { MatchHost } from '../src/sim/MatchHost'
 
 /**
@@ -17,7 +17,7 @@ import { MatchHost } from '../src/sim/MatchHost'
  */
 async function sitDown(seed: number) {
   const network = new NetworkManager()
-  AiOpponent.join(network)
+  AiOpponent.join(network, new Rng(seed + 1))
   network.hostMatch(seed, String(seed))
 
   const sheets = rollSquadSheets(new Rng(seed))

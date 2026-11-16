@@ -12,9 +12,10 @@ import { createGlobalRules } from './ecs/globals'
 import { TurnSystem } from './ecs/systems'
 import { isCommand } from './ecs/systems/CommandSystem'
 import { World } from './ecs/World'
-import { createEngineContext, type EngineContext, pauseRendering } from './engine'
+import { createEngineContext, type EngineContext, onEachFrame, pauseRendering } from './engine'
 import './game.css'
 import { Account } from './game/Account'
+import { consoleHandleAllowed } from './game/DebugAccess'
 import { ServerConnection } from './game/ServerConnection'
 import { AiOpponent } from './game/AiOpponent'
 import { Battlefield } from './game/Battlefield'
@@ -23,13 +24,8 @@ import type { Seated } from './game/Lobby'
 import { winnerOf } from './game/MatchEnd'
 import { type MatchLog, NetworkManager, type NetworkMessage } from './game/NetworkManager'
 import { Playback } from './game/Playback'
-import {
-  type CombatRecording,
-  type Deployment,
-  parseRecording,
-  RECORDING_VERSION,
-  type RecordingHeader,
-} from './game/Recording'
+import { type CombatRecording, parseRecording, RECORDING_VERSION, type RecordingHeader } from './game/Recording'
+import type { Deployment } from './core/Loadout'
 import { captureMoment, restoreMoment, type Rewindable } from './game/Rewind'
 import { Squads } from './game/Squads'
 import { TurnManager } from './game/TurnManager'
@@ -45,8 +41,10 @@ import { PlaybackControls } from './hud/PlaybackControls'
 import { ReconnectingBanner } from './hud/ReconnectingBanner'
 import { SpectatorBar } from './hud/SpectatorBar'
 import { RosterScreen } from './hud/RosterScreen'
+import { BUILD_ID } from './version'
 import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
+import { FixedStepLoop } from './sim/FixedStepLoop'
 
 const baseUrl = new URL('./', document.baseURI).href
 
@@ -70,6 +68,19 @@ function resolveSeed(): { seed: number; label: string } {
   }
   const seed = (Math.random() * 0xffffffff) >>> 0
   return { seed, label: String(seed) }
+}
+
+/**
+ * Entropy for dealing a squad: per peer, from the platform CSPRNG.
+ *
+ * Two peers must not deal the same people, and the sheets travel in `ready` as
+ * data, so nothing needs to reproduce them from the match seed. This is setup
+ * entropy, not gameplay randomness, and deliberately not `Math.random`:
+ * `resolveSeed` is the one such draw `tests/determinism.test.ts` allows here.
+ */
+function setupRng(): Rng {
+  const [entropy] = crypto.getRandomValues(new Uint32Array(1))
+  return new Rng(entropy!)
 }
 
 /**
@@ -234,7 +245,7 @@ function showMenu(notice?: string): void {
         closeMenu()
         const { seed, label } = resolveSeed()
         const network = new NetworkManager()
-        AiOpponent.join(network)
+        AiOpponent.join(network, setupRng())
         network.hostMatch(seed, label)
         equipThenStart(seed, label, network)
       }}
@@ -455,7 +466,7 @@ function followReconnects(network: NetworkManager): void {
  * keeps, which is the squad its referee will check and settle.
  */
 function equipThenStart(seed: number, label: string, network: NetworkManager, squad: Picked = {}): void {
-  const { sheets = rollSquadSheets(), hp, characterIds, fatigue } = squad
+  const { sheets = rollSquadSheets(setupRng()), hp, characterIds, fatigue } = squad
   const engine = createEngineContext(Game.instance())
   const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
   const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine, { [faction]: sheets }), seed, faction, sheets)
@@ -464,7 +475,7 @@ function equipThenStart(seed: number, label: string, network: NetworkManager, sq
   // Rolled per peer, never from the match seed — that seed is the host's map.
   // Local play needs an opposing squad too, and there is no peer to bring one.
   const mySheets = screen.sheets
-  const localEnemySheets = rollSquadSheets()
+  const localEnemySheets = rollSquadSheets(setupRng())
 
   // A peer that drops while the player is still equipping would otherwise hang
   // the screen: there is no controller yet to show the usual overlay. `start`
@@ -599,8 +610,7 @@ function buildMatch(
 /**
  * Take a match off the screen entirely, for one built again in its place
  * (a resync that found this window out of step with the server). Whoever
- * ticks it (`Game.onUpdate`, which has no way to unregister) has to stop on
- * its own.
+ * ticks it (`onEachFrame`) has to take its own frames down as well.
  */
 function disposeScene(scene: MatchScene): void {
   scene.controller.dispose()
@@ -625,8 +635,13 @@ function restoreCamera(rig: OrbitRig, view: CameraView): void {
   rig.azimuth = view.azimuth
 }
 
-/** The match on `window.tictac`, for the console and the browser tests. */
+/**
+ * The match on `window.tictac`, for the console and the browser tests — in a
+ * development server's bundle only: the handle is the live rules objects, and a
+ * shipped build must not give the console a way past the command door.
+ */
 function expose(scene: MatchScene, more: Record<string, unknown>): void {
+  if (!consoleHandleAllowed(BUILD_ID)) return
   const { battlefield, squads, rig, turnManager, hud, controller, tracers } = scene
   Object.assign(window as unknown as Record<string, unknown>, {
     tictac: { game: Game.instance(), battlefield, squads, rig, turnManager, hud, controller, tracers, ...more },
@@ -759,7 +774,6 @@ function catchUp(scene: MatchScene, log: MatchLog): void {
 function playMatch(scene: MatchScene, network: NetworkManager, header: RecordingHeader): void {
   const { battlefield, squads, rig, tracers, turnManager, hud, controller } = scene
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
-  let replaced = false
 
   // Assigned last thing before play, because it is what releases whatever the
   // other side sent while this one was still being built.
@@ -769,7 +783,7 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
 
   network.onDisconnected = (reason) => {
     showInterrupted(reason, () => {
-      replaced = true
+      stopFrames()
       disposeScene(scene)
       network.dispose()
     })
@@ -781,7 +795,7 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
   // (`caughtUp`) has already gone to `onMessage` and needs nothing here.
   network.onResync = (resync) => {
     if (resync.kind !== 'rebuild') return
-    replaced = true
+    stopFrames()
     const camera = { focus: rig.focusPoint.clone(), zoom: rig.zoom, azimuth: rig.azimuth }
     disposeScene(scene)
     resumeMatch(network, resync.log, camera)
@@ -798,15 +812,12 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
     rig.snapTo(new Vector3(0, 0, 0))
   }
 
-  let accumulator = 0
-  Game.instance().onUpdate((delta) => {
-    if (replaced) return
-    accumulator = Math.min(accumulator + delta, SIM.maxCatchUp)
-    while (accumulator >= SIM.step) {
-      accumulator -= SIM.step
-      tracers.update(SIM.step)
-      controller.update(SIM.step)
-    }
+  const loop = new FixedStepLoop(SIM.step, SIM.maxCatchUp, (step) => {
+    tracers.update(step)
+    controller.update(step)
+  })
+  const stopFrames = onEachFrame(Game.instance(), (delta) => {
+    loop.advance(delta)
     battlefield.flush()
   })
 
@@ -828,11 +839,19 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
  */
 function watchMatch(network: NetworkManager, seat: Seated): void {
   let scene: MatchScene | null = null
+  let stopFrames: (() => void) | null = null
   let left = false
+  /** The shown match and the frames that tick it, taken down together. */
+  const teardown = (): void => {
+    stopFrames?.()
+    stopFrames = null
+    if (scene) disposeScene(scene)
+    scene = null
+  }
   const leave = (): void => {
     left = true
     bar.dispose()
-    if (scene) disposeScene(scene)
+    teardown()
     network.dispose()
   }
   const bar = new SpectatorBar(() => {
@@ -869,17 +888,13 @@ function watchMatch(network: NetworkManager, seat: Seated): void {
     const commander = squads.getLiving(turnManager.activeFaction)[0]
     rig.snapTo(commander ? commander.position : new Vector3(0, 0, 0))
 
-    let accumulator = 0
-    Game.instance().onUpdate((delta) => {
-      // Stops for good once this scene has been left or shown again.
-      if (left || scene !== built) return
-      accumulator = Math.min(accumulator + delta, SIM.maxCatchUp)
-      while (accumulator >= SIM.step) {
-        accumulator -= SIM.step
-        while (live.length > 0 && !controller.busy) controller.applyRecordedCommand(live.shift()!)
-        tracers.update(SIM.step)
-        controller.update(SIM.step)
-      }
+    const loop = new FixedStepLoop(SIM.step, SIM.maxCatchUp, (step) => {
+      while (live.length > 0 && !controller.busy) controller.applyRecordedCommand(live.shift()!)
+      tracers.update(step)
+      controller.update(step)
+    })
+    stopFrames = onEachFrame(Game.instance(), (delta) => {
+      loop.advance(delta)
       battlefield.flush()
       // Decided once everything sent has been played out: the last shot's
       // walk and reactions are part of how it ended.
@@ -905,7 +920,7 @@ function watchMatch(network: NetworkManager, seat: Seated): void {
     if (resync.kind !== 'rebuild' || !scene) return
     const { rig } = scene
     const camera = { focus: rig.focusPoint.clone(), zoom: rig.zoom, azimuth: rig.azimuth }
-    disposeScene(scene)
+    teardown()
     restoreCamera(show(resync.log).rig, camera)
   }
 
@@ -1001,20 +1016,19 @@ function startPlayback(recording: CombatRecording): void {
   const commander = squads.byFaction[Faction.Blue][0]
   rig.snapTo(commander ? commander.position : new Vector3(0, 0, 0))
 
-  let accumulator = 0
-  Game.instance().onUpdate((delta) => {
-    // The speed multiplier goes into the accumulator rather than into the event
-    // pacing alone, so animations and dispatch run fast together: a 2x replay
-    // that only dispatched faster would show the same walk at the same pace
-    // with less room to breathe between moves.
-    const scale = playback.playing ? playback.speed : 1
-    accumulator = Math.min(accumulator + delta * scale, SIM.maxCatchUp)
-    while (accumulator >= SIM.step) {
-      accumulator -= SIM.step
-      tracers.update(SIM.step)
-      controller.update(SIM.step)
-      playback.update(SIM.step)
-    }
+  // A replay is left by reloading the page, so its frames are never taken down.
+  const loop = new FixedStepLoop(
+    SIM.step,
+    SIM.maxCatchUp,
+    (step) => {
+      tracers.update(step)
+      controller.update(step)
+      playback.update(step)
+    },
+    () => (playback.playing ? playback.speed : 1),
+  )
+  onEachFrame(Game.instance(), (delta) => {
+    loop.advance(delta)
     battlefield.flush()
   })
 

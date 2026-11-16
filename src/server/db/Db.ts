@@ -41,11 +41,16 @@
  *
  * A Durable Objects deployment means one more implementation of {@link Db},
  * and nothing above it changes: `workers/DoSqliteDb.ts` is that
- * implementation. Its `transaction` does not roll back on throw the way
- * `BunSqlDb.ts`'s does — `ctx.storage.sql`'s own transaction primitive cannot
- * run an `async` callback, which every caller of {@link Db.transaction} is.
- * See [ARCH-DEPLOYMENT §3](../../../docs/architecture/deployment.md) for why
- * that is a real mismatch and not just an unwritten adapter.
+ * implementation.
+ *
+ * **Atomicity is a batch, not a callback.** A Durable Object's
+ * `transactionSync` cannot wrap an `await`, so a transaction here is not a
+ * function that interleaves reads and writes: it is a {@link Batch} of writes
+ * built beforehand, which {@link Db.transaction} then runs all-or-nothing on
+ * every adapter. A caller reads what it needs, computes, and hands over the
+ * writes in one go; a batch cannot read, so it cannot decide anything halfway.
+ * Anything that must be read *and* written atomically is a single statement
+ * (`INSERT … SELECT`, a subselect, a guarded `UPDATE`), not a transaction.
  */
 
 /** The engines this build knows how to speak to. */
@@ -53,6 +58,30 @@ export type Dialect = 'sqlite' | 'postgres'
 
 /** What may be bound into a query. See the portability rules above. */
 export type SqlValue = string | number | null
+
+/** One recorded write, kept as the template it was written as so each adapter binds it its own way. */
+export type Step =
+  | { readonly kind: 'query'; readonly strings: TemplateStringsArray; readonly values: readonly SqlValue[] }
+  | { readonly kind: 'exec'; readonly statement: string }
+
+/**
+ * Writes to run together, in order, under one commit (`Db.transaction`).
+ *
+ * It takes the same two calls as a {@link Db} and returns nothing from either:
+ * nothing is sent to the database until the batch is handed over, so there is
+ * nothing yet to read back.
+ */
+export class Batch {
+  readonly steps: Step[] = []
+
+  query(strings: TemplateStringsArray, ...values: SqlValue[]): void {
+    this.steps.push({ kind: 'query', strings, values })
+  }
+
+  exec(statement: string): void {
+    this.steps.push({ kind: 'exec', statement })
+  }
+}
 
 export interface Db {
   readonly dialect: Dialect
@@ -68,8 +97,12 @@ export interface Db {
    * so a migration lists its statements separately rather than relying on it.
    */
   exec(statement: string): Promise<void>
-  /** Run `fn` inside a transaction, committing on return and rolling back on throw. */
-  transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T>
+  /**
+   * Run every step of `batch`, in order, as one transaction: all of them
+   * commit, or the first one to fail rolls the rest back and rejects with its
+   * error. The same on every adapter. A batch with no steps does nothing.
+   */
+  transaction(batch: Batch): Promise<void>
   close(): Promise<void>
 }
 

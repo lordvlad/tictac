@@ -39,9 +39,9 @@ tagged-template interface, so the port is thin: no ORM, no driver, no
 dependency.
 
 ```
-openPersistence(url, party)
+openPersistence(clock, url, party)
   └── openDb(url) ── dialectOf(url) → 'sqlite' | 'postgres'
-        └── migrate(db, MIGRATIONS)
+        └── migrate(db, clock)
               ├── MatchStore   — matches, events
               ├── RoomStore    — rooms
               ├── Accounts     — players, credentials, sessions, auth_challenges
@@ -50,7 +50,46 @@ openPersistence(url, party)
 
 `Persistence` is the only thing that opens a database. Every store is handed
 one, which is what lets the referee, the HTTP API and the tests share one
-transaction-capable connection instead of three that can disagree.
+connection instead of three that can disagree.
+
+### Transactions are batches
+
+`Db.transaction(batch)` takes a `Batch` — writes recorded beforehand with
+`batch.query` / `batch.exec` — and runs them in order, **all-or-nothing, on
+every adapter**: the first step to fail rolls the earlier ones back and the
+call rejects with its error. `BunSqlDb` does it with `sql.begin`;
+`DoSqliteDb` runs the steps inside `ctx.storage.transactionSync`.
+
+A callback form (`transaction(async (tx) => …)`) cannot be offered: a Durable
+Object's `transactionSync` forbids an `await` inside its closure, and an
+`await` between statements is exactly what such a callback is for. The port
+therefore has no transaction that *reads*. A caller reads what it needs, works
+out every write, and hands over one batch (`Accounts.register`, `Rosters.settle`,
+`MatchStore.appendAll`, `migrate`); a batch cannot decide anything halfway.
+Anything that must be read and written atomically is a single statement
+(a subselect, `INSERT … ON CONFLICT`, a guarded `UPDATE`) or is made
+idempotent by a primary key that leads the batch. What a read-then-batch
+cannot promise is that nothing wrote in between: on a Durable Object the input
+gate keeps other requests out while storage calls are in flight, on Bun a
+concurrent write can land, and the batch's own keys are what make the loser
+fail loudly instead of corrupting.
+
+`tests/dbContract.test.ts` asserts the guarantee against every adapter: a
+failing step after the first write leaves no rows (DDL included), a rolled-back
+batch can be retried, and a half-applied migration is not recorded. The
+Durable Object adapter runs it over a fake `ctx.storage` whose
+`transactionSync` rolls back as the real one does (`workerd` itself is
+exercised by `tests/cloudflare.test.ts`).
+
+### One clock
+
+Every store takes the host's `ServerClock` (`src/server/Clock.ts`) in its
+constructor — `openPersistence(clock, url, party)` /
+`persistenceOverDb(db, clock, party)` — so timestamps written to rows, session
+and challenge lifetimes, and migration stamps read the same hands as the
+lobby, the journeys and the handover coordinator. `Date.now` appears only in
+the wall-clock factory (`tests/serverClock.test.ts` scans `src/server` and
+`workers`).
 
 ### Portability rules
 
@@ -94,8 +133,8 @@ Before it applies anything it refuses three things by name:
 | a name that disagrees with the database's | a migration is identified by number *and* name, so an edited one is a deliberate break |
 | an applied id past the end of this build's list | **the dangerous direction**: an older build reading a newer schema writes rows the newer build will not recognise |
 
-Each migration runs in one transaction with the `schema_migrations` row that
-records it, so a half-applied schema is not reachable. A statement may be a
+Each migration runs as one batch with the `schema_migrations` row that
+records it (§1), so a half-applied schema is not reachable — on a Durable Object as much as on Bun. A statement may be a
 plain string or `{ sqlite, postgres }` — used once so far, for the append-only
 trigger, with both halves the *same number of statements* so a database's
 statement count does not depend on where it lives.
@@ -316,8 +355,10 @@ computes for growth), regardless of who won:
   carried out. `Rosters` needed no new branch: a leaver's fate is the same shape
   as any survivor's, and settles the same way (HP, healing, fatigue, downtime).
 
-`Rosters.settle` writes it in one transaction, keyed by `match_results.match_id`
-so a referee asked twice writes the growth once. A dead character is **marked,
+`Rosters.settle` reads what it needs, then writes every roster change and the
+`match_results` marker as one batch, marker first (§1): a referee asked twice
+writes the growth once, and one racing itself hits the marker's primary key and rolls
+back. A dead character is **marked,
 never deleted**: the row is the history of somebody who was, kept with the HP
 and the combat log they had at the end — and `roster_active_slot` is a partial
 unique index so every previous occupant of a slot sits beside the living one.
@@ -421,8 +462,8 @@ positions later; `squads_player` keeps it to one per player for now.
 | `waypoints` | the waypoint list as JSON (`src/core/Travel.ts`): where it has been and is going. The position now is computed from it and the clock, never stored. |
 | `start_lat_e6`, `start_lng_e6` | the start, in integer millionths of a degree (the port takes TEXT and INTEGER only), indexed so the separation check is a range query |
 
-**The start.** Registration places the squad in the same transaction as the player and the
-roster, so no player exists without one. The point is drawn from system randomness, uniform over
+**The start.** Registration places the squad in the same batch as the player and the
+roster (§1), so no player exists without one. The start is drawn before the batch is written. The point is drawn from system randomness, uniform over
 the 50 km disc around where Cloudflare placed the connection (`request.cf`, carried on the socket
 as `Upgrade.place`) or around Stuttgart centre when there is no such place, which on the Bun
 server is always. A draw within 1 km of another start is redrawn, up to 100 times; past that the

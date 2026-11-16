@@ -5,7 +5,8 @@ import type { ServerIntent } from '../game/Lobby'
 import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type SignedIn, type SquadOrder } from '../game/Rpc'
 import type { Transport } from '../game/Transport'
 import type { StandingOrder } from '../sim/Policy'
-import { OLDEST_SERVED_PROTOCOL, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
+import { SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
+import type { ServerClock } from './Clock'
 import type { HandoverCoordinator } from './Handover'
 import { HandoverCoordinator as HandoverCoordinatorImpl } from './Handover'
 import { Refusal, type Lobby } from './Lobby'
@@ -51,8 +52,8 @@ export interface SessionsOptions {
   journeys: Journeys
   /** Handover coordinator for cross-region transfers (RFC-0002). */
   handover?: HandoverCoordinator
-  /** The clock travel runs by (`clock/now`); the wall clock unless a host or a test says otherwise. */
-  now?: () => number
+  /** The host's one clock: what travel runs by (`clock/now`), and what a handover's expiry is read against. */
+  clock: ServerClock
   /** Called for anything worth a line in a server log. */
   log?: (message: string) => void
 }
@@ -92,15 +93,15 @@ export class Sessions {
   private readonly persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>
   private readonly journeys: Journeys
   readonly handover: HandoverCoordinator
-  private readonly now: () => number
+  private readonly clock: ServerClock
   private readonly log: (message: string) => void
 
   constructor(options: SessionsOptions) {
     this.lobby = options.lobby
     this.persistence = options.persistence
     this.journeys = options.journeys
-    this.handover = options.handover ?? new HandoverCoordinatorImpl({ log: options.log })
-    this.now = options.now ?? (() => Date.now())
+    this.clock = options.clock
+    this.handover = options.handover ?? new HandoverCoordinatorImpl({ clock: options.clock, log: options.log })
     this.log = options.log ?? ((message) => console.info(`[session] ${message}`))
   }
 
@@ -128,46 +129,41 @@ export class Sessions {
   }
 
   /**
-   * The version gate, on a socket's first word.
+   * The protocol gate, on a socket's first word.
    *
    * Before it is admitted, the only thing a socket can usefully say is which
-   * build it is. The gate comes before anything else: a client on another
-   * build diverges for innocent reasons, and a referee that accused it would
-   * be naming somebody whose browser cached yesterday's bundle. Stated in the
-   * server's own voice, because the reader is the client being turned away
-   * and needs to see both hashes: a Worker deployed without its build id says
-   * `dev` here, which is a server to redeploy rather than a page to reload.
-   * An `init` is gated too, since an older client opens with one.
+   * build it is, so `hello` is the only first word accepted; anything else
+   * (an `init`, as a client from before `hello` opened with) is turned away with the
+   * same reload text as a client that stated nothing. The gate comes before
+   * anything else: a client on another build diverges for innocent reasons,
+   * and a referee that accused it would be naming somebody whose browser
+   * cached yesterday's bundle. Stated in the server's own voice, because the
+   * reader is the client being turned away and needs to see both hashes: a
+   * Worker deployed without its build id says `dev` here, which is a server
+   * to redeploy rather than a page to reload.
    */
   private gate(session: Session, frame: JsonRpcNotification): void {
-    if (frame.method !== RpcMethods.hello && frame.method !== RpcMethods.init) return
-    const stated = frame.params
-    const refusal = this.admission(session, stated)
-    if (refusal) return this.lobby.turnAway(session.client, refusal)
-    if (frame.method !== RpcMethods.hello) return
-    // Both fields were read and checked by the gate a line ago.
-    session.client.version = { protocol: Number(stated.protocol), build: String(stated.build) }
+    const admitted = this.admission(frame.method === RpcMethods.hello ? frame.params : undefined)
+    if (typeof admitted === 'string') return this.lobby.turnAway(session.client, admitted)
+    session.client.version = admitted
   }
 
   /**
-   * Why a socket is turned away by what it `stated` about itself, or null
-   * to admit it.
+   * The version a socket is admitted as, from what it `stated` about itself,
+   * or the reason it is turned away.
    *
    * This server's protocol is admitted at any build: a page still running
    * the build before a deploy has a match to finish here, so what a page may
    * start is weighed when it asks (`Lobby.enter`), not here. Any other
    * protocol is refused by the gate.
    */
-  private admission(_session: Session, stated: unknown): string | null {
+  private admission(stated: unknown): PeerVersion | string {
     const mine = this.lobby.version
     const refusal = versionRefusal(stated, mine, SERVER_VOICES)
-    if (!refusal || typeof stated !== 'object' || stated === null) return refusal
-    const { protocol, build } = stated as Partial<PeerVersion>
-    if (typeof build !== 'string' || build.length === 0) return refusal
-    if (protocol === mine.protocol) return null
-    return refusal
+    if (refusal === null) return { ...mine }
+    const { protocol, build } = typeof stated === 'object' && stated !== null ? (stated as Partial<PeerVersion>) : {}
+    return typeof build === 'string' && build.length > 0 && protocol === mine.protocol ? { protocol, build } : refusal
   }
-
 
   /**
    * One request: answered exactly once, after every request before it on
@@ -275,7 +271,7 @@ export class Sessions {
       reply({ squad: await this.persistence.squads.ensure(signedIn(session).player.id, session.place) })
     },
     'tictac/api/clock/now': (_session, _params, reply) => {
-      reply({ now: this.now() })
+      reply({ now: this.clock.now() })
     },
     'tictac/api/squad/order': async (session, params, reply) => {
       const player = signedIn(session).player

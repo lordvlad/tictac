@@ -1,4 +1,5 @@
 import { Accounts } from './Accounts'
+import type { ServerClock } from './Clock'
 import type { Db } from './db/Db'
 import { migrate } from './db/migrate'
 import { Encounters } from './Encounters'
@@ -60,22 +61,23 @@ export interface Persistence {
  */
 export async function persistenceOverDb(
   db: Db,
+  clock: ServerClock,
   party: RelyingParty = LOCAL_RELYING_PARTY,
 ): Promise<Persistence> {
   // Every process that opens the database migrates it on the way in. That is
   // safe because `migrate` is idempotent and refuses a database from a newer
   // build, and it means there is no separate deploy step to forget.
-  await migrate(db)
-  const rosters = new Rosters(db)
-  const squads = new Squads(db)
+  await migrate(db, clock)
+  const rosters = new Rosters(db, clock)
+  const squads = new Squads(db, clock)
   return {
     db,
     matches: new MatchStore(db),
     rooms: new RoomStore(db),
-    accounts: new Accounts(db, rosters, squads, party),
+    accounts: new Accounts(db, rosters, squads, party, clock),
     rosters,
     squads,
-    encounters: new Encounters(db),
+    encounters: new Encounters(db, clock),
     party,
     close: () => db.close(),
   }

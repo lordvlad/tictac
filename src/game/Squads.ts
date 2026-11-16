@@ -2,8 +2,8 @@ import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
 import { AmmoId, GRENADES, GrenadeId, WeaponId } from '../core/Arsenal'
 import type { Grid, Tile } from '../core/Grid'
 import { Soldier } from '../entities/Soldier'
-import { applyUnitLoadout, type SquadLoadout } from './Loadout'
-import type { Deployment } from './Recording'
+import { applyUnitLoadout } from './Loadout'
+import type { SquadLoadout, Deployment } from '../core/Loadout'
 import type { World } from '../ecs/World'
 
 export class Squads {
@@ -134,10 +134,8 @@ export class Squads {
   }
 
   /**
-   * Nothing to tear down.
-   *
-   * A squad is state now. The bodies are disposed by whatever built them, which
-   * in a rendered match is `SquadViews`.
+   * Let go of the units. State only: the bodies belong to `SquadViews`, which
+   * disposes them, so views come down first and squads last.
    */
   dispose(): void {
     this.soldiers.length = 0

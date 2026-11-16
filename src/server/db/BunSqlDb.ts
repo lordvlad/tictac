@@ -1,11 +1,12 @@
-import { SQL, type TransactionSQL } from 'bun'
+import { SQL } from 'bun'
 import {
   LOCAL_RELYING_PARTY,
   persistenceOverDb,
   type Persistence,
   type RelyingParty,
 } from '../Persistence'
-import { dialectOf, type Db, type Dialect, type SqlValue } from './Db'
+import type { ServerClock } from '../Clock'
+import { dialectOf, type Batch, type Db, type Dialect, type SqlValue } from './Db'
 
 /**
  * The `Db` port (`./Db.ts`), over `Bun.SQL` — the adapter that runs today, in
@@ -20,11 +21,12 @@ import { dialectOf, type Db, type Dialect, type SqlValue } from './Db'
  */
 
 export async function openPersistence(
+  clock: ServerClock,
   url = ':memory:',
   party: RelyingParty = LOCAL_RELYING_PARTY,
 ): Promise<Persistence> {
   const db = await openDb(url)
-  return persistenceOverDb(db, party)
+  return persistenceOverDb(db, clock, party)
 }
 
 /** Open a database. It is not migrated here — see `migrate`. */
@@ -43,7 +45,7 @@ export async function openDb(url: string): Promise<Db> {
   return db
 }
 
-function wrap(sql: SQL | TransactionSQL, dialect: Dialect): Db {
+function wrap(sql: SQL, dialect: Dialect): Db {
   return {
     dialect,
     async query<T>(strings: TemplateStringsArray, ...values: SqlValue[]): Promise<T[]> {
@@ -55,8 +57,16 @@ function wrap(sql: SQL | TransactionSQL, dialect: Dialect): Db {
     async exec(statement: string): Promise<void> {
       await sql.unsafe(statement)
     },
-    transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
-      return sql.begin((tx) => fn(wrap(tx, dialect))) as Promise<T>
+    async transaction(batch: Batch): Promise<void> {
+      if (batch.steps.length === 0) return
+      // `begin` rolls back when the callback rejects, which is the first step
+      // to fail: the same all-or-nothing `DoSqliteDb` gets from `transactionSync`.
+      await sql.begin(async (tx) => {
+        for (const step of batch.steps) {
+          if (step.kind === 'exec') await tx.unsafe(step.statement)
+          else await tx(step.strings, ...step.values)
+        }
+      })
     },
     async close(): Promise<void> {
       await sql.close()

@@ -216,16 +216,9 @@ turned away and the remedy differs: a stale tab reloads, a mis-stamped server re
 
 ## 3. The `Db` adapter: `workers/DoSqliteDb.ts`
 
-`src/server/db/Db.ts` is an async port:
-
-```ts
-transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T>
-```
-
-built around `Bun.SQL`'s genuinely asynchronous wire protocol — a real network round trip for
-Postgres, and for SQLite a promise that resolves once Bun's own binding has run the statement.
-Every caller (`src/server/db/migrate.ts`'s `apply`, `Rosters.settle`, …) writes a multi-statement
-transaction the way that invites: `await tx.exec(a); await tx.exec(b); await tx.query\`…\``.
+`src/server/db/Db.ts` is an async port, built around `Bun.SQL`'s genuinely asynchronous wire
+protocol — a real network round trip for Postgres, and for SQLite a promise that resolves once
+Bun's own binding has run the statement.
 
 A Durable Object's SQLite storage, `ctx.storage.sql`, is **synchronous** — `sql.exec()` runs and
 returns immediately, no promise involved — and its own explicit-transaction primitive,
@@ -233,34 +226,28 @@ returns immediately, no promise involved — and its own explicit-transaction pr
 **no** `await` at all. Cloudflare's own documentation is explicit about this: the callback "must
 complete synchronously... it should not be declared `async` nor otherwise return a Promise."
 
-Wrapping the synchronous engine in `async` functions to satisfy `Db`'s shape typechecks and is
-not, on its own, wrong — `query`/`exec` do exactly this, and are entirely correct: an `async
-function` with a synchronous body still runs that body immediately when called, so the actual
-SQLite work happens at the same moment it always did. `transaction` is where the shape stops
-being enough. The *caller*'s `await tx.exec(a)` yields to the microtask queue before continuing
-to `tx.exec(b)`, regardless of how quickly `exec` itself resolved — so calling `fn` from inside
-`transactionSync` would have the closure return, and the runtime consider the transaction
-committed, after only `fn`'s *first* statement had genuinely run; every statement after `fn`'s
-first `await` would execute later, outside the boundary it was meant to be part of.
-`ctx.storage.transaction()` (the async variant) does not help either: its `txn` argument exposes
-the key-value API (`put`/`get`/`delete`/`list`), not `sql.exec`, because Cloudflare's own
-guidance for the SQL case is that a request's natural serialization — one Durable Object
-instance processes one request at a time — already makes a sequence of `sql.exec()` calls with
-no other I/O in between atomic *against concurrent requests*, without an explicit transaction
-wrapper.
+Wrapping the synchronous engine in `async` functions to satisfy `Db`'s shape is not wrong for
+`query`/`exec`: an `async function` with a synchronous body still runs that body immediately when
+called. It *is* wrong for a transaction written as a callback with `await`s between statements
+(`transaction(async (tx) => …)`, which is what the port used to offer): the caller's `await`
+yields to the microtask queue, so calling it from inside `transactionSync` would have the closure
+return, and the runtime consider the transaction committed, after only the first statement had
+run. The adapter used to paper over that with `return fn(self)` and no rollback, which left a
+half-applied migration or a player without a squad behind on a Durable Object while the port
+promised otherwise.
 
-`dbOverSqlStorage`'s `transaction` therefore does the honest thing rather than the clever one:
-`return fn(self)`, no special wrapping. What this keeps is real — two overlapping callers of
-`transaction` never interleave, because nothing about this adapter's work ever actually awaits
-genuine I/O, and the object's own input gates serialize requests regardless. What it does **not**
-keep is rollback on throw: if `fn` throws after its second statement has already run, that
-statement stays written, where the `Bun.SQL` adapter's genuine `sql.begin()` would have rolled
-it back. `migrate.ts`'s `apply()` is the one caller this matters for in practice — a migration
-that fails partway on this adapter needs a human to notice and fix the row it left behind, the
-same way a `down` migration would have needed one to write and run it. This is a real,
-documented gap, not a silent one: it is the price of running the same `migrate.ts`/`Rosters.ts`
-code unmodified over an engine whose transaction primitive cannot run the code either of those
-files is written in.
+**The port now promises what both engines can keep.** `Db.transaction(batch)` takes a `Batch` —
+writes recorded beforehand, with nothing to read back and nothing to `await` — and `dbOverStorage`
+runs every step of it inside one `ctx.storage.transactionSync`, so the first step to throw rolls
+the whole batch back; `BunSqlDb` does the same with `sql.begin`. Callers (`migrate`,
+`Accounts.register`/`login`, `Rosters.settle`, `MatchStore.appendAll`) read and compute first and
+write once. What a batch cannot do is read in the middle of a write, and a read before it may be
+stale by the time it commits: on a Durable Object the object's input gates keep another request
+from interleaving while storage calls are in flight, and the batch's own keys (a primary key that
+leads it) make a loser fail rather than corrupt. The adapter takes a structural `DoStorage`
+(`sql` and `transactionSync`) rather than `@cloudflare/workers-types`' globals, so
+`tests/dbContract.test.ts` can run the same rollback assertions against it over a fake whose
+`transactionSync` rolls back as the real one does. See [ARCH-PERSISTENCE §1](./persistence.md).
 
 ### 3.1 Splitting the port from the `Bun.SQL` adapter
 

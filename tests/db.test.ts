@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { dialectOf } from '../src/server/db/Db'
 import { migrate, type Migration } from '../src/server/db/migrate'
@@ -26,10 +27,10 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
   test('a fresh database gets every migration, and a second run gets none', async () => {
     const db = await freshDb(url)
 
-    expect(await migrate(db)).toEqual(MIGRATIONS.map((m) => m.id))
+    expect(await migrate(db, WALL_CLOCK)).toEqual(MIGRATIONS.map((m) => m.id))
     // Idempotent, because every process that opens the database runs this on
     // the way in: a second server must not re-run migration 1.
-    expect(await migrate(db)).toEqual([])
+    expect(await migrate(db, WALL_CLOCK)).toEqual([])
 
     await db.close()
   })
@@ -38,9 +39,9 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
     const db = await freshDb(url)
     const gapped = [MIGRATIONS[0]!, { ...MIGRATIONS[2]!, id: 3 }]
 
-    await expect(migrate(db, gapped)).rejects.toThrow(/numbered 1\.\.n/)
+    await expect(migrate(db, WALL_CLOCK, gapped)).rejects.toThrow(/numbered 1\.\.n/)
     // Refused by the list, not by the database: an empty list still migrates.
-    await expect(migrate(db, [])).resolves.toEqual([])
+    await expect(migrate(db, WALL_CLOCK, [])).resolves.toEqual([])
 
     await db.close()
   })
@@ -56,7 +57,7 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
       },
     ]
 
-    await expect(migrate(db, list)).rejects.toThrow(/migration 2 \(second\) failed/)
+    await expect(migrate(db, WALL_CLOCK, list)).rejects.toThrow(/migration 2 \(second\) failed/)
     // The whole migration rolled back, so `beta` is not half-there — and
     // migration 2 is not recorded, so a fixed build can run it again.
     await expect(db.query`SELECT id FROM beta`).rejects.toThrow()
@@ -70,10 +71,10 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
 
   test('a migration renamed underneath a database is refused by both names', async () => {
     const db = await freshDb(url)
-    await migrate(db)
+    await migrate(db, WALL_CLOCK)
     const renamed = MIGRATIONS.map((m) => (m.id === 2 ? { ...m, name: 'accounts and things' } : m))
 
-    await expect(migrate(db, renamed)).rejects.toThrow(
+    await expect(migrate(db, WALL_CLOCK, renamed)).rejects.toThrow(
       /migration 2 in the database is "accounts", this build calls it "accounts and things"/,
     )
 
@@ -84,11 +85,11 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
     // The dangerous direction. An older build reading a newer schema writes
     // rows the newer build will not recognise, so it never gets that far.
     const db = await freshDb(url)
-    await migrate(db)
+    await migrate(db, WALL_CLOCK)
     await db.query`INSERT INTO schema_migrations (id, name, applied_at)
                    VALUES (${99}, ${'from the future'}, ${new Date().toISOString()})`
 
-    await expect(migrate(db)).rejects.toThrow(new RegExp(`at migration 99.*up to ${MIGRATIONS.length}`, 's'))
+    await expect(migrate(db, WALL_CLOCK)).rejects.toThrow(new RegExp(`at migration 99.*up to ${MIGRATIONS.length}`, 's'))
 
     await db.close()
   })

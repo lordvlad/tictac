@@ -17,15 +17,16 @@ tags: ["networking", "peerjs", "jsonrpc", "p2p", "replication"]
 # ADR-0003: P2P JSON-RPC 2.0 State Replication & Sender-Resolved Combat
 
 ## Status
-**Status:** Implemented; the sender-resolved half is superseded by
+**Status:** Implemented; §1 (component diffs) and the sender-resolved half (§2) are superseded by
 [ADR-0004](./0004-full-knowledge-lockstep.md)
 **Date:** 2026-09-14
 **Deciders:** Engineering
 
-> The JSON-RPC envelope and component-diff replication stand. **Sender-resolved combat is
-> gone**: `ITEM-023` landed, `WireHit` is deleted, and a command now carries intent that both
-> peers resolve. Kept for the reasoning — an attacker needing facts about its target turned out
-> to be a bug class rather than an optimisation, three times over.
+> The JSON-RPC envelope stands. **Component-diff replication (§1) and sender-resolved combat
+> (§2) are both gone**: component diffs were removed in favour of intent-only lockstep and the
+> machinery deleted; `ITEM-023` landed, `WireHit` is deleted, and a command now carries intent
+> that both peers resolve. Kept for the reasoning — an attacker needing facts about its target
+> turned out to be a bug class rather than an optimisation, three times over.
 
 ---
 
@@ -39,10 +40,15 @@ Tactical online play requires low-latency synchronization across browser clients
 ## Decision Outcome
 **Chosen Architecture:** PeerJS WebRTC DataChannels formatted with standard JSON-RPC 2.0 frames (`src/game/JsonRpc.ts`) and a dual-tier replication model.
 
-### 1. Component Dirty-State Replication
-- `World.ts` maintains a snapshot cache of every component's serialized state.
-- Calling `World.syncDirty()` computes structural diffs (`jsonEqual`) and emits `componentUpdate` JSON-RPC notifications.
-- Remote peers unpack notifications and apply updates directly to entity component instances with an `applyingRemote` guard to prevent feedback loops.
+### 1. Component Dirty-State Replication — superseded by [ADR-0004](./0004-full-knowledge-lockstep.md)
+> **Superseded.** Commit 4b37ffb removed the wire component diffs and the dead machinery
+> (`World.syncDirty`, `onComponentChanged`, `applyRemote`, the `jsonEqual` baseline) was deleted
+> after it. Peers exchange intents and derive state; the state digest catches a divergence.
+> What follows is the original decision, kept for the reasoning.
+
+- `World.ts` maintained a snapshot cache of every component's serialized state.
+- Calling `World.syncDirty()` computed structural diffs (`jsonEqual`) and emitted `componentUpdate` JSON-RPC notifications.
+- Remote peers unpacked notifications and applied updates directly to entity component instances with an `applyingRemote` guard to prevent feedback loops.
 
 ### 2. Sender-Resolved Combat Intent
 - Combat actions are calculated and resolved on the **acting peer's client**.
@@ -51,7 +57,7 @@ Tactical online play requires low-latency synchronization across browser clients
 
 ### Consequences
 - **Positive:**
-  - Minimal bandwidth overhead (only dirty component properties transmit).
-  - Clean separation between intent commands (`NetworkMessage`) and state propagation (`World.syncDirty`).
+  - ~~Minimal bandwidth overhead (only dirty component properties transmit).~~ Superseded with §1: no component state transmits.
+  - Clean separation between intent commands (`NetworkMessage`) and state: commands travel, state is derived by each peer.
 - **Negative / Costs:**
   - Client-side resolution requires strict input sanitization (`sanitizeSheet`) against malicious peer payloads in competitive contexts.

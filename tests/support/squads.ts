@@ -1,6 +1,6 @@
 import { Faction } from '../../src/config'
 import type { CharacterSheet } from '../../src/core/Characters'
-import type { Deployment } from '../../src/game/Recording'
+import type { Deployment } from '../../src/core/Loadout'
 
 /**
  * Sheets, wrapped with no kit — the raw-stock deploy path `Squads` already

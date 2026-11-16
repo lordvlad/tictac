@@ -34,7 +34,7 @@ docs/
 ├── README.md                      # Central hub, navigation index, and repository map
 ├── architecture/                  # Living system architecture (current state)
 │   ├── overview.md                # System layers, boundaries, and runtime topology
-│   ├── ecs.md                     # World, Components, Systems, and dirty state replication
+│   ├── ecs.md                     # World, Components, Systems, snapshot and rewind
 │   ├── combat-and-rules.md        # Combat resolution, LOS DDA, cover, ballistics, statuses
 │   ├── headless-sim.md            # Headless execution, determinism, balance runner
 │   ├── networking.md              # P2P mesh, PeerJS, JSON-RPC 2.0 wire protocol
@@ -90,7 +90,7 @@ tags: ["ecs", "networking"]
 - **Document to update**: `docs/architecture/ecs.md`
 - **What to check**:
   - Update component tables and serializable payload shapes.
-  - Verify dirty-state sync behaviors and whether the component replicates over P2P.
+  - Verify whether the component is in the state digest and whether it rewinds with the unit.
   - Note any systems that process the component.
 
 ### Trigger 2: Modifying Combat, Ballistics, or Game Rules

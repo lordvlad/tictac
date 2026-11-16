@@ -69,7 +69,7 @@ export function ownerOfCoord(coord: LatLng): string {
  * Inspects the squad's current position (or fallback resting position) against
  * the region partition table.
  */
-export function ownerOf(squad: { waypoints?: Squad['waypoints']; id: string }, now: number = Date.now()): string {
+export function ownerOf(squad: { waypoints?: Squad['waypoints']; id: string }, now: number): string {
   if (!squad.waypoints || squad.waypoints.length === 0) return partitions[0]?.durableObjectName ?? MATCH_SERVER
   try {
     const state = positionAt(squad.waypoints, now)

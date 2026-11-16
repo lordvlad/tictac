@@ -7,7 +7,7 @@ import { createGlobalRules } from '../src/ecs/globals'
 import { CHARACTER, Faction, RULES, SQUAD_SIZE } from '../src/config'
 import { GrenadeId, ShotMode, StatusKind, WeaponId } from '../src/core/Arsenal'
 import { derive, rollSquadSheets } from '../src/core/Characters'
-import { defaultLoadout } from '../src/game/Loadout'
+import { defaultLoadout } from '../src/core/Loadout'
 import { MeleeId } from '../src/core/Melee'
 import { canMelee, type ShotResult } from '../src/game/Combat'
 import type { Seated } from '../src/game/Lobby'
@@ -101,7 +101,7 @@ describe('A joiner that arrives after the host opened the match', () => {
     host.attach(hostSide)
     host.hostMatch(4242, 'forty-two')
 
-    const squad = rollSquadSheets().map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! }))
+    const squad = rollSquadSheets(new Rng(1)).map((sheet, i) => ({ sheet, loadout: defaultLoadout(SQUAD_SIZE)[i]! }))
     host.send({ type: 'ready', squad })
 
     const joiner = new NetworkManager()

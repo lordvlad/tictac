@@ -9,7 +9,7 @@ import { World } from '../src/ecs/World'
 import { HealthComponent } from '../src/ecs/components'
 import { fireWeapon } from '../src/game/Combat'
 import { deploymentStateFrom, parseRecording, RECORDING_VERSION, Recorder } from '../src/game/Recording'
-import { defaultLoadout } from '../src/game/Loadout'
+import { defaultLoadout } from '../src/core/Loadout'
 import { Squads } from '../src/game/Squads'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
@@ -304,17 +304,10 @@ describe('A world can be put back to an earlier moment', () => {
     victim.hp = 3
     victim.tile = { x: 9, y: 9 }
 
-    const frames: string[] = []
-    world.onComponentChanged((_id, name) => frames.push(name))
     world.restore(before)
 
     expect(victim.hp).toBe(fullHp)
     expect(victim.tile).toEqual(spawns[Faction.Red][0]!)
-    // A rewind is not a mutation to announce, and the diff must not report it
-    // on the next pass either.
-    expect(frames).toHaveLength(0)
-    world.syncDirty()
-    expect(frames).toHaveLength(0)
     expect(world.getComponent(victim.entityId, HealthComponent)?.hp).toBe(fullHp)
   })
 })

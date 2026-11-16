@@ -22,6 +22,7 @@ import type { Battlefield } from './Battlefield'
 import { FogOfWar } from './FogOfWar'
 import { MovementPlanner } from './MovementPlanner'
 import { DebugPanel, type RecordingControls } from '../hud/DebugPanel'
+import { debugEditable } from './DebugAccess'
 import { downloadJson } from '../hud/download'
 import { DebugMap } from '../hud/DebugMap'
 import { GrenadePlanner } from './GrenadePlanner'
@@ -39,6 +40,7 @@ import { roughly } from '../core/Noise'
 import type { Squads } from './Squads'
 import type { TurnManager } from './TurnManager'
 import type { Tracers } from '../render/Tracers'
+import type { System } from '../ecs/System'
 import type { World } from '../ecs/World'
 import {
   MovementSystem,
@@ -73,6 +75,7 @@ import { DamageIndicators } from '../render/DamageIndicators'
 const ITEM_REACH = 1
 
 const SPECTATOR_INTENTS: Partial<Record<HudIntent['type'], true>> = {
+  // Inspection only: with no network the panel is built read-only (`debugEditable`).
   openDebug: true,
   toggleDebugMap: true,
   selectLevel: true,
@@ -187,6 +190,8 @@ export class InteractionController {
    * Null unless the debug panel armed it.
    */
   private recorder: Recorder | null = null
+  /** What this controller put in the world's tick, in tick order, so `dispose` takes out exactly that. */
+  private readonly systems: System[]
 
   constructor(
     readonly world: World,
@@ -241,14 +246,17 @@ export class InteractionController {
     )
 
     // First, so a queued command is applied before the tick that walks it.
-    this.world.addSystem(this.commands)
-    this.world.addSystem(this.movementSystem)
-    this.world.addSystem(this.combatSystem)
-    this.world.addSystem(this.itemSystem)
-    this.world.addSystem(turnManager.turns)
-    this.world.addSystem(this.renderSystem)
-    this.world.addSystem(this.wallSystem)
-    this.world.addSystem(this.groundSystem)
+    this.systems = [
+      this.commands,
+      this.movementSystem,
+      this.combatSystem,
+      this.itemSystem,
+      turnManager.turns,
+      this.renderSystem,
+      this.wallSystem,
+      this.groundSystem,
+    ]
+    for (const system of this.systems) this.world.addSystem(system)
 
     // One entity per wall, so the map's boundaries are state the systems and
     // the network can reach like any other.
@@ -369,6 +377,7 @@ export class InteractionController {
       },
       () => this.turnManager.selectedSoldier,
       this.recordingControls(),
+      debugEditable(network?.mode ?? null),
     )
     this.fog = new FogOfWar(battlefield.grid, battlefield.ground, battlefield.blocks)
     this.xray = new WallXray(rig, squads, battlefield.blocks)
@@ -523,8 +532,8 @@ export class InteractionController {
    * Presentation advances along with it — `alongside` is for whatever the
    * caller ticks beside the controller, the tracers — so the blasts and
    * callouts it set off are long finished by the time anyone sees the field.
-   * Replication does not: state is published once, by the next ordinary
-   * tick, as where things stand rather than as every step on the way there.
+   * Nothing is published for the steps on the way: peers hold the same
+   * commands, so the state reached is theirs without being sent.
    */
   catchUp(commands: readonly NetworkMessage[], step: number, alongside?: (step: number) => void): void {
     for (const command of commands) {
@@ -539,7 +548,7 @@ export class InteractionController {
     // Bounded, like `MatchHost`, so a walker that never arrives costs a stall
     // rather than a frozen tab.
     for (let i = 0; i < 2000 && this.busy; i++) {
-      this.advance(step)
+      this.update(step)
       alongside?.(step)
     }
   }
@@ -907,7 +916,13 @@ export class InteractionController {
     // The bodies too: a match rebuilt in place (`main.tsx`, a resync) would
     // otherwise stand the new squads among the old ones.
     this.views.dispose()
+    // Each taken back out of the world it was added to, leaving that world as
+    // it was before this controller: a system left in it would keep ticking
+    // and answering for a match that is gone.
+    for (const system of this.systems) this.world.removeSystem(system)
+    this.recorder = null
   }
+
   enterShootMode(intent: 'shoot' | 'strike' = 'shoot'): void {
     if (!this.shoot.enter(this.turnManager.selectedSoldier, intent)) return
     this.planner.clear()
@@ -1377,15 +1392,8 @@ export class InteractionController {
     if (first) this.hud.showEndScreen(first)
   }
 
+  /** One tick of everything: the systems, then the screens that read what they changed. */
   update(delta: number): void {
-    this.advance(delta)
-    // One pass at the end: whatever changed this tick — from input, combat,
-    // a system or the debug panel — replicates from here and nowhere else.
-    this.world.syncDirty()
-  }
-
-  /** One tick of everything but replication; see `catchUp` for why the two part. */
-  private advance(delta: number): void {
     // Systems advance the simulation; every mutation lands in a component.
     this.world.update(delta)
     // The HUD offers nothing while the rules are running a broken unit, so it

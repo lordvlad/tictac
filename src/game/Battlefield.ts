@@ -22,6 +22,11 @@ export class Battlefield {
   readonly spawns: Record<Faction, Tile[]>
 
   private readonly sun: DirectionalLight
+  private readonly ambient: AmbientLight
+  private readonly hemisphere: HemisphereLight
+  /** What the scene had before this drew over it, put back on dispose. */
+  private readonly previousBackground: EngineContext['scene']['background']
+  private readonly previousFog: EngineContext['scene']['fog']
 
   constructor(
     map: GeneratedMap,
@@ -37,12 +42,16 @@ export class Battlefield {
     scene.add(this.ground.mesh)
     scene.add(this.blocks.group)
 
+    this.previousBackground = scene.background
+    this.previousFog = scene.fog
     const sky = new Color(0x05070a)
     scene.background = sky
     scene.fog = new Fog(sky.getHex(), 50, 110)
 
-    scene.add(new AmbientLight(0xffffff, 0.5))
-    scene.add(new HemisphereLight(0x9fc4ff, 0x30281f, 0.55))
+    this.ambient = new AmbientLight(0xffffff, 0.5)
+    this.hemisphere = new HemisphereLight(0x9fc4ff, 0x30281f, 0.55)
+    scene.add(this.ambient)
+    scene.add(this.hemisphere)
 
     const sun = new DirectionalLight(0xfff1d8, 1.6)
     sun.position.set(24, 38, 18)
@@ -75,7 +84,12 @@ export class Battlefield {
     const scene = this.engine.scene
     scene.remove(this.ground.mesh)
     scene.remove(this.blocks.group)
-    scene.remove(this.sun)
+    scene.remove(this.sun, this.sun.target, this.ambient, this.hemisphere)
+    this.sun.shadow.dispose()
+    // Lights add up and the sky is whatever was set last, so a rebuild that
+    // left these behind would be brighter every time.
+    scene.background = this.previousBackground
+    scene.fog = this.previousFog
     this.ground.dispose()
     this.blocks.dispose()
   }

@@ -1,4 +1,5 @@
 import { BUILD_ID, PROTOCOL_VERSION } from '../version'
+import type { ServerClock } from './Clock'
 import { Journeys } from './Journeys'
 import { Lobby } from './Lobby'
 import type { Persistence } from './Persistence'
@@ -41,8 +42,11 @@ export interface GameServerOptions {
   graceMs?: number
   /** Map tiles at `/tiles/{z}/{x}/{y}.mvt` (`ITEM-061`); none when unset. */
   tiles?: TileHandler
-  /** The clock squads travel by; the wall clock and `setTimeout` unless a test turns it. */
-  clock?: ServerClock
+  /**
+   * The host's one clock, the same one `persistence` was opened with: squads
+   * travel by it, handovers expire by it, sessions last by it.
+   */
+  clock: ServerClock
   /**
    * Whether squads of different players can meet (`ITEM-053`): the trial
    * switch, read at every check; on unless this says otherwise.
@@ -50,25 +54,10 @@ export interface GameServerOptions {
   playerEncounters?: () => boolean
 }
 
-/** Time, and a way to be woken at one: what the Durable Object's alarm is here. */
-export interface ServerClock {
-  now(): number
-  /** Run `fn` in `ms`; returns what cancels it. */
-  schedule(fn: () => void, ms: number): () => void
-}
-
-const WALL_CLOCK: ServerClock = {
-  now: () => Date.now(),
-  schedule: (fn, ms) => {
-    const timer = setTimeout(fn, ms)
-    return () => clearTimeout(timer)
-  },
-}
-
 export async function startGameServer(options: GameServerOptions): Promise<GameServer> {
   const { persistence } = options
   const log = options.log ?? ((message: string) => console.info(`[referee] ${message}`))
-  const clock = options.clock ?? WALL_CLOCK
+  const { clock } = options
   const lobby = new Lobby({
     matches: persistence.matches,
     rooms: persistence.rooms,
@@ -77,8 +66,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
     graceMs: options.graceMs,
     // The same clock the squads travel by: a fight found on the road keeps a
     // seat for its player until a moment on it.
-    now: () => clock.now(),
-    schedule: (fn, ms) => clock.schedule(fn, ms),
+    clock,
     onEncounterTaken: (roomId, playerId) => {
       persistence.encounters.markTaken(roomId, playerId).catch((error: unknown) => log(`could not record that ${roomId} was taken: ${String(error)}`))
     },
@@ -115,7 +103,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
     squads: persistence.squads,
     encounters: persistence.encounters,
     schedule,
-    now: () => clock.now(),
+    clock,
     tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
     openEncounter: (contact) => lobby.openEncounter(contact),
     openMeeting: (meeting) => lobby.openMeeting(meeting),
@@ -124,7 +112,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   })
   await journeys.restore()
 
-  const sessions = new Sessions({ lobby, persistence, journeys, now: () => clock.now(), log })
+  const sessions = new Sessions({ lobby, persistence, journeys, clock, log })
   const sockets = new WeakMap<object, ServerSocket>()
   // Parity with the Worker: a `serve:match` on its own domain can have its
   // client hosted on another site only if it publishes this too.

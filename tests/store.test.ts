@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -322,12 +323,12 @@ describe('A match outlives the process that played it', () => {
     // already somebody else's process.
     const url = `sqlite://${join(dir, 'roundtrip.sqlite')}`
 
-    const writing = await openPersistence(url)
+    const writing = await openPersistence(WALL_CLOCK, url)
     const id = await writing.matches.create(log.header)
     await writing.matches.appendAll(id, unsequenced(log))
     await writing.close()
 
-    const reading = await openPersistence(url)
+    const reading = await openPersistence(WALL_CLOCK, url)
     expect(await reading.matches.header(id)).toEqual(log.header)
     expect(await reading.matches.events(id)).toEqual(log.events)
     expect(await reading.matches.recent()).toEqual([
@@ -346,14 +347,14 @@ describe('A match outlives the process that played it', () => {
     // checked against each other on the way in. Opening it quietly would replay
     // an intent log whose shape changed underneath it.
     const url = `sqlite://${join(dir, 'future.sqlite')}`
-    await (await openPersistence(url)).close()
+    await (await openPersistence(WALL_CLOCK, url)).close()
 
     const raw = await openDb(url)
     await raw.query`INSERT INTO schema_migrations (id, name, applied_at)
                     VALUES (${99}, ${'from the future'}, ${new Date().toISOString()})`
     await raw.close()
 
-    await expect(openPersistence(url)).rejects.toThrow(
+    await expect(openPersistence(WALL_CLOCK, url)).rejects.toThrow(
       new RegExp(`at migration 99.*up to ${MIGRATIONS.length}`, 's'),
     )
   })

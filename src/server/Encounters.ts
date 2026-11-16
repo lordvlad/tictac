@@ -1,6 +1,7 @@
 import { Faction } from '../config'
 import type { LatLng } from '../core/Travel'
 import type { EncounterEntry, PassedFor } from '../game/Encounter'
+import type { ServerClock } from './Clock'
 import type { Db } from './db/Db'
 
 /**
@@ -79,7 +80,10 @@ export class Encounters {
    */
   private readonly taken = new Map<string, number>()
   private static readonly MAX_TAKEN = 500
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly clock: ServerClock,
+  ) {}
 
   /** What was done about the contact at this checkpoint, or null when nothing was: it is new. */
   async find(squadId: string, trip: string, checkpoint: number): Promise<Pick<EncounterRecord, 'roomId' | 'passedFor'> | null> {
@@ -107,7 +111,7 @@ export class Encounters {
   async markTaken(roomId: string, playerId: string): Promise<void> {
     const key = `${roomId}|${playerId}`
     this.taken.delete(key)
-    this.taken.set(key, Date.now())
+    this.taken.set(key, this.clock.now())
     if (this.taken.size > Encounters.MAX_TAKEN) {
       const oldest = this.taken.keys().next().value
       if (oldest !== undefined) this.taken.delete(oldest)

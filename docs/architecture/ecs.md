@@ -22,13 +22,14 @@ The game uses a lightweight, type-safe ECS located in `src/ecs/`.
 classDiagram
     class World {
         -entityComponents: Map
-        -snapshots: Map
         -systems: System[]
         +createEntity() number
         +addComponent(entity, component)
         +getComponent(entity, class) Component
-        +syncDirty() ComponentUpdate[]
-        +applyRemoteUpdate(entity, name, data)
+        +addSystem(system)
+        +removeSystem(system)
+        +snapshot(entityIds) WorldSnapshot
+        +restore(snapshot)
         +update(dt)
     }
 
@@ -114,28 +115,38 @@ Systems execute business logic across entities on each tick or action:
 - **`ItemSystem`**: Command-driven, not ticked. Applies an item's ordered effect list to a target that defaults to the user; charges the turn's price and the pouch to the *user* whoever is being worked on. The only place that knows what an effect does.
 - **`TurnSystem`**: Manages round handovers, resets AP pools, decrements status durations.
 - **`WallSystem`**: Updates structural integrity and occlusion of destructible barricades.
-- **`GroundSystem`**: The one writer of what is on the ground — fire, smoke, ash, crates burned away (`GroundComponent`, one entity for the map) — and of the grid's dense index over it (`Grid.fire`, `Grid.smoke`, surfaces, blocks), which the rules read on every step and sight line. Implements `core/Fire`'s `Ground` port; a change that arrives from outside (replication, a rewind) bumps the component's revision and `update` rebuilds the index from the generated map plus the component.
+- **`GroundSystem`**: The one writer of what is on the ground — fire, smoke, ash, crates burned away (`GroundComponent`, one entity for the map) — and of the grid's dense index over it (`Grid.fire`, `Grid.smoke`, surfaces, blocks), which the rules read on every step and sight line. Implements `core/Fire`'s `Ground` port; a change made to the component from outside (a rewind) bumps its revision and `update` rebuilds the index from the generated map plus the component.
 - **`RenderSystem`** (`src/render/RenderSystem.ts`): Presentation-layer ECS system. Reads component state (`PositionComponent`, `StanceComponent`, `HealthComponent`) to drive 3D view representations.
 
 ---
 
-## 4. State Replication & Dirty Diffing
+## 4. State, Digests & Rewind
 
 Every component implements `serialize(): Record<string, unknown>` and `deserialize(data: Record<string, unknown>)`.
 
-1. **Snapshotting**: `World.ts` maintains a snapshot map of the serialized state of every component.
-2. **Diffing (`World.syncDirty()`)**: Iterates all active components, compares current serialized JSON against previous snapshot using `jsonEqual()`.
-3. **Broadcast**: Emits `componentUpdate` JSON-RPC notifications for modified components.
-4. **Remote Ingestion (`World.applyRemoteUpdate()`)**: Remote client unpacks data, calls `deserialize()`, and bypasses re-broadcasting via `applyingRemote` guard.
-5. **Rewind (`World.snapshot(entityIds)` / `World.restore(snapshot)`)**: The
-   same `serialize`/`deserialize` pair, used to record and put back a whole
-   moment rather than one component. `restore` writes under the same
-   `applyingRemote` guard and re-baselines the snapshot map, so a rewind is
-   neither broadcast nor reported by the next `syncDirty()`. Takes named
-   entities rather than all of them: spectator playback only rewinds soldiers,
+State is **not replicated component by component**. Peers exchange intent commands and each
+resolves them through the same systems ([ADR-0004](../design/adr/0004-full-knowledge-lockstep.md));
+the old dirty-diff broadcast (`syncDirty`, `onComponentChanged`, `applyRemote`) was deleted
+with it. What `serialize` still serves:
+
+1. **The state digest**: `StateDigest.digestWorld` fingerprints a world from the same
+   serialisations, exchanged at each handover to catch a desynchronisation.
+2. **Rewind (`World.snapshot(entityIds)` / `World.restore(snapshot)`)**: Record and put
+   back a whole moment rather than one component. `restore` just calls `deserialize`;
+   nothing observes components changing, so there is nothing to suppress or re-baseline.
+   Takes named entities rather than all of them: spectator playback only rewinds soldiers,
    and snapshotting a map's worth of wall entities at every event would cost a
    great deal to restore terrain that nothing can change. See
    [P2P Networking §4](networking.md) for what uses it.
+
+### Lifecycle
+
+A system is added with `World.addSystem` and taken out with `World.removeSystem`; whoever
+adds it removes it. `InteractionController` keeps the list of what it registered and
+`dispose` removes exactly that, so a rebuilt match leaves the world with the systems a fresh
+one has. Per-frame ticking belongs to the caller: `FixedStepLoop` (`src/sim/FixedStepLoop.ts`)
+turns engine frames into fixed steps, and `onEachFrame` (`src/engine.ts`) registers it and
+returns the function that unregisters it.
 
 ### Commands, and why a target on the wire can still matter
 
@@ -147,7 +158,7 @@ is worth being precise about, because the same message is read two different way
 - **Every side resolves it.** A peer's `useItem` goes through `CommandSystem` like any other
   command and is resolved here, from the same sheets — until ITEM-031 the live receiver applied
   nothing and waited for the user's component updates, while a replay re-ran the use: two
-  readings of one message. The component updates still arrive and agree.
+  readings of one message. No component update travels now; the state agrees because both sides resolved the command.
 - **The target is load-bearing.** A frame from before targeted use, or one naming a unit this
   side cannot resolve, resolves as a self-use rather than being dropped.
 - **No number travels.** Both peers hold both squads' real sheets from the `ready` handshake,

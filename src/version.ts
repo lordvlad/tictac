@@ -9,9 +9,13 @@
  * rules" a precondition rather than a nicety: once disagreement is grounds for
  * naming a cheat, a stale cache would be the first thing accused.
  *
- * So mismatched builds are refused at the door. That turns the whole class into
- * a connection error with a stated cause, before it can become a foul with a
- * wronged party.
+ * So a mismatch is refused with a stated cause, before it can become a foul
+ * with a wronged party, in two stages. The *protocol* is checked at the door:
+ * `Session` admits a socket only if its `hello` states this server's protocol,
+ * at any build, and turns every other first word away. The *build* is checked
+ * per room, when a page asks to open, join or watch (`Lobby.enter`): a page
+ * still on yesterday's bundle may finish a match it already has here, so a
+ * seat is resumed under the **room's** build, not the server's.
  */
 
 /**

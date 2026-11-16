@@ -1,4 +1,5 @@
-import type { Db } from './Db'
+import type { ServerClock } from '../Clock'
+import { Batch, type Db } from './Db'
 import { MIGRATIONS } from './migrations'
 
 /**
@@ -47,6 +48,7 @@ interface AppliedRow {
  */
 export async function migrate(
   db: Db,
+  clock: ServerClock,
   migrations: readonly Migration[] = MIGRATIONS,
 ): Promise<number[]> {
   for (const [index, migration] of migrations.entries()) {
@@ -87,7 +89,7 @@ export async function migrate(
   const ran: number[] = []
   for (const migration of migrations) {
     if (done.has(migration.id)) continue
-    await apply(db, migration)
+    await apply(db, migration, new Date(clock.now()).toISOString())
     ran.push(migration.id)
   }
   return ran
@@ -100,16 +102,15 @@ export async function migrate(
  * so the bookkeeping and the change are the same transaction. (SQLite runs DDL
  * transactionally, which is the whole reason this is possible at all.)
  */
-async function apply(db: Db, migration: Migration): Promise<void> {
-  const appliedAt = new Date().toISOString()
+async function apply(db: Db, migration: Migration, appliedAt: string): Promise<void> {
+  const batch = new Batch()
+  for (const statement of migration.up) {
+    batch.exec(typeof statement === 'string' ? statement : statement[db.dialect])
+  }
+  batch.query`INSERT INTO schema_migrations (id, name, applied_at)
+              VALUES (${migration.id}, ${migration.name}, ${appliedAt})`
   try {
-    await db.transaction(async (tx) => {
-      for (const statement of migration.up) {
-        await tx.exec(typeof statement === 'string' ? statement : statement[tx.dialect])
-      }
-      await tx.query`INSERT INTO schema_migrations (id, name, applied_at)
-                     VALUES (${migration.id}, ${migration.name}, ${appliedAt})`
-    })
+    await db.transaction(batch)
   } catch (error) {
     throw new Error(
       `migration ${migration.id} (${migration.name}) failed: ${

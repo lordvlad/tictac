@@ -5,15 +5,8 @@ import type { DoorVerb } from '../core/Doors'
 import type { ItemId } from '../core/Items'
 import { isCommand } from '../ecs/systems/CommandSystem'
 import { canonical } from '../core/digest'
-import {
-  deploymentStateFrom,
-  parseRecording,
-  unitLoadoutFrom,
-  type Deployment,
-  type RecordedEvent,
-  type RecordingHeader,
-} from './Recording'
-import type { UnitLoadout } from './Loadout'
+import { deploymentStateFrom, parseRecording, unitLoadoutFrom, type RecordedEvent, type RecordingHeader } from './Recording'
+import type { Deployment, UnitLoadout } from '../core/Loadout'
 import type { RoomPhase, Seated, ServerIntent } from './Lobby'
 import type { ServerConnection } from './ServerConnection'
 import type { StateDigest } from './StateDigest'

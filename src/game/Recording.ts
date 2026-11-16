@@ -9,8 +9,7 @@ import { ITEMS, type ItemId } from '../core/Items'
 import { ROLES, RoleId } from '../core/Roles'
 import type { ResolvedHit } from './Combat'
 import { RpcMethods } from './JsonRpc'
-import { defaultLoadout, type Deployment, type DeploymentState, type UnitLoadout } from '../core/Loadout'
-export type { Deployment, DeploymentState }
+import type { Deployment, DeploymentState, UnitLoadout } from '../core/Loadout'
 import type { NetworkMessage } from './NetworkManager'
 
 /**

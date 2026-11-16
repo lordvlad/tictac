@@ -28,5 +28,5 @@ This directory records high-stakes architectural decisions, their historical con
 | --- | --- | --- | --- | --- |
 | [ADR-0001](./0001-ecs-render-decoupling.md) | ECS Render Decoupling & View-Unit Separation | Implemented / Active | 2026-09-14 | Architecture / ECS |
 | [ADR-0002](./0002-deterministic-headless-balance-harness.md) | Deterministic Headless Balance Harness | Implemented | 2026-09-14 | Simulation / Testing |
-| [ADR-0003](./0003-p2p-jsonrpc-replication.md) | P2P JSON-RPC 2.0 State Replication & Sender-Resolved Combat | Implemented / partly superseded by [ADR-0004](./0004-full-knowledge-lockstep.md) | 2026-09-14 | Networking / Wire |
+| [ADR-0003](./0003-p2p-jsonrpc-replication.md) | P2P JSON-RPC 2.0 State Replication & Sender-Resolved Combat | Implemented / §1 and §2 superseded by [ADR-0004](./0004-full-knowledge-lockstep.md) | 2026-09-14 | Networking / Wire |
 | [ADR-0004](./0004-full-knowledge-lockstep.md) | Full-Knowledge Lockstep With an Optional Referee | Accepted | 2026-09-17 | Networking / Authority |

@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { checkpoints, distanceKm, plannedArrivals, positionAt, type PastWaypoint, type Waypoint } from '../src/core/Travel'
 import { RPC_ERRORS, type Squad } from '../src/game/Rpc'
@@ -208,7 +209,7 @@ describe('A server that restarts', () => {
     const later = due + 2 * HOUR
     const armed: (number | null)[] = []
     const schedule = new Schedule({ now: () => later, arm: (at) => armed.push(at) })
-    const restarted = new Journeys({ squads: persistence.squads, encounters: persistence.encounters, schedule, now: () => later, tell: () => {} })
+    const restarted = new Journeys({ squads: persistence.squads, encounters: persistence.encounters, schedule, clock: { now: () => later, schedule: WALL_CLOCK.schedule }, tell: () => {} })
     await restarted.restore()
     expect(armed.at(-1)).toBe(due)
 

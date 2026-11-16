@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
 import type { Player } from '../src/game/Rpc'
@@ -21,7 +22,7 @@ const BO: Player = { id: 'bo', name: 'Bo' }
 
 async function harness() {
   const persistence = await freshPersistence(':memory:')
-  const lobby = new Lobby({ matches: persistence.matches, rooms: persistence.rooms, log: () => {} })
+  const lobby = new Lobby({ matches: persistence.matches, rooms: persistence.rooms, log: () => {}, clock: WALL_CLOCK })
   return { persistence, lobby }
 }
 
@@ -131,6 +132,15 @@ describe('A page on an older protocol', () => {
     old.send({ type: 'hello', ...PREVIOUS })
 
     expect(old.of('abort')[0]?.reason).toMatch(/Protocol mismatch/)
+    expect(old.closed).toBe(true)
+  })
+
+  test('is refused when its first word is an init rather than a hello', async () => {
+    const { lobby } = await harness()
+    const old = await connect(lobby, null, null, { hello: false })
+    old.send({ type: 'init', seed: 1, seedLabel: 'x', ...MY_VERSION })
+
+    expect(old.of('abort')[0]?.reason).toBeTruthy()
     expect(old.closed).toBe(true)
   })
 })

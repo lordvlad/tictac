@@ -22,7 +22,7 @@ tags: ["networking", "lockstep", "authority", "persistence", "referee"]
 **Status:** Accepted
 **Date:** 2026-09-17
 **Deciders:** Engineering
-**Supersedes:** the sender-resolved half of [ADR-0003](./0003-p2p-jsonrpc-replication.md)
+**Supersedes:** the sender-resolved half (§2) and the component dirty-state replication (§1) of [ADR-0003](./0003-p2p-jsonrpc-replication.md)
 **Reasoning:** [RFC-0001](../rfc/0001-referee-and-transports.md)
 
 ---

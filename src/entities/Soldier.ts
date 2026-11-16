@@ -63,8 +63,8 @@ import {
  *
  * Nothing here stores game state of its own. Every property below reads and
  * writes the entity's components, so a mutation from combat resolution, the
- * turn manager or the debug panel lands in exactly one place and is picked up
- * by {@link World.syncDirty} without the writer having to announce it.
+ * turn manager or the debug panel lands in exactly one place, where the state
+ * digest and a rewind both read it.
  */
 export class Soldier {
   readonly faction: Faction

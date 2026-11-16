@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { ENCOUNTER } from '../src/config'
 import { firstContact } from '../src/core/Meetings'
@@ -442,7 +443,7 @@ async function restarted(persistence: Persistence, clock: { now: number }, open:
     squads: persistence.squads,
     encounters: persistence.encounters,
     schedule,
-    now: () => clock.now,
+    clock: { now: () => clock.now, schedule: WALL_CLOCK.schedule },
     tell: () => {},
     openMeeting: open,
   })

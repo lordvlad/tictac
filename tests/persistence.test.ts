@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction, FATIGUE, HEALING, MEDICAL_BAY, ROSTER, SQUAD_SIZE, WOUNDS } from '../src/config'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
@@ -11,7 +12,8 @@ import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { TurnSystem } from '../src/ecs/systems'
 import { carriedOut, settlement, winnerOf, type UnitFate } from '../src/game/MatchEnd'
-import type { CombatRecording, Deployment, RecordingHeader } from '../src/game/Recording'
+import type { CombatRecording, RecordingHeader } from '../src/game/Recording'
+import type { Deployment } from '../src/core/Loadout'
 import { Squads } from '../src/game/Squads'
 import { TurnManager } from '../src/game/TurnManager'
 import type { Player } from '../src/game/Rpc'
@@ -121,8 +123,8 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
       .query`INSERT INTO players (id, name, created_at) VALUES (${'A'}, ${'Ada'}, ${'2026-01-01T00:00:00Z'})`
     await persistence.db
       .query`INSERT INTO players (id, name, created_at) VALUES (${'B'}, ${'Bo'}, ${'2026-01-01T00:00:00Z'})`
-    await persistence.rosters.enlist(persistence.db, 'A', sheets(10))
-    await persistence.rosters.enlist(persistence.db, 'B', sheets(50))
+    await persistence.rosters.enlist('A', sheets(10))
+    await persistence.rosters.enlist('B', sheets(50))
     // A match row, because a result names one.
     await persistence.db
       .query`INSERT INTO matches (id, header, created_at, seed_label) VALUES (${'m1'}, ${'{}'}, ${'2026-01-02T00:00:00Z'}, ${'m1'})`
@@ -253,7 +255,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
 
     await persistence.db
       .query`INSERT INTO players (id, name, created_at) VALUES (${'J'}, ${'Jug'}, ${'2026-01-01T00:00:00Z'})`
-    await persistence.rosters.enlist(persistence.db, 'J', [tough])
+    await persistence.rosters.enlist('J', [tough])
     const [enlisted] = await persistence.rosters.active('J')
     expect(enlisted!.hp).toBe(trueMax)
 
@@ -552,8 +554,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       await persistence.db
         .query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${name}, ${'2026-01-01T00:00:00Z'})`
     }
-    await persistence.rosters.enlist(persistence.db, 'A', blueSheets)
-    await persistence.rosters.enlist(persistence.db, 'B', redSheets)
+    await persistence.rosters.enlist('A', blueSheets)
+    await persistence.rosters.enlist('B', redSheets)
     const verdicts: RefereeVerdict[] = []
     const lobby = new Lobby({
       matches: persistence.matches,
@@ -561,6 +563,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       rosters: persistence.rosters,
       onVerdict: (verdict) => verdicts.push(verdict),
       log: () => {},
+      clock: WALL_CLOCK,
     })
     return { persistence, lobby, verdicts }
   }

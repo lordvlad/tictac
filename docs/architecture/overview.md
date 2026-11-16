@@ -37,7 +37,7 @@ graph TD
     subgraph Data ["Data & State Layer (ECS)"]
         World[ECS World & Entity Registry]
         Comp[Components: Health, Position, Stance, Traits, Weapons, AP...]
-        Dirty[Dirty State Diff & Snapshot Engine]
+        Snap[Snapshot & Digest Engine]
     end
 
     subgraph Core ["Pure Rule & Math Layer (Headless Compatible)"]
@@ -61,7 +61,7 @@ graph TD
 | Directory | Layer | Purpose & Responsibilities | Headless Safe? |
 | --- | --- | --- | --- |
 | `src/core/` | Core Rules | Pure math, Grid DDA, Line of Sight, Pathfinding, Ballistics, Combat formulas, RNG. | **Yes** (100% pure) |
-| `src/ecs/` | State & Systems | ECS `World`, component classes, system update loops, dirty-diff state sync. | **Yes** (Pure data) |
+| `src/ecs/` | State & Systems | ECS `World`, component classes, system update loops, snapshot/restore for rewind. | **Yes** (Pure data) |
 | `src/sim/` | Simulation | Headless matches: `MatchHost` (the ECS match, driven by intents), `SimMatch` (the sweep's policy), `Replay`, `Balance`. | **Yes** |
 | `src/game/` | Game Logic | `TurnManager`, `NetworkManager`, `Battlefield`, `Squads`, movement/shooting planners. | Mostly (decoupling in progress) |
 | `src/render/`| Presentation | Three.js meshes, animations, tracers, particles, material cloning, ground tiles. | **No** (Requires WebGL) |

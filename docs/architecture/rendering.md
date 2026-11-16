@@ -215,6 +215,18 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
     hands it to `main.tsx`'s `playBack`: the map and menu close and `startPlayback` runs, ending
     like any replay. A recording this build cannot read (`RECORDING_VERSION`) or the server
     refuses is said on its line.
+- **Debug tooling and the command door.** The debug panel writes straight to the soldiers and the
+  rules tables — not a command, so not recorded, not sent, not in the digest. In a shared match
+  that desynchronises the peers and gets the referee's next digest compare to name the editor's
+  opponent. So `debugEditable(mode)` (`src/game/DebugAccess.ts`) allows the editing groups only
+  when `network.mode === 'local'` (offline, hot seat, versus the AI on this screen). In a
+  host/join match, and in a spectated or replayed one (no network), the panel is read-only: it
+  lists the selected unit's numbers and, where a recording can still be armed, the recorder —
+  nothing that writes to the match. If online edits are ever wanted they become a recorded
+  `DebugEdit` command, not a way round the door. `window.tictac` (live match, rules objects)
+  exists only in the development bundle (`BUILD_ID === 'dev'`, i.e. `bun run dev` and `preview`
+  — `consoleHandleAllowed`); a built bundle carries an injected build id and never sets it.
+  Browser tests drive the dev server, so they need no flag.
 - **Not React:** Tweakpane's panels inside `DebugPanel`, the frame counter's per-frame text
   (`FpsCounter`), the page-corner containers (`CornerStack`) and the Three.js canvas.
 - **Tests** that need a DOM register happy-dom for their own file only

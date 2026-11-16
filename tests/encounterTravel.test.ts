@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { ENCOUNTER, Faction } from '../src/config'
 import { dealAliens, rollEncounter, stretchOf } from '../src/core/Encounters'
@@ -246,7 +247,7 @@ async function restarted(persistence: Persistence, now: number, open: OpenEncoun
     squads: persistence.squads,
     encounters: persistence.encounters,
     schedule,
-    now: () => now,
+    clock: { now: () => now, schedule: WALL_CLOCK.schedule },
     tell: () => {},
     openEncounter: open,
   })

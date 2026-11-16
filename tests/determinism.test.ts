@@ -76,7 +76,7 @@ describe('Nothing in the rules reaches for its own randomness', () => {
   test('the seed picker is the one allowed exception, and says why', async () => {
     // `resolveSeed` chooses a *seed* when the URL names none. That is the one
     // draw that cannot come from the stream, because it is what creates it —
-    // and it lives in `main.ts`, not `core/rng.ts`, so `core/rng.ts` itself
+    // and it lives in `main.tsx`, not `core/rng.ts`, so `core/rng.ts` itself
     // needs no exception at all.
     const rngText = await Bun.file('src/core/rng.ts').text()
     expect(code(rngText).includes('Math.random')).toBe(false)

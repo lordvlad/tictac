@@ -2,9 +2,9 @@ import { ENCOUNTER, Faction, SQUAD_SIZE } from '../config'
 import { dealAliens } from '../core/Encounters'
 import { toBase64Url } from '../game/Base64Url'
 import { RpcMethods, type JsonRpcNotification } from '../game/JsonRpc'
-import { defaultLoadout } from '../game/Loadout'
+import { defaultLoadout, type Deployment } from '../core/Loadout'
 import type { LobbyRoom, LobbyView, Seated, ServerIntent } from '../game/Lobby'
-import { RECORDING_VERSION, type Deployment, type RecordingHeader } from '../game/Recording'
+import { RECORDING_VERSION, type RecordingHeader } from '../game/Recording'
 import {
   RPC_ERRORS,
   SESSION_REPLACED,
@@ -14,6 +14,7 @@ import {
   type RpcPushes,
 } from '../game/Rpc'
 import { MY_VERSION, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
+import type { ServerClock } from './Clock'
 import type { EncounterContact, EncounterOpened, MeetingContact, MeetingOpened } from './EncounterPort'
 import type { MatchStore } from './MatchStore'
 import { hashSeatKey, Room, type Client, type RefereeVerdict, type RoomOptions } from './Room'
@@ -89,15 +90,13 @@ export interface LobbyOptions {
   log?: (message: string) => void
   /** How long a dropped seat is held; `GRACE_MS` unless a test says otherwise. */
   graceMs?: number
-  /** Run `fn` after `ms`, answering a cancel. `setTimeout` unless a test is the clock. */
-  schedule?: (fn: () => void, ms: number) => () => void
   /**
    * The build this server runs: `MY_VERSION`, unless a test stands up a
    * newer or older server over a database another one wrote.
    */
   version?: PeerVersion
-  /** The server's clock, in ms (`clock/now`); the wall clock unless a test turns it. */
-  now?: () => number
+  /** The host's one clock: `clock/now`, a seat's deadline, and the timers a grace period and a join window run on. */
+  clock: ServerClock
   /** The seed of a fight's map: system randomness, unless a test needs the fight to be the same one twice. */
   mapSeed?: () => number
   /** Called when a player takes a fight the server kept for them, before the AI did (`room`'s id, and the player). */
@@ -147,7 +146,7 @@ export class Lobby {
   private readonly roomOptions: RoomOptions
   private readonly store: { matches: MatchStore; rooms: RoomStore }
   private readonly rosters: Rosters | undefined
-  private readonly now: () => number
+  private readonly clock: ServerClock
   private readonly mapSeed: () => number
   private readonly onEncounterTaken: ((roomId: string, playerId: string) => void) | undefined
   private readonly log: (message: string) => void
@@ -158,7 +157,7 @@ export class Lobby {
     this.version = options.version ?? MY_VERSION
     this.store = { matches: options.matches, rooms: options.rooms }
     this.rosters = options.rosters
-    this.now = options.now ?? (() => Date.now())
+    this.clock = options.clock
     this.mapSeed = options.mapSeed ?? (() => crypto.getRandomValues(new Uint32Array(1))[0]!)
     this.onEncounterTaken = options.onEncounterTaken
     this.roomOptions = {
@@ -167,15 +166,9 @@ export class Lobby {
       rosters: options.rosters,
       serverVersion: this.version,
       onVerdict: options.onVerdict,
-      now: this.now,
+      clock: this.clock,
       log: this.log,
       graceMs: options.graceMs ?? GRACE_MS,
-      schedule:
-        options.schedule ??
-        ((fn, ms) => {
-          const timer = setTimeout(fn, ms)
-          return () => clearTimeout(timer)
-        }),
       onChanged: () => this.changed(),
       onOver: (room) => {
         this.sweep(room)
@@ -788,7 +781,7 @@ export class Lobby {
   /** The moment the seat a player is told of passes to the AI: the join window from now for one with a window bound, null for one who is not here to be asked. */
   private joinByFor(playerId: string): number | null {
     const window = this.windows.get(playerId)
-    return window && !window.gone ? this.now() + ENCOUNTER.joinWindowMs : null
+    return window && !window.gone ? this.clock.now() + ENCOUNTER.joinWindowMs : null
   }
 
   /** The header of a fight the server composes: a map from system randomness, a live source, and no turn cap. */
@@ -801,7 +794,7 @@ export class Lobby {
       seed,
       seedLabel: String(seed),
       source: 'live',
-      createdAt: new Date(this.now()).toISOString(),
+      createdAt: new Date(this.clock.now()).toISOString(),
       turnCap: null,
       squads,
       controllers,

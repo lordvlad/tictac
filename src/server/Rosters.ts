@@ -3,7 +3,8 @@ import { characterSheet, derive, maxHpOf, sanitizeSheet, type CharacterSheet } f
 import { mergeDeeds, noDeeds, type Deeds } from '../core/Progression'
 import { Rng } from '../core/rng'
 import type { UnitFate } from '../game/MatchEnd'
-import type { Db } from './db/Db'
+import type { ServerClock } from './Clock'
+import { Batch, type Db } from './db/Db'
 import { AuthError } from './WebAuthn'
 
 /**
@@ -60,17 +61,30 @@ interface MemberRow {
 }
 
 export class Rosters {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly clock: ServerClock,
+  ) {}
+
+  /** Now, as the ISO text a row stores. */
+  private stamp(): string {
+    return new Date(this.clock.now()).toISOString()
+  }
 
   /**
-   * Give a player a squad, at slots `0..n-1`.
-   *
-   * Takes its own {@link Db} so registration can enlist inside the same
-   * transaction that creates the player: an account with no squad is an account
-   * that cannot play.
+   * Give a player a squad, at slots `0..n-1`, in one transaction of its own.
+   * Registration does not use this: it queues {@link enlistInto} onto the
+   * batch that creates the player, so an account with no squad cannot exist.
    */
-  async enlist(db: Db, playerId: string, sheets: readonly CharacterSheet[]): Promise<void> {
-    const createdAt = new Date().toISOString()
+  async enlist(playerId: string, sheets: readonly CharacterSheet[]): Promise<void> {
+    const batch = new Batch()
+    this.enlistInto(batch, playerId, sheets)
+    await this.db.transaction(batch)
+  }
+
+  /** Queue the inserts for a player's squad onto `batch`. */
+  enlistInto(batch: Batch, playerId: string, sheets: readonly CharacterSheet[]): void {
+    const createdAt = this.stamp()
     const emptyDeeds = JSON.stringify(noDeeds())
     for (const [slot, rawSheet] of sheets.entries()) {
       // Sanitised on the way in as well as on the way out: what is stored is
@@ -78,10 +92,10 @@ export class Rosters {
       // a string comparison rather than a structural one.
       const sheet = sanitizeSheet(rawSheet)
       const stored = JSON.stringify(sheet)
-      await db.query`INSERT INTO roster
-                       (character_id, player_id, slot, sheet, status, matches, hp, deeds, created_at, died_in)
-                     VALUES (${crypto.randomUUID()}, ${playerId}, ${slot}, ${stored}, ${'active'}, ${0},
-                             ${maxHpOf(sheet)}, ${emptyDeeds}, ${createdAt}, ${null})`
+      batch.query`INSERT INTO roster
+                    (character_id, player_id, slot, sheet, status, matches, hp, deeds, created_at, died_in)
+                  VALUES (${crypto.randomUUID()}, ${playerId}, ${slot}, ${stored}, ${'active'}, ${0},
+                          ${maxHpOf(sheet)}, ${emptyDeeds}, ${createdAt}, ${null})`
     }
   }
 
@@ -130,7 +144,7 @@ export class Rosters {
 
     const sheet = characterSheet(rng)
     const characterId = crypto.randomUUID()
-    const createdAt = new Date().toISOString()
+    const createdAt = this.stamp()
     const hp = maxHpOf(sheet)
     const deeds = noDeeds()
     await this.db.query`INSERT INTO roster
@@ -152,32 +166,32 @@ export class Rosters {
    * otherwise derivable from the log.
    */
   async settle(result: MatchSettlement): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      const already = await tx.query<{
-        match_id: string
-      }>`SELECT match_id FROM match_results WHERE match_id = ${result.matchId}`
-      if (already.length > 0) return
+    const already = await this.db.query<{
+      match_id: string
+    }>`SELECT match_id FROM match_results WHERE match_id = ${result.matchId}`
+    if (already.length > 0) return
 
-      const sides = result.sides
-      for (const side of [sides[Faction.Blue], sides[Faction.Red]]) {
-        if (!side) continue
-        for (const [slot, fate] of side.fates.entries()) {
-          const characterId = side.characterIds[slot]
-          if (!characterId) continue
-          await this.record(tx, result.matchId, characterId, fate)
-        }
-        await this.rest(tx, side.playerId, new Set(side.characterIds))
+    // Everything is read and worked out first, then written in one batch: the
+    // marker leads it, so the writes and the mark that they were made commit
+    // together or not at all — and a second settlement racing this one hits
+    // the primary key and rolls back instead of growing the squads twice.
+    const sides = result.sides
+    const batch = new Batch()
+    batch.query`INSERT INTO match_results (match_id, winner, blue_player, red_player, settled_at)
+                VALUES (${result.matchId}, ${result.winner},
+                        ${sides[Faction.Blue]?.playerId ?? null},
+                        ${sides[Faction.Red]?.playerId ?? null},
+                        ${this.stamp()})`
+    for (const side of [sides[Faction.Blue], sides[Faction.Red]]) {
+      if (!side) continue
+      for (const [slot, fate] of side.fates.entries()) {
+        const characterId = side.characterIds[slot]
+        if (!characterId) continue
+        await this.record(batch, result.matchId, characterId, fate)
       }
-
-      // Inserted last so that on engines without rollback (e.g. DoSqliteDb on
-      // Cloudflare Durable Objects), an error during character recording or
-      // resting does not leave an idempotency marker that prevents retry.
-      await tx.query`INSERT INTO match_results (match_id, winner, blue_player, red_player, settled_at)
-                     VALUES (${result.matchId}, ${result.winner},
-                             ${sides[Faction.Blue]?.playerId ?? null},
-                             ${sides[Faction.Red]?.playerId ?? null},
-                             ${new Date().toISOString()})`
-    })
+      await this.rest(batch, side.playerId, new Set(side.characterIds))
+    }
+    await this.db.transaction(batch)
   }
 
   /**
@@ -189,8 +203,8 @@ export class Rosters {
    * fast as it rises and medical-bay downtime ticks down, both floored at
    * zero (`[ITEM-039]`).
    */
-  private async rest(db: Db, playerId: string, deployed: ReadonlySet<string>): Promise<void> {
-    const rows = await db.query<{ character_id: string; sheet: string; hp: number; fatigue: number; downtime: number }>`
+  private async rest(batch: Batch, playerId: string, deployed: ReadonlySet<string>): Promise<void> {
+    const rows = await this.db.query<{ character_id: string; sheet: string; hp: number; fatigue: number; downtime: number }>`
       SELECT character_id, sheet, hp, fatigue, downtime FROM roster
        WHERE player_id = ${playerId} AND status = ${'active'}`
     for (const row of rows) {
@@ -202,8 +216,8 @@ export class Rosters {
       const hp = Math.max(1, Math.min(maxHp, Math.round(healed)))
       const fatigue = Math.max(0, Number(row.fatigue) - 2)
       const downtime = Math.max(0, Number(row.downtime) - 1)
-      await db.query`UPDATE roster SET hp = ${hp}, fatigue = ${fatigue}, downtime = ${downtime}
-                      WHERE character_id = ${row.character_id} AND status = ${'active'}`
+      batch.query`UPDATE roster SET hp = ${hp}, fatigue = ${fatigue}, downtime = ${downtime}
+                  WHERE character_id = ${row.character_id} AND status = ${'active'}`
     }
   }
 
@@ -234,8 +248,8 @@ export class Rosters {
    * character who is already dead changes nothing — and the read that starts
    * each branch is the same guard: nothing to update means nothing to do.
    */
-  private async record(db: Db, matchId: string, characterId: string, fate: UnitFate): Promise<void> {
-    const rows = await db.query<{ sheet: string; deeds: string; fatigue: number }>`
+  private async record(batch: Batch, matchId: string, characterId: string, fate: UnitFate): Promise<void> {
+    const rows = await this.db.query<{ sheet: string; deeds: string; fatigue: number }>`
       SELECT sheet, deeds, fatigue FROM roster WHERE character_id = ${characterId} AND status = ${'active'}`
     const existing = rows[0]
     if (!existing) return
@@ -249,20 +263,20 @@ export class Rosters {
       const healed = fate.hp + HEALING.perMatch * maxHp * (1 + healBonus / 100)
       const hp = Math.max(1, Math.min(maxHp, Math.round(healed)))
       const downtime = fate.hp <= WOUNDS.concussed * maxHp ? MEDICAL_BAY.concussed : 0
-      await db.query`UPDATE roster SET sheet = ${JSON.stringify(sheet)}, hp = ${hp}, deeds = ${deeds},
-                                        matches = matches + 1, fatigue = ${fatigue}, downtime = ${downtime}
-                      WHERE character_id = ${characterId} AND status = ${'active'}`
+      batch.query`UPDATE roster SET sheet = ${JSON.stringify(sheet)}, hp = ${hp}, deeds = ${deeds},
+                                    matches = matches + 1, fatigue = ${fatigue}, downtime = ${downtime}
+                  WHERE character_id = ${characterId} AND status = ${'active'}`
       return
     }
     if (fate.kind === 'carried') {
-      await db.query`UPDATE roster SET hp = ${HEALING.carriedOutHp}, deeds = ${deeds}, matches = matches + 1,
-                                        fatigue = ${fatigue}, downtime = ${MEDICAL_BAY.carriedOut}
-                      WHERE character_id = ${characterId} AND status = ${'active'}`
+      batch.query`UPDATE roster SET hp = ${HEALING.carriedOutHp}, deeds = ${deeds}, matches = matches + 1,
+                                    fatigue = ${fatigue}, downtime = ${MEDICAL_BAY.carriedOut}
+                  WHERE character_id = ${characterId} AND status = ${'active'}`
       return
     }
-    await db.query`UPDATE roster SET status = ${'dead'}, died_in = ${matchId},
-                                      hp = ${Math.max(0, fate.hp)}, deeds = ${deeds}, matches = matches + 1,
-                                      fatigue = ${fatigue}
-                    WHERE character_id = ${characterId} AND status = ${'active'}`
+    batch.query`UPDATE roster SET status = ${'dead'}, died_in = ${matchId},
+                                  hp = ${Math.max(0, fate.hp)}, deeds = ${deeds}, matches = matches + 1,
+                                  fatigue = ${fatigue}
+                WHERE character_id = ${characterId} AND status = ${'active'}`
   }
 }

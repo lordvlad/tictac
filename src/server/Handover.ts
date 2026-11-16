@@ -1,3 +1,4 @@
+import type { ServerClock } from './Clock'
 import { Refusal } from './Lobby'
 import { RPC_ERRORS } from '../game/Rpc'
 
@@ -56,8 +57,10 @@ export class HandoverCoordinator {
   /** Track retry attempts per squad across sequential failures. */
   private readonly attemptCount = new Map<string, number>()
   private readonly log: (msg: string) => void
+  private readonly clock: ServerClock
 
-  constructor(options: { log?: (msg: string) => void } = {}) {
+  constructor(options: { clock: ServerClock; log?: (msg: string) => void }) {
+    this.clock = options.clock
     this.log = options.log ?? (() => {})
   }
 
@@ -89,7 +92,7 @@ export class HandoverCoordinator {
     const currentAttempts = (this.attemptCount.get(options.squadId) ?? 0) + 1
     this.attemptCount.set(options.squadId, currentAttempts)
 
-    const expiresAt = Date.now() + (options.ttlMs ?? HANDOVER_TIMEOUT_MS)
+    const expiresAt = this.clock.now() + (options.ttlMs ?? HANDOVER_TIMEOUT_MS)
     const reservation: HandoverReservation = {
       ...options,
       attempts: currentAttempts,
@@ -117,7 +120,7 @@ export class HandoverCoordinator {
     if (prepared.squadId !== squadId) {
       throw new Refusal(RPC_ERRORS.badInput, 'Handover squad ID mismatch.')
     }
-    if (Date.now() > prepared.expiresAt) {
+    if (this.clock.now() > prepared.expiresAt) {
       this.incoming.delete(handoverId)
       throw new Refusal(RPC_ERRORS.conflict, 'Handover offer has expired.')
     }
@@ -186,11 +189,11 @@ export class HandoverCoordinator {
   /** Check if a handover is active on source DO. */
   isPending(handoverId: string): boolean {
     const out = this.outgoing.get(handoverId)
-    return out !== undefined && out.state === 'offered' && Date.now() <= out.expiresAt
+    return out !== undefined && out.state === 'offered' && this.clock.now() <= out.expiresAt
   }
 
   private cleanupExpired(): void {
-    const now = Date.now()
+    const now = this.clock.now()
     for (const [id, res] of this.outgoing.entries()) {
       if (now > res.expiresAt) {
         this.outgoing.delete(id)

@@ -36,7 +36,7 @@ export interface ExampleData {
 ### Flow / State Machine / Sequences
 1. **Trigger:** Event initiation.
 2. **Resolution:** How calculations or checks are performed.
-3. **Replication / Wire Impact:** How state updates travel over P2P network (`NetworkMessage` / component dirty diffs).
+3. **Replication / Wire Impact:** How state updates travel over P2P network (`NetworkMessage` intents and the state digest).
 4. **Presentation / FX:** View representation and feedback.
 
 ## P2P & Determinism Impact

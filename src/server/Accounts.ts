@@ -4,7 +4,8 @@ import { Rng } from '../core/rng'
 import type { LatLng } from '../core/Travel'
 import { fromBase64Url, toBase64Url } from '../game/Base64Url'
 import type { PasskeyAsserted, PasskeyCreated, PasskeyOptions, Player, SignedIn } from '../game/Rpc'
-import type { Db } from './db/Db'
+import type { ServerClock } from './Clock'
+import { Batch, type Db } from './db/Db'
 import type { RelyingParty } from './Persistence'
 import type { Rosters } from './Rosters'
 import type { Squads } from './Squads'
@@ -54,13 +55,22 @@ interface CredentialRow {
   sign_count: number | string
 }
 
+/** A session worked out but not yet written: the token to hand the player, and the row that keeps only its hash. */
+interface MintedSession {
+  token: string
+  hash: string
+  playerId: string
+  createdAt: string
+  expiresAt: string
+}
+
 export class Accounts {
   constructor(
     private readonly db: Db,
     private readonly rosters: Rosters,
     private readonly squads: Squads,
     private readonly party: RelyingParty,
-    private readonly now: () => Date = () => new Date(),
+    private readonly clock: ServerClock,
   ) {}
 
   /** What the browser needs to create a passkey, and the id of the challenge it answers. */
@@ -124,20 +134,28 @@ export class Accounts {
     const name = challenge.name
     if (!playerId || !name) throw new AuthError(400, 'that sign-in request is not a registration')
 
-    const created = this.now().toISOString()
-    const token = await this.db.transaction(async (tx) => {
-      await tx.query`INSERT INTO players (id, name, created_at) VALUES (${playerId}, ${name}, ${created})`
-      await tx.query`INSERT INTO credentials (id, player_id, public_key, algorithm, sign_count, created_at)
-                     VALUES (${answer.credentialId}, ${playerId}, ${answer.publicKey},
-                             ${answer.publicKeyAlgorithm}, ${authenticator.signCount}, ${created})`
-      // The squad is rolled by the server, from system randomness: a client
-      // that dealt its own would deal itself six prodigies. A full roster,
-      // not a squad — the bench exists so resting anyone is a choice.
-      const seed = crypto.getRandomValues(new Uint32Array(1))[0]!
-      await this.rosters.enlist(tx, playerId, rollSquadSheets(new Rng(seed), ROSTER.size))
-      await this.squads.place(tx, playerId, near)
-      return this.startSession(tx, playerId)
-    })
+    const created = new Date(this.clock.now()).toISOString()
+    // Everything that needs reading or drawing is done before the batch: the
+    // squad is rolled by the server, from system randomness (a client that
+    // dealt its own would deal itself six prodigies), as a full roster, not a
+    // squad — the bench exists so resting anyone is a choice.
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0]!
+    const sheets = rollSquadSheets(new Rng(seed), ROSTER.size)
+    const placement = await this.squads.draw(near)
+    const session = await this.mintSession(playerId)
+
+    // One commit, so a player never exists without a credential, a squad and a
+    // session — on a Durable Object as much as on Bun.
+    const batch = new Batch()
+    batch.query`INSERT INTO players (id, name, created_at) VALUES (${playerId}, ${name}, ${created})`
+    batch.query`INSERT INTO credentials (id, player_id, public_key, algorithm, sign_count, created_at)
+                VALUES (${answer.credentialId}, ${playerId}, ${answer.publicKey},
+                        ${answer.publicKeyAlgorithm}, ${authenticator.signCount}, ${created})`
+    this.rosters.enlistInto(batch, playerId, sheets)
+    this.squads.placeInto(batch, playerId, placement)
+    this.queueSession(batch, session)
+    await this.db.transaction(batch)
+    const token = session.token
     return { token, player: { id: playerId, name } }
   }
 
@@ -208,8 +226,15 @@ export class Accounts {
     const player = players[0]
     if (!player) throw new AuthError(401, 'unknown passkey')
 
-    await this.db.query`UPDATE credentials SET sign_count = ${next} WHERE id = ${credential.id}`
-    const token = await this.startSession(this.db, credential.player_id)
+    // The counter and the session it earns are written together: a counter
+    // that advanced with no session to show for it would lock the player out
+    // of the same assertion next time.
+    const session = await this.mintSession(credential.player_id)
+    const batch = new Batch()
+    batch.query`UPDATE credentials SET sign_count = ${next} WHERE id = ${credential.id}`
+    this.queueSession(batch, session)
+    await this.db.transaction(batch)
+    const token = session.token
     return { token, player: { id: credential.player_id, name: player.name } }
   }
 
@@ -221,7 +246,7 @@ export class Accounts {
        WHERE s.token_hash = ${await sha256Hex(token)}`
     const row = rows[0]
     if (!row) return null
-    if (Date.parse(row.expires_at) <= this.now().getTime()) return null
+    if (Date.parse(row.expires_at) <= this.clock.now()) return null
     return { id: row.id, name: row.name }
   }
 
@@ -236,10 +261,10 @@ export class Accounts {
   ): Promise<{ id: string; challenge: string }> {
     // Swept on the way past rather than on a timer: a challenge nobody answered
     // is dead weight, and this is the only place that makes them.
-    await this.db.query`DELETE FROM auth_challenges WHERE expires_at <= ${this.now().toISOString()}`
+    await this.db.query`DELETE FROM auth_challenges WHERE expires_at <= ${new Date(this.clock.now()).toISOString()}`
     const id = crypto.randomUUID()
     const challenge = toBase64Url(crypto.getRandomValues(new Uint8Array(32)))
-    const expires = new Date(this.now().getTime() + CHALLENGE_MINUTES * 60_000).toISOString()
+    const expires = new Date(this.clock.now() + CHALLENGE_MINUTES * 60_000).toISOString()
     await this.db.query`INSERT INTO auth_challenges (id, purpose, challenge, user_id, name, expires_at)
                         VALUES (${id}, ${purpose}, ${challenge}, ${userId}, ${name}, ${expires})`
     return { id, challenge }
@@ -255,7 +280,7 @@ export class Accounts {
     const rows = await this.db.query<ChallengeRow>`
       DELETE FROM auth_challenges WHERE id = ${id} AND purpose = ${purpose} RETURNING *`
     const row = rows[0]
-    if (!row || Date.parse(row.expires_at) <= this.now().getTime()) {
+    if (!row || Date.parse(row.expires_at) <= this.clock.now()) {
       throw new AuthError(400, 'the sign-in request expired or was already used; try again')
     }
     return row
@@ -275,13 +300,21 @@ export class Accounts {
    *
    * A stolen database is then not a drawer full of working sessions.
    */
-  private async startSession(db: Db, playerId: string): Promise<string> {
+  private async mintSession(playerId: string): Promise<MintedSession> {
     const token = toBase64Url(crypto.getRandomValues(new Uint8Array(32)))
-    const created = this.now()
-    const expires = new Date(created.getTime() + SESSION_DAYS * 86_400_000)
-    await db.query`INSERT INTO sessions (token_hash, player_id, created_at, expires_at)
-                   VALUES (${await sha256Hex(token)}, ${playerId}, ${created.toISOString()}, ${expires.toISOString()})`
-    return token
+    const created = this.clock.now()
+    return {
+      token,
+      hash: await sha256Hex(token),
+      playerId,
+      createdAt: new Date(created).toISOString(),
+      expiresAt: new Date(created + SESSION_DAYS * 86_400_000).toISOString(),
+    }
+  }
+
+  private queueSession(batch: Batch, session: MintedSession): void {
+    batch.query`INSERT INTO sessions (token_hash, player_id, created_at, expires_at)
+                VALUES (${session.hash}, ${session.playerId}, ${session.createdAt}, ${session.expiresAt})`
   }
 }
 

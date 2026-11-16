@@ -13,15 +13,9 @@ import { debrief, winnerOf } from '../game/MatchEnd'
 import type { Grid } from '../core/Grid'
 import { ItemId } from '../core/Items'
 import { Rng } from '../core/rng'
-import type { SquadLoadout } from '../game/Loadout'
+import type { SquadLoadout, Deployment } from '../core/Loadout'
 import { type Attack, Policy, type StandingOrder } from './Policy'
-import {
-  type CombatRecording,
-  type Deployment,
-  RECORDING_VERSION,
-  Recorder,
-  type RecordingHeader,
-} from '../game/Recording'
+import { type CombatRecording, RECORDING_VERSION, Recorder, type RecordingHeader } from '../game/Recording'
 import { type GroundCovered, GroundTracker } from './Ground'
 import { MatchHost } from './MatchHost'
 
@@ -102,6 +96,12 @@ export interface MatchSetup {
   record?: boolean
   /** A battlefield other than the game's; see {@link MapOptions}. */
   map?: MapOptions
+  /**
+   * The recording header's `createdAt`. The sim has no clock of its own, so a
+   * caller that wants a real stamp supplies it; otherwise the epoch, which also
+   * makes the same seed record byte-identical.
+   */
+  createdAt?: string
 }
 
 /** What one weapon class did over a match. */
@@ -148,6 +148,8 @@ export interface MatchOutcome {
   withdrew: Faction | null
 }
 
+/** `createdAt` of a recording whose caller named no time. */
+const SIM_EPOCH = '1970-01-01T00:00:00.000Z'
 const DEFAULT_TURN_CAP = 40
 
 function emptyTally(): WeaponTally {
@@ -218,7 +220,7 @@ export class SimMatch {
       seed: setup.seed >>> 0,
       seedLabel: String(setup.seed >>> 0),
       source: 'sim',
-      createdAt: new Date().toISOString(),
+      createdAt: setup.createdAt ?? SIM_EPOCH,
       turnCap: this.turnCap,
       squads: { [Faction.Blue]: squadOf(Faction.Blue, setup.blue), [Faction.Red]: squadOf(Faction.Red, setup.red) },
       ...(setup.map ? { map: setup.map } : {}),

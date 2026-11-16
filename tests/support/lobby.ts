@@ -1,9 +1,11 @@
+import { WALL_CLOCK } from '../../src/server/Clock'
 import { Faction } from '../../src/config'
 import { maxHpOf, sanitizeSheet, type CharacterSheet } from '../../src/core/Characters'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../../src/game/JsonRpc'
 import type { LobbyView, ServerIntent } from '../../src/game/Lobby'
 import type { NetworkMessage } from '../../src/game/NetworkManager'
-import type { CombatRecording, Deployment, RecordingHeader } from '../../src/game/Recording'
+import type { CombatRecording, RecordingHeader } from '../../src/game/Recording'
+import type { Deployment } from '../../src/core/Loadout'
 import type { Player, RpcMethod, RpcParams, RpcResult } from '../../src/game/Rpc'
 import { loopback } from '../../src/game/Transport'
 import type { Lobby } from '../../src/server/Lobby'
@@ -75,6 +77,7 @@ function layerOf(lobby: Lobby): Layer {
       persistence: { accounts, rosters: {}, squads: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>,
       // Nothing here travels.
       journeys: {} as Journeys,
+      clock: WALL_CLOCK,
       log: () => {},
     })
     layer = { sessions, known }
@@ -319,8 +322,8 @@ export async function enlistFor(
     await persistence.db
       .query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${name}, ${'2026-01-01T00:00:00Z'})`
   }
-  await persistence.rosters.enlist(persistence.db, blue.id, sheetsOf(header, Faction.Blue))
-  await persistence.rosters.enlist(persistence.db, red.id, sheetsOf(header, Faction.Red))
+  await persistence.rosters.enlist(blue.id, sheetsOf(header, Faction.Blue))
+  await persistence.rosters.enlist(red.id, sheetsOf(header, Faction.Red))
   const ids = async (player: Player) => (await persistence.rosters.active(player.id)).map((m) => m.characterId)
   const hp = (faction: Faction) => sheetsOf(header, faction).map((sheet) => maxHpOf(sanitizeSheet(sheet)))
   return withStartingHp(

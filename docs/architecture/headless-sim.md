@@ -38,7 +38,7 @@ graph TD
 - **`MatchHost` (`src/sim/MatchHost.ts`)**: The match. Real ECS soldiers and systems with no scene, advanced by intents through `CommandSystem` — the same applier the played game uses for clicks and peer messages. What the host adds is time: it steps the world at a fixed rate until every walker has arrived.
 - **`Policy` (`src/sim/Policy.ts`)**: The AI, and nothing else. It reads the board, decides, and hands an `apply` function an intent (`moveUnit` one tile at a time, `fireShot`, `throwGrenade`, `toggleCover`, `overwatch`, `endUnitTurn`, `endTurn`). A refused intent throws: the policy asks the rules before it acts, so a refusal is a bug. A `PolicyObserver` reports attacks, throws, watches and steps to whoever wants to count them. `steps()` plays a side's turn a unit at a time; `playTurn()` runs it through.
 - **`SimMatch` (`src/sim/SimMatch.ts`)**: What surrounds the policy in a sweep: deals the squads, builds the host, records each intent before applying it, and tallies what the observer reports.
-- **`AiOpponent` (`src/game/AiOpponent.ts`)**: The same policy as an opponent in a played match (*Play Against the AI* in the menu). It is the joining peer of an ordinary hosted match, reached over an in-process `loopback()` transport: it takes the handshake, sends `ready` with a fresh squad, builds a `MatchHost` from the host's `matchHeader`, applies every command the player sends, and when it is Red's turn plays it with `Policy`, sending each intent it applies and a state digest before handing over. The player's controller has no AI mode; it sees a peer.
+- **`AiOpponent` (`src/game/AiOpponent.ts`)**: The same policy as an opponent in a played match (*Play Against the AI* in the menu). It is the joining peer of an ordinary hosted match, reached over an in-process `loopback()` transport: it takes the handshake, sends `ready` with a fresh squad (dealt from the setup entropy it is handed — `main.tsx` `setupRng()`, a per-peer CSPRNG draw; `rollSquadSheets` takes a required `Rng` and nothing headless reads the clock), builds a `MatchHost` from the host's `matchHeader`, applies every command the player sends, and when it is Red's turn plays it with `Policy`, sending each intent it applies and a state digest before handing over. The player's controller has no AI mode; it sees a peer.
 - **`Balance` (`src/sim/Balance.ts`)**: Statistical aggregator tracking win rates by faction/seed, mean turns to victory, weapon shot accuracy, damage distribution, and trait differential win rates.
 - **`scripts/balance.ts`**: Command-line entry point parsing sweep parameters and formatting tabular terminal outputs.
 
@@ -331,6 +331,10 @@ after it: adding one attribute per character once shifted every die in a
 had finished dealing and resolved a different match.
 
 A match is still one number. Its dice are a function of that number alone.
+
+Neither stream reads the clock. The recording header's `createdAt` is a
+`MatchSetup` input (the epoch when absent), so the same seed records
+byte-identical and `src/core`, `src/ecs` and `src/sim` hold no `Date.now`.
 
 ## One engine, not two
 

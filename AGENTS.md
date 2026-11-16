@@ -20,6 +20,7 @@ Welcome to **TicTac (No Way Home)**. This document establishes guidelines, archi
 ### 1. Headless-First Pure Rules Layer
 - Code under `src/core/`, `src/ecs/`, and `src/sim/` must remain **100% headless** and free of DOM or WebGL dependencies.
 - **Rule**: Never import from `src/render/`, `src/hud/`, or `src/camera/` inside `src/core/` or `src/ecs/`.
+- **Enforced**: `tests/layers.test.ts` checks every runtime import against the layer DAG (core ← ecs ← rules ← sim ← wire ← server/client; render/hud/camera client-only; `workers/` reaches only `src/server`). Edges that still violate it are an allowlist, each under the ticket that removes it. A new violating edge fails the test, and so does a listed edge that no longer exists — delete its line when you delete the import. The list only shrinks.
 - Three.js imports in core/ECS are restricted to pure vector arithmetic (`Vector3`, `Quaternion`, `MathUtils`).
 
 ### 2. Deterministic PRNG
@@ -82,7 +83,7 @@ bun run build
 | Path | Description |
 | --- | --- |
 | `src/core/` | Pure math, Grid DDA, Line of Sight, Pathfinding, Ballistics, Combat formulas. |
-| `src/ecs/` | ECS `World`, components, systems, dirty state diffing. |
+| `src/ecs/` | ECS `World`, components, systems, snapshot/restore. |
 | `src/sim/` | Headless match simulation engine (`SimUnit`, `SimMatch`, `Balance`). |
 | `src/game/` | Game orchestration: `TurnManager`, `NetworkManager`, `Battlefield`, `Squads`. |
 | `src/render/` | Three.js meshes, animations, tracers, visual FX, materials. |

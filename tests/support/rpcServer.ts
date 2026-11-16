@@ -1,6 +1,7 @@
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../../src/game/JsonRpc'
 import type { LatLng, PastWaypoint } from '../../src/core/Travel'
 import { loopback } from '../../src/game/Transport'
+import { WALL_CLOCK, type ServerClock } from '../../src/server/Clock'
 import type { OpenEncounter, OpenMeeting } from '../../src/server/EncounterPort'
 import { Journeys } from '../../src/server/Journeys'
 import { Lobby, type LobbyOptions } from '../../src/server/Lobby'
@@ -57,8 +58,10 @@ export interface RpcServerOptions {
   openMeeting?: OpenMeeting | 'lobby'
   /** The trial switch; on unless this says otherwise. */
   playerEncounters?: () => boolean
-  /** More of the lobby's own options, over the clock and rosters `openMeeting: 'lobby'` gives it. */
-  lobby?: Partial<LobbyOptions>
+  /** The timers the lobby's grace periods and join windows run on; real ones unless a test turns them. */
+  schedule?: ServerClock['schedule']
+  /** More of the lobby's own options, over the rosters `openMeeting: 'lobby'` gives it. */
+  lobby?: Partial<Omit<LobbyOptions, 'clock'>>
   /** A new trip's id; random unless a test needs to pick what its checkpoints roll. */
   mintTrip?: () => string
 }
@@ -69,11 +72,13 @@ export function rpcServer(
   options: RpcServerOptions = {},
 ): RpcServer {
   let now = start
+  const clock: ServerClock = { now: () => now, schedule: options.schedule ?? WALL_CLOCK.schedule }
   const lobby = new Lobby({
     matches: persistence.matches,
     rooms: persistence.rooms,
     log: () => {},
-    ...(options.openMeeting === 'lobby' ? { rosters: persistence.rosters, now: () => now } : {}),
+    clock,
+    ...(options.openMeeting === 'lobby' ? { rosters: persistence.rosters } : {}),
     ...options.lobby,
   })
   const armed: (number | null)[] = []
@@ -82,14 +87,14 @@ export function rpcServer(
     squads: persistence.squads,
     encounters: persistence.encounters,
     schedule,
-    now: () => now,
+    clock,
     openEncounter: options.openEncounter,
     openMeeting: options.openMeeting === 'lobby' ? (meeting) => lobby.openMeeting(meeting) : options.openMeeting,
     playerEncounters: options.playerEncounters,
     mintTrip: options.mintTrip,
     tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
   })
-  const sessions = new Sessions({ lobby, persistence, journeys, now: () => now, log: () => {} })
+  const sessions = new Sessions({ lobby, persistence, journeys, clock, log: () => {} })
 
   const window = (place: LatLng | null = null): Window => {
     const [page, socket] = loopback()

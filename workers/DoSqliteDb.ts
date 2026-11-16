@@ -1,4 +1,20 @@
-import type { Db, Dialect, SqlValue } from '../src/server/db/Db'
+import type { Batch, Db, Dialect, SqlValue } from '../src/server/db/Db'
+
+/**
+ * The slice of a Durable Object's `ctx.storage` this adapter uses, stated
+ * structurally rather than imported from `@cloudflare/workers-types`: that
+ * package's ambient globals cannot share a TypeScript project with `bun`'s
+ * (see `src/server/db/Db.ts`), and the contract test (`tests/dbContract.test.ts`)
+ * hands this adapter a fake that rolls back the way `transactionSync` does.
+ * The real `ctx.storage` satisfies it as it is.
+ */
+export interface DoStorage {
+  readonly sql: {
+    exec(query: string, ...bindings: SqlValue[]): { toArray(): unknown[] }
+  }
+  /** Runs `closure` as one transaction and returns what it returns; a throw rolls every write in it back. Cannot wrap an `await`. */
+  transactionSync<T>(closure: () => T): T
+}
 
 /**
  * A `Db` (`src/server/db/Db.ts`) over a Durable Object's own SQLite storage
@@ -12,49 +28,44 @@ import type { Db, Dialect, SqlValue } from '../src/server/db/Db'
  * changes nothing about *when* the work happens, only when the caller is
  * told it is done.
  *
- * `transaction` is the one place this adapter does not do what the `Bun.SQL`
- * one does, and says so rather than pretending otherwise. `Db.transaction<T>(fn:
- * (tx: Db) => Promise<T>)` is written with `await` between statements, and
- * Cloudflare's synchronous transaction primitive, `ctx.storage.sql`'s sibling
- * `transactionSync`, requires a callback that contains **no** `await` at all
- * — `await` unconditionally defers to the microtask queue even for an
- * already-resolved promise, so any statement in `fn` after its first `await`
- * would run *after* `transactionSync`'s callback had already returned and the
- * runtime had already considered the transaction committed, outside the
- * boundary it was meant to be in. There is no way to satisfy both
- * `transactionSync`'s synchronous-callback requirement and `Db.transaction`'s
- * async one for an `fn` with more than one statement — see the citations in
- * the deployment doc for exactly which Cloudflare guarantee does and does not
- * cover this.
+ * `transaction` runs a {@link Batch} inside `ctx.storage.transactionSync`,
+ * which is why the port takes a batch and not a callback: `transactionSync`
+ * requires a callback with **no** `await` in it (`await` always defers to the
+ * microtask queue, so a statement after one would run *after* the runtime had
+ * considered the transaction committed), and a batch is already a list of
+ * statements with nothing to await. Every step runs inside that one
+ * synchronous closure, and the first to throw rolls the whole batch back —
+ * what `BunSqlDb.ts`'s `begin` does, so a migration or a registration is
+ * all-or-nothing on both.
  *
- * What this adapter keeps: a Durable Object processes one request at a time,
- * and its input gates stop a *different* request's storage operations from
- * interleaving with this one's while it runs, so two overlapping calls to
- * `transaction` never see each other's half-done work. What it does **not**
- * keep is rollback on throw: if `fn` throws after its second statement has
- * already run, that statement stays written, where the `Bun.SQL` adapter's
- * genuine `sql.begin()` would have rolled it back. `migrate.ts`'s `apply()`
- * is the one caller this matters for in practice — a migration that fails
- * partway on this adapter needs a human to notice and fix the row it left
- * behind, the same way a `down` migration would have needed one to write and
- * run it.
+ * What a batch cannot do is read: whatever a caller must decide from the
+ * database it decides *before* building the batch, and a Durable Object's
+ * single-threaded input gates are what keep a different request from writing
+ * in between.
  */
-export function dbOverSqlStorage(sql: SqlStorage): Db {
+export function dbOverStorage(storage: DoStorage): Db {
   const dialect: Dialect = 'sqlite'
+  const { sql } = storage
 
-  const placeholders = (strings: TemplateStringsArray): string =>
+  const placeholders = (strings: readonly string[]): string =>
     strings.slice(1).reduce((text, part) => `${text}?${part}`, strings[0] ?? '')
 
-  const self: Db = {
+  return {
     dialect,
     async query<T>(strings: TemplateStringsArray, ...values: SqlValue[]): Promise<T[]> {
-      return sql.exec<Record<string, SqlValue>>(placeholders(strings), ...values).toArray() as T[]
+      return sql.exec(placeholders(strings), ...values).toArray() as T[]
     },
     async exec(statement: string): Promise<void> {
       sql.exec(statement)
     },
-    transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
-      return fn(self)
+    async transaction(batch: Batch): Promise<void> {
+      if (batch.steps.length === 0) return
+      storage.transactionSync(() => {
+        for (const step of batch.steps) {
+          if (step.kind === 'exec') sql.exec(step.statement)
+          else sql.exec(placeholders(step.strings), ...step.values)
+        }
+      })
     },
     async close(): Promise<void> {
       // Nothing to close: the Durable Object owns the storage's lifecycle,
@@ -62,5 +73,4 @@ export function dbOverSqlStorage(sql: SqlStorage): Db {
       // every other request this instance still has to answer.
     },
   }
-  return self
 }

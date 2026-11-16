@@ -1,7 +1,8 @@
 import { distanceKm, type LatLng } from '../core/Travel'
 import type { Player, Squad } from '../game/Rpc'
 import type { StandingOrder } from '../sim/Policy'
-import type { Db } from './db/Db'
+import type { ServerClock } from './Clock'
+import { Batch, type Db } from './db/Db'
 
 /**
  * Where a player's squad is on the world map (GDD-WORLD §2, §4).
@@ -78,10 +79,17 @@ function squadOf(row: { id: string; waypoints: string; standing: string }): Squa
   }
 }
 
+/** A squad drawn but not yet written: where it starts, when, and the squad standing there. */
+export interface Placement {
+  readonly squad: Squad
+  readonly start: LatLng
+  readonly createdAt: string
+}
+
 export class Squads {
   constructor(
     private readonly db: Db,
-    private readonly now: () => Date = () => new Date(),
+    private readonly clock: ServerClock,
     private readonly random: () => number = systemRandom,
     private readonly log: (line: string) => void = (line) => console.warn(line),
   ) {}
@@ -121,26 +129,42 @@ export class Squads {
   }
 
   /**
-   * Give `playerId` a squad at a start drawn around `anchor` (or
-   * `DEFAULT_ANCHOR`), inside `tx` — registration's transaction, so a player
-   * never exists without one.
+   * Choose a start around `anchor` (or `DEFAULT_ANCHOR`) and the squad that
+   * stands on it, without writing anything: what registration reads first so
+   * it can write the player, the squad and the rest in one batch.
    */
-  async place(tx: Db, playerId: string, anchor: LatLng | null): Promise<Squad> {
-    const start = await this.drawStart(tx, anchor ?? DEFAULT_ANCHOR)
-    const created = this.now()
-    const squad: Squad = {
-      id: crypto.randomUUID(),
-      waypoints: [{ kind: 'past', lat: start.lat, lng: start.lng, arrival: created.getTime(), departed: null }],
-      standing: 'stand',
+  async draw(anchor: LatLng | null): Promise<Placement> {
+    const start = await this.drawStart(anchor ?? DEFAULT_ANCHOR)
+    const created = this.clock.now()
+    return {
+      start,
+      createdAt: new Date(created).toISOString(),
+      squad: {
+        id: crypto.randomUUID(),
+        waypoints: [{ kind: 'past', lat: start.lat, lng: start.lng, arrival: created, departed: null }],
+        standing: 'stand',
+      },
     }
-    await tx.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at)
-                   VALUES (${squad.id}, ${playerId}, ${JSON.stringify(squad.waypoints)},
-                           ${Math.round(start.lat * MICRODEGREES)}, ${Math.round(start.lng * MICRODEGREES)},
-                           ${created.toISOString()})
-                   ON CONFLICT (player_id) DO NOTHING`
+  }
+
+  /** Queue the insert that gives `playerId` the drawn squad onto `batch`: a no-op if they already have one. */
+  placeInto(batch: Batch, playerId: string, { squad, start, createdAt }: Placement): void {
+    batch.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at)
+                VALUES (${squad.id}, ${playerId}, ${JSON.stringify(squad.waypoints)},
+                        ${Math.round(start.lat * MICRODEGREES)}, ${Math.round(start.lng * MICRODEGREES)},
+                        ${createdAt})
+                ON CONFLICT (player_id) DO NOTHING`
+  }
+
+  /** Give `playerId` a squad at a drawn start, in a transaction of its own; registration queues {@link placeInto} onto its own instead. */
+  async place(playerId: string, anchor: LatLng | null): Promise<Squad> {
+    const placement = await this.draw(anchor)
+    const batch = new Batch()
+    this.placeInto(batch, playerId, placement)
+    await this.db.transaction(batch)
     // Two windows of a player that had no squad may both get here; the one
     // that lost the race reads the winner's.
-    return (await this.of(playerId)) ?? squad
+    return (await this.of(playerId)) ?? placement.squad
   }
 
   /**
@@ -148,15 +172,15 @@ export class Squads {
    * registered before squads existed, the first time anything asks.
    */
   async ensure(playerId: string, anchor: LatLng | null): Promise<Squad> {
-    return (await this.of(playerId)) ?? this.place(this.db, playerId, anchor)
+    return (await this.of(playerId)) ?? this.place(playerId, anchor)
   }
 
-  private async drawStart(tx: Db, anchor: LatLng): Promise<LatLng> {
+  private async drawStart(anchor: LatLng): Promise<LatLng> {
     let start = drawAround(anchor, START_RADIUS_KM, this.random)
-    for (let draw = 1; draw < MAX_DRAWS && (await this.crowded(tx, start)); draw++) {
+    for (let draw = 1; draw < MAX_DRAWS && (await this.crowded(start)); draw++) {
       start = drawAround(anchor, START_RADIUS_KM, this.random)
     }
-    if (await this.crowded(tx, start)) {
+    if (await this.crowded(start)) {
       this.log(
         `[squads] no start ${START_SEPARATION_KM} km clear of the others in ${MAX_DRAWS} draws ` +
           `around ${anchor.lat}, ${anchor.lng}; taking the last`,
@@ -172,10 +196,10 @@ export class Squads {
    * where people are, and the worst case is two starts closer than a
    * kilometre.
    */
-  private async crowded(tx: Db, point: LatLng): Promise<boolean> {
+  private async crowded(point: LatLng): Promise<boolean> {
     const dLat = START_SEPARATION_KM / 111.2
     const dLng = dLat / Math.max(Math.cos((point.lat * Math.PI) / 180), 0.01)
-    const rows = await tx.query<{ lat: number; lng: number }>`
+    const rows = await this.db.query<{ lat: number; lng: number }>`
       SELECT start_lat_e6 AS lat, start_lng_e6 AS lng FROM squads
        WHERE start_lat_e6 BETWEEN ${Math.floor((point.lat - dLat) * MICRODEGREES)} AND ${Math.ceil((point.lat + dLat) * MICRODEGREES)}
          AND start_lng_e6 BETWEEN ${Math.floor((point.lng - dLng) * MICRODEGREES)} AND ${Math.ceil((point.lng + dLng) * MICRODEGREES)}`

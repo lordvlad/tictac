@@ -21,6 +21,7 @@ import {
 } from '../core/Travel'
 import { RPC_ERRORS, type Player, type Squad, type SquadOrder } from '../game/Rpc'
 import type { StandingOrder } from '../sim/Policy'
+import type { ServerClock } from './Clock'
 import { meetingKey, type Encounters } from './Encounters'
 import type { MeetingSide, OpenEncounter, OpenMeeting } from './EncounterPort'
 import { Refusal } from './Lobby'
@@ -68,7 +69,8 @@ export interface JourneysOptions {
   /** Where a contact is written down, so a checkpoint is handled once (`ITEM-048`). */
   encounters: Encounters
   schedule: Schedule
-  now: () => number
+  /** The one clock the host built: a route is read, and its arrivals planned, against it. */
+  clock: ServerClock
   /** Tell `playerId`'s window its squad has a new route (`squad/changed`). */
   tell: (playerId: string, squad: Squad) => void
   /** This match server's name, for `ownerOf`. */
@@ -101,7 +103,7 @@ export class Journeys {
   private readonly squads: Squads
   private readonly encounters: Encounters
   private readonly schedule: Schedule
-  private readonly now: () => number
+  private readonly clock: ServerClock
   private readonly tell: (playerId: string, squad: Squad) => void
   private readonly self: string
   private readonly mintTrip: () => string
@@ -121,7 +123,7 @@ export class Journeys {
     this.squads = options.squads
     this.encounters = options.encounters
     this.schedule = options.schedule
-    this.now = options.now
+    this.clock = options.clock
     this.tell = options.tell
     this.self = options.self ?? MATCH_SERVER
     this.mintTrip = options.mintTrip ?? (() => crypto.randomUUID())
@@ -173,7 +175,7 @@ export class Journeys {
       const squads = (await this.squads.all()).map(({ squad }) => squad)
       for (const squad of squads) this.plan(squad)
       if (!this.meetingsOn()) return
-      const now = this.now()
+      const now = this.clock.now()
       for (const [i, squad] of squads.entries()) {
         for (const other of squads.slice(i + 1)) this.meetingBetween(squad, other, now)
       }
@@ -189,7 +191,7 @@ export class Journeys {
     return this.serially(async () => {
       const placed = await this.squads.ensure(playerId, near)
       this.owned(placed)
-      const now = this.now()
+      const now = this.clock.now()
       // What was due before this order is weighed on the route as it was,
       // not on the one the order is about to make.
       const { player, squad } = (await this.weighDue(placed.id, now))!
@@ -449,7 +451,8 @@ export class Journeys {
   private meetingBetween(a: Squad, b: Squad, from: number): void {
     // One server owns every squad today. A squad of another is not in this
     // zone, and no match here is opened for it (RFC-0002 §6.4).
-    if (ownerOf(a) !== this.self || ownerOf(b) !== this.self) return
+    const now = this.clock.now()
+    if (ownerOf(a, now) !== this.self || ownerOf(b, now) !== this.self) return
     const pair = pairOf(a.id, b.id)
     const contact = firstContact(a.waypoints, b.waypoints, from, ENCOUNTER.meetingRangeKm)
     if (contact) this.schedule.set(MEETING, pair, contact.at)
@@ -500,7 +503,7 @@ export class Journeys {
    * is where a request for somebody else's squad is handed on.
    */
   private owned(squad: Squad): void {
-    if (ownerOf(squad) !== this.self) throw new Refusal(RPC_ERRORS.conflict, NOT_HERE)
+    if (ownerOf(squad, this.clock.now()) !== this.self) throw new Refusal(RPC_ERRORS.conflict, NOT_HERE)
   }
 
   private serially<T>(work: () => Promise<T>): Promise<T> {

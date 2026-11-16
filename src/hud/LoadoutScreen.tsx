@@ -17,7 +17,6 @@ import {
   canEquipSidearm,
   canEquipWeapon,
   canFitAttachment,
-  defaultLoadout,
   addGrenade,
   addItem,
   equipAmmo,
@@ -30,10 +29,9 @@ import {
   removeGrenade,
   removeItem,
   unfitAttachment,
-  type SquadLoadout,
-  type UnitLoadout,
   setRole,
 } from '../game/Loadout'
+import { defaultLoadout, type SquadLoadout, type UnitLoadout } from '../core/Loadout'
 import { Icon } from './Icon'
 import { LoadoutScene } from '../render/LoadoutScene'
 import type { OffscreenPortraits } from '../render/Portraits'

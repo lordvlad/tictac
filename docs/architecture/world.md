@@ -250,8 +250,8 @@ when it fires.
 
 | Host | Clock | Alarm |
 |---|---|---|
-| `workers/MatchDurableObject.ts` | `Date.now()` | `ctx.storage.setAlarm` / `deleteAlarm`; `alarm()` calls `schedule.fire()`. The alarm is kept in storage, so it wakes an evicted instance, which restores and fires. |
-| `src/server/GameServer.ts` | `ServerClock` option, the wall clock by default | a timer through `ServerClock.schedule`, replaced on every arm and cancelled on `stop` |
+| `workers/MatchDurableObject.ts` | `WALL_CLOCK` (`src/server/Clock.ts`) | `ctx.storage.setAlarm` / `deleteAlarm`; `alarm()` calls `schedule.fire()`. The alarm is kept in storage, so it wakes an evicted instance, which restores and fires. |
+| `src/server/GameServer.ts` | the required `ServerClock` option (`scripts/serve-match.ts` passes `WALL_CLOCK`) | a timer through `ServerClock.schedule`, replaced on every arm and cancelled on `stop` |
 | tests (`tests/support/rpcServer.ts`) | a number the test sets | `armed` records each moment asked for; `wake()` is the alarm, on time or late |
 
 ## 4. Who owns a squad

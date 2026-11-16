@@ -38,6 +38,7 @@ export interface RecordingControls {
 interface DebugPanelViewProps {
   soldier: Soldier | null
   recording: RecordingControls | null
+  editable: boolean
   groups: EditGroup[]
   onClose: () => void
   onChange: () => void
@@ -308,9 +309,65 @@ function EditGroupView({
   )
 }
 
+/** What the selected unit carries, with nothing to press: the panel's whole face in a shared match. */
+function InspectGroup({ soldier }: { soldier: Soldier }) {
+  const counts = (held: Record<string, number>, name: (id: string) => string): string =>
+    Object.entries(held)
+      .filter(([, count]) => count > 0)
+      .map(([id, count]) => `${name(id)} \u00d7${count}`)
+      .join(', ') || 'none'
+  return (
+    <div className="debug-group">
+      <div className="debug-group-title">{soldier.name}</div>
+      <div className="debug-note">read-only: edits are not commands, so a shared match would desynchronise</div>
+      <div className="debug-row">
+        <span>hp</span>
+        <span>
+          {soldier.hp}/{soldier.maxHp}
+        </span>
+      </div>
+      <div className="debug-row">
+        <span>ap</span>
+        <span>
+          {soldier.ap}/{soldier.maxAp}
+        </span>
+      </div>
+      <div className="debug-row">
+        <span>armor</span>
+        <span>
+          {soldier.armor}/{soldier.maxArmor}
+        </span>
+      </div>
+      <div className="debug-row">
+        <span>weapon</span>
+        <span>{soldier.weapon.name}</span>
+      </div>
+      <div className="debug-row">
+        <span>ammo</span>
+        <span>{soldier.ammo.name}</span>
+      </div>
+      <div className="debug-row">
+        <span>grenades</span>
+        <span>{counts(soldier.grenades, (id) => GRENADES[id as GrenadeId].name)}</span>
+      </div>
+      <div className="debug-row">
+        <span>items</span>
+        <span>{counts(soldier.items, (id) => ITEMS[id as ItemId].name)}</span>
+      </div>
+      <div className="debug-row">
+        <span>statuses</span>
+        <span>
+          {soldier.statuses.map((s) => `${STATUSES[s.kind].name} (${s.turnsLeft})`).join(', ') || 'none'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function DebugPanelView({
   soldier,
   recording,
+  editable,
   groups,
   onClose,
   onChange,
@@ -326,12 +383,14 @@ function DebugPanelView({
       </div>
       <div className="debug-body">
         {recording && <RecordingGroup controls={recording} onRefresh={onRefresh} />}
-        {soldier ? (
-          <LoadoutGroup soldier={soldier} onChange={onChange} onRefresh={onRefresh} />
-        ) : (
+        {!soldier ? (
           <div className="debug-group">
             <em>No unit selected</em>
           </div>
+        ) : editable ? (
+          <LoadoutGroup soldier={soldier} onChange={onChange} onRefresh={onRefresh} />
+        ) : (
+          <InspectGroup soldier={soldier} />
         )}
         {groups.map((group, i) => (
           <EditGroupView key={i} group={group} onChange={onChange} onRefresh={onRefresh} />
@@ -342,7 +401,10 @@ function DebugPanelView({
 }
 
 /**
- * Developer panel: edit any live gameplay value.
+ * Developer panel: edit any live gameplay value — where the match is this
+ * screen's alone (`debugEditable`). In a shared or watched one it only shows
+ * the selected unit and offers the recorder, because an edit is not a command
+ * and nobody else would hear of it.
  *
  * Deliberately outside the HUD's model/intent discipline — it writes straight to
  * the objects the systems read. That is the point of a debug tool, and keeping it
@@ -360,7 +422,8 @@ export class DebugPanel {
   constructor(
     private readonly onChange: () => void,
     private readonly getSelected: () => Soldier | null,
-    private readonly recording: RecordingControls | null = null,
+    private readonly recording: RecordingControls | null,
+    private readonly editable: boolean,
   ) {
     this.root = document.createElement('div')
     this.root.className = 'debug-panel'
@@ -397,6 +460,7 @@ export class DebugPanel {
   private groups(): EditGroup[] {
     const soldier = this.soldier
     const groups: EditGroup[] = []
+    if (!this.editable) return groups
 
     if (soldier) {
       groups.push({
@@ -453,6 +517,7 @@ export class DebugPanel {
         <DebugPanelView
           soldier={this.soldier}
           recording={this.recording}
+          editable={this.editable}
           groups={groups}
           onClose={() => this.close()}
           onChange={this.onChange}

@@ -1,3 +1,4 @@
+import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
 import type { RecordedEvent, RecordingHeader } from '../src/game/Recording'
@@ -33,7 +34,7 @@ const HALF = Math.floor(RECORDING.events.length / 2)
 
 /** One database, and a way to start a server over it — again, and as whichever build a test likes. */
 async function deployment() {
-  const persistence = await openPersistence()
+  const persistence = await openPersistence(WALL_CLOCK)
   const holds: { fn: () => void; ms: number; cancelled: boolean }[] = []
   const verdicts: RefereeVerdict[] = []
   const logs: string[] = []
@@ -45,12 +46,15 @@ async function deployment() {
       onVerdict: (verdict) => verdicts.push(verdict),
       log: (message) => logs.push(message),
       graceMs: 5_000,
-      schedule: (fn, ms) => {
-        const hold = { fn, ms, cancelled: false }
-        holds.push(hold)
-        return () => {
-          hold.cancelled = true
-        }
+      clock: {
+        now: WALL_CLOCK.now,
+        schedule: (fn, ms) => {
+          const hold = { fn, ms, cancelled: false }
+          holds.push(hold)
+          return () => {
+            hold.cancelled = true
+          }
+        },
       },
       version,
     })

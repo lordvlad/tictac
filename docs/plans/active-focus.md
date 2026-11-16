@@ -73,11 +73,6 @@ Nothing is ready: the queue is empty. What is left is in the backlog below and i
 - **ITEM-065**: the map screen has no automated test (the controller and map need a DOM and
   WebGL); it was checked in Chromium, locally and on Pages. The code under it is covered by the
   `Travel`, `Journeys` and `ServerConnection` tests. Safari is untested.
-- **ITEM-045 / ITEM-063**: on the Durable Object, `Db.transaction` does not roll back when its
-  body throws (`workers/DoSqliteDb.ts`; Cloudflare's synchronous transaction cannot wrap an
-  `await`ing body). A migration that fails partway leaves its rows for a human to fix, and so
-  could a registration that fails after its player row (player, roster and squad are one
-  transaction). Not seen in practice.
 - **ITEM-061 / ITEM-067**: the old Stuttgart-only `world.pmtiles` is still in the `map-tiles` R2
   bucket, unserved and now redundant; delete it.
 - **ITEM-067**: on-demand tiles depend on `build.protomaps.com` keeping the dated build
