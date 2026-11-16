@@ -15,21 +15,13 @@ import {
   weaponSerial,
 } from '../core/Arsenal'
 import { effectiveMaxAp, type StatusState } from '../core/Ballistics'
-import {
-  characterSheet,
-  type CharacterSheet,
-  derive,
-  type DerivedStats,
-  UtilityId,
-} from '../core/Characters'
-import { Rng } from '../core/rng'
+import { type CharacterSheet, type DerivedStats, UtilityId } from '../core/Characters'
 import {
   NO_TRAITS,
   type ResolvedTraits,
   resolveSourcedInto,
   type SourcedTrait,
   TraitSource,
-  type TraitId,
   woundTraits,
 } from '../core/Traits'
 import { ATTACHMENTS, type AttachmentId } from '../core/Attachments'
@@ -39,6 +31,7 @@ import type { Grid, Tile } from '../core/Grid'
 import type { World } from '../ecs/World'
 import {
   ActionPointsComponent,
+  CharacterComponent,
   AmmoComponent,
   ArmorComponent,
   GrenadeSpecsComponent,
@@ -73,14 +66,6 @@ export class Soldier {
   readonly entityId: number
   /** Present only for a kept roster (`[ITEM-042]`); absent for a rolled squad. */
   readonly characterId?: string
-  /**
-   * Consecutive deployments without rest, as stored on the roster this match
-   * started (`[ITEM-039]`) — 0 for every match outside a server that keeps
-   * one. Fixed for the match, the same as `sheet` and `startingHp`: it is
-   * read back by {@link Squads.deploymentsOf} onto `state.fatigue`, never
-   * mutated mid-match.
-   */
-  readonly fatigue: number
 
   private readonly health: HealthComponent
   private readonly actionPoints: ActionPointsComponent
@@ -98,38 +83,15 @@ export class Soldier {
   private readonly deedsComponent: DeedsComponent
   private readonly positionComponent: PositionComponent
 
-  /**
-   * Who this soldier is, as opposed to what they carry.
-   *
-   * Rolled by whichever peer commands this squad. For the enemy squad it is
-   * replaced wholesale when their sheets arrive in the start handshake, which
-   * is why it is not readonly.
-   */
-  sheet: CharacterSheet
+  private readonly character: CharacterComponent
+  private readonly traitsComponent: TraitsComponent
 
-  /**
-   * What the sheet's attributes work out to.
-   *
-   * Recomputed only when the sheet itself changes - on construction and when a
-   * peer's real sheet arrives - because it is a pure function of four numbers
-   * that do not move during a match. Trait bonuses are *not* in here: they
-   * land on top of these, and they change whenever the pouch does.
-   */
-  private derived: DerivedStats
-  /**
-   * Battlefield specialisation from the loadout screen. Not a component: both
-   * peers already hold the full {@link UnitLoadout} it came from, the same way
-   * `sheet` does, so there is nothing here a shooter needs replicated that its
-   * one granted trait does not already put in `resolvedTraits`.
-   */
-  private _role: RoleId = RoleId.Rifleman
-
-  /** Sheet plus carried gear, refolded whenever either could have changed. */
+  // Scratch for the fold in `refreshTraits`, kept to spare it an allocation per
+  // call. Nothing else reads these: every trait-driven number is read back
+  // from `traitsComponent`, which is what a rewind and a peer's update restore.
   private readonly resolvedTraits: ResolvedTraits = { ...NO_TRAITS }
-  /** The same fold over gear alone, for the rules that must tell it apart. */
   private readonly gearTraits: ResolvedTraits = { ...NO_TRAITS }
   private readonly sourcedTraits: SourcedTrait[] = []
-  private readonly traitsComponent: TraitsComponent
 
   constructor(
     world: World,
@@ -138,7 +100,12 @@ export class Soldier {
     name: string,
     initialTile: Tile,
     grid: Grid,
-    sheet: CharacterSheet = characterSheet(new Rng(squadIndex + 1)),
+    /**
+     * Who this soldier is. Required: a missing sheet is a bug in whatever read
+     * the wire or the roster, and rolling a stand-in here would hide it as two
+     * peers agreeing on the wrong person.
+     */
+    sheet: CharacterSheet,
     /**
      * HP to deploy at, clamped to this sheet's derived ceiling. Absent (the
      * default) is full health — every match today, and every match outside a
@@ -159,10 +126,8 @@ export class Soldier {
     this.faction = faction
     this.squadIndex = squadIndex
     this.name = name
-    this.sheet = sheet
-    this.derived = derive(sheet)
     this.characterId = characterId
-    this.fatigue = startingFatigue ?? 0
+    const fatigue = startingFatigue ?? 0
 
     // Blue team faces North (+Z), Red team faces South (-Z): the same facing as
     // a yaw for the view and as a heading for the rules.
@@ -171,17 +136,19 @@ export class Soldier {
 
     this.entityId = world.createEntity()
     world.addComponent(this.entityId, new IdentityComponent(faction, squadIndex, name))
+    this.character = world.addComponent(this.entityId, new CharacterComponent(sheet, RoleId.Rifleman, fatigue))
     this.positionComponent = world.addComponent(
       this.entityId,
       new PositionComponent({ ...initialTile }, grid.tileToWorld(initialTile), initialYaw, 0, initialHeading),
     )
     // The sheet's own trait bonuses are in these ceilings from the start; gear
     // picked up later lifts them through `refreshTraits`.
-    const hp = startingHp === undefined ? this.derived.maxHp : clamp(startingHp, 1, this.derived.maxHp)
-    this.health = world.addComponent(this.entityId, new HealthComponent(hp, this.derived.maxHp))
+    const { derived } = this
+    const hp = startingHp === undefined ? derived.maxHp : clamp(startingHp, 1, derived.maxHp)
+    this.health = world.addComponent(this.entityId, new HealthComponent(hp, derived.maxHp))
     this.actionPoints = world.addComponent(
       this.entityId,
-      new ActionPointsComponent(this.derived.maxAp, this.derived.maxAp),
+      new ActionPointsComponent(derived.maxAp, derived.maxAp),
     )
     this.armorComponent = world.addComponent(
       this.entityId,
@@ -198,7 +165,7 @@ export class Soldier {
     this.awarenessComponent = world.addComponent(this.entityId, new AwarenessComponent())
     // The first back-to-back deployment is free; only the level past it costs
     // starting morale, the same step `refreshTraits` prices in AP.
-    const fatigueSteps = Math.max(0, this.fatigue - 1)
+    const fatigueSteps = Math.max(0, fatigue - 1)
     this.moraleComponent = world.addComponent(
       this.entityId,
       new MoraleComponent(MORALE.max - FATIGUE.moralePerStep * fatigueSteps),
@@ -207,76 +174,98 @@ export class Soldier {
     this.traitsComponent = world.addComponent(this.entityId, new TraitsComponent())
     this.stampGrenades()
     this.refreshTraits()
+    // A restore writes components one at a time, and the traits are a fold of
+    // several of them: refold once they are all back.
+    world.onRestored(this.entityId, () => this.refreshTraits())
+  }
 
+  /** What the sheet's attributes work out to; see `CharacterComponent.derived`. */
+  private get derived(): DerivedStats {
+    return this.character.derived
+  }
+
+  /** Who this soldier is, as a peer or a roster stated it. */
+  get sheet(): CharacterSheet {
+    return this.character.sheet
+  }
+
+  /**
+   * Consecutive deployments without rest, as stored on the roster this match
+   * started (`[ITEM-039]`) — 0 for every match outside a server that keeps one.
+   */
+  get fatigue(): number {
+    return this.character.fatigue
   }
 
   /**
    * Refold the sheet's traits with whatever is being carried, and publish the
-   * two an enemy needs.
+   * result to the {@link TraitsComponent}, the one place anything reads it from.
    *
    * Called on every change to the pouch rather than computed per read: a shot
    * preview runs every frame the panel is open, and the answer only moves when
-   * gear does.
+   * gear does. Also the world's post-restore hook, so a rewound unit's wound
+   * bands, ceilings and traits are a fresh fold of its restored state.
    */
   refreshTraits(): void {
-    this.sourcedTraits.length = 0
-    for (const id of this.sheet.traits) {
-      this.sourcedTraits.push({ id, source: TraitSource.Innate })
+    const { sheet, derived, role, fatigue } = this.character
+    const sourced = this.sourcedTraits
+    sourced.length = 0
+    for (const id of sheet.traits) {
+      sourced.push({ id, source: TraitSource.Innate })
     }
     for (const id of woundTraits(this.health.hp, this.health.maxHp)) {
-      this.sourcedTraits.push({ id, source: TraitSource.Wound })
+      sourced.push({ id, source: TraitSource.Wound })
     }
-    const roleTrait = ROLES[this._role].trait
-    if (roleTrait) this.sourcedTraits.push({ id: roleTrait, source: TraitSource.Role })
+    const roleTrait = ROLES[role].trait
+    if (roleTrait) sourced.push({ id: roleTrait, source: TraitSource.Role })
     for (const id of Object.values(ItemId)) {
       if ((this.items[id] ?? 0) <= 0) continue
       const granted = ITEMS[id].traits
       if (granted) for (const trait of granted) {
-        this.sourcedTraits.push({ id: trait, source: TraitSource.Gear })
+        sourced.push({ id: trait, source: TraitSource.Gear })
       }
     }
     // Whatever is bolted to the weapon in its hands, which travels with the
     // weapon rather than with the soldier.
     for (const id of this.weapon.attachments) {
       for (const trait of ATTACHMENTS[id]?.traits ?? []) {
-        this.sourcedTraits.push({ id: trait, source: TraitSource.Gear })
+        sourced.push({ id: trait, source: TraitSource.Gear })
       }
     }
-    resolveSourcedInto(this.resolvedTraits, this.sourcedTraits)
+    const resolved = resolveSourcedInto(this.resolvedTraits, sourced)
     // Gear's share on its own, because Strength cancels that and not a limp.
-    resolveSourcedInto(this.gearTraits, this.sourcedTraits, TraitSource.Gear)
+    const gear = resolveSourcedInto(this.gearTraits, sourced, TraitSource.Gear)
 
-    const evasion = Math.max(0, this.derived.evasion + this.resolvedTraits.evasion)
-    if (this.traitsComponent.evasion !== evasion) this.traitsComponent.evasion = evasion
-    if (this.traitsComponent.critImmune !== this.resolvedTraits.critImmune) {
-      this.traitsComponent.critImmune = this.resolvedTraits.critImmune
-    }
-    const moveCostMul = 1 + this.resolvedTraits.moveCost - this.gearMoveRelief
-    if (this.traitsComponent.moveCostMul !== moveCostMul) {
-      this.traitsComponent.moveCostMul = moveCostMul
-    }
-    if (this.traitsComponent.evasionCrouched !== this.resolvedTraits.evasionCrouched) {
-      this.traitsComponent.evasionCrouched = this.resolvedTraits.evasionCrouched
-    }
-    if (this.traitsComponent.damageTaken !== this.resolvedTraits.damageTaken) {
-      this.traitsComponent.damageTaken = this.resolvedTraits.damageTaken
-    }
-    if (this.traitsComponent.unreadable !== this.resolvedTraits.unreadable) {
-      this.traitsComponent.unreadable = this.resolvedTraits.unreadable
-    }
-    if (this.traitsComponent.bleedImmune !== this.resolvedTraits.bleedImmune) {
-      this.traitsComponent.bleedImmune = this.resolvedTraits.bleedImmune
-    }
+    // Only the unfavourable share of gear's drag is Strength's to carry: kit
+    // that *helps* a unit move is not something being strong should undo.
+    const gearMoveRelief = Math.max(0, gear.moveCost) * (derived.gearRelief / 100)
+    const gearApRelief = Math.round(-Math.min(0, gear.maxAp) * (derived.gearRelief / 100))
+
+    const traits = this.traitsComponent
+    traits.evasion = Math.max(0, derived.evasion + resolved.evasion)
+    traits.critImmune = resolved.critImmune
+    traits.moveCostMul = 1 + resolved.moveCost - gearMoveRelief
+    traits.evasionCrouched = resolved.evasionCrouched
+    traits.damageTaken = resolved.damageTaken
+    traits.unreadable = resolved.unreadable
+    traits.bleedImmune = resolved.bleedImmune
+    traits.accuracy = resolved.accuracy
+    traits.accuracyCrouched = resolved.accuracyCrouched
+    traits.rangeFalloff = resolved.rangeFalloff
+    traits.silenced = resolved.silenced
+    traits.critChance = resolved.critChance
+    traits.critMultiplier = resolved.critMultiplier
+    traits.gearDrag = gear.moveCost > 0
 
     // Trait ceilings sit on top of the sheet's own, and a unit at full health
     // keeps being at full health when the source of the lift changes.
-    const maxHp = this.derived.maxHp + this.resolvedTraits.maxHp
+    const maxHp = derived.maxHp + resolved.maxHp
     if (this.health.maxHp !== maxHp) {
       const wasFull = this.health.hp >= this.health.maxHp
       this.health.maxHp = maxHp
       this.health.hp = wasFull ? maxHp : Math.min(this.health.hp, maxHp)
     }
-    const maxArmor = RULES.maxArmor + this.resolvedTraits.armor
+    const maxArmor = RULES.maxArmor + resolved.armor
     if (this.armorComponent.maxArmor !== maxArmor) {
       const wasFull = this.armorComponent.armor >= this.armorComponent.maxArmor
       this.armorComponent.maxArmor = maxArmor
@@ -285,30 +274,13 @@ export class Soldier {
         : Math.min(this.armorComponent.armor, maxArmor)
     }
 
-    const fatigueApPenalty = FATIGUE.apPerStep * Math.max(0, this.fatigue - 1)
-    const maxAp = this.derived.maxAp + this.resolvedTraits.maxAp + this.gearApRelief - fatigueApPenalty
+    const fatigueApPenalty = FATIGUE.apPerStep * Math.max(0, fatigue - 1)
+    const maxAp = derived.maxAp + resolved.maxAp + gearApRelief - fatigueApPenalty
     if (this.actionPoints.maxAp !== maxAp) {
       const wasFull = this.actionPoints.ap >= this.actionPoints.maxAp
       this.actionPoints.maxAp = maxAp
       this.actionPoints.ap = wasFull ? maxAp : Math.min(this.actionPoints.ap, maxAp)
     }
-  }
-
-  /**
-   * Adopt the sheet its own peer rolled for this soldier.
-   *
-   * Used on the enemy squad when the peer's sheets arrive in the handshake:
-   * this side rolled placeholders so the match could be built, and these are
-   * the real people. Called before the first turn, so resetting to the new
-   * ceilings is the right thing rather than a mid-match heal.
-   */
-  adoptSheet(sheet: CharacterSheet): void {
-    this.sheet = sheet
-    this.derived = derive(sheet)
-    this.stampGrenades()
-    this.refreshTraits()
-    this.health.hp = this.health.maxHp
-    this.actionPoints.ap = this.actionPoints.maxAp
   }
 
   /**
@@ -336,24 +308,9 @@ export class Soldier {
     }
   }
 
-  /**
-   * How much of gear's drag this soldier's shoulders take.
-   *
-   * Only the unfavourable share: kit that *helps* a unit move is not something
-   * being strong should undo, so a negative gear `moveCost` is left alone.
-   */
-  private get gearMoveRelief(): number {
-    return Math.max(0, this.gearTraits.moveCost) * (this.derived.gearRelief / 100)
-  }
-
-  /** The same allowance spent on the action points heavy kit costs. */
-  private get gearApRelief(): number {
-    return Math.round(-Math.min(0, this.gearTraits.maxAp) * (this.derived.gearRelief / 100))
-  }
-
-  /** What gear alone is doing to this unit, before Strength argues with it. */
-  get gearOnlyTraits(): ResolvedTraits {
-    return this.gearTraits
+  /** True when carried gear drags on this unit: what Strength learns from. */
+  get gearDrag(): boolean {
+    return this.traitsComponent.gearDrag
   }
 
   /** Percent each utility discipline adds to what it governs. */
@@ -384,23 +341,18 @@ export class Soldier {
     return 1 + this.derived.hearing / 100
   }
 
-  /** Every trait in force, from the sheet and from the pouch. */
-  get traits(): ResolvedTraits {
-    return this.resolvedTraits
-  }
-
   /**
    * Accuracy this soldier adds with the weapon in their hands: what the sheet
    * says about that class, plus anything a trait adds to every shot.
    */
   get proficiency(): number {
-    const braced = this.isCrouching ? this.resolvedTraits.accuracyCrouched : 0
-    return this.sheet.proficiency[this.weaponId] + this.resolvedTraits.accuracy + braced
+    const braced = this.isCrouching ? this.traitsComponent.accuracyCrouched : 0
+    return this.sheet.proficiency[this.weaponId] + this.traitsComponent.accuracy + braced
   }
 
   /** Extra fraction on the weapon's range falloff, from carried gear. */
   get rangeFalloff(): number {
-    return this.resolvedTraits.rangeFalloff
+    return this.traitsComponent.rangeFalloff
   }
 
   /**
@@ -413,14 +365,9 @@ export class Soldier {
     return this.traitsComponent.damageTaken
   }
 
-  /**
-   * True when firing does not give this unit's position away.
-   *
-   * Read from the local fold, not the component: it governs what *this* unit's
-   * own shot does, and a shot is always resolved by the side that owns it.
-   */
+  /** True when firing does not give this unit's position away. */
   get silenced(): boolean {
-    return this.resolvedTraits.silenced
+    return this.traitsComponent.silenced
   }
 
   /**
@@ -491,12 +438,12 @@ export class Soldier {
 
   /** Percentage points this soldier's traits add to its own crit chance. */
   get critChanceBonus(): number {
-    return this.resolvedTraits.critChance
+    return this.traitsComponent.critChance
   }
 
   /** What its traits add to the multiplier its own crits apply. */
   get critMultiplierBonus(): number {
-    return this.resolvedTraits.critMultiplier
+    return this.traitsComponent.critMultiplier
   }
 
   // --- component-backed state -----------------------------------------------
@@ -589,11 +536,11 @@ export class Soldier {
   }
   /** What this soldier trained for; refolds traits, since a role can grant one. */
   get role(): RoleId {
-    return this._role
+    return this.character.role
   }
   set role(value: RoleId) {
-    if (this._role === value) return
-    this._role = value
+    if (this.character.role === value) return
+    this.character.role = value
     this.refreshTraits()
   }
   get meleeSkill(): number {

@@ -44,6 +44,7 @@ const place = { lat: 48.137, lng: 11.575 }
 
 function contactFor(player: Player, over: Partial<EncounterContact> = {}): EncounterContact {
   return {
+    roomId: crypto.randomUUID(),
     player,
     squadId: `squad-${player.id}`,
     trip: 'trip',
@@ -498,7 +499,7 @@ describe('a fight found for a player who is online', () => {
     await w.clock.advance(GRACE - 1)
 
     const back = await connect(w.lobby, null, { kind: 'resume', roomId, seatKey: seated.seatKey! })
-    expect(back.of('seated')[0]).toMatchObject({ roomId, faction: Faction.Blue })
+    expect(back.seats[0]).toMatchObject({ roomId, faction: Faction.Blue })
     await w.clock.advance(GRACE * 2)
     expect(w.lobby.room(roomId)!.controlOf(Faction.Blue)).toBe('player')
     expect(w.logs.filter((line) => line.includes('the AI takes'))).toEqual([])
@@ -619,7 +620,7 @@ describe('a fight that is passed by', () => {
     const w = await world()
     await w.enlist(ADA)
     const ada = await connect(w.lobby, ADA, { kind: 'open' })
-    expect(ada.of('seated')).toHaveLength(1)
+    expect(ada.seats).toHaveLength(1)
 
     expect(await w.lobby.openEncounter(contactFor(ADA))).toEqual({ opened: false, passedFor: 'busy' })
     expect(w.lobby.view(null).rooms).toHaveLength(1)

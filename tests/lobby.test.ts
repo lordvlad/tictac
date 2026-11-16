@@ -32,6 +32,8 @@ async function harness() {
     rooms: persistence.rooms,
     log: () => {},
     graceMs: 5_000,
+    // Every match is opened from the one recording, whose header names its seed.
+    mapSeed: () => RECORDING.header.seed,
     clock: {
       now: WALL_CLOCK.now,
       schedule: (fn, ms) => {
@@ -120,22 +122,27 @@ describe('Taking a seat', () => {
     const watcher = await connect(lobby, null, { kind: 'watch', roomId })
     const red = await connect(lobby, BO, { kind: 'join', roomId })
 
-    const seated = { type: 'seated' as const, roomId, redirected: false, seatKey: expect.any(String) }
-    expect(blue.of('seated')).toEqual([{ ...seated, faction: Faction.Blue, phase: 'waiting' }])
-    expect(red.of('seated')).toEqual([{ ...seated, faction: Faction.Red, phase: 'deploying' }])
+    const seated = { roomId, redirected: false, seatKey: expect.any(String) }
+    expect(blue.seats).toEqual([{ ...seated, faction: Faction.Blue, phase: 'waiting' }])
+    expect(red.seats).toEqual([{ ...seated, faction: Faction.Red, phase: 'deploying' }])
     // A seat's key is its own; a spectator has no seat to take back.
     expect(keyOf(red)).not.toBe(keyOf(blue))
-    expect(watcher.of('seated')).toEqual([{ ...seated, faction: null, phase: 'waiting', seatKey: null }])
+    expect(watcher.seats).toEqual([{ ...seated, faction: null, phase: 'waiting', seatKey: null }])
 
     // The joiner's `hello` reaches the host, whose answer reaches the joiner:
     // the same handshake two peers have, with the server in the middle.
     red.send({ type: 'hello', ...MY_VERSION })
-    blue.send({ type: 'init', seed: 7, seedLabel: 'seven', ...MY_VERSION })
     blue.send({ type: 'ready', squad: [] })
     expect(blue.of('hello')).toHaveLength(1)
-    expect(red.of('init')).toEqual([{ type: 'init', seed: 7, seedLabel: 'seven', ...MY_VERSION }])
     expect(red.of('ready')).toHaveLength(1)
-    expect(watcher.received.map((m) => m.type)).toEqual(['seated'])
+    // The seed is the room's to issue: both seats are told it when the second
+    // sits down, and an opening a window states is relayed to nobody.
+    const issued = { type: 'init' as const, seed: RECORDING.header.seed, seedLabel: String(RECORDING.header.seed), ...MY_VERSION }
+    expect(blue.of('init')).toEqual([issued])
+    expect(red.of('init')).toEqual([issued])
+    blue.send({ type: 'init', seed: 7, seedLabel: 'seven', ...MY_VERSION })
+    expect(red.of('init')).toEqual([issued])
+    expect(watcher.received.map((m) => m.type)).toEqual([])
   })
 
   test('a room with two players, or one that is gone, cannot be joined', async () => {
@@ -184,7 +191,7 @@ describe('Watching', () => {
 
     // One who arrives later is handed the log so far, straight after its seat.
     const late = await connect(lobby, null, { kind: 'watch', roomId })
-    expect(late.received.map((m) => m.type)).toEqual(['seated', 'log'])
+    expect(late.received.map((m) => m.type)).toEqual(['log'])
     expect(late.of('log')[0]!.events.map((event) => event.seq)).toEqual([0, 1])
   })
 })
@@ -203,9 +210,8 @@ describe('One match per player', () => {
       { kind: 'watch', roomId: roomOf(other) } as const,
     ]) {
       const elsewhere = await connect(lobby, BO, intent)
-      expect(elsewhere.of('seated')).toEqual([
+      expect(elsewhere.seats).toEqual([
         {
-          type: 'seated',
           roomId,
           faction: Faction.Red,
           phase: 'playing',
@@ -221,7 +227,7 @@ describe('One match per player', () => {
       spectators: 0,
     })
     expect(lobby.view(null).rooms).toHaveLength(2)
-    expect(red.of('abort')[0]?.reason).toBe(WINDOW)
+    expect(red.ended).toEqual([{ reason: WINDOW, reconnect: 'never' }])
   })
 })
 
@@ -236,12 +242,12 @@ describe('One live window per player', () => {
     const window = await connect(lobby, ADA, { kind: 'resume' })
 
     // The old window is told why, and closed.
-    expect(blue.of('abort')).toEqual([{ type: 'abort', reason: WINDOW, side: null }])
+    expect(blue.ended).toEqual([{ reason: WINDOW, reconnect: 'never' }])
+    expect(blue.of('abort')).toEqual([])
     expect(blue.closed).toBe(true)
     // The new one has the seat and the match so far.
-    expect(window.of('seated')).toEqual([
+    expect(window.seats).toEqual([
       {
-        type: 'seated',
         roomId,
         faction: Faction.Blue,
         phase: 'playing',
@@ -276,13 +282,13 @@ describe('One live window per player', () => {
 
     const window = await connect(lobby, ADA, { kind: 'open' })
 
-    expect(blue.of('abort')).toEqual([{ type: 'abort', reason: WINDOW, side: null }])
+    expect(blue.ended).toEqual([{ reason: WINDOW, reconnect: 'never' }])
     expect(blue.closed).toBe(true)
     // Everybody else in the room is told who left, and the room is over.
     expect(red.of('abort')).toEqual([{ type: 'abort', reason: 'Ada left before the match began.', side: null }])
     expect(watcher.of('abort')[0]?.reason).toBe('Ada left before the match began.')
     // The player was free before the new window's intent was weighed: it got a room of its own.
-    const fresh = window.of('seated')[0]!
+    const fresh = window.seats[0]!
     expect(fresh).toMatchObject({ faction: Faction.Blue, phase: 'waiting', redirected: false })
     expect(fresh.roomId).not.toBe(roomId)
     expect(lobby.view(null).rooms.map((room) => room.id)).toEqual([fresh.roomId])
@@ -297,8 +303,8 @@ describe('One live window per player', () => {
 
     const second = await connect(lobby, CY, { kind: 'watch', roomId })
 
-    expect(first.of('abort')[0]?.reason).toBe(WINDOW)
-    expect(second.of('seated')[0]).toMatchObject({ roomId, faction: null })
+    expect(first.ended).toEqual([{ reason: WINDOW, reconnect: 'never' }])
+    expect(second.seats[0]).toMatchObject({ roomId, faction: null })
     expect(lobby.view(null).rooms[0]!.spectators).toBe(1)
   })
 
@@ -378,7 +384,7 @@ describe('Leaving', () => {
     expect(lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'playing', control: 'player', joinBy: null, against: null })
 
     const back = await connect(lobby, ADA, { kind: 'resume' })
-    expect(back.of('seated')[0]).toMatchObject({ roomId, faction: Faction.Blue, redirected: false })
+    expect(back.seats[0]).toMatchObject({ roomId, faction: Faction.Blue, redirected: false })
     expect(back.of('log')[0]!.events).toHaveLength(4)
 
     // The hold is called off: running the clock out now ends nothing.
@@ -435,7 +441,7 @@ describe('Taking a seat back with its key', () => {
       ),
     )
 
-    const seated = back.map((socket) => socket.of('seated')[0])
+    const seated = back.map((socket) => socket.seats[0])
     // The same seat, in the phase it was left in, under the same key.
     expect(seated.map((frame) => [frame?.roomId, frame?.faction, frame?.phase, frame?.seatKey])).toEqual([
       [roomOf(waiting), Faction.Blue, 'waiting', keyOf(waiting)],
@@ -465,20 +471,22 @@ describe('Taking a seat back with its key', () => {
     // No ticket: the key is the proof, and the socket becomes Ada's.
     const back = await answered(await connect(lobby, null, { kind: 'resume', roomId, seatKey: keyOf(blue) }))
 
-    expect(back.of('seated')[0]).toMatchObject({ roomId, faction: Faction.Blue, phase: 'deploying' })
+    expect(back.seats[0]).toMatchObject({ roomId, faction: Faction.Blue, phase: 'deploying' })
     expect(red.of('abort')).toEqual([])
     expect(lobby.view(ADA).you).toEqual({ roomId, faction: Faction.Blue, phase: 'deploying', control: 'player', joinBy: null, against: null })
-    // The reconnected window restates its opening, which the other seat hears
-    // as it heard the first one.
+    // The room says its seed again to the seat that came back — a seat being
+    // set up has nothing else to be told — and does not trouble the other.
+    expect(back.of('init')).toEqual([
+      { type: 'init', seed: RECORDING.header.seed, seedLabel: String(RECORDING.header.seed), ...MY_VERSION },
+    ])
     back.send({ type: 'hello', ...MY_VERSION })
-    back.send({ type: 'init', seed: 7, seedLabel: 'seven', ...MY_VERSION })
     expect(red.of('hello')).toHaveLength(1)
-    expect(red.of('init')).toEqual([{ type: 'init', seed: 7, seedLabel: 'seven', ...MY_VERSION }])
+    expect(red.of('init')).toHaveLength(1)
 
     // A new window of Ada's, by contrast, is a new window — of the socket
     // that just reconnected, which is now hers.
     await connect(lobby, ADA, { kind: 'open' })
-    expect(back.of('abort')[0]?.reason).toBe(WINDOW)
+    expect(back.ended).toEqual([{ reason: WINDOW, reconnect: 'never' }])
     expect(red.of('abort')[0]?.reason).toBe('Ada left before the match began.')
   })
 
@@ -491,7 +499,7 @@ describe('Taking a seat back with its key', () => {
 
     const back = await answered(await connect(lobby, null, { kind: 'resume', roomId, seatKey: keyOf(red) }))
 
-    expect(back.of('seated')[0]).toMatchObject({ faction: Faction.Red, phase: 'playing' })
+    expect(back.seats[0]).toMatchObject({ faction: Faction.Red, phase: 'playing' })
     expect(red.of('abort')[0]?.reason).toBe('This seat was taken back by another connection.')
     // Out of the room, still on the server: the socket is the window, not the seat.
     expect(red.closed).toBe(false)

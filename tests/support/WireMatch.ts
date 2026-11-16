@@ -11,15 +11,16 @@ import { SimMatch, type MatchOutcome, type MatchSetup } from '../../src/sim/SimM
  *
  * `SimMatch` already plays a whole match deterministically, both sides, in a
  * few milliseconds — which is also the one thing a browser-driven two-client
- * test cannot give: a long, decisive match, on demand, at a chosen seed. This
- * reuses that: play it headless first, exactly as `simulate` does, then
- * re-issue the very same commands over two real `NetworkManager`s connected
- * to a referee, one per side, the way two real clients would. It proves a
- * referee — any referee reachable at `url`, `Bun.serve` or a Cloudflare
- * Durable Object alike — reproduces the same match end to end, without
- * needing two browsers to do it.
+ * test cannot give: a long, decisive match, on demand. The seed is not ours
+ * to choose on a server (the room issues it), so this takes the room, learns
+ * the seed it was issued, and only then plays the match headless, exactly as
+ * `simulate` does, with that seed. It then re-issues the very same commands
+ * over two real `NetworkManager`s connected to a referee, one per side, the
+ * way two real clients would. It proves a referee — any referee reachable at
+ * `url`, `Bun.serve` or a Cloudflare Durable Object alike — reproduces the
+ * same match end to end, without needing two browsers to do it.
  */
-export interface WireMatchOptions extends MatchSetup {
+export interface WireMatchOptions extends Omit<MatchSetup, 'seed'> {
   /** A referee to play the match through: `ws://…` or `wss://…`. */
   url: string
 }
@@ -73,10 +74,6 @@ function onceMessage(manager: NetworkManager): Promise<NetworkMessage> {
  */
 export async function simulateOverWire(options: WireMatchOptions): Promise<WireMatchResult> {
   const { url, ...setup } = options
-  const sim = new SimMatch({ ...setup, record: true })
-  const outcome = sim.run()
-  const recording = sim.recording
-  if (!recording) throw new Error('simulateOverWire needs a recording; SimMatch was not asked to keep one')
 
   // Two windows, each with its own connection to the server: one socket each,
   // as a browser has. Tokens are held in memory — nobody signs in.
@@ -86,17 +83,23 @@ export async function simulateOverWire(options: WireMatchOptions): Promise<WireM
   const joiner = new NetworkManager()
 
   let roomId: string
+  let sim: SimMatch
+  let outcome: MatchOutcome
+  let recording: CombatRecording | null
   try {
     // Seated before the other connects, so the room exists to be joined.
     roomId = (await host.enterRoom(hostLine, { kind: 'open' })).roomId
     await joiner.enterRoom(joinerLine, { kind: 'join', roomId })
-    // The joiner says hello into the room; the host hears it and states the
-    // opening it announced (`restate`) — the same exchange whichever of the
-    // two speaks first.
-    host.hostMatch(recording.header.seed, recording.header.seedLabel)
-    const opening = await joiner.joinMatch()
-    if (opening.seed !== recording.header.seed) {
-      throw new Error(`the referee opened seed ${opening.seed}, not ${recording.header.seed}`)
+    // The room issues the seed to both seats once the second one is taken.
+    // The joiner says hello into the room as well, so the host restates what
+    // it deployed — the same exchange whichever of the two speaks first.
+    const [{ seed, seedLabel }] = await Promise.all([host.awaitOpening(), joiner.joinMatch()])
+    sim = new SimMatch({ ...setup, seed, record: true })
+    outcome = sim.run()
+    recording = sim.recording
+    if (!recording) throw new Error('simulateOverWire needs a recording; SimMatch was not asked to keep one')
+    if (recording.header.seedLabel !== seedLabel) {
+      throw new Error(`the referee issued seed ${seedLabel}, but the match was recorded as ${recording.header.seedLabel}`)
     }
 
     host.send({ type: 'ready', squad: recording.header.squads[Faction.Blue] })

@@ -108,5 +108,5 @@ chain above depends on it, and no milestone's Definition of Done names it.
   ([RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md)) for replacing `[ITEM-045]`'s
   single instance once the shared world exists and needs more than one Durable Object to hold
   it. Gated on the shared world itself; M5 builds its first piece (a squad's durable position
-  and the `ownerOf(squad)` seam), but leaves nothing to shard until there is load.
+  and the `RegionDirectory` seam), but leaves nothing to shard until there is load.
 

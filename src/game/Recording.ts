@@ -123,7 +123,6 @@ const SESSION_COMMANDS: Partial<Record<NetworkMessage['type'], true>> = {
   digest: true,
   matchHeader: true,
   log: true,
-  seated: true,
   abort: true,
 }
 

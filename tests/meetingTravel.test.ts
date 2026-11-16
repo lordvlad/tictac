@@ -8,8 +8,10 @@ import type { JsonRpcNotification } from '../src/game/JsonRpc'
 import { RPC_ERRORS, type Squad } from '../src/game/Rpc'
 import type { MeetingContact, MeetingOpened, OpenMeeting } from '../src/server/EncounterPort'
 import { Journeys } from '../src/server/Journeys'
+import { regionDirectory } from '../src/server/Owner'
 import type { Persistence } from '../src/server/Persistence'
 import { Schedule } from '../src/server/Schedule'
+import { seedContact } from './support/encounters'
 import { freshPersistence } from './support/db'
 import { registerAt, rpcServer, type RpcServer, type Window } from './support/rpcServer'
 
@@ -440,7 +442,9 @@ async function restarted(persistence: Persistence, clock: { now: number }, open:
   const armed: (number | null)[] = []
   const schedule = new Schedule({ now: () => clock.now, arm: (at) => armed.push(at) })
   const journeys = new Journeys({
+    directory: regionDirectory({ owners: persistence.squads }),
     squads: persistence.squads,
+    accounts: persistence.accounts,
     encounters: persistence.encounters,
     schedule,
     clock: { now: () => clock.now, schedule: WALL_CLOCK.schedule },
@@ -504,7 +508,7 @@ describe('A server that restarts', () => {
       [w.ada, w.bo],
       [w.bo, w.ada],
     ] as const) {
-      await w.persistence.encounters.record({
+      await seedContact(w.persistence.encounters, {
         squadId: who.squadId,
         playerId: who.id,
         trip: `${pair}@${planned.at}`,

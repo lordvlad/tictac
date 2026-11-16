@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { Playback } from '../src/game/Playback'
 import type { CombatRecording } from '../src/game/Recording'
 import type { StateDigest } from '../src/game/StateDigest'
-import type { Moment } from '../src/game/Rewind'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'
@@ -23,32 +23,42 @@ function matchThatBreaksGlass(): CombatRecording {
   throw new Error('no match in 60 broke a window')
 }
 
+/** A headless replay: the host applies each event to completion, and nothing is ever animating. */
+function playbackOf(host: MatchHost, recording: CombatRecording): Playback {
+  return new Playback({
+    recording,
+    apply: (command) => host.apply(command),
+    busy: () => false,
+    match: host.rewindable,
+    afterRestore: () => {},
+  })
+}
+
 describe('Stepping a replay back', () => {
   test('going back puts the match back, and playing on again reaches the match the file records', () => {
     const recording = matchThatBreaksGlass()
     const { events } = recording
     const straight = replay(recording).digest
 
-    // Played through once, keeping the moment before every event, the way
-    // playback does as it goes — and its fingerprint, to check a rewind by.
+    // Played through once, keeping the fingerprint before every event, to
+    // check each step back by.
     const host = new MatchHost(recording.header)
-    const moments: Moment[] = []
+    const playback = playbackOf(host, recording)
     const digests: StateDigest[] = []
-    for (const { command } of events) {
-      moments.push(host.moment())
+    for (let i = 0; i < events.length; i++) {
       digests.push(host.digest())
-      host.apply(command)
+      playback.stepForward()
     }
     expect(host.digest().total).toBe(straight.total)
 
     // Back to the middle, and to the very start. The match there is the match
     // that was there — windows unbroken included — and playing on has to roll
     // the same dice as the first time.
-    for (const from of [events.length >> 1, 0]) {
-      host.rewind(moments[from]!)
-      expect({ from, digest: host.digest() }).toEqual({ from, digest: digests[from]! })
-      for (const { command } of events.slice(from)) host.apply(command)
-      expect({ from, digest: host.digest() }).toEqual({ from, digest: straight })
+    for (const to of [events.length >> 1, 0]) {
+      while (playback.index > to) playback.stepBackward()
+      expect({ to, digest: host.digest() }).toEqual({ to, digest: digests[to]! })
+      while (!playback.finished) playback.stepForward()
+      expect({ to, digest: host.digest() }).toEqual({ to, digest: straight })
     }
   })
 
@@ -57,21 +67,34 @@ describe('Stepping a replay back', () => {
     const host = new MatchHost(header)
     const thrower = host.squads.byFaction[Faction.Blue][0]!
     thrower.grenades[GrenadeId.Incendiary] = 1
-    const before = host.moment()
     const untouched = host.digest()
+    const recording: CombatRecording = {
+      header,
+      events: [
+        {
+          seq: 0,
+          turn: 1,
+          faction: Faction.Blue,
+          command: {
+            type: 'throwGrenade',
+            shooterFaction: Faction.Blue,
+            shooterIndex: 0,
+            kind: GrenadeId.Incendiary,
+            targetTile: { x: thrower.tile.x, y: thrower.tile.y + 3 },
+            targetLevel: 0,
+          },
+        },
+        { seq: 1, turn: 1, faction: Faction.Blue, command: { type: 'endTurn', faction: Faction.Blue } },
+      ],
+    }
+    const playback = playbackOf(host, recording)
 
-    host.apply({
-      type: 'throwGrenade',
-      shooterFaction: Faction.Blue,
-      shooterIndex: 0,
-      kind: GrenadeId.Incendiary,
-      targetTile: { x: thrower.tile.x, y: thrower.tile.y + 3 },
-      targetLevel: 0,
-    })
-    host.apply({ type: 'endTurn', faction: Faction.Blue })
+    playback.stepForward()
+    playback.stepForward()
     expect(host.digest().terrain).not.toBe(untouched.terrain)
 
-    host.rewind(before)
+    playback.stepBackward()
+    playback.stepBackward()
     expect(host.digest()).toEqual(untouched)
     expect(host.grid.fire.every((turns) => turns === 0)).toBe(true)
   })

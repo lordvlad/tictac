@@ -1,26 +1,33 @@
 import type { LatLng } from '../core/Travel'
-import { positionAt } from '../core/Travel'
-import type { Squad } from '../game/Rpc'
 
 /**
- * Which match server owns what (RFC-0002 §5 / tictac-dwq):
- * The spatial partition registry that routes squads and connections
- * across region-sharded Durable Objects.
+ * Which region owns what (RFC-0002 §3–§5, tictac-dwq).
  *
- * In single-instance mode, everything routes to `MATCH_SERVER = 'singleton'`.
- * In region-sharded mode, regions are defined by bounding boxes or polygons
- * mapping coordinates to Durable Object instance names.
+ * Two different questions, answered by two different things:
+ *
+ * - **Where does a place go?** A pure function of the partition table: the
+ *   region whose box holds the point. It decides where a crossing is handed
+ *   to and where a new connection is first routed. {@link RegionMap}.
+ * - **Who keeps this squad?** A durable fact, written when a handover commits
+ *   (`Squads.setOwner`) and read back here — never recomputed from where the
+ *   squad happens to stand, which moves every millisecond and would flip a
+ *   squad's keeper in the middle of a handover. {@link RegionDirectory}.
+ *
+ * Nothing here is module state: a host builds its directory from its config
+ * and hands it to everything that asks (`Journeys`, `Sessions`,
+ * `HandoverCoordinator`, the Worker's router), so two servers in one process
+ * can disagree about the world.
  */
 
-/** The default Durable Object instance name. */
-export const MATCH_SERVER = 'singleton'
+/** The one region every deployment has today, and the owner every squad row defaults to (migration 11). */
+export const SINGLETON_REGION = 'singleton'
 
 export interface RegionPartition {
   /** Canonical region ID, e.g. "region-west" or "region-east". */
   id: string
-  /** The Durable Object instance name for this partition. */
+  /** The Durable Object instance name for this partition: what an owner column holds. */
   durableObjectName: string
-  /** Bounding box [minLat, maxLat, minLng, maxLng] */
+  /** The box this region covers. A partition without one covers everything not claimed by another. */
   bounds?: {
     minLat: number
     maxLat: number
@@ -29,52 +36,58 @@ export interface RegionPartition {
   }
 }
 
-/** Active spatial partition table. Defaults to a single world partition. */
-let partitions: RegionPartition[] = [
-  {
-    id: 'singleton',
-    durableObjectName: MATCH_SERVER,
-  },
-]
+/** The deployed partition table: one region covering the world, until there is load to shard (`tictac-dwq`). */
+export const REGIONS: readonly RegionPartition[] = [{ id: SINGLETON_REGION, durableObjectName: SINGLETON_REGION }]
 
-/** Override or configure region partitions (used in tests and multi-region deployment). */
-export function setPartitions(configured: readonly RegionPartition[]): void {
-  partitions = [...configured]
+/** The partition table asked about places. Everything the Worker needs, which has no database. */
+export interface RegionMap {
+  /** The Durable Object that owns a world coordinate. A point outside every box goes to the first partition. */
+  ownerOfPlace(place: LatLng): string
 }
 
-/** Reset partitions to default single-region mode. */
-export function resetPartitions(): void {
-  partitions = [{ id: 'singleton', durableObjectName: MATCH_SERVER }]
+/** What a region directory reads a squad's committed keeper from: the squads this region's store holds. */
+export interface SquadOwners {
+  /** The region that keeps `squadId`, or null for a squad the store does not hold. */
+  ownerOf(squadId: string): Promise<string | null>
 }
 
-/** Get all currently registered region partitions. */
-export function getPartitions(): readonly RegionPartition[] {
-  return partitions
+export interface RegionDirectory extends RegionMap {
+  /** This host's own region name: what `ownerOfSquad` is compared to before acting on a squad. */
+  readonly self: string
+  /** The region that keeps `squadId` as last committed, or null when this host holds no such squad. */
+  ownerOfSquad(squadId: string): Promise<string | null>
 }
 
-/** Find which Durable Object owns a specific world coordinate. */
-export function ownerOfCoord(coord: LatLng): string {
-  for (const part of partitions) {
-    if (!part.bounds) return part.durableObjectName
-    const { minLat, maxLat, minLng, maxLng } = part.bounds
-    if (coord.lat >= minLat && coord.lat <= maxLat && coord.lng >= minLng && coord.lng <= maxLng) {
-      return part.durableObjectName
-    }
+/** A place → region lookup over `partitions`, which must name at least one region. */
+export function regionMap(partitions: readonly RegionPartition[]): RegionMap {
+  const table = [...partitions]
+  const fallback = table[0]
+  if (!fallback) throw new Error('a region map needs at least one partition')
+  return {
+    ownerOfPlace({ lat, lng }) {
+      for (const part of table) {
+        if (!part.bounds) return part.durableObjectName
+        const { minLat, maxLat, minLng, maxLng } = part.bounds
+        if (lat >= minLat && lat <= maxLat && lng >= minLng && lng <= maxLng) return part.durableObjectName
+      }
+      return fallback.durableObjectName
+    },
   }
-  return partitions[0]?.durableObjectName ?? MATCH_SERVER
 }
 
-/**
- * The match server that owns `squad`:
- * Inspects the squad's current position (or fallback resting position) against
- * the region partition table.
- */
-export function ownerOf(squad: { waypoints?: Squad['waypoints']; id: string }, now: number): string {
-  if (!squad.waypoints || squad.waypoints.length === 0) return partitions[0]?.durableObjectName ?? MATCH_SERVER
-  try {
-    const state = positionAt(squad.waypoints, now)
-    return ownerOfCoord(state.position)
-  } catch {
-    return partitions[0]?.durableObjectName ?? MATCH_SERVER
+export interface RegionDirectoryOptions {
+  owners: SquadOwners
+  /** The partition table; the deployed one unless a test says otherwise. */
+  partitions?: readonly RegionPartition[]
+  /** The region this host is; `SINGLETON_REGION` unless a test or a region deployment says otherwise. */
+  self?: string
+}
+
+export function regionDirectory(options: RegionDirectoryOptions): RegionDirectory {
+  const { owners } = options
+  return {
+    self: options.self ?? SINGLETON_REGION,
+    ...regionMap(options.partitions ?? REGIONS),
+    ownerOfSquad: (squadId) => owners.ownerOf(squadId),
   }
 }

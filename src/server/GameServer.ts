@@ -3,6 +3,7 @@ import type { ServerClock } from './Clock'
 import { Journeys } from './Journeys'
 import { Lobby } from './Lobby'
 import type { Persistence } from './Persistence'
+import { type RegionPartition, regionDirectory, type RegionDirectory } from './Owner'
 import { Schedule } from './Schedule'
 import { Sessions } from './Session'
 import { socketTransport, type ServerSocket } from './SocketTransport'
@@ -30,6 +31,7 @@ export interface GameServer {
   url: string
   lobby: Lobby
   journeys: Journeys
+  directory: RegionDirectory
   sessions: Sessions
   stop(): Promise<void>
 }
@@ -52,6 +54,10 @@ export interface GameServerOptions {
    * switch, read at every check; on unless this says otherwise.
    */
   playerEncounters?: () => boolean
+  /** The partition table this host routes places by; the deployed one (`REGIONS`) unless set. */
+  regions?: readonly RegionPartition[]
+  /** The region this host is, as an owner column names it; the singleton unless set. */
+  self?: string
 }
 
 export async function startGameServer(options: GameServerOptions): Promise<GameServer> {
@@ -99,8 +105,11 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
     },
     (message) => log(`[schedule] ${message}`),
   )
+  const directory = regionDirectory({ owners: persistence.squads, partitions: options.regions, self: options.self })
   const journeys = new Journeys({
+    directory,
     squads: persistence.squads,
+    accounts: persistence.accounts,
     encounters: persistence.encounters,
     schedule,
     clock,
@@ -112,7 +121,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
   })
   await journeys.restore()
 
-  const sessions = new Sessions({ lobby, persistence, journeys, clock, log })
+  const sessions = new Sessions({ lobby, persistence, journeys, directory, clock, log })
   const sockets = new WeakMap<object, ServerSocket>()
   // Parity with the Worker: a `serve:match` on its own domain can have its
   // client hosted on another site only if it publishes this too.
@@ -161,6 +170,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
     url: String(server.url),
     lobby,
     journeys,
+    directory,
     sessions,
     /** Stops serving. Rooms still live stay in the database for the next server to restore; the database is the caller's. */
     stop: async () => {

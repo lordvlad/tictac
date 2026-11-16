@@ -1,7 +1,7 @@
 import { ENCOUNTER, Faction, SQUAD_SIZE } from '../config'
 import { dealAliens } from '../core/Encounters'
 import { toBase64Url } from '../game/Base64Url'
-import { RpcMethods, type JsonRpcNotification } from '../game/JsonRpc'
+import type { JsonRpcFrame, JsonRpcNotification } from '../game/JsonRpc'
 import { defaultLoadout, type Deployment } from '../core/Loadout'
 import type { LobbyRoom, LobbyView, Seated, ServerIntent } from '../game/Lobby'
 import { RECORDING_VERSION, type RecordingHeader } from '../game/Recording'
@@ -12,6 +12,7 @@ import {
   type RpcErrorCode,
   type RpcPush,
   type RpcPushes,
+  type SessionEnded,
 } from '../game/Rpc'
 import { MY_VERSION, SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
 import type { ServerClock } from './Clock'
@@ -97,7 +98,11 @@ export interface LobbyOptions {
   version?: PeerVersion
   /** The host's one clock: `clock/now`, a seat's deadline, and the timers a grace period and a join window run on. */
   clock: ServerClock
-  /** The seed of a fight's map: system randomness, unless a test needs the fight to be the same one twice. */
+  /**
+   * The seed of every match this server referees, from one source: a fight it
+   * composes, and a player match's room on leaving `waiting`. System
+   * randomness, unless a test needs the match to be the same one twice.
+   */
   mapSeed?: () => number
   /** Called when a player takes a fight the server kept for them, before the AI did (`room`'s id, and the player). */
   onEncounterTaken?: (roomId: string, playerId: string) => void
@@ -124,7 +129,14 @@ const IN_A_ROOM = 'Leave the match you are in first.'
 const AI_HAS_IT = 'The AI is playing that seat now.'
 
 const LOBBY_CHANGED = 'tictac/api/lobby/changed' satisfies RpcPush
-const SESSION_REPLACED_PUSH = 'tictac/api/session/replaced' satisfies RpcPush
+const SESSION_ENDED = 'tictac/api/session/ended' satisfies RpcPush
+
+/** Told to windows when the server stops: a restart is a drop to them, and they dial back. */
+const SERVER_STOPPING = 'The match server is restarting.'
+
+function sessionEnded(ended: SessionEnded): JsonRpcFrame {
+  return { jsonrpc: '2.0', method: SESSION_ENDED, params: { ...ended } }
+}
 
 export class Lobby {
   /** The build this server runs, which opening, joining and watching require. */
@@ -169,6 +181,7 @@ export class Lobby {
       clock: this.clock,
       log: this.log,
       graceMs: options.graceMs ?? GRACE_MS,
+      mapSeed: this.mapSeed,
       onChanged: () => this.changed(),
       onOver: (room) => {
         this.sweep(room)
@@ -232,6 +245,11 @@ export class Lobby {
     const { rosters } = this
     if (!rosters) throw new Error('this lobby keeps no rosters, so there is no squad to find on the road')
     await this.idle()
+    // A fight this contact already opened — before a restart, or before the
+    // write that says so failed — is that room, not a second one. It comes
+    // before the busy check: the player's seat in it is what that would find.
+    const already = await this.store.matches.header(contact.roomId)
+    if (already) return { opened: true, roomId: contact.roomId, aliens: already.squads[Faction.Red].length, joinBy: null }
     const party = await fit(rosters, player.id)
     if (this.disposed) throw new Error('the lobby has stopped')
     // Weighed after every wait, and acted on without another: nothing may
@@ -246,7 +264,7 @@ export class Lobby {
     )
 
     const joinBy = this.joinByFor(player.id)
-    const room = new Room(this.freshId(), this.version, this.roomOptions)
+    const room = new Room(contact.roomId, this.version, this.roomOptions)
     this.rooms.set(room.id, room)
     // The player's side is theirs to take or the AI's to play, on `stand`
     // until the AI is given a standing order for fights with aliens too.
@@ -293,6 +311,8 @@ export class Lobby {
     const { rosters } = this
     if (!rosters) throw new Error('this lobby keeps no rosters, so there is no squad to meet on the road')
     await this.idle()
+    const already = await this.store.matches.header(contact.roomId)
+    if (already) return { opened: true, roomId: contact.roomId, blueJoinBy: null, redJoinBy: null }
     const [blueParty, redParty] = await Promise.all([fit(rosters, blue.player.id), fit(rosters, red.player.id)])
     if (this.disposed) throw new Error('the lobby has stopped')
     if (this.seatOf(blue.player.id) || this.seatOf(red.player.id)) return { opened: false, passedFor: 'busy' }
@@ -304,7 +324,7 @@ export class Lobby {
     )
     const blueJoinBy = this.joinByFor(blue.player.id)
     const redJoinBy = this.joinByFor(red.player.id)
-    const room = new Room(this.freshId(), this.version, this.roomOptions)
+    const room = new Room(contact.roomId, this.version, this.roomOptions)
     this.rooms.set(room.id, room)
     room.openEncounter(header, {
       [Faction.Blue]: { player: blue.player, joinBy: blueJoinBy, standing: blue.standing },
@@ -336,6 +356,7 @@ export class Lobby {
   arrive(client: Client): void {
     if (this.disposed) {
       client.gone = true
+      client.transport.send(sessionEnded({ reason: SERVER_STOPPING, reconnect: 'retry' }))
       client.transport.close()
       return
     }
@@ -343,16 +364,17 @@ export class Lobby {
   }
 
   /**
-   * Turn a socket away for good, closing it with a reason it can show.
+   * End a socket's session for good, closing it with a reason it can show and
+   * the word on whether to come back (`SessionEnded`).
    *
-   * Only the version gate does this (`Session.ts`), and a protocol-6 page
-   * whose seat cannot be taken back, which knows no other way to be told:
-   * everything asked over a socket that passed the gate is answered in-band
-   * and leaves it open.
+   * The one door every close this server chooses goes through, bar a
+   * shutdown (`dispose`): the version gate (`Session.ts`) and a newer window
+   * of the same player (`replace`). Everything asked over a socket that
+   * passed the gate is answered in-band and leaves it open.
    */
-  turnAway(client: Client, reason: string): void {
-    this.log(`turning a client away: ${reason}`)
-    client.transport.send({ jsonrpc: '2.0', method: RpcMethods.abort, params: { reason, side: null } })
+  end(client: Client, ended: SessionEnded): void {
+    this.log(`ending a session (${ended.reconnect}): ${ended.reason}`)
+    client.transport.send(sessionEnded(ended))
     this.forget(client)
     client.transport.close()
   }
@@ -489,10 +511,11 @@ export class Lobby {
    * Stop serving: every socket is closed and every hold let go, and the
    * answer resolves once every write already decided has landed.
    *
-   * Nothing is ended or written on the way out. A room still live stays live
+   * No room is ended or written on the way out. A room still live stays live
    * in the store, for the next server over the same database to `restore`;
-   * its sockets are closed without a word, because to the window at the
-   * other end this is a dropped connection, which it reconnects through.
+   * its sockets are told `session/ended` with `retry` and closed, because to
+   * the window at the other end this is a dropped connection, which it
+   * reconnects through.
    *
    * The database is not closed here: it belongs to whoever opened the
    * `Persistence`, and the lobby is one of several things reading it.
@@ -504,7 +527,10 @@ export class Lobby {
     this.disposed = true
     const rooms = [...this.rooms.values()]
     for (const room of rooms) room.dispose()
-    for (const client of this.clients) client.transport.close()
+    for (const client of this.clients) {
+      client.transport.send(sessionEnded({ reason: SERVER_STOPPING, reconnect: 'retry' }))
+      client.transport.close()
+    }
     this.clients.clear()
     this.subscribers.clear()
     this.windows.clear()
@@ -664,9 +690,7 @@ export class Lobby {
     const previous = this.windows.get(player.id)
     if (!previous || previous === client) return
     this.windows.delete(player.id)
-    previous.transport.send({ jsonrpc: '2.0', method: SESSION_REPLACED_PUSH, params: { reason: SESSION_REPLACED } })
-    this.forget(previous)
-    previous.transport.close()
+    this.end(previous, { reason: SESSION_REPLACED, reconnect: 'never' })
     this.log(`${player.name} moved to a new window`)
   }
 

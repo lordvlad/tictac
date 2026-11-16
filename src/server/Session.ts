@@ -7,10 +7,10 @@ import type { Transport } from '../game/Transport'
 import type { StandingOrder } from '../sim/Policy'
 import { SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
 import type { ServerClock } from './Clock'
-import type { HandoverCoordinator } from './Handover'
-import { HandoverCoordinator as HandoverCoordinatorImpl } from './Handover'
+import { HandoverCoordinator } from './Handover'
 import { Refusal, type Lobby } from './Lobby'
 import type { Persistence } from './Persistence'
+import type { RegionDirectory } from './Owner'
 import type { Journeys } from './Journeys'
 import type { Client } from './Room'
 import type { RosterMember } from './Rosters'
@@ -25,8 +25,8 @@ import { AuthError } from './WebAuthn'
  * once, in the order they arrived — sign in, read the roster, subscribe to
  * the lobby, enter a room and leave it again. A request turned down is an
  * error response with a reason the player can read, and the socket stays
- * open; only the gate, and a newer window of the same player
- * (`session/replaced`), close one. Frames of the match itself are
+ * open; only the gate, and a newer window of the same player, close one —
+ * each preceded by `session/ended` (`Lobby.end`). Frames of the match itself are
  * notifications, as they always were, and go to the room the socket is in.
  *
  * What a socket *is* to the rooms — its player, its seat — is the lobby's
@@ -50,6 +50,8 @@ export interface SessionsOptions {
   persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>
   /** Squads on the move: the orders a window gives. */
   journeys: Journeys
+  /** Who keeps which squad: what a handover this server starts or receives is checked against. */
+  directory: RegionDirectory
   /** Handover coordinator for cross-region transfers (RFC-0002). */
   handover?: HandoverCoordinator
   /** The host's one clock: what travel runs by (`clock/now`), and what a handover's expiry is read against. */
@@ -101,7 +103,14 @@ export class Sessions {
     this.persistence = options.persistence
     this.journeys = options.journeys
     this.clock = options.clock
-    this.handover = options.handover ?? new HandoverCoordinatorImpl({ clock: options.clock, log: options.log })
+    this.handover =
+      options.handover ??
+      new HandoverCoordinator({
+        clock: options.clock,
+        directory: options.directory,
+        squads: options.persistence.squads,
+        log: options.log,
+      })
     this.log = options.log ?? ((message) => console.info(`[session] ${message}`))
   }
 
@@ -144,7 +153,7 @@ export class Sessions {
    */
   private gate(session: Session, frame: JsonRpcNotification): void {
     const admitted = this.admission(frame.method === RpcMethods.hello ? frame.params : undefined)
-    if (typeof admitted === 'string') return this.lobby.turnAway(session.client, admitted)
+    if (typeof admitted === 'string') return this.lobby.end(session.client, { reason: admitted, reconnect: 'never' })
     session.client.version = admitted
   }
 
@@ -312,8 +321,8 @@ export class Sessions {
       const handoverId = text(params, 'handoverId')
       const token = text(params, 'token')
       const squadId = text(params, 'squadId')
-      this.handover.arrive(handoverId, token, squadId)
-      reply({ committed: true, targetRegion: 'confirmed' })
+      const prepared = this.handover.arrive(handoverId, token, squadId)
+      reply({ committed: true, targetRegion: prepared.targetRegion })
     },
     'tictac/api/region/cancelHandover': (_session, params, reply) => {
       const handoverId = text(params, 'handoverId')

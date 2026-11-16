@@ -46,7 +46,6 @@ export const RpcMethods = {
   digest: 'tictac/system/session/digest',
   matchHeader: 'tictac/system/session/matchHeader',
   log: 'tictac/system/session/log',
-  seated: 'tictac/system/session/seated',
   abort: 'tictac/system/session/abort',
   moveUnit: 'tictac/system/movement/moveUnit',
   fireShot: 'tictac/system/combat/fireShot',

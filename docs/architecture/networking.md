@@ -106,6 +106,9 @@ against state they both hold. See
   announced into an empty room is gone, so a `hello` makes the host restate
   both its opening and, if it has already deployed, its `ready` — neither is
   an event, and neither is recorded, so saying them twice costs nothing.
+  On a match server there is no host to answer: the room issues the seed and sends
+  `init` to both seats itself (§3, *Entering a room*), and a window's own `init`
+  is dropped. Only a data channel or the in-window AI has a host that announces.
 - `ready`: one `Deployment[]` (`ITEM-043`) — a sanitized `CharacterSheet`, the
   kit this side equipped (absent if this build could not read one), and a
   session-state bag per soldier, `{ hp?, fatigue? }`. `hp` is present only on
@@ -117,8 +120,8 @@ against state they both hold. See
 - `retreat`: the faction only (protocol 4, `ITEM-051`). The side tries to get out; whether it
   does is rolled from the match's dice on every side, and a failed attempt hands over without
   an `endTurn` of its own. Like `endTurn`, a `digest` is sent just before it.
-- `digest`: a fingerprint of the sender's whole world, sent immediately before
-  it hands over. Not a command: it asks the other side to do nothing.
+- `digest`: a fingerprint of the sender's whole world and the position of the match dice,
+  sent immediately before it hands over. Not a command: it asks the other side to do nothing.
 
 ### 2. Player Tactical Actions (`NetworkMessage`)
 - `moveUnit`: faction, squad index, and waypoint array `{x, y}[]`.
@@ -246,16 +249,18 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   `InteractionController.busy` — walking, or the applier's queue not yet empty — before the next
   event, and a restored frame clears the queue, which was about the moment being left.
 - **Stepping back** is not replay: no command is invertible. `Playback` keeps a `Moment`
-  (`src/game/Rewind.ts`) at every event boundary and puts one back with `restoreMoment`. A
+  (`src/game/Rewind.ts` holds the types) at every event boundary and puts one back with
+  `restoreMoment`, which is private to `src/game/Playback.ts`: a rewind presents a recording and
+  is never a move in live play. A
   moment is four things, and playing on from a restored one reaches the match the file
   records only if all four come back: the soldiers' components (`World.snapshot`, restored
-  by `deserialize`; nothing observes components changing); every wall's
+  by `deserialize`, then each soldier's trait refold; nothing observes components changing); every wall's
   kind, one byte each (`WallSystem.kinds`), since a round through a window breaks it; the
   ground entity (fire, smoke, ash, crates burned away — `GroundSystem` rebuilds the grid from
   it); and the position of the match's dice (`Rng.snapshot`), since every roll depends on all
   the rolls before it. Until 2026-09-24 only the first was kept: a stepped-back replay left
   broken windows broken and played on with dice that had moved on, so it diverged from the
-  file. `MatchHost.moment()` / `rewind()` do the same headlessly (`tests/rewind.test.ts`).
+  file. `MatchHost.rewindable` hands the same parts to a `Playback` headlessly (`tests/rewind.test.ts`).
 - **The ground entity** is replicated like the walls: it belongs to no faction, so the host is
   its authority. Both peers make it at the same point (after the walls), so it has the same id
   on both and on the referee, which the digest's terrain fold depends on.
@@ -368,18 +373,24 @@ Three pushes are sent unasked:
 - **`tictac/api/lobby/changed`**: the whole `LobbyView`, to each subscriber whose view changed,
   once per burst of changes — one window replacing another retires a socket, holds a seat and
   ends a room, and that is one push rather than three.
-- **`tictac/api/session/replaced`**: `{ reason }` (`SESSION_REPLACED`), just before the server
-  closes the socket of a window its player has replaced. That window does not reconnect.
+- **`tictac/api/session/ended`**: `{ reason, reconnect, url? }` (`SessionEnded`, `Reconnect`),
+  sent before **every** close the server starts, and the only thing that tells a window the
+  close is final. `reconnect` is `never` (the version gate; a window its player has replaced,
+  with `SESSION_REPLACED` as the reason), `retry` (the server is stopping: dial back like after
+  a drop) or `elsewhere` (the session continues at `url`: the connection ends and
+  `ServerConnection.onElsewhere` hears where, which is the hook a region handover takes the
+  window across by). A word a build does not know is read as `never`. `Lobby.end` is the one
+  door on the server; `ServerConnection.sessionEnded` the one on the window.
 - **`tictac/api/squad/changed`**: `{ squad }`, to the player's window whenever its squad's route
   changes — an order, or an arrival recorded by the travel schedule ([ARCH-WORLD](world.md)).
 
 **A refusal is an answer, not an ending.** It is an error response with a code (`RPC_ERRORS`:
 the JSON-RPC codes for a malformed exchange, HTTP-shaped ones for everything else) and a message
 a player can read; anything internal is `500` *the server failed*, with no detail to probe. The
-socket stays open and where it was. Only three things end a connection: the version gate
-(`abort`, then close), `session/replaced`, and the window giving up after a drop. A room's
-`abort` ends the socket's membership of that room, not the session: the window is back in the
-lobby on the same socket.
+socket stays open and where it was. Only two things end a connection: the server's
+`session/ended`, and the window giving up after a drop. A room's `abort` is a match frame: it
+ends the socket's membership of that room, never the session, and is not read at all outside a
+room — the window is back in the lobby on the same socket.
 
 ### Entering a room
 
@@ -398,9 +409,17 @@ that is over is stood up from it first. An intent that cannot be read is `-32602
 | `resume{roomId, seatKey}` | the seat that key belongs to, in any phase, with the log if `playing` | `403` *That seat is not yours.* / `410` *That match is gone.* / `409` a room of another build (*Admission*) |
 | `resume` (signed in, no key) | the player's own seat in a `playing` room, with the log — a new window | `410` *You have no match in progress.* |
 
-After the answer, a seat in a room still being set up carries on exactly as a peer match does:
-Blue announces the seed (`init`), Red states its build (`hello`), both deploy (`ready`), and
-Blue's `matchHeader` opens the match (`playing`).
+After the answer, a seat in a room still being set up carries on much as a peer match does,
+except that **the room issues the seed**: when Red takes the second seat the room draws one (the
+same source the lobby draws a fight's map from, `LobbyOptions.mapSeed`) and sends `init` to both
+seats — to Blue at once, to Red straight after its answer, and again to any seat that comes
+back to a room still being set up (a restart does not keep it; the seats take the new one).
+Red states its build (`hello`), both deploy (`ready`), and Blue's `matchHeader` opens the match
+(`playing`) — **on exactly that seed**: a header carrying any other ends the match with a
+verdict against Blue (*The match was opened on a seed this server did not issue…*), because a
+seed a player chooses is a map and dice they can grind offline. An `init` a window states is
+not relayed. `?seed=` and `Math.random` (`entropy()` in `main.tsx`) remain for matches a window
+plays offline, locally or peer to peer, where nobody referees.
 
 `room/leave` stands the socket up from its room and leaves it connected, in the lobby. A
 spectator goes; a window done with a match that is over is let off its end screen; a seat in a
@@ -424,10 +443,10 @@ or a redirect) is not a reconnection, so the seat gets a fresh key and the repla
 stops working — it cannot take the seat back from under the new one.
 
 After a keyed reconnect into a room still `waiting` or `deploying`, the window restates what it
-had already said — a second `hello`, Blue's `init`, either side's `ready` if it had deployed —
-and the server relays it to the other seat as always. Since `ready` frames are relayed rather
-than stored, that restatement is also how a `ready` sent while the other seat was away reaches
-it.
+had already said — a second `hello`, either side's `ready` if it had deployed — and the server
+relays it to the other seat as always; the room itself says the seed again to the seat that
+came back (a `deploying` room has one). Since `ready` frames are relayed rather than stored,
+that restatement is also how a `ready` sent while the other seat was away reaches it.
 
 ### Admission: which build may do what
 
@@ -439,7 +458,7 @@ Every room records the build and protocol it was opened under.
   other protocol, a `hello` that states nothing usable, or any other first notification (an
   `init` included) is refused as in §5 (*Protocol mismatch: the match server speaks protocol 7,
   this page speaks protocol 5. …*, or the reload text for a page that reports no version) with
-  `abort`, and the socket is closed.
+  `session/ended` (`reconnect: 'never'`), and the socket is closed.
 - **`open`, `join` and `watch`** start something on this server, so they take its own build
   (`409` *Build mismatch: the match server is running build b, this page is running build a.
   …*). `join` and `watch` also need the room's build to be the page's (`409` *That match was
@@ -452,18 +471,21 @@ Every room records the build and protocol it was opened under.
   player's seat in a match being played is in a room of another build: binding the socket would
   retire the window that can finish the match. The page keeps its token, since a page that can
   finish it should find the token where it was left, and shows the reason.
-- **Protocol 6 compatibility is retired**: `OLDEST_SERVED_PROTOCOL` is 7. Sockets must speak
-  protocol 7.
+- **Only the server's own protocol is admitted.** There is no older protocol still served:
+  protocol 8 changed the wire three ways at once (`session/ended`, the server-issued seed, the
+  digest's `dice`), and a page speaking protocol 7 is refused at the gate, even to take a seat
+  back.
 
 ### What goes where
 
 | Frame | Accepted from | Sent on to |
 | --- | --- | --- |
-| `hello`, `init`, `ready` | either seat | the other seat only — it is how Blue restates its opening to a late joiner (§3), and how either seat restates itself after a reconnect |
-| `matchHeader` | Blue, once Red has joined | Red; spectators get `log` instead |
+| `hello`, `ready` | either seat | the other seat only — it is how either seat restates itself after a reconnect |
+| `init` | the server only: it issues the seed; one a window states is dropped | — |
+| `matchHeader` | Blue, once Red has joined, on the seed the room issued (anything else aborts the match) | Red; spectators get `log` instead |
 | an intent (`isCommand`) | either seat, once `playing` — legality is the rules' business | recorded, refought, then the other seat and every spectator |
 | `digest` | either seat, once `playing` | checked against the referee's world, then the other seat |
-| `log`, `seated`, `abort` | nobody: the server's to say | — |
+| `log`, `abort` | nobody: the server's to say | — |
 | anything from a spectator | — | dropped |
 
 The `log` a socket is handed is the room's own in-memory copy of what it accepted, numbered as
@@ -480,7 +502,7 @@ keyed reconnect is not a new window, and triggers neither.
   `redirected: true` and the log.
 - **One live window per player.** Signing in on a new socket (`account/signIn`, or a passkey
   ceremony) replaces the player's previous one wherever it was: that socket is sent
-  `session/replaced` (*You opened TicTac in another window; this one was disconnected.*) and
+  `session/ended` (`never`, *You opened TicTac in another window; this one was disconnected.*) and
   closed. A seat it held is **held** for the grace like any dropped seat, in every phase: the
   same window reconnecting signs in before it re-enters by its seat key, so signing in cannot be
   what abandons a room. What happens to the seat is then the new window's doing. Entering by
@@ -612,12 +634,12 @@ player, joinBy)` sets both seats and starts the match in one go — `Room.start`
 
 ### The browser's side
 
-A window holds one `ServerConnection` (`src/game/ServerConnection.ts`) per server. `main.tsx`
-keeps it at module level — `connectionFor(url)` returns the live one to that url or replaces
-it, `leaveServer()` closes it — because it outlives every screen: the server panel opens it, a
-match plays over it, and the panel shown again without a page load (a room refused, a match
-aborted) finds it still signed in and subscribed. A finished match's way back to the menu
-(`backToMenu`) reloads the page, which ends the connection like any other page load. The panel
+A window holds one `ServerConnection` (`src/game/ServerConnection.ts`) per server. `main.tsx`'s
+`ScreenController` holds it — `connectionToServer()` returns the live one or replaces it,
+`leaveServer()` closes it — because it outlives every screen: the server panel opens it, a
+match plays over it, and the panel shown again (a room refused, a match aborted, a match left
+through `leaveMatch`, the one way off a match screen) finds it still signed in and subscribed.
+There is no page reload on the way back to the menu. The panel
 (`src/hud/menu/ServerPanel.tsx`) is driven by it: its state, its player,
 and the lobby through `watchLobby`, whose subscription ends with its last listener. `Account`
 (`src/game/Account.ts`) is a thin wrapper over it for the passkey ceremonies, calling
@@ -634,7 +656,7 @@ and is not dialled again: the address is more likely wrong than the server away.
 `connection.enter(intent, member)` and plays over it exactly as over a data channel; it resolves
 with the `Seated` answer, or rejects with the server's reason and leaves the connection as it
 was, so the player tries something else on the same socket. Closing that transport is
-`room/leave`. `seated` and `log` are taken at its edge, never forwarded as commands;
+`room/leave`. `log` is taken at its edge, never forwarded as a command;
 `waitForLog()` hands the log over whenever it is asked for, and any intent relayed while the
 window is still being built is held and released, in order, the moment `onMessage` is assigned.
 A spectator is `mode: 'spectate'`: it hears everything and transmits nothing after `hello` — no
@@ -642,8 +664,11 @@ intents, no digests, no component updates.
 
 What `main.tsx` does with the seat (`takeSeat`):
 
-- **A seat in a room being set up** — Blue announces the match and goes to its loadout; Red
-  waits for the opening and goes to its own. The same flow a peer match has.
+- **A seat in a room being set up** — Blue and Red go to their loadouts (Blue at once; Red,
+  seated only once there is an opponent, hears the seed first). Neither states a seed: each
+  starts the match from the one the room issued (`NetworkManager.awaitOpening`, read at the
+  moment the match starts so a re-issue after a restart is the one used). The loadout
+  backdrop alone uses `entropy()` while Blue waits, since nothing depends on it.
 - **A seat in a match being played** (`resume`, or `redirected`) — the match is rebuilt from
   the log's header and replayed with `InteractionController.catchUp`, which applies each logged
   intent the way a replay does and steps time in fixed ticks until its walk and reactions have
@@ -686,21 +711,23 @@ before it; `signIn` with the stored token, since the lobby's `you` and a seat's 
 it (a `401` forgets the token, any other refusal keeps it with the reason); `lobby/subscribe` if
 anybody is listening; `room/enter` with `rejoin()` if it was seated, whose answer is followed by
 the match itself. A refusal on that last step ends the room, not the try: the server is there
-and has said the window stands in its lobby. `session/replaced` ends the connection with no
-reconnect. A `Seated` in another room or seat is reported as a lost match. The connector and the
+and has said the window stands in its lobby. `session/ended` ends the connection: `never` and
+`elsewhere` for good (`elsewhere` first telling `onElsewhere` where), `retry` as a drop the
+server announced. A `Seated` in another room or seat is reported as a lost match. The connector and the
 timers are injectable (`ServerLink`), which is how `tests/serverConnection.test.ts` and
 `tests/network.test.ts` walk the schedule without waiting for it.
 
 Everything else the manager holds — mode, side, opening, deployed squad, held commands, the
 world it is bound to — survives the new socket. While reconnecting `isMyTurn` is false and
-nothing is put on the wire, so the controller takes no input for the seat; `main.tsx` shows a
-click-through `ReconnectingBanner` (*Connection lost — reconnecting… (attempt N)*) over whatever
-is on screen and removes it on `onReconnected`.
+nothing is put on the wire, so the controller takes no input for the seat; `main.tsx`'s
+`ScreenController` shows a click-through line (`ReconnectingNotice`: *Connection lost —
+reconnecting… (attempt N)*) over whatever is on screen and removes it on `onReconnected`.
 
 What happens next depends on the phase it is seated back into:
 
 - **`waiting`/`deploying`** — a room being set up keeps nothing, so the window sends a second
-  `hello` and `restate`s: Blue its `init`, either side its `ready` if it had deployed. The other
+  `hello` and `restate`s its `ready` if it had deployed; the room says the seed again to the
+  seat that came back. The other
   side answers the `hello` with its own restatement, which is how a `ready` relayed while one of
   them was away still arrives. The loadout screen stays up untouched. A Blue that had already
   stated `matchHeader` into a dying socket states it again, with every intent it played since.

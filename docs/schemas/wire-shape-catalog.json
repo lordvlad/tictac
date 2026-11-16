@@ -93,14 +93,6 @@
       "x": "number",
       "z": "number"
     },
-    "seated": {
-      "faction": "Faction | null",
-      "phase": "RoomPhase",
-      "redirected": "boolean",
-      "roomId": "string",
-      "seatKey": "string | null",
-      "type": "'seated'"
-    },
     "throwGrenade": {
       "kind": "GrenadeId",
       "shooterFaction": "Faction",
@@ -395,12 +387,19 @@
       "list": "array<unknown>"
     },
     "traits": {
+      "accuracy": "number",
+      "accuracyCrouched": "number",
       "bleedImmune": "boolean",
+      "critChance": "number",
       "critImmune": "boolean",
+      "critMultiplier": "number",
       "damageTaken": "number",
       "evasion": "number",
       "evasionCrouched": "number",
+      "gearDrag": "boolean",
       "moveCostMul": "number",
+      "rangeFalloff": "number",
+      "silenced": "boolean",
       "unreadable": "boolean"
     },
     "wall": {
@@ -431,5 +430,5 @@
       "weaponId": "string"
     }
   },
-  "protocolVersion": 7
+  "protocolVersion": 8
 }

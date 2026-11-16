@@ -7,7 +7,7 @@ import { openPersistence } from '../src/server/db/BunSqlDb'
 import { Lobby } from '../src/server/Lobby'
 import { hashSeatKey, type RefereeVerdict } from '../src/server/Room'
 import { MatchHost } from '../src/sim/MatchHost'
-import { MY_VERSION, OLDEST_SERVED_PROTOCOL, PROTOCOL_VERSION, type PeerVersion } from '../src/version'
+import { MY_VERSION, PROTOCOL_VERSION, type PeerVersion } from '../src/version'
 import { answered, connect, decisive, enlistFor, keyOf, roomOf, seatBoth, type Connection } from './support/lobby'
 
 /**
@@ -44,6 +44,7 @@ async function deployment() {
       rooms: persistence.rooms,
       rosters: persistence.rosters,
       onVerdict: (verdict) => verdicts.push(verdict),
+      mapSeed: () => RECORDING.header.seed,
       log: (message) => logs.push(message),
       graceMs: 5_000,
       clock: {
@@ -130,8 +131,8 @@ describe('A restart loses no room', () => {
     // Each window reconnects with its key: same room, same side, same key, same phase.
     const after = await Promise.all(before.map((socket) => reconnect(second, socket)))
     for (const [i, socket] of after.entries()) {
-      const was = before[i]!.of('seated')[0]!
-      expect(socket.of('seated')).toEqual([{ ...was, phase: i < 1 ? 'waiting' : i < 3 ? 'deploying' : 'playing' }])
+      const was = before[i]!.seats[0]!
+      expect(socket.seats).toEqual([{ ...was, phase: i < 1 ? 'waiting' : i < 3 ? 'deploying' : 'playing' }])
     }
     expect(holds.every((hold) => hold.cancelled)).toBe(true)
     const [, deployingBlue, deployingRed, playingBlue, playingRed] = after
@@ -140,14 +141,14 @@ describe('A restart loses no room', () => {
     deployingBlue!.send({ type: 'init', seed: 7, seedLabel: 'seven', ...MY_VERSION })
     expect(deployingRed!.of('init')).toHaveLength(1)
     // And a room waiting for an opponent can still get one.
-    expect((await connect(second, CY, { kind: 'join', roomId: roomOf(waiting) })).of('seated')[0]).toMatchObject({
+    expect((await connect(second, CY, { kind: 'join', roomId: roomOf(waiting) })).seats[0]).toMatchObject({
       faction: Faction.Red,
       phase: 'deploying',
     })
 
     // A seat in the match being played is handed exactly what was accepted before the restart.
     for (const socket of [playingBlue!, playingRed!]) {
-      expect(socket.received.map((m) => m.type)).toEqual(['seated', 'log'])
+      expect(socket.received.map((m) => m.type)).toEqual(['log'])
       expect(socket.of('log')[0]!.events).toEqual(accepted)
     }
 
@@ -186,7 +187,7 @@ describe('A restart loses no room', () => {
     // One match per player holds for a restored room: whatever Bo's new
     // window asks for, it is put back in his own seat.
     const window = await connect(second, BO, { kind: 'open' })
-    expect(window.of('seated')[0]).toMatchObject({ roomId, faction: Faction.Red, redirected: true })
+    expect(window.seats[0]).toMatchObject({ roomId, faction: Faction.Red, redirected: true })
     expect(window.of('log')[0]!.events).toHaveLength(4)
 
     expire()
@@ -219,7 +220,7 @@ describe('A rolling update', () => {
 
     // The pages still running the old bundle reconnect to their own seats.
     const [ada, bo] = await Promise.all([reconnect(fresh, blue, OLD), reconnect(fresh, red, OLD)])
-    expect(ada.of('seated')[0]).toMatchObject({ roomId, faction: Faction.Blue, phase: 'playing', seatKey: keyOf(blue) })
+    expect(ada.seats[0]).toMatchObject({ roomId, faction: Faction.Blue, phase: 'playing', seatKey: keyOf(blue) })
     expect(bo.of('log')[0]!.events).toHaveLength(HALF)
 
     // But they can start nothing on the new server: that takes its build.
@@ -316,12 +317,12 @@ describe('A rolling update', () => {
     expect(verdicts).toEqual([])
   })
 
-  test('a protocol older than the server still serves is refused, even to take a seat back', async () => {
+  test('a page on an older protocol is refused, even to take a seat back', async () => {
     const { serve } = await deployment()
     const lobby = await serve()
     const { blue, red, roomId } = await seatBoth(lobby, null, null)
     red.close()
-    const ancient: PeerVersion = { protocol: OLDEST_SERVED_PROTOCOL - 1, build: MY_VERSION.build }
+    const ancient: PeerVersion = { protocol: PROTOCOL_VERSION - 1, build: MY_VERSION.build }
     const refusal =
       `Protocol mismatch: the match server speaks protocol ${PROTOCOL_VERSION}, ` +
       `this page speaks protocol ${ancient.protocol}.`
@@ -329,12 +330,12 @@ describe('A rolling update', () => {
     const opening = await connect(lobby, null, { kind: 'open' }, { version: ancient })
     const returning = await reconnect(lobby, red, ancient)
 
-    expect(opening.of('abort')[0]?.reason).toStartWith(refusal)
-    expect(returning.of('abort')[0]?.reason).toStartWith(refusal)
-    expect(returning.of('seated')).toEqual([])
+    expect(opening.ended[0]?.reason).toStartWith(refusal)
+    expect(returning.ended[0]?.reason).toStartWith(refusal)
+    expect(returning.seats).toEqual([])
     // The seat is still held for a page that can take it.
     expect(lobby.view(null).rooms.find((room) => room.id === roomId)!.red).toEqual({ name: null, connected: false })
     expect(blue.of('abort')).toEqual([])
-    expect((await reconnect(lobby, red)).of('seated')).toHaveLength(1)
+    expect((await reconnect(lobby, red)).seats).toHaveLength(1)
   })
 })

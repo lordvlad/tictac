@@ -284,6 +284,23 @@ export interface HudRetreat {
   armed: boolean
 }
 
+/**
+ * Which pieces of the HUD are showing, as data.
+ *
+ * The view renders a piece or renders nothing for it from these flags: there
+ * is no visibility held in a DOM class that something else would have to read
+ * back or keep in step.
+ */
+export interface HudVisibility {
+  /**
+   * The in-match panels away, as for a replay or a watcher, where there is
+   * nothing to command: a squad bar whose buttons do nothing is worse than none.
+   */
+  panelsHidden: boolean
+  /** The hot-seat "pass the screen" cover is up. */
+  turnOverlay: boolean
+}
+
 export interface HudModelSources {
   turnManager: TurnManager
   squads: Squads

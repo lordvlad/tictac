@@ -268,7 +268,7 @@ These are the decisions `ITEM-048` builds on, each naming the code it changes.
    clash while the world is one zone, which it is. Once it has borders, the RFC wins at the
    border: a route that would cross one is cut where it meets the crossing (the gate, the
    checkpoint), the squad stops there, and going through is its own order — the hand-off
-   (`ownerOf`, `src/server/Owner.ts`). Inside a zone, routes stay straight lines.
+   (`RegionDirectory`, `src/server/Owner.ts`). Inside a zone, routes stay straight lines.
 
 ### 5.5 When two players' squads meet (`ITEM-053`)
 

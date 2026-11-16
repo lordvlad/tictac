@@ -9,8 +9,10 @@ import { RECORDING_VERSION, type RecordingHeader } from '../src/game/Recording'
 import { RPC_ERRORS, type Squad } from '../src/game/Rpc'
 import type { EncounterContact, EncounterOpened, OpenEncounter } from '../src/server/EncounterPort'
 import { Journeys } from '../src/server/Journeys'
+import { regionDirectory } from '../src/server/Owner'
 import type { Persistence } from '../src/server/Persistence'
 import { Schedule } from '../src/server/Schedule'
+import { seedContact } from './support/encounters'
 import { softwareAuthenticator } from './support/authenticator'
 import { freshPersistence } from './support/db'
 import { register, rpcServer, type RpcServer, type Window } from './support/rpcServer'
@@ -244,7 +246,9 @@ async function restarted(persistence: Persistence, now: number, open: OpenEncoun
   const armed: (number | null)[] = []
   const schedule = new Schedule({ now: () => now, arm: (at) => armed.push(at) })
   const journeys = new Journeys({
+    directory: regionDirectory({ owners: persistence.squads }),
     squads: persistence.squads,
+    accounts: persistence.accounts,
     encounters: persistence.encounters,
     schedule,
     clock: { now: () => now, schedule: WALL_CLOCK.schedule },
@@ -283,7 +287,7 @@ describe('A server that restarts', () => {
     const trip = (sent.waypoints.find((waypoint) => waypoint.kind === 'past' && waypoint.departed) as PastWaypoint).departed!.trip
     const start = w.server.now
     // The server went down after the room opened and the row was written, before the squad was saved.
-    await w.persistence.encounters.record({
+    await seedContact(w.persistence.encounters, {
       squadId: w.squadId,
       playerId: w.playerId,
       trip,
@@ -328,7 +332,7 @@ describe('The return feed', () => {
     const { persistence, playerId, squadId, home } = w
     const place = north(home, 1)
     const row = (checkpoint: number, at: number, roomId: string | null, passedFor: 'busy' | null) =>
-      persistence.encounters.record({ squadId, playerId, trip: 't', checkpoint, at, place, aliens: roomId ? 2 : 0, roomId, passedFor })
+      seedContact(persistence.encounters, { squadId, playerId, trip: 't', checkpoint, at, place, aliens: roomId ? 2 : 0, roomId, passedFor })
     await row(0, 1_000, null, 'busy')
     await row(1, 2_000, 'in-progress', null)
     await row(2, 3_000, 'won', null)
@@ -348,39 +352,28 @@ describe('The return feed', () => {
     expect(ENCOUNTER.feedLimit).toBeGreaterThanOrEqual(entries.length)
   })
 
-  test('a player taking the seat before the row is written is still recorded as having played', async () => {
+  test('a player who takes the seat the moment the fight opens is recorded as having played it', async () => {
+    // The row is written before the room is opened (`Encounters.begin`), so
+    // a window that beats the end of the work around the fight still finds it.
     const w = await walker(() => 'unused', (persistence) => contacts(persistence, PASSED))
-    await w.persistence.encounters.markTaken('quick', w.playerId)
-    await w.persistence.encounters.record({
-      squadId: w.squadId, playerId: w.playerId, trip: 't', checkpoint: 0, at: 1, place: w.home, aliens: 1, roomId: 'quick', passedFor: null,
-    })
-    expect((await w.feed())[0]).toMatchObject({ playedBy: 'you' })
+    const { encounters } = w.persistence
+    const handling = await encounters.begin([
+      { squadId: w.squadId, playerId: w.playerId, trip: 't', checkpoint: 0, at: 1, place: w.home },
+    ])
+    await encounters.markTaken(handling.roomId, w.playerId)
+    await encounters.settle(handling, { roomId: handling.roomId, passedFor: null, aliens: 1 })
+    expect((await w.feed())[0]).toMatchObject({ playedBy: 'you', matchId: handling.roomId })
   })
 
-  test('markTaken in-memory set is bounded to prevent memory leaks', async () => {
+  test('a contact still being carried out is not in the feed', async () => {
     const w = await walker(() => 'unused', (persistence) => contacts(persistence, PASSED))
-    // Fill beyond capacity
-    for (let i = 0; i < 550; i++) {
-      await w.persistence.encounters.markTaken(`room-${i}`, w.playerId)
-    }
-    // Oldest entries (e.g. room-0) should have been evicted from in-memory map
-    await w.persistence.encounters.record({
-      squadId: w.squadId, playerId: w.playerId, trip: 't-old', checkpoint: 0, at: 1, place: w.home, aliens: 1, roomId: 'room-0', passedFor: null,
-    })
-    // Recent entries (e.g. room-549) should still be retained in in-memory map
-    await w.persistence.encounters.record({
-      squadId: w.squadId, playerId: w.playerId, trip: 't-recent', checkpoint: 0, at: 2, place: w.home, aliens: 1, roomId: 'room-549', passedFor: null,
-    })
-    const feed = await w.feed()
-    const oldEntry = feed.find((e) => e.matchId === 'room-0')
-    const recentEntry = feed.find((e) => e.matchId === 'room-549')
-    expect(oldEntry?.playedBy).toBe('ai')
-    expect(recentEntry?.playedBy).toBe('you')
+    await w.persistence.encounters.begin([{ squadId: w.squadId, playerId: w.playerId, trip: 't', checkpoint: 0, at: 1, place: w.home }])
+    expect(await w.feed()).toEqual([])
   })
 
   test('shows a player only their own, and only to a signed-in window', async () => {
     const w = await walker(() => 'unused', (persistence) => contacts(persistence, PASSED))
-    await w.persistence.encounters.record({
+    await seedContact(w.persistence.encounters, {
       squadId: w.squadId, playerId: w.playerId, trip: 't', checkpoint: 0, at: 1, place: w.home, aliens: 0, roomId: null, passedFor: 'nobodyFit',
     })
     const other = w.server.window()
@@ -406,7 +399,7 @@ describe('A recording', () => {
       command: { type: 'endTurn' } as never,
     })
     await persistence.matches.create(header(), 'running')
-    await persistence.encounters.record({
+    await seedContact(persistence.encounters, {
       squadId: w.squadId, playerId, trip: 't', checkpoint: 0, at: 1, place: w.home, aliens: 2, roomId: 'running', passedFor: null,
     })
     await persistence.matches.create(header(), 'strangers')

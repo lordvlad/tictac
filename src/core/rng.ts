@@ -68,11 +68,13 @@ export function hashSeed(value: string): number {
 }
 
 /**
- * `resolveSeed` (`?seed=` from the URL, or a random one) lives in `main.tsx`,
- * not here: it is the one place in the game that draws from `Math.random`
- * rather than the match stream, because it is what *creates* a match's seed,
- * and `main.tsx` is not part of the rules this file's own determinism guard
- * (`tests/determinism.test.ts`) sweeps.
+ * `entropy()` and `resolveSeed` (`?seed=` from the URL, or a random one) live in
+ * `main.tsx`, not here, and serve only a match a window plays offline: it is the
+ * one place in the game that draws from `Math.random` rather than the match
+ * stream, because it is what *creates* a match's seed, and `main.tsx` is not
+ * part of the rules this file's own determinism guard
+ * (`tests/determinism.test.ts`) sweeps. A match on a server is issued its seed
+ * by the room (`Room`, `LobbyOptions.mapSeed`).
  */
 
 /**

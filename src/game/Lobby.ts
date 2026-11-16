@@ -66,8 +66,8 @@ export type RoomPhase = 'waiting' | 'deploying' | 'playing'
  * every spectator of one, is sent the match's `log` (header and every intent
  * so far) straight after the answer; a spectator of a room that starts later
  * is sent it when the room starts. A seat in a room that is still being set
- * up proceeds exactly as before: Blue announces the match (`init`), Red
- * waits for it.
+ * up waits for the room to issue the seed (`init`, sent to both seats once
+ * Red has sat down), deploys, and Blue states the opening on that seed.
  */
 export interface Seated {
   roomId: string

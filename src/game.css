@@ -110,11 +110,6 @@ canvas {
   line-height: 1.35;
   color: var(--hud-text);
   pointer-events: none;
-  display: none;
-}
-
-.hud-tile-readout.visible {
-  display: block;
 }
 
 .hud-tile-line.hazard b {
@@ -434,10 +429,64 @@ canvas {
   border-color: rgba(56, 189, 248, 0.5);
 }
 
-/* Hidden wholesale during a replay: the panels command a match, and a replay
-   has no commands to give. */
-.hud-hidden {
-  display: none !important;
+/* The element a HUD root draws into: not a box of its own, so what is drawn in
+   it is laid out as if it were a child of #ui (or of the corner row). */
+.hud-mount {
+  display: contents;
+}
+
+/* A screen drawn over the game by the screen controller (start menu, the
+   interrupted-match notice): it takes the whole of #ui. */
+.screen-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 14, 20, 0.92);
+  backdrop-filter: blur(8px);
+  z-index: 10000;
+  font-family: inherit;
+  color: #e2e8f0;
+  /* #ui is pointer-events: none and only its buttons opt back in, so without
+     this a menu <input> is click-through: it never takes focus and a phone
+     never raises its keyboard. */
+  pointer-events: auto;
+}
+
+/* A line said briefly over whatever is on screen. */
+.screen-notice {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10001;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: rgba(10, 14, 20, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: #e2e8f0;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* The line while a window gets its seat back: lower than the notice, so
+   neither hides the other. Click-through, so a stall is a stall rather than a
+   screen that has stopped being the player's match. */
+.screen-reconnecting {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: rgba(10, 14, 20, 0.92);
+  border: 1px solid rgba(250, 204, 21, 0.5);
+  color: #fde68a;
+  font-size: 13px;
+  pointer-events: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -841,14 +890,11 @@ canvas {
    Target strip (shoot mode) — small enemy icons above the squad bar
    --------------------------------------------------------------------------- */
 .hud-target-strip {
-  display: none;
+  display: flex;
   gap: 8px;
   align-items: flex-end;
 }
 
-.hud-target-strip.visible {
-  display: flex;
-}
 
 .target-icon {
   position: relative;

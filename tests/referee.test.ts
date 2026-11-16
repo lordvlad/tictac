@@ -42,6 +42,7 @@ async function harness(seed = 4242) {
     rooms: persistence.rooms,
     onVerdict: (v) => verdicts.push(v),
     log: () => {},
+    mapSeed: () => recording.header.seed,
     // A dropped seat is held on a clock nothing here ever runs out.
     clock: { now: WALL_CLOCK.now, schedule: () => () => {} },
   })
@@ -114,7 +115,7 @@ describe('A third recomputation of the same match', () => {
     blue.send(recording.events[0]!.command)
 
     await lobby.idle()
-    const roomId = blue.of('seated')[0]!.roomId
+    const roomId = blue.seats[0]!.roomId
     expect(lobby.view(null).rooms[0]!.phase).toBe('waiting')
     expect(await store.header(roomId)).toBeNull()
   })
@@ -227,9 +228,8 @@ describe('Rejoining a match that outlived its tab', () => {
 
     const returning = await connect(lobby, ADA, { kind: 'resume' })
 
-    expect(returning.of('seated')).toEqual([
+    expect(returning.seats).toEqual([
       {
-        type: 'seated',
         roomId,
         faction: Faction.Blue,
         phase: 'playing',
@@ -239,7 +239,7 @@ describe('Rejoining a match that outlived its tab', () => {
     ])
     // The log follows the seat immediately, without waiting on the database:
     // nothing relayed after it may arrive before it.
-    expect(returning.received.map((m) => m.type)).toEqual(['seated', 'log'])
+    expect(returning.received.map((m) => m.type)).toEqual(['log'])
     const log = returning.of('log')[0]!
     expect(log.matchId).toBe(roomId)
     expect(log.events.map((event) => event.seq)).toEqual(played.map((_, i) => i))

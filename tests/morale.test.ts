@@ -74,11 +74,10 @@ const always = (value: number): Roll => () => value
 
 /** Make a unit somebody in particular: its sheet's temperament, and a predisposition or none. */
 function be(unit: Soldier, who: { temperament?: Temperament; predisposition?: Predisposition }): void {
-  unit.sheet = {
-    ...unit.sheet,
-    temperament: who.temperament ?? unit.sheet.temperament,
-    traits: who.predisposition ? [who.predisposition] : [],
-  }
+  // Each unit has a sheet of its own (see `match`), so it is made over in place.
+  unit.sheet.temperament = who.temperament ?? unit.sheet.temperament
+  unit.sheet.traits = who.predisposition ? [who.predisposition] : []
+  unit.refreshTraits()
 }
 
 describe('Stress', () => {

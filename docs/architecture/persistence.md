@@ -45,8 +45,18 @@ openPersistence(clock, url, party)
               ├── MatchStore   — matches, events
               ├── RoomStore    — rooms
               ├── Accounts     — players, credentials, sessions, auth_challenges
-              └── Rosters      — roster, match_results
+              ├── Rosters      — roster, match_results
+              ├── Squads       — squads
+              └── Encounters   — encounters
 ```
+
+**One store per table.** Every table is named in SQL by exactly one module — `MatchStore`
+(`matches`, `events`), `RoomStore` (`rooms`), `Accounts` (`players`, `credentials`, `sessions`,
+`auth_challenges`), `Rosters` (`roster`, `match_results`), `Squads` (`squads`), `Encounters`
+(`encounters`), `migrate` (`schema_migrations`) — and a store that needs another's data asks it
+(`Encounters` is handed `Rosters.result`, `RoomStore.holdsSeat` and `Accounts.player`; `Journeys`
+resolves a squad's player through `Accounts.player`). `tests/tableOwnership.test.ts` scans
+`src/server` and `workers` and fails when a table appears in the SQL of a second module.
 
 `Persistence` is the only thing that opens a database. Every store is handed
 one, which is what lets the referee, the HTTP API and the tests share one
@@ -72,7 +82,8 @@ idempotent by a primary key that leads the batch. What a read-then-batch
 cannot promise is that nothing wrote in between: on a Durable Object the input
 gate keeps other requests out while storage calls are in flight, on Bun a
 concurrent write can land, and the batch's own keys are what make the loser
-fail loudly instead of corrupting.
+fail loudly instead of corrupting. A *check* that must hold across writers —
+the 1 km separation of squad starts — is serialized instead (§5a).
 
 `tests/dbContract.test.ts` asserts the guarantee against every adapter: a
 failing step after the first write leaves no rows (DDL included), a rolled-back
@@ -144,12 +155,17 @@ Migrations are append-only and never edited once shipped:
 1. **`match log`** — `matches`, `events`, and the append-only triggers.
 2. **`accounts`** — `players`, `credentials`, `sessions`, `auth_challenges`.
 3. **`rosters`** — `roster`, `match_results`.
-4. **`lasting wounds`** — `roster.hp`, `roster.deeds` (`ITEM-038`).
+4. **`lasting wounds`** — `roster.hp`, `roster.deeds` (`ITEM-038`). The `deeds` default is a
+   literal: a column DEFAULT is DDL and takes no bound parameter on either engine; the text is
+   exactly what the earlier `JSON.stringify` produced.
 5. **`fatigue and medical bay`** — `roster.fatigue`, `roster.downtime` (`ITEM-039`).
 6. **`rooms`** — `rooms`, the lobby's live rooms (§3).
 7. **`squads`** — `squads`, where each squad is on the world map (§5a).
 8. **`encounter rooms`** — `rooms.encounter`, `blue_control`, `red_control`, `blue_join_by`, `red_join_by`: the rooms the server opens for a fight on the road, and who moves each seat (§3).
 9. **`encounters`** — `encounters`, what found a squad on the road (§5b).
+10. **`player encounters`** — `squads.standing`, `rooms.*_standing`, `encounters.opponent_player_id` (§5b).
+11. **`squad owner`** — `squads.owner`, the region that keeps a squad (§5a).
+12. **`encounter intent`** — `encounters.settled`: a contact is written before its fight is opened (§5b).
 
 > This is the *database* schema. The **recorded command and component
 > shapes** are a separate guard — `bun run schema:catalog`, see
@@ -455,7 +471,9 @@ type.
 
 `src/server/Squads.ts`, migration 7 (`ITEM-063`, GDD-WORLD §2 and §4). A squad is a row of its
 own, not a column on `players`, so captives, alien squads and several squads per player can have
-positions later; `squads_player` keeps it to one per player for now.
+positions later; `squads_player` keeps it to one per player for now. `owner` (migration 11,
+`TEXT`, `singleton` for every squad that existed before it) is the region that keeps the squad, the
+durable fact `RegionDirectory.ownerOfSquad` reads ([ARCH-WORLD §4](world.md)).
 
 | Column | What |
 |---|---|
@@ -463,12 +481,21 @@ positions later; `squads_player` keeps it to one per player for now.
 | `start_lat_e6`, `start_lng_e6` | the start, in integer millionths of a degree (the port takes TEXT and INTEGER only), indexed so the separation check is a range query |
 
 **The start.** Registration places the squad in the same batch as the player and the
-roster (§1), so no player exists without one. The start is drawn before the batch is written. The point is drawn from system randomness, uniform over
+roster (§1), so no player exists without one. The point is drawn from system randomness, uniform over
 the 50 km disc around where Cloudflare placed the connection (`request.cf`, carried on the socket
 as `Upgrade.place`) or around Stuttgart centre when there is no such place, which on the Bun
 server is always. A draw within 1 km of another start is redrawn, up to 100 times; past that the
 last draw is taken and a line is logged. The drawn point is rounded to the stored precision so the
 waypoint and the columns agree, and the reported location is written down nowhere.
+
+**One placement at a time.** The 1 km check is a read of the starts already kept, and a read followed
+by a write is not atomic (§1, *Transactions are batches*): two placements that overlapped would both
+see a clear disc. `Squads.placing` draws and commits under one queue, so each placement's check sees
+every start written before it; `Squads.place` (a player from before squads) and `Accounts.register`
+(the batch with the player) both go through it. That holds for the one process that writes the table
+— one Durable Object or one Bun server per database — which is the rule here; two Bun servers sharing
+a Postgres would need a constraint the database enforces. `tests/squads.test.ts` places five players
+at once onto five candidate spots.
 
 **Players from before squads.** Migration 7 adds no rows: a random draw is not something SQL
 should do. `Squads.ensure` places a player who has no squad the first time `squad/get` asks,
@@ -490,8 +517,22 @@ nothing writes no row — it is a function of its key, so a row would only be a 
 | `found_at` | the server's clock in ms when the squad was found. `BIGINT`: a millisecond epoch does not fit Postgres's `INTEGER` |
 | `lat_e6`, `lng_e6` | where the squad stood, in millionths of a degree, as a start is kept |
 | `aliens` | how many came; 0 when passed by |
-| `room_id` | the fight's room, which is its match id; null when passed by (`encounters_room`) |
-| `played_by_you` | 1 when the player took the seat inside the join window (`Encounters.markTaken`, from the lobby's `onEncounterTaken`); 0 when the AI played it |
+| `room_id` | the fight's room, which is its match id; reserved on the row when it is begun (below), null once a contact is settled as passed by (`encounters_room`) |
+| `settled` | migration 12: 0 while the contact's outcome is still being carried out, 1 once it is written; every row from before is 1 |
+| `played_by_you` | 1 when the player took the seat inside the join window (`Encounters.markTaken`, from the lobby's `onEncounterTaken`); 0 when the AI played it. A column, not a memory: the row exists before the room does, so the mark always has a row to land on |
+
+**The row comes first** (`Encounters.begin`, tictac-uqt.18). A contact is written down unsettled,
+with a fresh id reserved in `room_id`, *before* anything is done about it. The lobby then opens the
+room under that id (`EncounterContact.roomId`), and only afterwards is the outcome written
+(`Encounters.settle`: room and aliens, or `passed_for`). A server that dies in between leaves the
+row and, if its writes landed, the room; the restart finds the row (`UNIQUE` makes `begin` return it
+rather than insert), asks the lobby to open the same id, and the lobby answers with the match it
+already holds (`matches.header(roomId)`) instead of opening a second. A meeting begins and settles
+both players' rows in one `Db.transaction`, so it is written for both or neither; one that cannot
+happen is `discard`ed rather than settled. Meetings an older build wrote one side at a time are
+made whole by the next `begin`. A match whose room opened but whose row never landed (the match
+write is queued ahead of the room row) is reported opened and has no live room; the fight is lost,
+not duplicated.
 
 **Fights between players** (`ITEM-053`, migration 10, GDD-WORLD §5.5) are rows of this table too,
 one for each of the two players, so each has the fight in their own feed. `trip` is
@@ -505,13 +546,15 @@ seat, `rooms.blue_standing` / `red_standing`: the order each AI seat in a meetin
 was when the squads met, so a restored room plays on as the room it was and a player changing
 their order mid-fight changes nothing already being fought.
 
-How a fight ended is not copied here: the feed joins `match_results` on `room_id`. No result yet
-is `inProgress`; a winner of Blue is `won`. The human side is always Blue in an encounter.
+How a fight ended is not copied here, and neither is anything else another store owns. The feed
+reads this table's own rows and asks `Rosters.result` for how each match settled (no result yet is
+`inProgress`; a winner of Blue is `won`, the human side always being Blue in an encounter) and
+`Accounts.player` for the opponent's name. Rows still `settled = 0` are not in it.
 
 `match/recording` lets a player read a match's header and events if a settled result names them
-(`match_results`), a live room holds them in a seat (`rooms`), or the match is their encounter's
-(`encounters.room_id`, which covers a seat the AI took from them). Not theirs is `403`; not a
-match at all, `410`.
+(`Rosters.result`), a live room holds them in a seat (`RoomStore.holdsSeat`), or the match is their
+encounter's (`encounters.room_id`, which covers a seat the AI took from them). Not theirs is `403`;
+not a match at all, `410`.
 
 ---
 

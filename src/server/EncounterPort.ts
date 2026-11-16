@@ -9,7 +9,17 @@ import type { StandingOrder } from '../sim/Policy'
  * knows routes and clocks, and `Lobby`, which knows rooms and rosters.
  */
 
-export interface EncounterContact {
+/**
+ * The id the fight's room is opened under, reserved by the contact's row
+ * (`Encounters.begin`) before the room exists. Asked again for a contact whose
+ * room already is — a restart between opening it and recording that — the
+ * lobby answers with the room it has rather than opening a second.
+ */
+interface Reserved {
+  roomId: string
+}
+
+export interface EncounterContact extends Reserved {
   /** The player whose squad it was. */
   player: Player
   squadId: string
@@ -55,7 +65,7 @@ export interface MeetingSide {
   standing: StandingOrder
 }
 
-export interface MeetingContact {
+export interface MeetingContact extends Reserved {
   blue: MeetingSide
   red: MeetingSide
   /** The server's clock when they came within range, in ms. */

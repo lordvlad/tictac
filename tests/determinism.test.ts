@@ -73,18 +73,20 @@ describe('Nothing in the rules reaches for its own randomness', () => {
     expect(offenders).toEqual([])
   })
 
-  test('the seed picker is the one allowed exception, and says why', async () => {
-    // `resolveSeed` chooses a *seed* when the URL names none. That is the one
+  test('`entropy()` is the one allowed exception, and says why', async () => {
+    // `entropy` chooses a *seed* for a match played offline. That is the one
     // draw that cannot come from the stream, because it is what creates it —
     // and it lives in `main.tsx`, not `core/rng.ts`, so `core/rng.ts` itself
-    // needs no exception at all.
+    // needs no exception at all. A match on a server never draws one: its room
+    // issues the seed (`tests/refereed.test.ts`).
     const rngText = await Bun.file('src/core/rng.ts').text()
     expect(code(rngText).includes('Math.random')).toBe(false)
 
     const mainText = await Bun.file('src/main.tsx').text()
     const uses = code(mainText).split('Math.random').length - 1
     expect(uses).toBe(1)
-    expect(mainText).toContain('resolveSeed')
+    const entropy = code(mainText).match(/function entropy\(\)[^}]*\}/)
+    expect(entropy?.[0]).toContain('Math.random')
   })
 
   test('the same seed is the same dice, and a different seed is not', () => {
@@ -169,6 +171,8 @@ describe('Two peers dealt the same match hold the same world', () => {
     const b = peer()
     const ids = (p: ReturnType<typeof peer>) => p.squads.soldiers.map((u) => u.entityId)
 
-    expect(digestWorld(a.world, ids(a), 1).total).toBe(digestWorld(b.world, ids(b), 1).total)
+    expect(digestWorld(a.world, ids(a), 1, new Rng(7)).total).toBe(
+      digestWorld(b.world, ids(b), 1, new Rng(7)).total,
+    )
   })
 })

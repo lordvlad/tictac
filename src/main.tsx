@@ -1,12 +1,13 @@
 import Game from '@mavonengine/core/Game'
 import type { Asset } from '@mavonengine/core/Types/Asset'
-import { createRoot } from 'react-dom/client'
+import type { ReactElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { Vector3 } from 'three'
 import { OrbitRig } from './camera/OrbitRig'
 import { Faction, FACTION_INFO, matchServerFor, SIM } from './config'
 import { type CharacterSheet, rollSquadSheets } from './core/Characters'
 import { generateMap } from './core/MapGenerator'
-import { hashSeed, matchDice, Rng, type Roll } from './core/rng'
+import { hashSeed, Rng } from './core/rng'
 import { WeaponId } from './core/Arsenal'
 import { createGlobalRules } from './ecs/globals'
 import { TurnSystem } from './ecs/systems'
@@ -26,7 +27,7 @@ import { type MatchLog, NetworkManager, type NetworkMessage } from './game/Netwo
 import { Playback } from './game/Playback'
 import { type CombatRecording, parseRecording, RECORDING_VERSION, type RecordingHeader } from './game/Recording'
 import type { Deployment } from './core/Loadout'
-import { captureMoment, restoreMoment, type Rewindable } from './game/Rewind'
+import type { Rewindable } from './game/Rewind'
 import { Squads } from './game/Squads'
 import { TurnManager } from './game/TurnManager'
 import { type EncounterPromptHandle, mountEncounterPrompt } from './hud/EncounterPrompt'
@@ -38,7 +39,7 @@ import { closeMap, openMap } from './hud/MapScreen'
 import { InterruptedOverlay } from './hud/menu/InterruptedOverlay'
 import { StartMenu } from './hud/menu/StartMenu'
 import { PlaybackControls } from './hud/PlaybackControls'
-import { ReconnectingBanner } from './hud/ReconnectingBanner'
+import { ReconnectingNotice, ScreenNotice, ScreenOverlay } from './hud/ScreenChrome'
 import { SpectatorBar } from './hud/SpectatorBar'
 import { RosterScreen } from './hud/RosterScreen'
 import { BUILD_ID } from './version'
@@ -49,15 +50,25 @@ import { FixedStepLoop } from './sim/FixedStepLoop'
 const baseUrl = new URL('./', document.baseURI).href
 
 /**
- * Resolve the map seed: `?seed=` from the URL if present, otherwise random.
- * Numeric seeds are used directly so `?seed=1234` is readable.
+ * A fresh seed for a match this window plays on its own — local, against the
+ * AI, peer to peer — when the URL names none (`resolveSeed`).
  *
  * The one place in the game that draws from `Math.random` rather than the
  * match stream, because it is what *creates* a match's seed rather than
  * something the rules resolve — `tests/determinism.test.ts` checks this file
- * for exactly one such draw, the same way it once checked `core/rng.ts`.
+ * for exactly one such draw. A match on a server never asks: its room issues
+ * the seed, and a window that chose its own would be refused (`Room`).
  */
-function resolveSeed(): { seed: number; label: string } {
+function entropy(): number {
+  return (Math.random() * 0xffffffff) >>> 0
+}
+
+/**
+ * The seed of a match this window plays offline: `?seed=` from the URL if
+ * present, otherwise `entropy()`. Numeric seeds are used directly so
+ * `?seed=1234` is readable. Never read for a match on a server.
+ */
+function resolveSeed(): ChosenSeed {
   const param = new URLSearchParams(window.location.search).get('seed')
   if (param !== null && param.length > 0) {
     const numeric = Number(param)
@@ -66,8 +77,14 @@ function resolveSeed(): { seed: number; label: string } {
     }
     return { seed: hashSeed(param), label: param }
   }
-  const seed = (Math.random() * 0xffffffff) >>> 0
+  const seed = entropy()
   return { seed, label: String(seed) }
+}
+
+/** A seed this window chose, and how the match names it on screen. */
+interface ChosenSeed {
+  seed: number
+  label: string
 }
 
 /**
@@ -76,54 +93,225 @@ function resolveSeed(): { seed: number; label: string } {
  * Two peers must not deal the same people, and the sheets travel in `ready` as
  * data, so nothing needs to reproduce them from the match seed. This is setup
  * entropy, not gameplay randomness, and deliberately not `Math.random`:
- * `resolveSeed` is the one such draw `tests/determinism.test.ts` allows here.
+ * `entropy` is the one such draw `tests/determinism.test.ts` allows here.
  */
 function setupRng(): Rng {
-  const [entropy] = crypto.getRandomValues(new Uint32Array(1))
-  return new Rng(entropy!)
+  const [word] = crypto.getRandomValues(new Uint32Array(1))
+  return new Rng(word!)
 }
 
 /**
- * The window's one connection to a match server, while it is on one
- * (`ITEM-060`, `src/game/ServerConnection.ts`).
+ * What is on this window's screen, and the one way off it.
  *
- * Held here, outside every screen, because it outlives them: the server
- * panel opens it and a match plays over it, so the lobby, the sign-in and the
- * room are one socket rather than one each. Leaving the server (Back from its
- * panel) ends it; so does the page reload that
- * takes a finished match back to the menu (`backToMenu`).
+ * Created once the game has loaded and handed to every flow, so that nothing a
+ * screen puts up lives in module state where only a page reload could clear it:
+ *
+ * - the **overlays** — the start menu, the interrupted-match notice, the
+ *   flashed line, the reconnecting line — are React roots made here, once, and
+ *   drawn into or emptied. There is never a second set to find by DOM id.
+ * - the **current screen** (a loadout, a match, a watcher's view, a replay) is
+ *   whatever was last `present`ed: its disposer, and with it the window's
+ *   network for the match, are what `leaveMatch` puts away.
+ * - the **connection to the match server** outlives every screen (it is the
+ *   lobby and the sign-in as much as it is the match), so it is held here and
+ *   is not part of a screen's teardown: leaving a match leaves the server
+ *   connected, and Back from the server panel (`leaveServer`) ends it.
  */
-let server: ServerConnection | null = null
+class ScreenController {
+  private connection: ServerConnection | null = null
+  private prompt: EncounterPromptHandle | null = null
+  private screen: (() => void) | null = null
+  private network: NetworkManager | null = null
+  private noticeTimer: number | undefined
+  private menuKey = 0
+  private menuUp = false
+  private map: Promise<void> | null = null
+  /** The roster screen on screen, if any: dismissed if an encounter takes over. */
+  roster: RosterScreen | null = null
 
-/** The window's connection to the match server: the existing one if it is still alive. */
-function connectionToServer(): ServerConnection {
-  if (server && server.state.kind !== 'closed') return server
-  server?.close()
-  server = new ServerConnection(matchServerFor(new URL(window.location.href)))
-  encounterPrompt?.follow(server)
-  return server
+  private readonly menuRoot: Root
+  private readonly interruptedRoot: Root
+  private readonly noticeRoot: Root
+  private readonly reconnectingRoot: Root
+
+  constructor(
+    ui: HTMLElement,
+    private readonly flows: {
+      /** The start menu, as it is drawn when the player is back at it. */
+      menu: (notice: string | undefined) => ReactElement
+      /** Play a recording from the return feed. */
+      watch: (recording: CombatRecording) => void
+    },
+  ) {
+    const mount = (): Root => {
+      const element = document.createElement('div')
+      element.className = 'hud-mount'
+      ui.appendChild(element)
+      return createRoot(element)
+    }
+    this.menuRoot = mount()
+    this.interruptedRoot = mount()
+    this.noticeRoot = mount()
+    this.reconnectingRoot = mount()
+  }
+
+  // ---------------------------------------------------------------------------
+  // The match server
+  // ---------------------------------------------------------------------------
+
+  /** The window's connection to the match server: the existing one if it is still alive. */
+  connectionToServer(): ServerConnection {
+    if (this.connection && this.connection.state.kind !== 'closed') return this.connection
+    this.connection?.close()
+    this.connection = new ServerConnection(matchServerFor(new URL(window.location.href)))
+    this.prompt?.follow(this.connection)
+    return this.connection
+  }
+
+  leaveServer(): void {
+    this.connection?.close()
+    this.connection = null
+    this.prompt?.follow(null)
+  }
+
+  /**
+   * Mount the join prompt for a fight on the road (`ITEM-048`), following
+   * whichever connection the window has.
+   */
+  followEncounters(take: (roomId: string) => Promise<void>): void {
+    this.prompt = mountEncounterPrompt({
+      // A fight is taken over from the menu or the map. In a match or a replay
+      // there is nothing to take it over from: the player is already somewhere
+      // the prompt has no business, and the AI plays it.
+      available: () => (this.menuUp || this.map !== null) && this.roster === null,
+      take,
+      showFeed: () => void this.showMap(),
+    })
+    if (this.connection) this.prompt.follow(this.connection)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Overlays
+  // ---------------------------------------------------------------------------
+
+  /** Draw the start menu, replacing any that is up (and so starting it afresh). */
+  showMenu(notice?: string): void {
+    this.menuUp = true
+    this.menuRoot.render(<ScreenOverlay key={++this.menuKey}>{this.flows.menu(notice)}</ScreenOverlay>)
+  }
+
+  closeMenu(): void {
+    this.menuUp = false
+    this.menuRoot.render(null)
+  }
+
+  /** Show why a match stopped, over it, with the way back to the menu. */
+  showInterrupted(reason: string | undefined): void {
+    this.hideReconnecting()
+    this.interruptedRoot.render(
+      <ScreenOverlay>
+        <InterruptedOverlay reason={reason} onReturn={() => this.leaveMatch()} />
+      </ScreenOverlay>,
+    )
+  }
+
+  /**
+   * Say something briefly over whatever is on screen.
+   *
+   * For news the player did not ask for and cannot act on — being put back in
+   * a match they already had — so it goes away by itself rather than waiting
+   * to be dismissed.
+   */
+  flash(text: string): void {
+    window.clearTimeout(this.noticeTimer)
+    this.noticeRoot.render(<ScreenNotice text={text} />)
+    this.noticeTimer = window.setTimeout(() => this.noticeRoot.render(null), 6000)
+  }
+
+  /**
+   * Say so while `network` gets its seat back after a drop, whatever is on
+   * screen — the loadout, the match, the watcher's view — and nothing once it
+   * is back. A window that gives up is told why by whatever ends the screen
+   * (`showInterrupted`, `leaveMatch`), which takes the line down first.
+   */
+  followReconnects(network: NetworkManager): void {
+    network.onReconnecting = (attempt) => this.reconnectingRoot.render(<ReconnectingNotice attempt={attempt} />)
+    network.onReconnected = () => this.hideReconnecting()
+  }
+
+  private hideReconnecting(): void {
+    this.reconnectingRoot.render(null)
+  }
+
+  // ---------------------------------------------------------------------------
+  // The map
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Open the map over everything else, once: asking again while it is open
+   * (the join prompt's link to the feed) is the same map.
+   */
+  showMap(): Promise<void> {
+    this.map ??= (async () => {
+      // The game's own canvas is covered by the map, which draws its own
+      // frames: two render loops would share the GPU for nothing.
+      const resume = pauseRendering(Game.instance())
+      try {
+        await openMap(this.connectionToServer(), baseUrl, this.flows.watch)
+      } finally {
+        resume()
+        this.map = null
+      }
+    })()
+    return this.map
+  }
+
+  /** Put the map away, resolving once it has gone: something else needs the screen. */
+  async dismissMap(): Promise<void> {
+    closeMap()
+    await this.map
+  }
+
+  // ---------------------------------------------------------------------------
+  // Screens
+  // ---------------------------------------------------------------------------
+
+  /** The window's network for the screen being shown, to close when it is left. */
+  holdNetwork(network: NetworkManager): void {
+    this.network = network
+  }
+
+  /** Show `screen` as the current one, putting away whatever was. */
+  present(screen: () => void): void {
+    this.dismiss()
+    this.screen = screen
+  }
+
+  /** Put the current screen away, leaving the network (a match rebuilt in place keeps its own). */
+  dismiss(): void {
+    const screen = this.screen
+    this.screen = null
+    screen?.()
+  }
+
+  /**
+   * The one way out of a match, a loadout, a watcher's view or a replay: the
+   * screen, then the network, then every overlay and line that went with
+   * them, then the menu — with `notice` on it, when something sent the player
+   * back rather than the player choosing to go.
+   */
+  leaveMatch(notice?: string): void {
+    this.dismiss()
+    this.network?.dispose()
+    this.network = null
+    this.hideReconnecting()
+    this.interruptedRoot.render(null)
+    window.clearTimeout(this.noticeTimer)
+    this.noticeRoot.render(null)
+    delete (window as unknown as Record<string, unknown>).tictac
+    this.showMenu(notice)
+  }
 }
-
-function leaveServer(): void {
-  server?.close()
-  server = null
-  encounterPrompt?.follow(null)
-}
-
-/**
- * The join prompt for a fight on the road (`ITEM-048`), mounted once the game
- * has loaded and following whichever connection the window has.
- */
-let encounterPrompt: EncounterPromptHandle | null = null
-
-/** The start menu on screen, if any: how something that is not the menu puts it away. */
-let openMenu: (() => void) | null = null
-
-/** The map on screen, from opening to its close having finished. */
-let mapOpen: Promise<void> | null = null
-
-/** The roster screen on screen, if any: dismissed if an encounter takes over. */
-let openRoster: RosterScreen | null = null
 const ASSETS: Asset[] = [
   { name: 'character', type: 'gltfModel', path: `${baseUrl}character.glb` },
   ...Object.values(WeaponId).map(
@@ -151,62 +339,23 @@ game.resources.on('loaded', () => {
   // back on exit, and the counter measures frames wherever the game is drawing.
   new FullscreenPrompt()
   new FpsCounter()
-  encounterPrompt = mountEncounterPrompt({
-    // A fight is taken over from the menu or the map. In a match or a replay
-    // there is nothing to take it over from: the player is already somewhere
-    // the prompt has no business, and the AI plays it.
-    available: () => (openMenu !== null || mapOpen !== null) && openRoster === null,
-    take: takeEncounter,
-    showFeed: () => void showMap(),
+  const screens: ScreenController = new ScreenController(game.uiRoot, {
+    menu: (notice) => startMenu(screens, notice),
+    watch: (recording) => void playBack(screens, recording),
   })
-  if (server) encounterPrompt.follow(server)
-  showMenu()
+  screens.followEncounters((roomId) => takeEncounter(screens, roomId))
+  screens.showMenu()
 })
 
 /**
- * Draw the start menu, optionally stating why the player is back at it.
+ * The start menu, optionally stating why the player is back at it.
  *
  * `notice` is how a match that never started says so: a referee that refuses
  * a build sends `abort` before either side has a controller to show the usual
  * interrupted overlay, and without this the screen would simply reappear with
  * no explanation at all.
  */
-function showMenu(notice?: string): void {
-  reconnecting.hide()
-  const ui = Game.instance().uiRoot
-  const container = document.createElement('div')
-  container.id = 'start-menu-overlay'
-  container.style.cssText = `
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: rgba(10, 14, 20, 0.92);
-    backdrop-filter: blur(8px);
-    z-index: 10000;
-    font-family: inherit;
-    color: #e2e8f0;
-    /* #ui is pointer-events: none and only its buttons opt back in, so without
-       this a menu <input> is click-through: it never takes focus and a phone
-       never raises its keyboard. */
-    pointer-events: auto;
-  `
-  container.addEventListener('pointerdown', (e) => e.stopPropagation())
-  container.addEventListener('mousedown', (e) => e.stopPropagation())
-  container.addEventListener('click', (e) => e.stopPropagation())
-  ui.appendChild(container)
-
-  const root = createRoot(container)
-
-  const closeMenu = () => {
-    if (openMenu === closeMenu) openMenu = null
-    root.unmount()
-    container.remove()
-  }
-  openMenu = closeMenu
-
+function startMenu(screens: ScreenController, notice?: string): ReactElement {
   /**
    * Who a signed-in player deploys (`[ITEM-042]`): chosen from the roster
    * that server keeps. Anonymous: nobody chosen, and the squad is rolled as
@@ -219,7 +368,7 @@ function showMenu(notice?: string): void {
       throw new Error('Nobody is left on your roster. Recruit before deploying.')
     }
     const screen = new RosterScreen(roster, () => account.recruit())
-    openRoster = screen
+    screens.roster = screen
     try {
       const picked = await screen.pick()
       return {
@@ -229,61 +378,61 @@ function showMenu(notice?: string): void {
         characterIds: picked.map((entry) => entry.characterId),
       }
     } finally {
-      if (openRoster === screen) openRoster = null
+      if (screens.roster === screen) screens.roster = null
     }
   }
 
-  root.render(
+  return (
     <StartMenu
       notice={notice}
       onLocalVersus={() => {
-        closeMenu()
-        const { seed, label } = resolveSeed()
-        equipThenStart(seed, label, new NetworkManager())
+        screens.closeMenu()
+        const chosen = resolveSeed()
+        equipThenStart(screens, chosen, new NetworkManager())
       }}
       onPlayAi={() => {
-        closeMenu()
-        const { seed, label } = resolveSeed()
+        screens.closeMenu()
+        const chosen = resolveSeed()
         const network = new NetworkManager()
         AiOpponent.join(network, setupRng())
-        network.hostMatch(seed, label)
-        equipThenStart(seed, label, network)
+        network.hostMatch(chosen.seed, chosen.label)
+        equipThenStart(screens, chosen, network)
       }}
       onLoadRecording={async (file) => {
         // `File.text()`, never `FileReader`: this codebase reads files
         // asynchronously and nothing here needs a progress event.
         const recording = parseRecording(JSON.parse(await file.text()))
-        closeMenu()
-        startPlayback(recording)
+        screens.closeMenu()
+        startPlayback(screens, recording)
       }}
       onInitHost={async () => {
-        const { seed, label } = resolveSeed()
+        const chosen = resolveSeed()
         const network = new NetworkManager()
-        const hostId = await network.initHost(seed, label)
+        const hostId = await network.initHost(chosen.seed, chosen.label)
         network.onConnected = () => {
-          closeMenu()
+          screens.closeMenu()
           // Only once a peer is attached, which is what makes `ready` deliverable.
-          equipThenStart(seed, label, network)
+          equipThenStart(screens, chosen, network)
         }
         return hostId
       }}
       onJoinP2p={async (hostId) => {
         const network = new NetworkManager()
         const initData = await network.initJoin(hostId)
-        closeMenu()
-        equipThenStart(initData.seed, initData.seedLabel, network)
+        screens.closeMenu()
+        equipThenStart(screens, { seed: initData.seed, label: initData.seedLabel }, network)
       }}
-      connectionToServer={connectionToServer}
-      leaveServer={leaveServer}
+      connectionToServer={() => screens.connectionToServer()}
+      leaveServer={() => screens.leaveServer()}
       onServerConnect={async (intent) => {
-        const connection = connectionToServer()
+        const connection = screens.connectionToServer()
         const account = connection.player ? new Account(connection) : null
         // Only a seat in a room still being set up deploys anybody. Watching
         // brings nobody, and a match taken back already has its squad.
         const squad = intent.kind === 'open' || intent.kind === 'join' ? await pickSquad(account) : {}
         const network = new NetworkManager()
         try {
-          await takeSeat(network, await network.enterRoom(connection, intent), squad, closeMenu)
+          await takeSeat(screens, network, await network.enterRoom(connection, intent), squad)
         } catch (err) {
           // Whatever seat was taken is stood up from; the connection stays,
           // and the panel shows the reason on it.
@@ -291,40 +440,20 @@ function showMenu(notice?: string): void {
           throw err
         }
       }}
-      onOpenMap={showMap}
-    />,
+      onOpenMap={() => screens.showMap()}
+    />
   )
 }
 
-/**
- * Open the map over everything else, once: asking again while it is open
- * (the join prompt's link to the feed) is the same map.
- */
-function showMap(): Promise<void> {
-  mapOpen ??= (async () => {
-    // The game's own canvas is covered by the map, which draws its own
-    // frames: two render loops would share the GPU for nothing.
-    const resume = pauseRendering(Game.instance())
-    try {
-      await openMap(connectionToServer(), baseUrl, (recording) => void playBack(recording))
-    } finally {
-      resume()
-      mapOpen = null
-    }
-  })()
-  return mapOpen
-}
-
-/** Watch a fight from the return feed: the map and the menu give way to the replay, and its end is a page reload to the menu like any other. */
-async function playBack(recording: CombatRecording): Promise<void> {
-  closeMap()
-  await mapOpen
-  openMenu?.()
+/** Watch a fight from the return feed: the map and the menu give way to the replay, which is left like any other screen. */
+async function playBack(screens: ScreenController, recording: CombatRecording): Promise<void> {
+  await screens.dismissMap()
+  screens.closeMenu()
   try {
-    startPlayback(recording)
+    startPlayback(screens, recording)
   } catch (error) {
     console.error('[tictac] could not play the recording back', error)
-    flashNotice('That fight could not be played back.')
+    screens.flash('That fight could not be played back.')
   }
 }
 
@@ -335,14 +464,13 @@ async function playBack(recording: CombatRecording): Promise<void> {
  * room's log has arrived; rejects, with the server's own reason, if the
  * seat is no longer to be had (the AI has it).
  */
-async function takeEncounter(roomId: string): Promise<void> {
+async function takeEncounter(screens: ScreenController, roomId: string): Promise<void> {
   const network = new NetworkManager()
   try {
-    const seat = await network.enterRoom(connectionToServer(), { kind: 'resume', roomId })
-    openRoster?.dismiss()
-    closeMap()
-    await mapOpen
-    await takeSeat(network, seat, {}, () => openMenu?.())
+    const seat = await network.enterRoom(screens.connectionToServer(), { kind: 'resume', roomId })
+    screens.roster?.dismiss()
+    await screens.dismissMap()
+    await takeSeat(screens, network, seat, {})
   } catch (err) {
     network.dispose()
     throw err
@@ -376,81 +504,35 @@ interface Picked {
  * player who already holds a seat in a match being played is put back in it,
  * whatever they asked for, and is told so.
  */
-async function takeSeat(network: NetworkManager, seat: Seated, squad: Picked, closeMenu: () => void): Promise<void> {
-  followReconnects(network)
+async function takeSeat(screens: ScreenController, network: NetworkManager, seat: Seated, squad: Picked): Promise<void> {
+  screens.followReconnects(network)
   const redirected = seat.redirected
     ? 'You already have a match on this server, so you are back in it.'
     : null
 
   if (seat.faction === null) {
-    closeMenu()
-    watchMatch(network, seat)
+    screens.closeMenu()
+    watchMatch(screens, network, seat)
     return
   }
 
   if (seat.phase === 'playing') {
     const log = await network.waitForLog()
-    closeMenu()
-    resumeMatch(network, log)
-    flashNotice(redirected ?? 'Your match continues here; any other window it was open in has been closed.')
+    screens.closeMenu()
+    resumeMatch(screens, network, log)
+    screens.flash(redirected ?? 'Your match continues here; any other window it was open in has been closed.')
     return
   }
 
-  // A room still being set up goes on exactly as a match between two peers
-  // does: Blue announces it, Red waits to hear it.
-  if (seat.faction === Faction.Blue) {
-    const { seed, label } = resolveSeed()
-    network.hostMatch(seed, label)
-    closeMenu()
-    equipThenStart(seed, label, network, squad)
-  } else {
-    const opening = await network.joinMatch()
-    closeMenu()
-    equipThenStart(opening.seed, opening.seedLabel, network, squad)
-  }
-  if (redirected) flashNotice(redirected)
-}
-
-/**
- * Say something briefly over whatever is on screen.
- *
- * For news the player did not ask for and cannot act on — being put back in
- * a match they already had — so it goes away by itself rather than waiting
- * to be dismissed.
- */
-function flashNotice(text: string): void {
-  const notice = document.createElement('div')
-  notice.textContent = text
-  notice.style.cssText = `
-    position: absolute;
-    top: 16px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 10001;
-    padding: 8px 14px;
-    border-radius: 6px;
-    background: rgba(10, 14, 20, 0.92);
-    border: 1px solid rgba(148, 163, 184, 0.4);
-    color: #e2e8f0;
-    font-size: 13px;
-    pointer-events: none;
-  `
-  Game.instance().uiRoot.appendChild(notice)
-  setTimeout(() => notice.remove(), 6000)
-}
-
-/** The one window's word that it is getting its seat back; a page plays one match at a time. */
-const reconnecting = new ReconnectingBanner()
-
-/**
- * Say so while `network` gets its seat back after a drop, whatever is on
- * screen — the loadout, the match, the watcher's view — and nothing once it
- * is back. A window that gives up is told why by whatever ends the screen
- * (`showInterrupted`, `showMenu`), which takes the banner down first.
- */
-function followReconnects(network: NetworkManager): void {
-  network.onReconnecting = (attempt) => reconnecting.show(attempt)
-  network.onReconnected = () => reconnecting.hide()
+  // A room still being set up goes on as a match between two peers does, with
+  // one difference: the seed is the server's. Blue equips while it waits for
+  // an opponent and Red, who is seated only once there is one, hears it at
+  // once; neither states one, and the match starts from whatever the room has
+  // issued by then (`equipThenStart`).
+  if (seat.faction === Faction.Red) await network.joinMatch()
+  screens.closeMenu()
+  equipThenStart(screens, null, network, squad)
+  if (redirected) screens.flash(redirected)
 }
 
 /**
@@ -465,11 +547,14 @@ function followReconnects(network: NetworkManager): void {
  * match on a server the player is signed in to brings the roster that server
  * keeps, which is the squad its referee will check and settle.
  */
-function equipThenStart(seed: number, label: string, network: NetworkManager, squad: Picked = {}): void {
+function equipThenStart(screens: ScreenController, chosen: ChosenSeed | null, network: NetworkManager, squad: Picked = {}): void {
   const { sheets = rollSquadSheets(setupRng()), hp, characterIds, fatigue } = squad
   const engine = createEngineContext(Game.instance())
   const faction = network.mode === 'local' ? Faction.Blue : network.myFaction
-  const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine, { [faction]: sheets }), seed, faction, sheets)
+  // The loadout screen's backdrop only: a server's seed may not exist yet
+  // while Blue waits for an opponent, and nothing about the match depends on it.
+  const backdrop = chosen?.seed ?? entropy()
+  const screen = new LoadoutScreen(engine, new OffscreenPortraits(engine, { [faction]: sheets }), backdrop, faction, sheets)
 
   // The squad the player was shown while equipping is the squad that deploys.
   // Rolled per peer, never from the match seed — that seed is the host's map.
@@ -480,11 +565,9 @@ function equipThenStart(seed: number, label: string, network: NetworkManager, sq
   // A peer that drops while the player is still equipping would otherwise hang
   // the screen: there is no controller yet to show the usual overlay. `start`
   // reassigns this to the in-match overlay rather than adding a second handler.
-  network.onDisconnected = (reason) => {
-    screen.dispose()
-    network.dispose()
-    showMenu(reason)
-  }
+  network.onDisconnected = (reason) => screens.leaveMatch(reason)
+  screens.holdNetwork(network)
+  screens.present(() => screen.dispose())
 
   void screen.show().then(async (loadout) => {
     const mySquad: Deployment[] = mySheets.map((sheet, i) => ({
@@ -498,14 +581,22 @@ function equipThenStart(seed: number, label: string, network: NetworkManager, sq
     network.send({ type: 'ready', squad: mySquad })
     if (network.mode !== 'local') screen.markWaiting('Waiting for opponent to deploy…')
     const peer = await network.waitForPeerReady()
-    screen.dispose()
+    screens.dismiss()
     const other = faction === Faction.Blue ? Faction.Red : Faction.Blue
     // The peer's squad, when it sent one this build could read. Without a
     // peer at all (local play) the enemy is a fresh roll with no kit of its
     // own — the stock spread, same as every match before a referee needed to
     // know what both sides were carrying.
     const otherSquad: Deployment[] = peer?.squad ?? localEnemySheets.map((sheet) => ({ sheet }))
-    start(seed, label, network, {
+    // A server's room has issued the seed by now: the opponent had to be
+    // seated before it could have deployed. Read at this moment so that a
+    // seed issued again after a server restart is the one used.
+    let opening = chosen
+    if (!opening) {
+      const issued = await network.awaitOpening()
+      opening = { seed: issued.seed, label: issued.seedLabel }
+    }
+    start(screens, opening.seed, opening.label, network, {
       [faction]: mySquad,
       [other]: otherSquad,
     } as Record<Faction, Deployment[]>)
@@ -565,10 +656,11 @@ interface MatchScene extends Field {
  * draw who carried out from.
  */
 function buildMatch(
+  screens: ScreenController,
   engine: EngineContext,
   field: Field,
   seedLabel: string,
-  dice: Roll,
+  dice: Rng,
   network: NetworkManager | null,
   recordingHeader: RecordingHeader | null,
 ): MatchScene {
@@ -601,6 +693,7 @@ function buildMatch(
     dice,
     tracers,
     engine,
+    () => screens.leaveMatch(),
     network,
     recordingHeader,
   )
@@ -648,52 +741,8 @@ function expose(scene: MatchScene, more: Record<string, unknown>): void {
   })
 }
 
-/**
- * Show why a match stopped, over it, with the way back to the menu.
- *
- * `teardown` is whatever the screen behind it needs putting away first.
- */
-function showInterrupted(reason: string | undefined, teardown: () => void): void {
-  reconnecting.hide()
-  const ui = Game.instance().uiRoot
-  if (document.getElementById('disconnection-overlay')) return
-
-  const overlay = document.createElement('div')
-  overlay.id = 'disconnection-overlay'
-  overlay.style.cssText = `
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: rgba(10, 14, 20, 0.92);
-    backdrop-filter: blur(8px);
-    z-index: 10000;
-    font-family: inherit;
-    color: #e2e8f0;
-  `
-  overlay.addEventListener('pointerdown', (e) => e.stopPropagation())
-  overlay.addEventListener('mousedown', (e) => e.stopPropagation())
-  overlay.addEventListener('click', (e) => e.stopPropagation())
-
-  ui.appendChild(overlay)
-
-  const root = createRoot(overlay)
-  root.render(
-    <InterruptedOverlay
-      reason={reason}
-      onReturn={() => {
-        root.unmount()
-        overlay.remove()
-        teardown()
-        showMenu()
-      }}
-    />,
-  )
-}
-
 function start(
+  screens: ScreenController,
   seed: number,
   seedLabel: string,
   network: NetworkManager,
@@ -726,7 +775,12 @@ function start(
   // which is derivable from the stream of intents that follows.
   if (network.mode === 'host') network.send({ type: 'matchHeader', header: recordingHeader })
 
-  playMatch(buildMatch(engine, field, seedLabel, matchDice(seed), network, recordingHeader), network, recordingHeader)
+  playMatch(
+    screens,
+    buildMatch(screens, engine, field, seedLabel, new Rng(seed), network, recordingHeader),
+    network,
+    recordingHeader,
+  )
 }
 
 /**
@@ -742,13 +796,13 @@ function start(
  * `camera` is where the window was looking, when this is a match rebuilt in
  * place after a resync rather than one arrived at from the menu.
  */
-function resumeMatch(network: NetworkManager, log: MatchLog, camera?: CameraView): void {
+function resumeMatch(screens: ScreenController, network: NetworkManager, log: MatchLog, camera?: CameraView): void {
   const { header } = log
   const engine = createEngineContext(Game.instance())
   const field = buildField(engine, header.seed, header.map, header.squads)
-  const scene = buildMatch(engine, field, header.seedLabel, matchDice(header.seed), network, header)
+  const scene = buildMatch(screens, engine, field, header.seedLabel, new Rng(header.seed), network, header)
   catchUp(scene, log)
-  playMatch(scene, network, header)
+  playMatch(screens, scene, network, header)
   if (camera) restoreCamera(scene.rig, camera)
 }
 
@@ -771,7 +825,7 @@ function catchUp(scene: MatchScene, log: MatchLog): void {
 }
 
 /** Hand a built match to the player who commands one of its sides. */
-function playMatch(scene: MatchScene, network: NetworkManager, header: RecordingHeader): void {
+function playMatch(screens: ScreenController, scene: MatchScene, network: NetworkManager, header: RecordingHeader): void {
   const { battlefield, squads, rig, tracers, turnManager, hud, controller } = scene
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
 
@@ -781,13 +835,7 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
     controller.handleRemoteNetworkMessage(msg)
   }
 
-  network.onDisconnected = (reason) => {
-    showInterrupted(reason, () => {
-      stopFrames()
-      disposeScene(scene)
-      network.dispose()
-    })
-  }
+  network.onDisconnected = (reason) => screens.showInterrupted(reason)
 
   // Back from a drop to find the server never got something this window
   // played: the match is the server's log, built again in place exactly as a
@@ -795,11 +843,10 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
   // (`caughtUp`) has already gone to `onMessage` and needs nothing here.
   network.onResync = (resync) => {
     if (resync.kind !== 'rebuild') return
-    stopFrames()
     const camera = { focus: rig.focusPoint.clone(), zoom: rig.zoom, azimuth: rig.azimuth }
-    disposeScene(scene)
-    resumeMatch(network, resync.log, camera)
-    flashNotice('Your last move never reached the server, so the match has been rebuilt to where the server has it.')
+    screens.dismiss()
+    resumeMatch(screens, network, resync.log, camera)
+    screens.flash('Your last move never reached the server, so the match has been rebuilt to where the server has it.')
   }
 
   const commander = squads.getLiving(myFaction)[0]
@@ -820,6 +867,11 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
     loop.advance(delta)
     battlefield.flush()
   })
+  screens.holdNetwork(network)
+  screens.present(() => {
+    stopFrames()
+    disposeScene(scene)
+  })
 
   expose(scene, { seed: header.seed, seedLabel: header.seedLabel, network })
   console.info(`[tictac] tactical combat ready — mode: ${network.mode}, seed ${header.seedLabel}`)
@@ -837,7 +889,7 @@ function playMatch(scene: MatchScene, network: NetworkManager, header: Recording
  * A room that has not started yet has no log to build from, so the watcher
  * waits — with the way out already on screen — until it does.
  */
-function watchMatch(network: NetworkManager, seat: Seated): void {
+function watchMatch(screens: ScreenController, network: NetworkManager, seat: Seated): void {
   let scene: MatchScene | null = null
   let stopFrames: (() => void) | null = null
   let left = false
@@ -848,27 +900,24 @@ function watchMatch(network: NetworkManager, seat: Seated): void {
     if (scene) disposeScene(scene)
     scene = null
   }
-  const leave = (): void => {
+  const bar = new SpectatorBar(() => screens.leaveMatch())
+  bar.render({ roomId: seat.roomId, progress: { kind: 'waiting' } })
+  screens.holdNetwork(network)
+  screens.present(() => {
     left = true
     bar.dispose()
     teardown()
-    network.dispose()
-  }
-  const bar = new SpectatorBar(() => {
-    leave()
-    showMenu()
   })
-  bar.render({ roomId: seat.roomId, progress: { kind: 'waiting' } })
   // The room aborted, or this player opened another window: said over
   // whatever is showing, as a player's interrupted match is.
-  network.onDisconnected = (reason) => showInterrupted(reason, leave)
+  network.onDisconnected = (reason) => screens.showInterrupted(reason)
 
   /** The match as the log has it, then live as it is played. */
   const show = (log: MatchLog): MatchScene => {
     const { header } = log
     const engine = createEngineContext(Game.instance())
     const field = buildField(engine, header.seed, header.map, header.squads)
-    const built = buildMatch(engine, field, header.seedLabel, matchDice(header.seed), null, null)
+    const built = buildMatch(screens, engine, field, header.seedLabel, new Rng(header.seed), null, null)
     scene = built
     const { battlefield, squads, rig, tracers, turnManager, hud, controller } = built
     controller.spectating = true
@@ -943,7 +992,7 @@ function watchMatch(network: NetworkManager, seat: Seated): void {
  * it is spectating — which reveals the whole field and takes the player's
  * hands off the units.
  */
-function startPlayback(recording: CombatRecording): void {
+function startPlayback(screens: ScreenController, recording: CombatRecording): void {
   const { header } = recording
   const engine = createEngineContext(Game.instance())
   const field = buildField(engine, header.seed, header.map, header.squads)
@@ -951,7 +1000,7 @@ function startPlayback(recording: CombatRecording): void {
   // Held as the generator rather than a wrapped stream, because stepping back
   // has to put the dice back as well as the world.
   const dice = new Rng(header.seed)
-  const scene = buildMatch(engine, field, header.seedLabel, () => dice.next(), null, null)
+  const scene = buildMatch(screens, engine, field, header.seedLabel, dice, null, null)
   const { world, battlefield, squads, rig, tracers, turnSystem, turnManager, hud, controller } = scene
   controller.spectating = true
   hud.setHidden(true)
@@ -973,9 +1022,8 @@ function startPlayback(recording: CombatRecording): void {
     recording,
     apply: (command) => controller.applyRecordedCommand(command),
     busy: () => controller.busy,
-    capture: () => captureMoment(rewindable),
-    restore: (moment) => {
-      restoreMoment(rewindable, moment)
+    match: rewindable,
+    afterRestore: () => {
       turnManager.autoSelectFirst()
       controller.recomputeVisibility()
       battlefield.flush()
@@ -995,6 +1043,9 @@ function startPlayback(recording: CombatRecording): void {
         break
       case 'stepBackward':
         playback.stepBackward()
+        break
+      case 'leave':
+        screens.leaveMatch()
         break
     }
   })
@@ -1016,7 +1067,6 @@ function startPlayback(recording: CombatRecording): void {
   const commander = squads.byFaction[Faction.Blue][0]
   rig.snapTo(commander ? commander.position : new Vector3(0, 0, 0))
 
-  // A replay is left by reloading the page, so its frames are never taken down.
   const loop = new FixedStepLoop(
     SIM.step,
     SIM.maxCatchUp,
@@ -1027,9 +1077,16 @@ function startPlayback(recording: CombatRecording): void {
     },
     () => (playback.playing ? playback.speed : 1),
   )
-  onEachFrame(Game.instance(), (delta) => {
+  const stopFrames = onEachFrame(Game.instance(), (delta) => {
     loop.advance(delta)
     battlefield.flush()
+  })
+  // Taken down with the screen, whoever leaves it: a replay's frames, bar and
+  // scene go together, and a second replay does not stand among them.
+  screens.present(() => {
+    stopFrames()
+    controls.dispose()
+    disposeScene(scene)
   })
 
   expose(scene, { playback, seed: header.seed, seedLabel: header.seedLabel })

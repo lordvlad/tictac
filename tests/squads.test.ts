@@ -92,4 +92,41 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
 
     await persistence.close()
   })
+
+  test('players placed at the same moment still start a kilometre apart', async () => {
+    const persistence = await freshPersistence(url)
+    // Every draw lands on one of five spots ten kilometres apart, so a
+    // placement that read the starts before the others had written theirs
+    // would very likely choose a spot that is taken. `random` is asked for a
+    // distance and then a bearing, and the bearing is always due north.
+    const SPOTS = 5
+    const pick = new Rng(7)
+    let spot: number | null = null
+    const random = (): number => {
+      if (spot === null) {
+        spot = Math.floor(pick.next() * SPOTS)
+        return ((spot * 10) / START_RADIUS_KM) ** 2
+      }
+      spot = null
+      return 0
+    }
+    const lines: string[] = []
+    const squads = new Squads(persistence.db, { now: () => 0, schedule: WALL_CLOCK.schedule }, random, (line) => lines.push(line))
+    const ids = Array.from({ length: SPOTS }, (_, i) => `p${i}`)
+    for (const id of ids) {
+      await persistence.db.query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${id}, ${new Date(0).toISOString()})`
+    }
+
+    const placed = await Promise.all(ids.map((id) => squads.ensure(id, null)))
+
+    const starts = placed.map((squad) => squad.waypoints[0]!)
+    for (let i = 0; i < starts.length; i++) {
+      for (let j = i + 1; j < starts.length; j++) {
+        expect(distanceKm(starts[i]!, starts[j]!)).toBeGreaterThanOrEqual(START_SEPARATION_KM)
+      }
+    }
+    expect(lines).toEqual([])
+
+    await persistence.close()
+  })
 })

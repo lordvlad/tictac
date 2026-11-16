@@ -1,6 +1,7 @@
 export { IdentityComponent } from './IdentityComponent'
 export { PositionComponent } from './PositionComponent'
 export { HealthComponent } from './HealthComponent'
+export { CharacterComponent } from './CharacterComponent'
 export { ActionPointsComponent } from './ActionPointsComponent'
 export { ArmorComponent } from './ArmorComponent'
 export { WeaponComponent } from './WeaponComponent'

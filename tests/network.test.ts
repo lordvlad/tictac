@@ -61,7 +61,6 @@ describe('JSON-RPC framing', () => {
       'digest',
       'matchHeader',
       'log',
-      'seated',
       'abort',
       'moveUnit',
       'fireShot',
@@ -606,6 +605,29 @@ describe('A match over a socket, as a referee would host one', () => {
       net.dispose()
       server.stop()
     }
+  })
+
+  test('a seed a server issued is waiting for whoever asks, and the latest one issued is the one read', async () => {
+    const { net, send } = peered('host')
+    // Said before anybody asked: the host's window is still on its loadout screen.
+    send(openingFrame())
+    expect(await net.awaitOpening()).toEqual({ seed: 21, seedLabel: '21' })
+
+    // Issued again, to a seat that came back to a restarted server.
+    send(openingFrame({ seed: 22, seedLabel: '22' }))
+    expect(await net.awaitOpening()).toEqual({ seed: 22, seedLabel: '22' })
+  })
+
+  test('asked for before it is said, it arrives, and a build it cannot play against is refused instead', async () => {
+    const waiting = peered('host')
+    const opening = waiting.net.awaitOpening()
+    waiting.send(openingFrame({ seed: 5, seedLabel: '5' }))
+    expect(await opening).toEqual({ seed: 5, seedLabel: '5' })
+
+    const refused = peered('host')
+    const never = refused.net.awaitOpening()
+    refused.send(openingFrame({ build: 'c0ffee1' }))
+    await expect(never).rejects.toThrow('c0ffee1')
   })
 })
 

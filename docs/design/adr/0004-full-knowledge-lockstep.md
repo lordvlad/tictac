@@ -68,7 +68,9 @@ entry points, and persistence is the foundation the rest stands on.
 - **One log, four uses**: replay, the wire, the referee's input, and rebuilding a client that
   crashed. The recorder already proves the first — a captured match is an intent stream with no
   outcomes in it — and nothing currently checks it, which is what makes this work overdue
-  rather than speculative.
+  rather than speculative. Rewind is none of the four: stepping a replay back (`Playback`
+  restoring a `Moment`) is presentation of a recording only, never a move in live play, so it
+  is deliberately outside the command path and nothing that plays a match can reach it.
 
 ## Alternatives rejected
 
@@ -88,7 +90,10 @@ entry points, and persistence is the foundation the rest stands on.
 - The bug class disappears structurally: an attacker never needs a fact it does not own.
 - A match becomes a durable, replayable, auditable event log — the substrate persistence needs.
 - A faked die stops being a lie and becomes a desynchronisation, which a digest catches and a
-  referee attributes.
+  referee attributes. The digest carries the match dice's position beside the world, because a
+  peer that draws one die more or fewer leaves every component identical until the next roll
+  that matters; compared on its own, that drift is named `dice` at the handover where it began
+  rather than blamed on a later command.
 - The wire shrinks; `WireHit`, `toWireHits`/`fromWireHits` and the resolved-replay path go.
 
 **Negative / accepted costs**
@@ -111,7 +116,7 @@ Staged, in this order, and tracked in the [backlog](../../backlog/active-backlog
 | --- | --- | --- |
 | `ITEM-022` | Determinism audit: version gate, one match stream, float discipline | **Landed** |
 | `ITEM-020` | Shadow resolution: re-derive a received attack and report disagreement | **Landed, then retired by `ITEM-023`** — with no numbers on the wire there is nothing to re-derive |
-| `ITEM-021` | State digest at the turn boundary, for drift | **Landed** — and now the only check on agreement |
+| `ITEM-021` | State digest at the turn boundary, for drift — world and dice position | **Landed** — and now the only check on agreement |
 | `ITEM-023` | Intent-only wire; `WireHit` deleted | **Landed** |
 | `ITEM-024` | Transport port: PeerJS behind a seam, plus socket and loopback | **Landed** with `ITEM-025`, its second caller |
 | `ITEM-025` | The referee: witness, persistence, rejoin, abort on foul | **Landed** |

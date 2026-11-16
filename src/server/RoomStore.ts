@@ -125,6 +125,13 @@ export class RoomStore {
     await this.db.query`DELETE FROM rooms WHERE id = ${id}`
   }
 
+  /** Whether `playerId` holds a seat in the live room `id`, whoever is moving it. */
+  async holdsSeat(id: string, playerId: string): Promise<boolean> {
+    const rows = await this.db.query<{ one: number }>`
+      SELECT 1 AS one FROM rooms WHERE id = ${id} AND (blue_player_id = ${playerId} OR red_player_id = ${playerId})`
+    return rows.length > 0
+  }
+
   /** Every room not yet over, oldest first — the order a lobby lists them in, reversed. */
   async live(): Promise<StoredRoom[]> {
     const rows = await this.db.query<RoomRow>`SELECT * FROM rooms ORDER BY created_at, id`

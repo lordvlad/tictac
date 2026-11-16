@@ -105,9 +105,10 @@ describe('What a match teaches', () => {
 
 /**
  * A small match with no scene, on dice the test chooses. Blue 0 and Red 0
- * are placed by the test; everyone else is parked behind a wall.
+ * are placed by the test; everyone else is parked behind a wall. `blueSheet`
+ * makes Blue 0 somebody in particular.
  */
-function match(roll: Roll) {
+function match(roll: Roll, blueSheet?: (rolled: CharacterSheet) => CharacterSheet) {
   const world = new World()
   createGlobalRules(world)
   const grid = new Grid(40)
@@ -119,7 +120,7 @@ function match(roll: Roll) {
     grid,
     { [Faction.Blue]: parked(1), [Faction.Red]: parked(30) },
     stockSquads({
-      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, plain),
+      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, (_, i) => (i === 0 && blueSheet ? blueSheet(plain()) : plain())),
       [Faction.Red]: Array.from({ length: SQUAD_SIZE }, plain),
     }),
   )
@@ -209,9 +210,8 @@ describe('The service record', () => {
 
 describe('The end of a match', () => {
   test('comes when one side has nobody standing, and teaches only that side’s survivors', () => {
-    const m = match(always(0.5))
     // An ordinary constitution, so there is a point of Health to gain.
-    m.blue.adoptSheet({ ...m.blue.sheet, attributes: { ...m.blue.sheet.attributes, health: 5 } })
+    const m = match(always(0.5), (sheet) => ({ ...sheet, attributes: { ...sheet.attributes, health: 5 } }))
     expect(winnerOf(m.squads)).toBeNull()
     for (const red of m.squads.byFaction[Faction.Red]) red.hp = 0
     expect(winnerOf(m.squads)).toBe(Faction.Blue)

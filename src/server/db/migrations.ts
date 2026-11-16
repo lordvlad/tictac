@@ -164,18 +164,11 @@ export const MIGRATIONS: readonly Migration[] = [
       // one count per weapon class this build had. Never edited afterwards —
       // a WeaponId added later gets its own zero here from `Rosters` code,
       // not from an edited migration.
-      `ALTER TABLE roster ADD COLUMN deeds TEXT NOT NULL DEFAULT '${JSON.stringify({
-        hits: { rifle: 0, shotgun: 0, sniper: 0, gatling: 0 },
-        crits: { rifle: 0, shotgun: 0, sniper: 0, gatling: 0 },
-        kills: 0,
-        wounds: 0,
-        unseen: 0,
-        pushed: 0,
-        blows: 0,
-        forced: 0,
-        heavy: 0,
-        kit: 0,
-      })}'`,
+      // A column DEFAULT is DDL, which neither engine lets a statement bind a
+      // parameter into, so the snapshot is spelled out: the very text the
+      // earlier `JSON.stringify` of it produced, so a database that applied
+      // this migration and one that applies it now end up with one default.
+      `ALTER TABLE roster ADD COLUMN deeds TEXT NOT NULL DEFAULT '{"hits":{"rifle":0,"shotgun":0,"sniper":0,"gatling":0},"crits":{"rifle":0,"shotgun":0,"sniper":0,"gatling":0},"kills":0,"wounds":0,"unseen":0,"pushed":0,"blows":0,"forced":0,"heavy":0,"kit":0}'`,
     ],
   },
   {
@@ -314,6 +307,30 @@ export const MIGRATIONS: readonly Migration[] = [
       // `opponent_player_id` is the other player, whose name the feed shows;
       // null for every fight against aliens and for a contact passed by.
       'ALTER TABLE encounters ADD COLUMN opponent_player_id TEXT',
+    ],
+  },
+  {
+    id: 11,
+    name: 'squad owner',
+    up: [
+      // Which region Durable Object keeps this squad (RFC-0002 §4): a durable
+      // fact written when a handover commits, not recomputed from where the
+      // squad stands. Every squad that exists before this belongs to the one
+      // region there was, `singleton` (`SINGLETON_REGION`, `src/server/Owner.ts`).
+      "ALTER TABLE squads ADD COLUMN owner TEXT NOT NULL DEFAULT 'singleton'",
+    ],
+  },
+  {
+    id: 12,
+    name: 'encounter intent',
+    up: [
+      // A contact is written down *before* the fight it calls for is opened,
+      // with the room's id reserved on the row (`room_id`), so a server that
+      // dies between opening the room and recording it finds the row and the
+      // room under the same id instead of rolling a second fight. 0 while the
+      // outcome (a room, or a pass) is still being carried out; 1 once it is
+      // written. Every earlier row was written after the fact, so it is 1.
+      'ALTER TABLE encounters ADD COLUMN settled INTEGER NOT NULL DEFAULT 1',
     ],
   },
 ]

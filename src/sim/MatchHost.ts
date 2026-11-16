@@ -2,7 +2,7 @@ import { Faction, SIM } from '../config'
 import { NO_FOCUS, NO_FX } from '../core/Combatant'
 import { generateMap } from '../core/MapGenerator'
 import { Rng } from '../core/rng'
-import { captureMoment, type Moment, restoreMoment, type Rewindable } from '../game/Rewind'
+import type { Rewindable } from '../game/Rewind'
 import type { Grid } from '../core/Grid'
 import type { NetworkMessage } from '../game/NetworkManager'
 import type { RecordingHeader } from '../game/Recording'
@@ -118,8 +118,13 @@ export class MatchHost {
     this.turnManager.autoSelectFirst()
   }
 
-  /** The parts a moment is taken from; see `game/Rewind`. */
-  private get rewindable(): Rewindable {
+  /**
+   * The parts a replay's `Playback` steps this match back through.
+   *
+   * A host has no way to rewind itself: going back is the presentation of a
+   * recording, so the only thing that does it is a `Playback` handed this.
+   */
+  get rewindable(): Rewindable {
     return {
       world: this.world,
       unitIds: this.squads.soldiers.map((unit) => unit.entityId),
@@ -130,16 +135,6 @@ export class MatchHost {
       movement: this.movement,
       commands: this.commands,
     }
-  }
-
-  /** The match as it stands, to come back to. */
-  moment(): Moment {
-    return captureMoment(this.rewindable)
-  }
-
-  /** Put the match back to a moment taken earlier. */
-  rewind(moment: Moment): void {
-    restoreMoment(this.rewindable, moment)
   }
 
   /**
@@ -187,6 +182,7 @@ export class MatchHost {
       this.world,
       this.squads.soldiers.map((unit) => unit.entityId),
       this.turnManager.turnNumber,
+      this.dice,
     )
   }
 

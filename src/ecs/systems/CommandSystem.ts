@@ -211,7 +211,7 @@ export class CommandSystem extends System {
       // the reaction, which is what they are for.
       this.sound({ at: { ...mover.tile }, loudness: stepLoudness(mover.isCrouching), faction: mover.faction })
       // Carrying what drags is what Strength learns from.
-      if (mover.gearOnlyTraits.moveCost > 0) mover.deeds.heavy += 1
+      if (mover.gearDrag) mover.deeds.heavy += 1
       this.look()
       this.reactions += this.combat.reactTo(mover)
       // Walking into fire costs the step it took.

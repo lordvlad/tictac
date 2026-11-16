@@ -70,14 +70,16 @@ export async function persistenceOverDb(
   await migrate(db, clock)
   const rosters = new Rosters(db, clock)
   const squads = new Squads(db, clock)
+  const rooms = new RoomStore(db)
+  const accounts = new Accounts(db, rosters, squads, party, clock)
   return {
     db,
     matches: new MatchStore(db),
-    rooms: new RoomStore(db),
-    accounts: new Accounts(db, rosters, squads, party, clock),
+    rooms,
+    accounts,
     rosters,
     squads,
-    encounters: new Encounters(db, clock),
+    encounters: new Encounters(db, { results: rosters, rooms, players: accounts }),
     party,
     close: () => db.close(),
   }

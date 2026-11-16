@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import {
   BUILD_ID,
   MY_VERSION,
-  OLDEST_SERVED_PROTOCOL,
   PROTOCOL_VERSION,
   SERVER_VOICES,
   versionRefusal,
@@ -53,10 +52,6 @@ describe('What this build says about itself', () => {
     // admitting there is none.
     expect(BUILD_ID).toBe('dev')
     expect(MY_VERSION).toEqual({ protocol: PROTOCOL_VERSION, build: 'dev' })
-  })
-
-  test('the oldest served protocol is protocol 7 now that protocol 6 is retired', () => {
-    expect(OLDEST_SERVED_PROTOCOL).toBe(7)
   })
 })
 

@@ -2,15 +2,16 @@ import { WALL_CLOCK } from '../../src/server/Clock'
 import { Faction } from '../../src/config'
 import { maxHpOf, sanitizeSheet, type CharacterSheet } from '../../src/core/Characters'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../../src/game/JsonRpc'
-import type { LobbyView, ServerIntent } from '../../src/game/Lobby'
+import type { LobbyView, Seated, ServerIntent } from '../../src/game/Lobby'
 import type { NetworkMessage } from '../../src/game/NetworkManager'
 import type { CombatRecording, RecordingHeader } from '../../src/game/Recording'
 import type { Deployment } from '../../src/core/Loadout'
-import type { Player, RpcMethod, RpcParams, RpcResult } from '../../src/game/Rpc'
+import type { Player, RpcMethod, RpcParams, RpcResult, SessionEnded } from '../../src/game/Rpc'
 import { loopback } from '../../src/game/Transport'
 import type { Lobby } from '../../src/server/Lobby'
 import type { Persistence } from '../../src/server/Persistence'
 import type { Journeys } from '../../src/server/Journeys'
+import { regionDirectory } from '../../src/server/Owner'
 import { Sessions } from '../../src/server/Session'
 import { STOCK_PLAN } from '../../src/sim/Balance'
 import { SimMatch } from '../../src/sim/SimMatch'
@@ -22,11 +23,10 @@ import { MY_VERSION, PROTOCOL_VERSION, type PeerVersion } from '../../src/versio
  * so what is under test is the server's half of the conversation and nothing
  * else.
  *
- * The match's own notifications are collected as `NetworkMessage`s, and so
- * is the answer to the room this socket asked for: a seat as `seated`, a
- * refusal as `abort` with the server's reason — the two shapes these tests
- * have always read a room's answer in, whether it came as a notification
- * (protocol 6) or as the response to `room/enter` (protocol 7).
+ * The match's own notifications are collected as `NetworkMessage`s. The answer
+ * to the room this socket asked for is `seats` (the response to `room/enter`),
+ * and a refusal is read as an `abort` with the server's reason — the shape
+ * these tests have always read a refusal in.
  */
 export interface Connection {
   send(message: NetworkMessage): void
@@ -34,12 +34,16 @@ export interface Connection {
   request<M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>
   /** Everything the server sent, in order. */
   received: NetworkMessage[]
+  /** The answers to every `room/enter` this socket made, in order: where the server put it. */
+  seats: Seated[]
   /** Everything of one type the server sent, in order. */
   of<T extends NetworkMessage['type']>(type: T): Extract<NetworkMessage, { type: T }>[]
   /** Every lobby view pushed to this socket (`lobby/changed`), in order. */
   lobby: LobbyView[]
   /** Every other `tictac/api/*` notification the server pushed to this socket, in order: `encounter/started` and the like. */
   pushed: JsonRpcNotification[]
+  /** What the server said when it ended this socket's session (`session/ended`), in order; empty while it has not. */
+  ended: SessionEnded[]
   /**
    * The first pushed view that satisfies `ready` — one already here, or the
    * next to arrive. Pushes are gathered into one per change and sent a
@@ -77,6 +81,7 @@ function layerOf(lobby: Lobby): Layer {
       persistence: { accounts, rosters: {}, squads: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>,
       // Nothing here travels.
       journeys: {} as Journeys,
+      directory: regionDirectory({ owners: { ownerOf: async () => null } }),
       clock: WALL_CLOCK,
       log: () => {},
     })
@@ -105,8 +110,10 @@ export async function connect(
   const { sessions, known } = layerOf(lobby)
   const [mine, theirs] = loopback()
   const received: NetworkMessage[] = []
+  const seats: Seated[] = []
   const views: LobbyView[] = []
   const pushed: JsonRpcNotification[] = []
+  const ended: SessionEnded[] = []
   const lobbyWaiters = new Set<{ ready: (view: LobbyView) => boolean; resolve: (view: LobbyView) => void }>()
   /** Requests awaiting their answer, by id; `read` sees a result as it arrives, before any frame after it. */
   const pending = new Map<number, { waiting: PromiseWithResolvers<unknown>; read?: (result: unknown) => void }>()
@@ -126,12 +133,7 @@ export async function connect(
       return
     }
     const params = (frame as JsonRpcNotification).params as Record<string, unknown>
-    // The window being replaced by a newer one of its player: read as the
-    // `abort` it was before protocol 7, which is what these tests check for.
-    if (frame.method === 'tictac/api/session/replaced') {
-      received.push({ type: 'abort', reason: String(params.reason), side: null })
-      return
-    }
+    if (frame.method === 'tictac/api/session/ended') ended.push(params as unknown as SessionEnded)
     if (frame.method.startsWith('tictac/api/') && frame.method !== 'tictac/api/lobby/changed') {
       pushed.push(frame as JsonRpcNotification)
     }
@@ -179,8 +181,10 @@ export async function connect(
     send,
     request,
     received,
+    seats,
     lobby: views,
     pushed,
+    ended,
     lobbyWhere: (ready) => {
       const already = views.find(ready)
       if (already) return Promise.resolve(already)
@@ -205,7 +209,7 @@ export async function connect(
     if (intent) {
       // The seat is recorded as its answer is read — before the `log` that
       // follows it — as a window takes it.
-      await ask('tictac/api/room/enter', { intent }, (seated) => received.push({ type: 'seated', ...seated }))
+      await ask('tictac/api/room/enter', { intent }, (seated) => seats.push(seated))
     }
   } catch (error) {
     // A refusal — or a socket the gate already closed — read as a room's
@@ -220,26 +224,26 @@ export async function connect(
 /**
  * Resolves once the server has answered `connection` — seated it, or turned
  * it away. `connect` already waits for its own answer; this is for a
- * protocol-6 page, whose answer is a notification.
+ * socket that was opened without asking for anything.
  */
 export async function answered(connection: Connection): Promise<Connection> {
   for (let waited = 0; waited < 1_000; waited++) {
-    if (connection.of('seated').length > 0 || connection.of('abort').length > 0) return connection
+    if (connection.seats.length > 0 || connection.of('abort').length > 0) return connection
     await Bun.sleep(1)
   }
   throw new Error(`never answered; received ${connection.received.map((m) => m.type).join(', ')}`)
 }
 
-/** The seat key a connection was handed, read off its `seated` answer. */
+/** The seat key a connection was handed, read off its seat. */
 export function keyOf(connection: Connection): string {
-  const key = connection.of('seated')[0]?.seatKey
+  const key = connection.seats[0]?.seatKey
   if (!key) throw new Error(`no seat key; received ${connection.received.map((m) => m.type).join(', ')}`)
   return key
 }
 
-/** The room a connection was placed in, read off its `seated` answer. */
+/** The room a connection was placed in, read off its seat. */
 export function roomOf(connection: Connection): string {
-  const seated = connection.of('seated')[0]
+  const seated = connection.seats[0]
   if (!seated) throw new Error(`never seated; received ${connection.received.map((m) => m.type).join(', ')}`)
   return seated.roomId
 }

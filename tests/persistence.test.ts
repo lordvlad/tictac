@@ -548,7 +548,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
 })
 
 describe('A refereed match is kept on the rosters it was played with', () => {
-  async function playing(url: string, blueSheets: CharacterSheet[], redSheets: CharacterSheet[]) {
+  async function playing(url: string, blueSheets: CharacterSheet[], redSheets: CharacterSheet[], seed: number) {
     const persistence = await freshPersistence(url)
     for (const { id, name } of [ADA, BO]) {
       await persistence.db
@@ -564,6 +564,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       onVerdict: (verdict) => verdicts.push(verdict),
       log: () => {},
       clock: WALL_CLOCK,
+      mapSeed: () => seed,
     })
     return { persistence, lobby, verdicts }
   }
@@ -574,6 +575,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
+      recording.header.seed,
     )
 
     // Both sides freshly enlisted, so their roster HP is full — the same
@@ -643,6 +645,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       others,
       sheetsOf(recording.header, Faction.Red),
+      recording.header.seed,
     )
     const before = await persistence.rosters.active('A')
 
@@ -674,6 +677,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
+      recording.header.seed,
     )
 
     const characterIds = {
@@ -699,6 +703,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
+      recording.header.seed,
     )
     const wrongHp = {
       [Faction.Blue]: sheetsOf(recording.header, Faction.Blue).map(() => 1),
@@ -729,6 +734,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
+      recording.header.seed,
     )
     const startingHp = {
       [Faction.Blue]: sheetsOf(recording.header, Faction.Blue).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
@@ -763,6 +769,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
+      recording.header.seed,
     )
     const enlisted = await persistence.rosters.active('A')
     // A wound the last match left them with, not yet healed off — the exact
@@ -801,6 +808,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
+      recording.header.seed,
     )
     const before = await persistence.rosters.active('A')
 
@@ -810,8 +818,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     first.send({ type: 'matchHeader', header: recording.header })
     await lobby.idle()
 
-    expect(first.of('abort')[0]?.reason).toMatch(/another window/)
-    expect(second.of('seated')).toEqual([])
+    expect(first.ended).toEqual([{ reason: expect.stringMatching(/another window/), reconnect: 'never' }])
+    expect(second.seats).toEqual([])
     expect(second.of('abort')[0]?.reason).toBe('That match is gone.')
     expect(await persistence.matches.header(roomId)).toBeNull()
     expect(await persistence.rosters.active('A')).toEqual(before)
@@ -826,6 +834,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
+      recording.header.seed,
     )
     const before = await persistence.rosters.active('A')
 
@@ -860,6 +869,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       [first!, fallen, second!, third!],
       sheetsOf(header, Faction.Red),
+      header.seed,
     )
     const enlisted = await persistence.rosters.active('A')
     await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE character_id = ${enlisted[1]!.characterId}`
@@ -899,6 +909,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       ':memory:',
       sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
+      recording.header.seed,
     )
     await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE player_id = ${'A'}`
 

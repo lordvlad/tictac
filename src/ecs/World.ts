@@ -35,6 +35,8 @@ export class World {
    * movement, above all — cost in proportion to the map's walls.
    */
   private readonly byComponent = new Map<string, Set<number>>()
+  /** entityId -> what to run once a restore has put its components back. */
+  private readonly afterRestore = new Map<number, () => void>()
 
   private readonly systems: System[] = []
 
@@ -58,6 +60,7 @@ export class World {
     for (const name of this.entityComponents.get(id)?.keys() ?? []) this.byComponent.get(name)?.delete(id)
     this.activeEntities.delete(id)
     this.entityComponents.delete(id)
+    this.afterRestore.delete(id)
   }
 
   /**
@@ -179,14 +182,28 @@ export class World {
   }
 
   /**
+   * Run `hook` whenever {@link restore} has put this entity's components back.
+   *
+   * Some state is a fold of other state — a soldier's traits over its sheet,
+   * wounds, role and gear — and a restore writes components one by one, so the
+   * fold is only known to be right once all of them are back. One hook per
+   * entity: the entity's owner is the one that knows what to refold.
+   */
+  onRestored(entityId: number, hook: () => void): void {
+    this.afterRestore.set(entityId, hook)
+  }
+
+  /**
    * Put a snapshot back. A component named in the frame but no longer on the
-   * entity is skipped.
+   * entity is skipped. An entity's {@link onRestored} hook runs once all of its
+   * components are in.
    */
   restore(snapshot: WorldSnapshot): void {
     for (const { entityId, components } of snapshot) {
       const live = this.entityComponents.get(entityId)
       if (!live) continue
       for (const [name, data] of Object.entries(components)) live.get(name)?.deserialize(data)
+      this.afterRestore.get(entityId)?.()
     }
   }
 
@@ -194,6 +211,7 @@ export class World {
     this.activeEntities.clear()
     this.entityComponents.clear()
     this.byComponent.clear()
+    this.afterRestore.clear()
     this.systems.length = 0
     this.nextEntityId = 1
   }

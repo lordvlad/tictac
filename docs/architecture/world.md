@@ -42,7 +42,7 @@ nothing here draws from a match's dice.
 | `src/server/Squads.ts` | The `squads` table: where each squad starts and its route ([ARCH-PERSISTENCE §5a](persistence.md)). |
 | `src/server/Journeys.ts` | Orders in, arrivals out: checks an order against the maths, writes the route, schedules the next arrival, pushes the change. |
 | `src/server/Schedule.ts` | Every moment the server must wake for, behind the host's one alarm. |
-| `src/server/Owner.ts` | `ownerOf(squad)` and `MATCH_SERVER`: which match server owns what (§4). |
+| `src/server/Owner.ts` | `RegionDirectory` (`ownerOfPlace`, `ownerOfSquad`, `self`): which region owns what, built by the host and injected (§4). |
 
 ## 2. Orders
 
@@ -257,11 +257,29 @@ when it fires.
 ## 4. Who owns a squad
 
 RFC-0002 §5 calls the Worker's fixed `idFromName('singleton')` debt: a placeholder for a lookup.
-`src/server/Owner.ts` is that lookup. The Worker routes every connection to `MATCH_SERVER`, and
-`Journeys` asks `ownerOf(squad)` before it acts on one, refusing a squad that belongs to another
-server. Both answer the same instance today. Splitting the world (`ITEM-046`) changes these two
-and nothing that calls them. The name itself stays `singleton`: it is what addresses the existing
-Durable Object and its storage, and renaming it would address a new, empty one.
+`src/server/Owner.ts` is that lookup, and it holds no state of its own: a host builds a
+`RegionDirectory` from its partition table (`REGIONS`, one region covering the world today) and hands
+it to `Journeys`, `Sessions` (which gives it to its `HandoverCoordinator`) and, as the half that
+needs no database, to the Worker's router (`regionMap(REGIONS)`). Two servers in one process hold
+two directories.
+
+Two questions, two answers:
+
+- **Where does a place go?** `ownerOfPlace(place)`: the region whose box holds the point, the first
+  partition for a point outside every box. It decides where a connection is first routed (the Worker
+  asks it with `request.cf`'s location, or `DEFAULT_ANCHOR` where Cloudflare says nothing) and, once
+  the world has borders, where a crossing is handed.
+- **Who keeps this squad?** `ownerOfSquad(id)`: a durable fact, the `squads.owner` column
+  (migration 11), read back and `null` for a squad this store does not hold. Every row that existed
+  before the column belongs to `singleton`. It is written once, by `HandoverCoordinator.confirm` through
+  `Squads.setOwner`, and never recomputed from where the squad stands: a position moves every
+  millisecond, a keeper changes only when a handover commits. `Journeys` asks it before it acts on
+  a squad, refuses a squad another region keeps, and schedules arrivals and meetings only for the
+  squads this region keeps. A handover starts only from the region that keeps the squad.
+
+The name `singleton` stays: it is what addresses the existing Durable Object and its storage, and
+renaming it would address a new, empty one. Where each region's data lives, and the account/region
+split of `Persistence` this implies, is [RFC-0002 §4](../design/rfc/0002-region-sharded-durable-objects.md).
 
 ## 5. The client
 

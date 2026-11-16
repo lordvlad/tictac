@@ -15,7 +15,7 @@ import { carriedOut, debrief, escaped, winnerOf } from './MatchEnd'
 import { ailmentCost, calculateHitChance } from './Combat'
 import { compareDigests, digestWorld, reportDivergence, type StateDigest } from './StateDigest'
 import { RpcMethods } from './JsonRpc'
-import type { Roll } from '../core/rng'
+import type { Rng } from '../core/rng'
 import { Recorder, type RecordingHeader } from './Recording'
 import type { OffscreenPortraits } from '../render/Portraits'
 import type { Battlefield } from './Battlefield'
@@ -209,11 +209,14 @@ export class InteractionController {
      * replay and a sweep all resolve the same fight from the same stream. The
      * one rule about it: only the rules may draw from it — a tracer's scatter
      * or a puff of smoke takes its own randomness, because a draw here moves
-     * every later roll in the match.
+     * every later roll in the match. Held as the stream rather than a roll
+     * function because the state digest reads where it has got to.
      */
-    private readonly dice: Roll,
+    private readonly dice: Rng,
     tracers: Tracers,
     private readonly engine: EngineContext,
+    /** The match is over for this window and the player is going back to the menu. */
+    private readonly onLeave: () => void,
     public network: NetworkManager | null = null,
     /** The match's opening position, for a recording armed from the debug panel. */
     private readonly recordingHeader: RecordingHeader | null = null,
@@ -230,7 +233,7 @@ export class InteractionController {
       battlefield.grid,
       squads,
       new SceneCombatFx(tracers, this.views),
-      dice,
+      () => dice.next(),
     )
     this.wallSystem = new WallSystem(battlefield.grid)
     this.groundSystem = new GroundSystem(battlefield.grid)
@@ -692,8 +695,9 @@ export class InteractionController {
         break
       }
       case 'backToMenu':
-        // The start menu is what a fresh page load opens on.
-        window.location.reload()
+        // What leaving means (and what has to be put away first) is the
+        // screen's to say: this controller is one of the things it puts away.
+        this.onLeave()
         break
       case 'operateDoor': {
         const soldier = this.turnManager.selectedSoldier
@@ -862,6 +866,7 @@ export class InteractionController {
       this.world,
       this.squads.soldiers.map((unit) => unit.entityId),
       this.turnManager.turnNumber,
+      this.dice,
     )
   }
 

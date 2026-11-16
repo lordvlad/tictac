@@ -3,10 +3,12 @@ title: "RFC 0002: Region-Sharded Durable Objects"
 id: "RFC-0002"
 type: "rfc"
 status: "accepted"
-lastReviewed: "2026-10-28"
+lastReviewed: "2026-11-16"
 appliesTo:
   - "workers/**"
   - "src/server/Persistence.ts"
+  - "src/server/Owner.ts"
+  - "src/server/Handover.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
   - "docs/design/gdd/overview.md"
@@ -17,12 +19,14 @@ tags: ["network", "cloudflare", "durable-objects", "scaling", "rfc"]
 
 # RFC 0002: Region-Sharded Durable Objects
 
-**Status: proposed.** Nothing in this document is built. `[ITEM-045]` runs one Durable Object
-for the whole deployment today, deliberately — see
+**Status: design accepted; implementation in progress** under `tictac-dwq.2`–`.4`. `[ITEM-045]`
+runs one Durable Object for the whole deployment today, deliberately — see
 [ARCH-DEPLOYMENT §2.1](../../architecture/deployment.md#21-one-durable-object-not-one-per-match).
-This is the plan for what replaces that single instance once it needs replacing, and it is
-gated on a game feature that does not exist yet (§1). It is written now because the shape of
-the replacement changes what "a match server" is allowed to assume in the meantime — see §5.
+What is built: the 2PC coordinator and its client half (`src/server/Handover.ts`,
+`src/game/ServerConnection.ts`), and the ownership directory (`src/server/Owner.ts`, §4–§5). What
+is not: the shared world that makes a second region worth having (§1), the per-region store split
+(§4), and the DO-to-DO transport. The plan is gated on that world; it is written now because the
+shape of the replacement changes what "a match server" is allowed to assume in the meantime — see §5.
 
 ## 1. Why this is not urgent, and why it is written anyway
 
@@ -164,14 +168,56 @@ answers two things this RFC would otherwise still be asking:
   position, which is, again, the world-map design's to answer — but it bears directly on §6.5's
   economics.
 
-**What still is not the roster: everything else `Persistence` already holds.** Accounts, the
-sheet, deeds, growth and the match log stay one logical store (`src/server/db/Db.ts`,
-`[ITEM-012]`, `[ITEM-045]`'s `Db` adapter) reachable by every region-owning Durable Object,
-regardless of where a squad currently stands — nothing about a character's sheet or its owner's
-account means anything different depending on which part of the world it is in. Splitting *that*
-by region would turn every read of "my roster" into a lookup of where it currently lives, losing
-the load-bearing simplicity RFC-0001 §8.4 chose ("one database, behind a portable port") for a
-scaling problem regional sharding does not actually need solved that way.
+**Where the data lives: per region, owner-routed (decided 2026-11-16, `tictac-dwq.1`).** An
+earlier draft said everything `Persistence` holds stays one logical store reachable by every
+region. That is not what the code can do, and not what is chosen: each Durable Object opens its
+own SQLite (`ctx.storage.sql`, `workers/MatchDurableObject.ts`), so a second region would start
+with no accounts, and a shared store (D1, or a hub Durable Object every region calls on every
+read) would put a network hop under every roster and squad read. Instead:
+
+- **Each region Durable Object owns the squads standing in it and everything about them** —
+  their rosters, encounters, the matches played in it and its live rooms — in its own
+  `ctx.storage.sql`. A read of "my roster" goes to the region that keeps the squad, which is the
+  one the player's socket is connected to.
+- **Accounts live in one directory Durable Object**: players, passkeys, sessions and sign-in
+  challenges. They are small, read at sign-in rather than per frame, and need one global answer
+  (a name, a credential) that no region may disagree about.
+- **Handover moves the squad's rows inside the 2PC.** The target writes the squad, its roster
+  members and its open encounter state on prepare/arrive; the source deletes them only after
+  confirm, and commits the new keeper (`squads.owner`) at the same moment. Until confirm the
+  source stays authoritative and the target's copy is not live, which is what lets cancel and
+  retry (§2) leave no trace on either side.
+- **Cross-region reads go through the owning Durable Object, found via the directory:** the
+  return feed of a player whose squad moved, the recording of a match played in another region,
+  a player lookup by id or name. Nothing reads another region's tables directly.
+
+**The port split.** `Persistence` (`src/server/Persistence.ts`) is one bag of stores over one
+`Db` today. It splits along the line above into two ports, each over its own `Db`:
+
+- **`AccountStore`**, owned by the directory Durable Object: `Accounts` over `players`,
+  `credentials`, `sessions` and `auth_challenges`. Asks: register, sign in, resolve a token to a
+  player, resolve a player id to a name, which region keeps a player's squad.
+- **`RegionStore`**, owned by each region Durable Object: `Squads` (`squads`), `Rosters`
+  (`roster`, `match_results`), `Encounters` (`encounters`), `MatchStore` (`matches`, `events`) and
+  `RoomStore` (`rooms`). Asks: everything a region does about its own squads and fights, plus the
+  three handover verbs (write a squad's rows, delete them, commit the keeper).
+
+Three consequences the split has to handle, found by reading the migrations:
+
+- **Foreign keys to `players(id)` cannot cross a database.** `squads.player_id`, `roster.player_id`,
+  `match_results.blue_player`/`red_player` and `encounters.player_id` become plain ids in the
+  region schema; a player's name is asked of the directory (`Squads.byId` joins `players` today, and
+  `Encounters` names an opponent from it).
+- **A player's row is not a squad's.** The unique index `squads_player` and the roster's active-slot
+  index are per region, so the directory, not either region, is what says a player has one squad
+  anywhere.
+- **A match belongs to the region that hosted it (§6.4), but its two players may be keepers in
+  different regions.** Settling writes each player's growth to the roster rows of the region
+  that keeps them, through that region's own port.
+
+The split is not built yet: today `Persistence` is still one bag over one `Db`, which is correct
+for the single region. Its code split is the prerequisite of the handover tickets
+(`tictac-dwq.2` onward).
 
 **What transfers at a hand-off, beyond the durable position, is the rest of a squad's live
 session:** the open socket's transport, which faction/side (if any) it is attached to, heading,
@@ -181,8 +227,8 @@ hand-off — it initiates it the moment a deliberate crossing happens, rather th
 the destination instance reaching in to pull the connection over. The source instance closes out
 cleanly (the same shape as a match ending unwatched, RFC-0001 §8.6); the destination instance
 opens a session the way `MatchDurableObject.fetch` opens one today, reading whatever durable
-state it needs — including the squad's own position — from the one shared `Persistence`, not
-from the instance it is succeeding.
+state it needs — including the squad's own position — from the rows the handover moved into its
+own store (below), not from the instance it is succeeding.
 
 **Decided: a match never spans two Durable Objects (§6.4).** A match belongs entirely to
 whichever region's instance was hosting it when it started, the same way it belongs to one
@@ -204,10 +250,14 @@ exactly the single `MatchDurableObject` instance that exists today — this RFC 
 second deployment model to migrate to, only for that instance to keep two things true so it is
 not accidentally load-bearing for an assumption this RFC removes:
 
-1. **`env.MATCH.idFromName('singleton')` is a placeholder for a lookup, not a constant to build
-   more routing logic on top of.** Anything that starts depending on there being exactly one
-   Durable Object (rather than going through a lookup that happens to always return the same
-   one today) is debt against this RFC.
+1. **Who owns what is a lookup, not a constant.** `RegionDirectory` (`src/server/Owner.ts`) is
+   built by each host from its config and handed to `Journeys`, `Sessions` and
+   `HandoverCoordinator`; the Worker routes through the same partition table
+   (`regionMap(REGIONS)`). Where a *place* goes is a function of the table; who keeps a *squad* is
+   a durable fact (`squads.owner`, written when a handover commits), never recomputed from where
+   the squad stands. `env.MATCH.idFromName` is called with a name that lookup returns, and
+   anything that starts depending on there being exactly one Durable Object instead of asking it
+   is debt against this RFC.
 2. **A match today is not "in" a region**, and does not need to become one before combat ships —
    `[ITEM-045]`'s single referee is correct for a game with no persistent world to place a match
    in. This RFC only starts mattering once §3's prerequisites exist.

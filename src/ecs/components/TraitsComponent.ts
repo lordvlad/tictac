@@ -1,17 +1,15 @@
 import { Component } from '../Component'
 
 /**
- * The part of a unit's traits an *enemy* has to be able to read.
+ * What a unit's traits work out to: the one place anything reads them from.
  *
- * Evasion and crit immunity are consulted by whoever is shooting, and both can
- * come from gear — which is loadout, private to the peer that chose it. So the
- * owner resolves them and this component replicates the answer. The shooter
- * reads these two numbers and never inspects the other side's kit, which is the
- * same contract the resolved damage numbers already travel under.
- *
- * Everything a trait does to its *own* unit (accuracy, crit chance, HP, AP)
- * stays local: it is folded into numbers that are either replicated in their
- * own component or sent with the attack that used them.
+ * The soldier folds its sheet, wounds, role and carried gear into these numbers
+ * (`Soldier.refreshTraits`) and nothing reads the fold itself, so a rewind or a
+ * peer's update that puts this component back puts every trait-driven number
+ * back with it. Evasion, crit immunity and the rest an *enemy* consults come
+ * from gear — loadout, private to the peer that chose it — so the owner
+ * resolves them and this component carries the answer; a shooter reads the
+ * target's word for it and never inspects the other side's kit.
  */
 export class TraitsComponent extends Component {
   static readonly componentName = 'traits'
@@ -56,6 +54,20 @@ export class TraitsComponent extends Component {
      * the shooter's side rolls against the target's word for it.
      */
     public bleedImmune: boolean = false,
+    /** Accuracy added to every shot with the unit's own weapon. */
+    public accuracy: number = 0,
+    /** Accuracy added only while crouched, as `evasionCrouched` is. */
+    public accuracyCrouched: number = 0,
+    /** Extra fraction on the weapon's range falloff. */
+    public rangeFalloff: number = 0,
+    /** Firing does not give the unit's position away. */
+    public silenced: boolean = false,
+    /** Percentage points added to the unit's own crit chance. */
+    public critChance: number = 0,
+    /** Added to the multiplier the unit's own crits apply. */
+    public critMultiplier: number = 0,
+    /** Carried gear slows the unit: what Strength learns from. */
+    public gearDrag: boolean = false,
   ) {
     super()
   }
@@ -69,6 +81,13 @@ export class TraitsComponent extends Component {
       damageTaken: this.damageTaken,
       unreadable: this.unreadable,
       bleedImmune: this.bleedImmune,
+      accuracy: this.accuracy,
+      accuracyCrouched: this.accuracyCrouched,
+      rangeFalloff: this.rangeFalloff,
+      silenced: this.silenced,
+      critChance: this.critChance,
+      critMultiplier: this.critMultiplier,
+      gearDrag: this.gearDrag,
     }
   }
 
@@ -82,5 +101,12 @@ export class TraitsComponent extends Component {
     if (typeof data.damageTaken === 'number') this.damageTaken = data.damageTaken
     if (typeof data.unreadable === 'boolean') this.unreadable = data.unreadable
     if (typeof data.bleedImmune === 'boolean') this.bleedImmune = data.bleedImmune
+    if (typeof data.accuracy === 'number') this.accuracy = data.accuracy
+    if (typeof data.accuracyCrouched === 'number') this.accuracyCrouched = data.accuracyCrouched
+    if (typeof data.rangeFalloff === 'number') this.rangeFalloff = data.rangeFalloff
+    if (typeof data.silenced === 'boolean') this.silenced = data.silenced
+    if (typeof data.critChance === 'number') this.critChance = data.critChance
+    if (typeof data.critMultiplier === 'number') this.critMultiplier = data.critMultiplier
+    if (typeof data.gearDrag === 'boolean') this.gearDrag = data.gearDrag
   }
 }

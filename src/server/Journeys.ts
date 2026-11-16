@@ -22,10 +22,11 @@ import {
 import { RPC_ERRORS, type Player, type Squad, type SquadOrder } from '../game/Rpc'
 import type { StandingOrder } from '../sim/Policy'
 import type { ServerClock } from './Clock'
+import type { Accounts } from './Accounts'
 import { meetingKey, type Encounters } from './Encounters'
 import type { MeetingSide, OpenEncounter, OpenMeeting } from './EncounterPort'
 import { Refusal } from './Lobby'
-import { MATCH_SERVER, ownerOf } from './Owner'
+import type { RegionDirectory } from './Owner'
 import type { Schedule } from './Schedule'
 import type { Squads } from './Squads'
 
@@ -66,6 +67,8 @@ const NOT_HERE = 'That squad is kept by another match server.'
 
 export interface JourneysOptions {
   squads: Squads
+  /** Who a squad's player is: a squad row knows only their id. */
+  accounts: Pick<Accounts, 'player'>
   /** Where a contact is written down, so a checkpoint is handled once (`ITEM-048`). */
   encounters: Encounters
   schedule: Schedule
@@ -73,8 +76,8 @@ export interface JourneysOptions {
   clock: ServerClock
   /** Tell `playerId`'s window its squad has a new route (`squad/changed`). */
   tell: (playerId: string, squad: Squad) => void
-  /** This match server's name, for `ownerOf`. */
-  self?: string
+  /** Who keeps which squad: this server acts only on the ones it does (RFC-0002 §6.4). */
+  directory: RegionDirectory
   /** A new trip's id. */
   mintTrip?: () => string
   /**
@@ -102,10 +105,11 @@ export interface JourneysOptions {
 export class Journeys {
   private readonly squads: Squads
   private readonly encounters: Encounters
+  private readonly accounts: Pick<Accounts, 'player'>
   private readonly schedule: Schedule
   private readonly clock: ServerClock
   private readonly tell: (playerId: string, squad: Squad) => void
-  private readonly self: string
+  private readonly directory: RegionDirectory
   private readonly mintTrip: () => string
   private readonly openEncounter: OpenEncounter | undefined
   private readonly openMeeting: OpenMeeting | undefined
@@ -122,10 +126,11 @@ export class Journeys {
   constructor(options: JourneysOptions) {
     this.squads = options.squads
     this.encounters = options.encounters
+    this.accounts = options.accounts
     this.schedule = options.schedule
     this.clock = options.clock
     this.tell = options.tell
-    this.self = options.self ?? MATCH_SERVER
+    this.directory = options.directory
     this.mintTrip = options.mintTrip ?? (() => crypto.randomUUID())
     this.openEncounter = options.openEncounter
     this.openMeeting = options.openMeeting
@@ -172,7 +177,7 @@ export class Journeys {
    */
   restore(): Promise<void> {
     return this.serially(async () => {
-      const squads = (await this.squads.all()).map(({ squad }) => squad)
+      const squads = await this.mine((await this.squads.all()).map(({ squad }) => squad))
       for (const squad of squads) this.plan(squad)
       if (!this.meetingsOn()) return
       const now = this.clock.now()
@@ -190,7 +195,7 @@ export class Journeys {
   order(playerId: string, near: LatLng | null, order: SquadOrder): Promise<Squad> {
     return this.serially(async () => {
       const placed = await this.squads.ensure(playerId, near)
-      this.owned(placed)
+      await this.owned(placed)
       const now = this.clock.now()
       // What was due before this order is weighed on the route as it was,
       // not on the one the order is about to make.
@@ -220,7 +225,7 @@ export class Journeys {
   standing(playerId: string, near: LatLng | null, order: StandingOrder): Promise<Squad> {
     return this.serially(async () => {
       const placed = await this.squads.ensure(playerId, near)
-      this.owned(placed)
+      await this.owned(placed)
       await this.squads.setStanding(placed.id, order)
       const next: Squad = { ...placed, standing: order }
       this.tell(playerId, next)
@@ -254,9 +259,9 @@ export class Journeys {
    */
   private async arrive(id: string, at: number): Promise<void> {
     const weighed = await this.weighDue(id, at)
-    const found = weighed ?? (await this.squads.byId(id))
+    const found = weighed ?? (await this.found(id))
     if (!found) return
-    this.owned(found.squad)
+    await this.owned(found.squad)
     const settled = settle(found.squad.waypoints, at)
     if (settled === found.squad.waypoints) {
       this.plan(found.squad)
@@ -278,10 +283,10 @@ export class Journeys {
    * time. Returns the squad as it is after, or null for one that is gone.
    */
   private async weighDue(id: string, until: number): Promise<{ player: Player; squad: Squad } | null> {
-    let found = await this.squads.byId(id)
+    let found = await this.found(id)
     if (!this.openEncounter) return found
     while (found) {
-      this.owned(found.squad)
+      await this.owned(found.squad)
       const next = this.nextCheckpoint(found.squad)
       if (!next || next.at > until) return found
       const squad = await this.weigh(found.player, found.squad, next)
@@ -293,6 +298,13 @@ export class Journeys {
       found = { player: found.player, squad }
     }
     return found
+  }
+
+  /** A squad with its player, or null for one that is gone: the squad row names the player, the accounts say who they are. */
+  private async found(id: string): Promise<{ player: Player; squad: Squad } | null> {
+    const row = await this.squads.byId(id)
+    const player = row && (await this.accounts.player(row.playerId))
+    return row && player ? { player, squad: row.squad } : null
   }
 
   /**
@@ -311,11 +323,18 @@ export class Journeys {
     }
     const there = settle(squad.waypoints, checkpoint.at)
     const place = positionAt(there, checkpoint.at).position
-    // A contact already written down was handled before a restart: it is not
-    // opened a second time, only the halt it called for is made sure of.
-    let outcome = await this.encounters.find(squad.id, trip, index)
+    // The contact is written down before the fight is opened, with the room's
+    // id reserved on its row: a restart between the two finds the row again
+    // and the lobby finds the room under that id, so the fight is opened
+    // once. A contact already settled was handled before a restart: only the
+    // halt it called for is made sure of.
+    const handling = await this.encounters.begin([
+      { squadId: squad.id, playerId: player.id, trip, checkpoint: index, at: checkpoint.at, place },
+    ])
+    let outcome = handling.outcome
     if (!outcome) {
       const opened = await this.openEncounter({
+        roomId: handling.roomId,
         player,
         squadId: squad.id,
         trip,
@@ -326,18 +345,9 @@ export class Journeys {
         sizeOffset: roll.sizeOffset,
       })
       outcome = opened.opened
-        ? { roomId: opened.roomId, passedFor: null }
-        : { roomId: null, passedFor: opened.passedFor }
-      await this.encounters.record({
-        squadId: squad.id,
-        playerId: player.id,
-        trip,
-        checkpoint: index,
-        at: checkpoint.at,
-        place,
-        aliens: opened.opened ? opened.aliens : 0,
-        ...outcome,
-      })
+        ? { roomId: opened.roomId, passedFor: null, aliens: opened.aliens }
+        : { roomId: null, passedFor: opened.passedFor, aliens: 0 }
+      await this.encounters.settle(handling, outcome)
     }
     this.weighed.set(squad.id, { trip, index })
     if (outcome.roomId === null) return squad
@@ -386,33 +396,44 @@ export class Journeys {
     // bit, which is the parity of the characters and says little.
     const [blue, red] = new Rng(hashSeed(`${pair}|${at}`)).next() < 0.5 ? [a, b] : [b, a]
     const key = meetingKey(pair, at)
-    // A meeting already written down was handled before a restart: it is not
-    // opened a second time, only the halt it called for is made sure of.
-    if (!(await this.encounters.find(blue.squad.id, key, 0))) {
+    // Both sides are written down in one transaction before the fight is
+    // opened (`Encounters.begin`). A meeting already settled was handled
+    // before a restart: it is not opened a second time, only the halt it
+    // called for is made sure of.
+    const handling = await this.encounters.begin([
+      {
+        squadId: blue.squad.id,
+        playerId: blue.player.id,
+        trip: key,
+        checkpoint: 0,
+        at,
+        place: contact.place,
+        opponentPlayerId: red.player.id,
+      },
+      {
+        squadId: red.squad.id,
+        playerId: red.player.id,
+        trip: key,
+        checkpoint: 0,
+        at,
+        place: contact.place,
+        opponentPlayerId: blue.player.id,
+      },
+    ])
+    if (!handling.outcome) {
       const opened = await openMeeting({
+        roomId: handling.roomId,
         blue: sideOf(blue),
         red: sideOf(red),
         at,
         place: contact.place,
       })
-      if (!opened.opened) return
-      for (const [mine, theirs] of [
-        [blue, red],
-        [red, blue],
-      ] as const) {
-        await this.encounters.record({
-          squadId: mine.squad.id,
-          playerId: mine.player.id,
-          trip: key,
-          checkpoint: 0,
-          at,
-          place: contact.place,
-          aliens: 0,
-          roomId: opened.roomId,
-          passedFor: null,
-          opponentPlayerId: theirs.player.id,
-        })
+      if (!opened.opened) {
+        // Passed in the night: nothing is kept of it for either player.
+        await this.encounters.discard(handling)
+        return
       }
+      await this.encounters.settle(handling, { roomId: opened.roomId, passedFor: null, aliens: 0 })
     }
 
     // Both stop where they stood at `at`. A squad that was resting has
@@ -442,17 +463,16 @@ export class Journeys {
    */
   private async scheduleMeetings(squad: Squad, from: number, squads?: readonly Squad[]): Promise<void> {
     if (!this.meetingsOn()) return
-    for (const other of squads ?? (await this.squads.all()).map((row) => row.squad)) {
+    // A squad of another region is not in this zone, and no match here is
+    // opened for it (RFC-0002 §6.4).
+    if (!(await this.keeps(squad))) return
+    for (const other of await this.mine(squads ?? (await this.squads.all()).map((row) => row.squad))) {
       if (other.id !== squad.id) this.meetingBetween(squad, other, from)
     }
   }
 
   /** Schedule the first moment `a` and `b` come within range of each other from `from` on, or nothing when they never do. */
   private meetingBetween(a: Squad, b: Squad, from: number): void {
-    // One server owns every squad today. A squad of another is not in this
-    // zone, and no match here is opened for it (RFC-0002 §6.4).
-    const now = this.clock.now()
-    if (ownerOf(a, now) !== this.self || ownerOf(b, now) !== this.self) return
     const pair = pairOf(a.id, b.id)
     const contact = firstContact(a.waypoints, b.waypoints, from, ENCOUNTER.meetingRangeKm)
     if (contact) this.schedule.set(MEETING, pair, contact.at)
@@ -498,12 +518,23 @@ export class Journeys {
   }
 
   /**
-   * Every squad request is answered by the server that owns the squad. One
-   * server owns them all today; when the world is split (`ITEM-046`), this
-   * is where a request for somebody else's squad is handed on.
+   * Every squad request is answered by the region that keeps the squad, as
+   * last committed (`RegionDirectory.ownerOfSquad`); a request for another's
+   * is refused here, for the caller to hand on.
    */
-  private owned(squad: Squad): void {
-    if (ownerOf(squad, this.clock.now()) !== this.self) throw new Refusal(RPC_ERRORS.conflict, NOT_HERE)
+  private async owned(squad: Squad): Promise<void> {
+    if (!(await this.keeps(squad))) throw new Refusal(RPC_ERRORS.conflict, NOT_HERE)
+  }
+
+  private async keeps(squad: Squad): Promise<boolean> {
+    return (await this.directory.ownerOfSquad(squad.id)) === this.directory.self
+  }
+
+  /** The squads of `squads` this region keeps. */
+  private async mine(squads: readonly Squad[]): Promise<Squad[]> {
+    const kept: Squad[] = []
+    for (const squad of squads) if (await this.keeps(squad)) kept.push(squad)
+    return kept
   }
 
   private serially<T>(work: () => Promise<T>): Promise<T> {

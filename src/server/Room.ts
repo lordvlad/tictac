@@ -141,6 +141,13 @@ export interface RoomOptions {
    * if a settled room is then aborted — which sends its sockets out of it.
    */
   onOver: (room: Room) => void
+  /**
+   * Where a match's seed comes from: the room issues it when it leaves
+   * `waiting`, and Blue's opening has to carry exactly it. System randomness
+   * in production; a test fixes it. The lobby uses the same source for the
+   * fights it composes itself, so there is one policy for who chooses a seed.
+   */
+  mapSeed: () => number
 }
 
 interface Seat {
@@ -188,6 +195,13 @@ export class Room {
   private settled = false
   private judging = true
   private encounterRoom = false
+  /**
+   * The seed issued to this room's two seats, from `join` on while the room
+   * is being set up; null while it waits for an opponent. Not stored: the
+   * header carries it from the moment the match starts, and a room restored
+   * while still deploying issues a fresh one to the seats that come back.
+   */
+  private issued: number | null = null
 
   /**
    * Every intent the referee accepted, numbered as the store numbers them.
@@ -358,7 +372,7 @@ export class Room {
 
   /**
    * Seat the player who opened the room. The opener is always Blue, because
-   * the opener is the side that announces the match (`hostMatch`).
+   * the opener is the side that states the opening position (`matchHeader`).
    */
   open(client: Client): Seated {
     const seated = this.take(client, Faction.Blue, false, mintSeatKey())
@@ -370,6 +384,11 @@ export class Room {
   join(client: Client): Seated {
     this.phaseNow = 'deploying'
     const seated = this.take(client, Faction.Red, false, mintSeatKey())
+    this.issued = this.options.mapSeed()
+    // Blue was seated before there was a seed; Red hears it as `catchUp`
+    // follows its answer.
+    const blue = this.seats[Faction.Blue]?.client
+    if (blue) this.send(blue, this.opening(this.issued))
     this.persist()
     return seated
   }
@@ -428,6 +447,7 @@ export class Room {
     // The match is written before the row says it is playing, so a match in
     // the store is the better witness of the two.
     this.phaseNow = match ? 'playing' : stored.phase
+    if (this.phaseNow === 'deploying') this.issued = this.options.mapSeed()
     if (match) {
       this.header = match.header
       this.host = new MatchHost(match.header)
@@ -497,13 +517,16 @@ export class Room {
   }
 
   /**
-   * Hand a socket just seated or watching here the match so far, if there is
-   * one yet. Called straight after it has been told where it sits, before
-   * anything else is relayed to it, so the log is always the first thing of
-   * the match it hears.
+   * Hand a socket just seated or watching here what it needs to know now, if
+   * anything: the match so far once there is one, or — for a seat in a room
+   * still being set up — the seed both seats will play from. Called straight
+   * after it has been told where it sits, before anything else is relayed to
+   * it, so this is always the first thing of the match it hears.
    */
   catchUp(client: Client): void {
-    if (this.host && client.room === this) this.send(client, this.logSoFar())
+    if (client.room !== this) return
+    if (this.host) this.send(client, this.logSoFar())
+    else if (this.issued !== null && client.faction !== null) this.send(client, this.opening(this.issued))
   }
 
   /**
@@ -559,14 +582,24 @@ export class Room {
 
     switch (message.type) {
       case 'hello':
-      case 'init':
       case 'ready':
         this.relayToOpponent(client, frame)
         return
+      case 'init':
+        // The seed is this server's to issue (`join`); an opening a window
+        // states is nothing to relay and nothing a match is built from.
+        return
       case 'matchHeader': {
-        // The host of a match is always Blue (`NetworkManager.hostMatch`),
+        // The host of a match is always Blue (`NetworkManager.seated`),
         // and it states the opening position once both sides have deployed.
         if (client.faction !== Faction.Blue || this.phaseNow !== 'deploying') return
+        if (message.header.seed !== this.issued) {
+          // A seed Blue chose is a map and a stream of dice Blue chose, and
+          // one it could grind for offline. Not a rules disagreement, so it
+          // ends the match whatever build the room was opened under.
+          this.abort({ matchId: this.id, side: Faction.Blue, reason: SEED_NOT_ISSUED, found: [] })
+          return
+        }
         this.start(message.header)
         this.relayToOpponent(client, frame)
         return
@@ -578,7 +611,7 @@ export class Room {
         return
       }
       default: {
-        // `log`, `seated` and `abort` are the server's to say, never a
+        // `log` and `abort` are the server's to say, never a
         // client's; anything else that is not an intent has no business here.
         if (!isCommand(message) || !this.host) return
         // Recorded first and resolved second, so a match that desynchronises
@@ -820,6 +853,11 @@ export class Room {
 
   private send(client: Client, message: NetworkMessage): void {
     client.transport.send(frameOf(message))
+  }
+
+  /** The seed the room issued, as it is told to a seat: stated in this room's own build, which is the one its players run. */
+  private opening(seed: number): NetworkMessage {
+    return { type: 'init', seed, seedLabel: String(seed), ...this.version }
   }
 
   /** To the other seat, never back to the sender and never to a spectator. */
@@ -1195,6 +1233,9 @@ function same(a: string, b: string): boolean {
 
 /** What the players are told when the AI playing a fight cannot carry on. The detail is in the server's log. */
 const CALLED_OFF = 'This fight has been called off: the AI playing it could not carry on.'
+
+/** What the players are told when Blue opens the match on a seed the room did not issue. */
+const SEED_NOT_ISSUED = 'The match was opened on a seed this server did not issue, so it cannot be refereed.'
 
 /** Why a room ends when `seat` is gone from it for good, in the phase it ends in. */
 function departure(seat: Seat, phase: RoomPhase): string {

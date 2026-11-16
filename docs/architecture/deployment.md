@@ -74,7 +74,7 @@ per match — and that one instance hosts every room:
 workers/index.ts (Worker)
   ├── /tiles/{z}/{x}/{y}.mvt  ── answered here from R2 (§6), never reaching the object
   ├── /.well-known/webauthn  ── answered here from the RELYING_PARTY_* vars (§4)
-  └── env.MATCH.idFromName(MATCH_SERVER)  ── always the same id ('singleton', src/server/Owner.ts)
+  └── env.MATCH.idFromName(regions.ownerOfPlace(…))  ── always the same id today ('singleton', REGIONS in src/server/Owner.ts)
         └── workers/MatchDurableObject.ts (the one instance)
               ├── fetch(): a WebSocket upgrade (→ Sessions → Lobby → a Room),
               │            or env.ASSETS.fetch(request)
@@ -96,8 +96,9 @@ it — sharding by *region* of the game's shared world rather than by match — 
 exists and the player base needs more than one instance. Nothing about that plan is built; it
 is written down so the single instance here stays easy to retire rather than becoming an
 assumption other code quietly depends on: the Worker addresses the instance through
-`MATCH_SERVER`, and squad requests go through `ownerOf(squad)` (`src/server/Owner.ts`,
-[ARCH-WORLD §4](world.md)), the two lookups a split replaces.
+the region table (`regionMap(REGIONS)`), and squad requests go through the host's
+`RegionDirectory.ownerOfSquad` (`src/server/Owner.ts`, [ARCH-WORLD §4](world.md)), the two
+lookups a split replaces.
 
 **The object's one alarm is the travel schedule's** ([ARCH-WORLD §3](world.md)): set with
 `ctx.storage.setAlarm` for the earliest moment any squad has due, never more than an hour ahead,
@@ -157,9 +158,12 @@ next request pays for. Static-asset traffic never needed the exemption, since it
 stateless reply.
 
 **A rolling update.** `wrangler deploy` replaces the Worker and restarts the object under the
-new build while browsers keep running the previous bundle. The new server admits its own protocol
-at any build, and the protocol before (`OLDEST_SERVED_PROTOCOL`, never below 6) only for a keyed
-resume named in the socket's url; each room keeps the build it was opened under, so:
+new build while browsers keep running the previous bundle. The new server admits only its own
+protocol (the gate, `Session.admission`), at any build. A deploy that **bumps the protocol**
+therefore turns away every window still running the previous protocol, at the gate and even to
+take a seat back (`session/ended`, `never`): their matches are held for the grace and then
+abandoned. A deploy at the **same protocol** behaves as follows; each room keeps the build it
+was opened under, so:
 
 - the windows of a match in progress reconnect to it on the previous bundle and finish it — a
   seat is taken back by a page on the *room's* build, not the server's;

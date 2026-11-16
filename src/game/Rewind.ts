@@ -9,7 +9,9 @@ import type { WallSystem } from '../ecs/systems/WallSystem'
 
 /**
  * Everything a match is at one moment between two commands — what a replay
- * stepped backwards has to put back.
+ * stepped backwards has to put back. Taken and restored by `Playback`, which
+ * is the only code that does either: a rewind presents a recording and is
+ * never a move in live play.
  *
  * Commands are not invertible (damage is applied, points spent, glass broken),
  * so going back means having kept the moment. Four things make one up, and
@@ -43,38 +45,4 @@ export interface Rewindable {
   dice: Rng
   movement: MovementSystem
   commands: CommandSystem
-}
-
-/** The match as it is now. Only between commands: nothing walking, nothing queued. */
-export function captureMoment(match: Rewindable): Moment {
-  return {
-    units: match.world.snapshot(match.unitIds),
-    walls: match.walls.kinds(match.world),
-    ground: match.world.snapshot([match.ground.entity]),
-    dice: match.dice.snapshot(),
-    activeFaction: match.turns.activeFaction,
-    turnNumber: match.turns.turnNumber,
-  }
-}
-
-/**
- * Put the match back to `moment`.
- *
- * Routes first: a unit's path is the one piece of movement state that is not
- * a component, so a restored unit would otherwise walk on along a path it is
- * no longer on. The same for whatever the rules had queued for a broken unit:
- * it was decided about the moment being left.
- */
-export function restoreMoment(match: Rewindable, moment: Moment): void {
-  match.movement.clearRoutes(match.world, match.unitIds)
-  match.commands.clear()
-  match.world.restore(moment.units)
-  match.walls.restoreKinds(match.world, moment.walls)
-  match.world.restore(moment.ground)
-  // The grid is an index over the ground component; catch it up now rather
-  // than on the next tick, so the restored moment is whole at once.
-  match.ground.update(0, match.world)
-  match.dice.restore(moment.dice)
-  match.turns.activeFaction = moment.activeFaction
-  match.turns.turnNumber = moment.turnNumber
 }

@@ -16,6 +16,10 @@ import { GLOBAL_ENTITY_ID, World } from '../src/ecs/World'
 import { Squads } from '../src/game/Squads'
 import { stockSquads } from './support/squads'
 import { compareDigests, digestWorld } from '../src/game/StateDigest'
+import { STOCK_PLAN } from '../src/sim/Balance'
+import { MatchHost } from '../src/sim/MatchHost'
+import { replay } from '../src/sim/Replay'
+import { SimMatch } from '../src/sim/SimMatch'
 
 /** Two worlds dealt the same people, as two peers hold them after a handshake. */
 function peer(seed = 5) {
@@ -32,10 +36,11 @@ function peer(seed = 5) {
     }),
   )
   for (const unit of squads.soldiers) unit.equip(WeaponId.Rifle, AmmoId.Standard)
-  const digest = () => digestWorld(world, squads.soldiers.map((u) => u.entityId), 3)
+  const dice = new Rng(seed)
+  const digest = () => digestWorld(world, squads.soldiers.map((u) => u.entityId), 3, dice)
   const nameOf = (entityId: number) =>
     squads.soldiers.find((u) => u.entityId === entityId)?.name ?? `#${entityId}`
-  return { world, grid, squads, digest, nameOf }
+  return { world, grid, squads, dice, digest, nameOf }
 }
 
 describe('Hashing state so two copies can be compared', () => {
@@ -168,6 +173,31 @@ describe('Comparing two peers at a handover', () => {
     // change the rules for every test that runs after this one.
     rules.rules.maxAp = wasMaxAp
     expect(a.digest().total).toBe(before.total)
+  })
+
+  test('a peer that drew one die more is reported as dice, at that handover', () => {
+    // Identical worlds, and the world stays identical: a die drawn for a roll
+    // that changed nothing leaves no trace in any component. Only the stream
+    // has moved, and every later roll with it.
+    const a = peer()
+    const b = peer()
+    expect(compareDigests(a.digest(), b.digest(), a.nameOf)).toEqual([])
+
+    b.dice.next()
+
+    const found = compareDigests(a.digest(), b.digest(), a.nameOf)
+    expect(found).toEqual([{ what: 'dice', mine: a.dice.snapshot(), theirs: b.dice.snapshot() }])
+  })
+
+  test('a host digests the dice its match has drawn', () => {
+    const match = new SimMatch({ seed: 5, blue: STOCK_PLAN, red: STOCK_PLAN, turnCap: 10, record: true })
+    match.run()
+    const recording = match.recording!
+
+    const opening = new MatchHost(recording.header).digest()
+    const played = replay(recording).digest
+
+    expect(played.dice).not.toBe(opening.dice)
   })
 
   test('comparing two different turns says so instead of blaming every unit', () => {

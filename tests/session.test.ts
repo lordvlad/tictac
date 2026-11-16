@@ -1,7 +1,7 @@
 import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
-import type { Player } from '../src/game/Rpc'
+import { SESSION_REPLACED, type Player } from '../src/game/Rpc'
 import { Lobby } from '../src/server/Lobby'
 import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
 import { connect, keyOf, roomOf, seatBoth } from './support/lobby'
@@ -109,7 +109,8 @@ describe('One window per player', () => {
 
     const window = await connect(lobby, ADA, null)
 
-    expect(blue.of('abort')[0]?.reason).toBe('You opened TicTac in another window; this one was disconnected.')
+    expect(blue.ended).toEqual([{ reason: SESSION_REPLACED, reconnect: 'never' }])
+    expect(blue.of('abort')).toEqual([])
     expect(blue.closed).toBe(true)
     expect(lobby.view(null).rooms.map((room) => [room.id, room.phase, room.blue.connected])).toEqual([
       [roomId, 'deploying', false],
@@ -126,12 +127,13 @@ describe('One window per player', () => {
 describe('A page on an older protocol', () => {
   const PREVIOUS = { protocol: PROTOCOL_VERSION - 1, build: MY_VERSION.build }
 
-  test('is refused at the version gate: protocol 6 compatibility is retired', async () => {
+  test('is refused at the version gate', async () => {
     const { lobby } = await harness()
     const old = await connect(lobby, null, null, { version: PREVIOUS, hello: false })
     old.send({ type: 'hello', ...PREVIOUS })
 
-    expect(old.of('abort')[0]?.reason).toMatch(/Protocol mismatch/)
+    expect(old.ended).toEqual([{ reason: expect.stringMatching(/Protocol mismatch/), reconnect: 'never' }])
+    expect(old.of('abort')).toEqual([])
     expect(old.closed).toBe(true)
   })
 
@@ -140,7 +142,24 @@ describe('A page on an older protocol', () => {
     const old = await connect(lobby, null, null, { hello: false })
     old.send({ type: 'init', seed: 1, seedLabel: 'x', ...MY_VERSION })
 
-    expect(old.of('abort')[0]?.reason).toBeTruthy()
+    expect(old.ended).toEqual([{ reason: expect.any(String), reconnect: 'never' }])
+    expect(old.ended[0]!.reason).not.toBe('')
     expect(old.closed).toBe(true)
+  })
+})
+
+describe('A server that stops', () => {
+  test('tells every window to dial back, before it closes them', async () => {
+    const { lobby } = await harness()
+    const watcher = await connect(lobby, null, null)
+    const { blue, red } = await seatBoth(lobby, ADA, BO)
+
+    await lobby.dispose()
+
+    for (const window of [watcher, blue, red]) {
+      expect(window.ended).toEqual([{ reason: expect.any(String), reconnect: 'retry' }])
+      expect(window.of('abort')).toEqual([])
+      expect(window.closed).toBe(true)
+    }
   })
 })

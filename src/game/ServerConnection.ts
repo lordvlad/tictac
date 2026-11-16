@@ -3,12 +3,12 @@ import { type JsonRpcFrame, type JsonRpcNotification, RpcMethods } from './JsonR
 import type { LobbyView, Seated, ServerIntent } from './Lobby'
 import {
   RPC_ERRORS,
-  SESSION_REPLACED,
   type Player,
   type RpcMethod,
   type RpcParams,
   type RpcPushes,
   type RpcResult,
+  type SessionEnded,
   type SignedIn,
 } from './Rpc'
 import { SocketTransport } from './SocketTransport'
@@ -25,9 +25,10 @@ import type { Transport } from './Transport'
  *
  * Refusals are answers, not endings. A room that is gone, a token the server
  * no longer honours, a roster that is full: each is an error response the
- * caller shows, and the socket stays up. Only three things end it: the
- * version gate, the window being replaced by a newer one of its player, and
- * the window giving up after a drop.
+ * caller shows, and the socket stays up. Only the server ending the session
+ * (`session/ended`: the version gate, the window being replaced by a newer
+ * one of its player, a move to another server) and the window giving up after
+ * a drop end it.
  */
 
 /**
@@ -76,6 +77,9 @@ export const CONNECTION_LOST = 'Lost the connection to the match server.'
 
 /** What a window's first socket failing to open says: there is nothing there to be refused by. */
 export const UNREACHABLE = 'No match server answers at that address.'
+
+/** What a session the server ended without a reason is shown as. */
+const SESSION_ENDED = 'The match server ended this session.'
 
 /** A request the server never answered. */
 export const NO_ANSWER = 'The match server did not answer.'
@@ -191,12 +195,6 @@ interface Socket {
   pending: Map<number, (outcome: Outcome<unknown>) => void>
   /** Whether the lobby subscription is live on this socket. */
   lobby: boolean
-  /**
-   * Whether a `room/enter` has been answered on this socket. Before that, an
-   * `abort` can only be the version gate turning the window away; after it,
-   * it is the room's.
-   */
-  entered: boolean
   /** Let go of: nothing it says is read again. */
   done: boolean
   cancelDeadline: (() => void) | null
@@ -240,6 +238,7 @@ export class ServerConnection {
   private readonly listeners = new Set<() => void>()
   private secondaryConnection: ServerConnection | null = null
   private readonly handoverListeners = new Set<(event: { kind: 'offered' | 'complete'; targetRegion: string }) => void>()
+  private readonly elsewhereListeners = new Set<(url: string) => void>()
 
   player: Player | null = null
   /**
@@ -323,6 +322,17 @@ export class ServerConnection {
   onHandover(listener: (event: { kind: 'offered' | 'complete'; targetRegion: string }) => void): () => void {
     this.handoverListeners.add(listener)
     return () => this.handoverListeners.delete(listener)
+  }
+
+  /**
+   * Hear that the server ended this session because it continues on another
+   * server (`session/ended` with `reconnect: 'elsewhere'`), at the url given.
+   * Called once, just before this connection closes for good: this connection
+   * never dials the new place itself, whoever listens does.
+   */
+  onElsewhere(listener: (url: string) => void): () => void {
+    this.elsewhereListeners.add(listener)
+    return () => this.elsewhereListeners.delete(listener)
   }
 
   /**
@@ -487,7 +497,7 @@ export class ServerConnection {
       this.retry()
       return
     }
-    const socket: Socket = { transport, pending: new Map(), lobby: false, entered: false, done: false, cancelDeadline: null }
+    const socket: Socket = { transport, pending: new Map(), lobby: false, done: false, cancelDeadline: null }
     this.socket = socket
     transport.onFrame((frame) => this.receive(socket, frame))
     transport.onClosed(() => {
@@ -598,7 +608,6 @@ export class ServerConnection {
         failed(outcome.error)
         return
       }
-      socket.entered = true
       room.seated = true
       room.socket = socket
       room.member.seated(outcome.result)
@@ -675,11 +684,9 @@ export class ServerConnection {
     }
     const params = (frame as JsonRpcNotification).params
     switch (frame.method) {
-      case 'tictac/api/session/replaced': {
-        const { reason } = params as Partial<RpcPushes['tictac/api/session/replaced']>
-        this.terminate(typeof reason === 'string' && reason.length > 0 ? reason : SESSION_REPLACED)
+      case 'tictac/api/session/ended':
+        this.sessionEnded(socket, params as unknown as Partial<SessionEnded>)
         return
-      }
       case 'tictac/api/lobby/changed':
         if (socket.lobby && this.lobbyListeners.size > 0) this.showLobby(params as unknown as LobbyView)
         return
@@ -702,12 +709,7 @@ export class ServerConnection {
         return
       }
     }
-    if (frame.method === RpcMethods.abort && !socket.entered) {
-      // The version gate: this page cannot talk to this server at all, and
-      // dialling it again would be told the same.
-      this.terminate(typeof params.reason === 'string' && params.reason.length > 0 ? params.reason : UNREACHABLE)
-      return
-    }
+
     const room = this.room
     // A relay for a room this window has left.
     if (!room || room.socket !== socket) return
@@ -715,6 +717,29 @@ export class ServerConnection {
     // left to re-enter after a drop, or to stand up from.
     if (frame.method === RpcMethods.abort) this.room = null
     for (const handler of room.frames) handler(frame)
+  }
+
+  /**
+   * The server's word on a session it is closing (`session/ended`): the one
+   * way a connection learns that a close is the server's decision, rather
+   * than inferring it from what the window was doing when the socket went.
+   *
+   * `never` and `elsewhere` end this connection for good — `elsewhere` after
+   * saying where the session went (`onElsewhere`), which is the hook a region
+   * handover takes the window to the new server by. `retry` is a drop the
+   * server announced: the usual way back, at once. A word this build does not
+   * know is read as `never`, because dialling a server that has said it does
+   * not want this window is the worse mistake.
+   */
+  private sessionEnded(socket: Socket, ended: Partial<SessionEnded>): void {
+    if (ended.reconnect === 'retry') {
+      this.giveUpOn(socket)
+      return
+    }
+    if (ended.reconnect === 'elsewhere' && typeof ended.url === 'string') {
+      for (const listener of this.elsewhereListeners) listener(ended.url)
+    }
+    this.terminate(typeof ended.reason === 'string' && ended.reason.length > 0 ? ended.reason : SESSION_ENDED)
   }
 
   /**

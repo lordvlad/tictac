@@ -45,8 +45,30 @@ const GRAVITY = 9.8
 const CASING_LIFETIME = 1.6
 const CASING_SHRINK = 0.3
 
+/**
+ * Where a round is *drawn* landing: the resolved point itself for a hit, and
+ * for a miss a spot past it or to the side.
+ *
+ * A fresh vector and a presentation-only draw (`jitter`), never the rules' own:
+ * the resolved point is what a peer, a replay and the referee agree on, and
+ * moving it — or drawing from the match's dice — would be a different fight
+ * (`tests/tracerScatter.test.ts`).
+ */
+export function drawnImpact(resolved: Vector3, hit: boolean, jitter: () => number): Vector3 {
+  const drawn = resolved.clone()
+  if (!hit) {
+    drawn.x += (jitter() - 0.5) * 1.5
+    drawn.z += (jitter() - 0.5) * 1.5
+  }
+  return drawn
+}
+
 export class Tracers {
-  constructor(private readonly engine: EngineContext) {}
+  constructor(
+    private readonly engine: EngineContext,
+    /** Cosmetic randomness for scatter; injectable so a test can pin the picture. */
+    private readonly jitter: () => number = Math.random,
+  ) {}
 
   private activeTracers: { line: Line; light: PointLight; age: number; duration: number }[] = []
   private readonly pops: Pop[] = []
@@ -65,13 +87,7 @@ export class Tracers {
     }
 
     const eye = fromWorld.clone().add(new Vector3(0, EYE_HEIGHT, 0))
-    const target = toWorld.clone().add(new Vector3(0, EYE_HEIGHT, 0))
-
-    if (!hit) {
-      // Offset missed shots slightly past or to the side of target
-      target.x += (Math.random() - 0.5) * 1.5
-      target.z += (Math.random() - 0.5) * 1.5
-    }
+    const target = drawnImpact(toWorld, hit, this.jitter).add(new Vector3(0, EYE_HEIGHT, 0))
 
     // The round leaves the muzzle, not the eye.
     const heading = new Vector3(target.x - eye.x, 0, target.z - eye.z)

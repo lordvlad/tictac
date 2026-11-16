@@ -1,5 +1,5 @@
 import { distanceKm, type LatLng } from '../core/Travel'
-import type { Player, Squad } from '../game/Rpc'
+import type { Squad } from '../game/Rpc'
 import type { StandingOrder } from '../sim/Policy'
 import type { ServerClock } from './Clock'
 import { Batch, type Db } from './db/Db'
@@ -87,6 +87,9 @@ export interface Placement {
 }
 
 export class Squads {
+  /** The placement in flight, which the next waits for (`placing`). */
+  private placements: Promise<unknown> = Promise.resolve()
+
   constructor(
     private readonly db: Db,
     private readonly clock: ServerClock,
@@ -102,13 +105,12 @@ export class Squads {
     return row ? squadOf(row) : null
   }
 
-  /** A squad by its id, with the player it belongs to; null for one that does not exist. */
-  async byId(id: string): Promise<{ player: Player; squad: Squad } | null> {
-    const rows = await this.db.query<{ player_id: string; name: string; waypoints: string; standing: string }>`
-      SELECT s.player_id, p.name, s.waypoints, s.standing
-        FROM squads s JOIN players p ON p.id = s.player_id WHERE s.id = ${id}`
+  /** A squad by its id, with the id of the player it belongs to; null for one that does not exist. */
+  async byId(id: string): Promise<{ playerId: string; squad: Squad } | null> {
+    const rows = await this.db.query<{ player_id: string; waypoints: string; standing: string }>`
+      SELECT player_id, waypoints, standing FROM squads WHERE id = ${id}`
     const row = rows[0]
-    return row ? { player: { id: row.player_id, name: row.name }, squad: squadOf({ ...row, id }) } : null
+    return row ? { playerId: row.player_id, squad: squadOf({ ...row, id }) } : null
   }
 
   /** Every squad, for a starting server to schedule what each has due. */
@@ -128,23 +130,46 @@ export class Squads {
     await this.db.query`UPDATE squads SET standing = ${order} WHERE id = ${squadId}`
   }
 
+  /** The region that keeps `squadId`, as last committed; null for a squad this store does not hold. */
+  async ownerOf(squadId: string): Promise<string | null> {
+    const rows = await this.db.query<{ owner: string }>`SELECT owner FROM squads WHERE id = ${squadId}`
+    return rows[0]?.owner ?? null
+  }
+
+  /** Commit `region` as the keeper of `squadId`: written when a handover is confirmed (RFC-0002 §6.4), nowhere else. */
+  async setOwner(squadId: string, region: string): Promise<void> {
+    await this.db.query`UPDATE squads SET owner = ${region} WHERE id = ${squadId}`
+  }
+
   /**
-   * Choose a start around `anchor` (or `DEFAULT_ANCHOR`) and the squad that
-   * stands on it, without writing anything: what registration reads first so
-   * it can write the player, the squad and the rest in one batch.
+   * Draw a start around `anchor` (or `DEFAULT_ANCHOR`) and hand it, with the
+   * squad that stands on it, to `commit`, which writes it — and nobody else
+   * draws until `commit` has settled.
+   *
+   * The 1 km separation (GDD-WORLD D4) is a read of the starts already kept,
+   * and a read followed by a write is not atomic on any adapter (`Db.ts`): two
+   * placements that overlapped would both read a clear disc and both land in
+   * it. One placement at a time, from the draw to the commit, makes each read
+   * see every start written before it. This holds for the one process that
+   * writes the table, which is the rule here (one Durable Object or one Bun
+   * server per database).
    */
-  async draw(anchor: LatLng | null): Promise<Placement> {
-    const start = await this.drawStart(anchor ?? DEFAULT_ANCHOR)
-    const created = this.clock.now()
-    return {
-      start,
-      createdAt: new Date(created).toISOString(),
-      squad: {
-        id: crypto.randomUUID(),
-        waypoints: [{ kind: 'past', lat: start.lat, lng: start.lng, arrival: created, departed: null }],
-        standing: 'stand',
-      },
-    }
+  placing<T>(anchor: LatLng | null, commit: (placement: Placement) => Promise<T>): Promise<T> {
+    const run = this.placements.then(async () => {
+      const start = await this.drawStart(anchor ?? DEFAULT_ANCHOR)
+      const created = this.clock.now()
+      return commit({
+        start,
+        createdAt: new Date(created).toISOString(),
+        squad: {
+          id: crypto.randomUUID(),
+          waypoints: [{ kind: 'past', lat: start.lat, lng: start.lng, arrival: created, departed: null }],
+          standing: 'stand',
+        },
+      })
+    })
+    this.placements = run.catch(() => undefined)
+    return run
   }
 
   /** Queue the insert that gives `playerId` the drawn squad onto `batch`: a no-op if they already have one. */
@@ -158,13 +183,15 @@ export class Squads {
 
   /** Give `playerId` a squad at a drawn start, in a transaction of its own; registration queues {@link placeInto} onto its own instead. */
   async place(playerId: string, anchor: LatLng | null): Promise<Squad> {
-    const placement = await this.draw(anchor)
-    const batch = new Batch()
-    this.placeInto(batch, playerId, placement)
-    await this.db.transaction(batch)
+    const placed = await this.placing(anchor, async (placement) => {
+      const batch = new Batch()
+      this.placeInto(batch, playerId, placement)
+      await this.db.transaction(batch)
+      return placement.squad
+    })
     // Two windows of a player that had no squad may both get here; the one
     // that lost the race reads the winner's.
-    return (await this.of(playerId)) ?? placement.squad
+    return (await this.of(playerId)) ?? placed
   }
 
   /**

@@ -1,6 +1,8 @@
 import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
 import { AmmoId, GRENADES, GrenadeId, WeaponId } from '../core/Arsenal'
 import type { Grid, Tile } from '../core/Grid'
+import { characterSheet } from '../core/Characters'
+import { Rng } from '../core/rng'
 import { Soldier } from '../entities/Soldier'
 import { applyUnitLoadout } from './Loadout'
 import type { SquadLoadout, Deployment } from '../core/Loadout'
@@ -51,6 +53,13 @@ export class Squads {
       for (const { faction, size, fallbackRow } of sides) {
         if (i >= size) continue
         const deployment = squads?.[faction]?.[i]
+        // A deployment without a sheet is wire or roster data this build
+        // could not make sense of; fielding a rolled stand-in would let two
+        // peers agree on the wrong person. Only a side with no deployments at
+        // all gets the stock squad's own-rolled sheets.
+        if (deployment && !deployment.sheet) {
+          throw new Error(`${faction} unit ${i}: deployment states no character sheet`)
+        }
         const soldier = new Soldier(
           world,
           faction,
@@ -58,7 +67,7 @@ export class Squads {
           FACTION_INFO[faction].squadNames[i]!,
           spawns[faction][i] ?? { x: 2 + i * 2, y: fallbackRow },
           grid,
-          deployment?.sheet,
+          deployment ? deployment.sheet : characterSheet(new Rng(i + 1)),
           deployment?.state?.hp,
           deployment?.characterId,
           deployment?.state?.fatigue,

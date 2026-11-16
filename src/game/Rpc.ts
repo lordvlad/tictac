@@ -27,12 +27,12 @@ import type { LobbyView, Seated, ServerIntent } from './Lobby'
  *
  * 1. The window's first frame is the `hello` notification with its
  *    `PeerVersion`, exactly as before; the server version-gates it and, on a
- *    refusal, sends `abort` and closes. A request that arrives before a
+ *    refusal, sends `session/ended` and closes. A request that arrives before a
  *    `hello` has passed is answered with `RPC_ERRORS.helloFirst`.
  * 2. Then any request, in any order. A signed-in window calls
  *    `account/signIn` with its stored token first, which is what binds the
  *    socket to a player — and what replaces a previous window of that player
- *    (`SESSION_REPLACED`).
+ *    (`session/ended`, `SESSION_REPLACED`).
  * 3. A window reconnecting after a drop does the same, then re-subscribes to
  *    the lobby if it was subscribed, and re-enters its room with
  *    `room/enter { kind: 'resume', roomId, seatKey }` if it held a seat (a
@@ -144,9 +144,10 @@ export interface RpcApi {
    * window then forgets it — and with `RPC_ERRORS.conflict` when the player's
    * seat in a match being played is in a room this page's build cannot carry
    * on, so a newer tab cannot cut off the window that can finish it. Any
-   * other socket already bound to that player is sent `SESSION_REPLACED` and
-   * closed, and a seat it held is *held* for its grace, in every phase: the
-   * same window reconnecting signs in before it re-enters by its seat key, so
+   * other socket already bound to that player is sent `session/ended` with
+   * `SESSION_REPLACED` and closed, and a seat it held is *held* for its grace,
+   * in every phase: the same window reconnecting signs in before it
+   * re-enters by its seat key, so
    * signing in cannot be what abandons a room. A room still being set up is
    * abandoned only when this window enters a room other than by that seat's
    * key, or when the hold runs out (`ITEM-058`/`ITEM-059`).
@@ -247,11 +248,14 @@ export interface RpcPushes {
   /** The whole lobby view, to a socket subscribed to it, whenever it changes. */
   'tictac/api/lobby/changed': LobbyView
   /**
-   * This window has been replaced by a newer one of the same player, and its
-   * socket is about to close. The window must not reconnect: its player is
-   * playing somewhere else now.
+   * The server is about to close this socket, and says why and whether to
+   * come back. The one thing sent before every close the server starts
+   * (the version gate, a newer window of the same player, a shutdown), so a
+   * window never has to infer from the shape of what it was doing whether a
+   * close is final. A room's `abort` is not this: it ends a socket's part in
+   * a match and leaves the session standing.
    */
-  'tictac/api/session/replaced': { reason: string }
+  'tictac/api/session/ended': SessionEnded
   /**
    * This player's squad has a new route: an order was given (from any of the
    * player's windows), or it arrived somewhere. The whole route, as
@@ -288,8 +292,28 @@ export interface RpcPushes {
 
 export type RpcPush = keyof RpcPushes
 
-/** Sent with `session/replaced`. */
+/** Sent with `session/ended` when a newer window of the same player took over. */
 export const SESSION_REPLACED = 'You opened TicTac in another window; this one was disconnected.'
+
+/**
+ * What a window does about a session the server ended (`session/ended`).
+ *
+ * - `never`: the server will not have this window back — a build it cannot
+ *   talk to, a newer window of the same player. Dialling again would be told
+ *   the same, or would fight the window that replaced it.
+ * - `elsewhere`: the session continues on another server at `url` (a region
+ *   handover); this socket is not dialled again.
+ * - `retry`: the server is going away for a while, as a drop is; the window
+ *   reconnects to this server by the usual backoff.
+ */
+export type Reconnect = 'never' | 'elsewhere' | 'retry'
+
+export interface SessionEnded {
+  reason: string
+  reconnect: Reconnect
+  /** Where the session went, for `elsewhere`; absent otherwise. */
+  url?: string
+}
 
 /**
  * Error codes a response can carry.

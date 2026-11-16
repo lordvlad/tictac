@@ -338,18 +338,20 @@ describe('The planted Cloudflare deployment', () => {
     // way to a decisive win, which is what "the referee runs for real" here
     // means concretely (`[ITEM-045]`).
     const url = BASE.replace('http', 'ws')
-    let seed = 6000
+    // The room issues the seed, so a match that somebody wins is found by
+    // trying rooms rather than seeds: a few draws of the server's, each a
+    // fresh match against the same rules.
+    let attempts = 0
     let winner: unknown = null
-    while (winner === null && seed < 6040) {
+    while (winner === null && attempts < 40) {
       const result = await simulateOverWire({
-        seed,
         blue: { ...STOCK_PLAN, size: 3 },
         red: { ...STOCK_PLAN, size: 3 },
         turnCap: 60,
         url,
       })
       winner = result.outcome.winner
-      seed++
+      attempts++
     }
     expect(winner).not.toBeNull()
   }, 30000)

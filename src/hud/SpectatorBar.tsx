@@ -1,4 +1,5 @@
 import { createRoot, type Root } from 'react-dom/client'
+import { uiMount } from './uiMount'
 
 /** Everything the watcher's bar shows, as one snapshot. */
 export interface SpectatorView {
@@ -52,7 +53,7 @@ export class SpectatorBar {
   constructor(private readonly onLeave: () => void) {
     this.container = document.createElement('div')
     this.container.className = 'playback-bar'
-    ;(document.getElementById('ui') ?? document.body).appendChild(this.container)
+    uiMount().appendChild(this.container)
     this.root = createRoot(this.container)
   }
 

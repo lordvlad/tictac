@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { bottomLeftRow } from './CornerStack'
 import type {
@@ -12,9 +13,11 @@ import type {
   HudStrikeOption,
   HudTargetIcon,
   HudThrowPanel,
+  HudVisibility,
   TileReadout,
 } from './HudModel'
 import { Icon } from './Icon'
+import { uiMount } from './uiMount'
 
 export interface ContextMenuItem {
   label: string
@@ -826,29 +829,43 @@ function EndScreenView({
   )
 }
 
-function TileReadoutView({ readout }: { readout: TileReadout | null }) {
-  if (!readout) return null
+function TileReadoutView({ readout }: { readout: TileReadout }) {
   return (
-    <>
+    <div className="hud-tile-readout">
       {readout.lines.map((line, i) => (
         <div key={i} className={`hud-tile-line ${line.tone}`}>
           <b>{line.name}</b> {line.detail}
         </div>
       ))}
-    </>
+    </div>
   )
 }
 
-function ContextMenuView({
-  items,
-  onClose,
-}: {
+interface ContextMenuState {
+  x: number
+  y: number
   items: ContextMenuItem[]
-  onClose: () => void
-}) {
+}
+
+function ContextMenuView({ menu, onClose }: { menu: ContextMenuState; onClose: () => void }) {
+  const element = useRef<HTMLDivElement>(null)
+  const [at, setAt] = useState({ left: menu.x, top: menu.y })
+
+  // Keep the menu fully on screen: a tap near the right or bottom edge of a
+  // phone would otherwise open it mostly outside the viewport. Measured once
+  // it has a size, before the browser paints it.
+  useLayoutEffect(() => {
+    const margin = 8
+    const rect = element.current?.getBoundingClientRect()
+    if (!rect) return
+    const maxLeft = window.innerWidth - rect.width - margin
+    const maxTop = window.innerHeight - rect.height - margin
+    setAt({ left: Math.max(margin, Math.min(menu.x, maxLeft)), top: Math.max(margin, Math.min(menu.y, maxTop)) })
+  }, [menu])
+
   return (
-    <>
-      {items.map((item, idx) => (
+    <div ref={element} className="hud-context-menu" style={at}>
+      {menu.items.map((item, idx) => (
         <button
           key={idx}
           className={`hud-context-item interactive ${item.danger ? 'danger' : ''}`}
@@ -858,12 +875,10 @@ function ContextMenuView({
           }}
         >
           <span>{item.label}</span>
-          {item.detail && (
-            <span style={{ fontSize: 10, opacity: 0.6 }}>{item.detail}</span>
-          )}
+          {item.detail && <span style={{ fontSize: 10, opacity: 0.6 }}>{item.detail}</span>}
         </button>
       ))}
-    </>
+    </div>
   )
 }
 
@@ -873,37 +888,27 @@ function ContextMenuView({
  * A pure view. It renders whatever {@link HudModel} it is handed and reports
  * presses as {@link HudIntent}s — it never touches the turn manager, a soldier
  * or the camera, so "what a button does" is answered in exactly one place.
+ *
+ * Every piece is rendered by React from the state held here, and a piece that
+ * is not showing is not rendered: nothing toggles a class on an element
+ * from outside.
  */
 export class Hud {
-  private readonly uiRoot: HTMLElement
-  private readonly topCentreEl: HTMLElement
-  private readonly levelSelectorEl: HTMLElement
-  private readonly bottomCentreEl: HTMLElement
-  private readonly targetStripEl: HTMLElement
-  private readonly squadBarEl: HTMLElement
-  private readonly actionPanelEl: HTMLElement
-  private readonly endTurnEl: HTMLElement
-  private readonly cornerActionsEl: HTMLElement
-  private readonly turnOverlayEl: HTMLElement
-  private readonly endScreenEl: HTMLElement
-  private readonly contextMenuEl: HTMLElement
-  /** What the tile under the pointer is; see {@link showTile}. */
-  private readonly tileReadoutEl: HTMLElement
-
+  /** The elements the roots draw into, each laid out as if it were not there (`.hud-mount`). */
+  private readonly mounts: HTMLElement[] = []
   private readonly topCentreRoot: Root
   private readonly levelSelectorRoot: Root
-  private readonly cornerActionsRoot: Root
-  private readonly endTurnRoot: Root
-  private readonly targetStripRoot: Root
-  private readonly squadBarRoot: Root
+  private readonly bottomCentreRoot: Root
   private readonly actionPanelRoot: Root
+  private readonly endTurnRoot: Root
   private readonly turnOverlayRoot: Root
   private readonly endScreenRoot: Root
   private readonly contextMenuRoot: Root
+  /** What the tile under the pointer is; see {@link showTile}. */
   private readonly tileReadoutRoot: Root
+  private readonly cornerActionsRoot: Root
 
-  private turnOverlayVisible = false
-  private panelsHidden = false
+  private visible: HudVisibility = { panelsHidden: false, turnOverlay: false }
   /**
    * Which group's submenu is open, if any. View state: which rows are folded
    * away is a property of this panel, not of the match. One at a time, because
@@ -911,118 +916,63 @@ export class Hud {
    */
   private openGroup: 'items' | 'grenades' | null = null
   private model: HudModel | null = null
+  /**
+   * What the turn cover says, held from the moment it went up: it fades out
+   * after the turn has changed hands, and must not change its words while it does.
+   */
+  private turnCover: HudModel | null = null
+  private contextMenu: ContextMenuState | null = null
 
   constructor(private readonly onIntent: (intent: HudIntent) => void) {
-    this.uiRoot = document.getElementById('ui') ?? document.body
+    const ui = uiMount()
+    const mountOn = (parent: HTMLElement): Root => {
+      const element = document.createElement('div')
+      element.className = 'hud-mount'
+      parent.appendChild(element)
+      this.mounts.push(element)
+      return createRoot(element)
+    }
 
-    this.levelSelectorEl = document.createElement('div')
-    this.levelSelectorEl.className = 'hud-level-selector'
-    this.topCentreEl = document.createElement('div')
-    this.topCentreEl.className = 'hud-top-centre'
-    // Strip and squad bar share one bottom-centred column: stacking them in the
-    // layout means they cannot overlap, whatever height the cards grow to.
-    this.bottomCentreEl = document.createElement('div')
-    this.bottomCentreEl.className = 'hud-bottom-centre'
-
-    this.targetStripEl = document.createElement('div')
-    this.targetStripEl.className = 'hud-target-strip'
-
-    this.squadBarEl = document.createElement('div')
-    this.squadBarEl.className = 'hud-squad-bar'
-
-    this.bottomCentreEl.append(this.targetStripEl, this.squadBarEl)
-
-    this.actionPanelEl = document.createElement('div')
-    this.actionPanelEl.className = 'hud-action-panel'
-
-    this.endTurnEl = document.createElement('div')
-    this.endTurnEl.className = 'hud-end-turn'
-
-    this.turnOverlayEl = document.createElement('div')
-    this.turnOverlayEl.className = 'turn-overlay'
-
-    this.endScreenEl = document.createElement('div')
-    this.endScreenEl.className = 'turn-overlay end-screen'
-    this.contextMenuEl = document.createElement('div')
-    this.contextMenuEl.className = 'hud-context-menu'
-    this.contextMenuEl.style.display = 'none'
-
-    this.tileReadoutEl = document.createElement('div')
-    this.tileReadoutEl.className = 'hud-tile-readout'
-
-    this.uiRoot.append(
-      this.topCentreEl,
-      this.levelSelectorEl,
-      this.bottomCentreEl,
-      this.actionPanelEl,
-      this.endTurnEl,
-      this.turnOverlayEl,
-      this.endScreenEl,
-      this.contextMenuEl,
-      this.tileReadoutEl,
-    )
-
+    this.topCentreRoot = mountOn(ui)
+    this.levelSelectorRoot = mountOn(ui)
+    this.bottomCentreRoot = mountOn(ui)
+    this.actionPanelRoot = mountOn(ui)
+    this.endTurnRoot = mountOn(ui)
+    this.turnOverlayRoot = mountOn(ui)
+    this.endScreenRoot = mountOn(ui)
+    this.contextMenuRoot = mountOn(ui)
+    this.tileReadoutRoot = mountOn(ui)
     // The developer tools live in the bottom-left corner beside the frame
     // counter, which is outside #ui — so they carry their own listener.
-    this.cornerActionsEl = document.createElement('div')
-    this.cornerActionsEl.className = 'hud-corner-actions'
-    bottomLeftRow().appendChild(this.cornerActionsEl)
-
-    this.topCentreRoot = createRoot(this.topCentreEl)
-    this.levelSelectorRoot = createRoot(this.levelSelectorEl)
-    this.cornerActionsRoot = createRoot(this.cornerActionsEl)
-    this.endTurnRoot = createRoot(this.endTurnEl)
-    this.targetStripRoot = createRoot(this.targetStripEl)
-    this.squadBarRoot = createRoot(this.squadBarEl)
-    this.actionPanelRoot = createRoot(this.actionPanelEl)
-    this.turnOverlayRoot = createRoot(this.turnOverlayEl)
-    this.endScreenRoot = createRoot(this.endScreenEl)
-    this.contextMenuRoot = createRoot(this.contextMenuEl)
-    this.tileReadoutRoot = createRoot(this.tileReadoutEl)
+    this.cornerActionsRoot = mountOn(bottomLeftRow())
   }
 
   dispose(): void {
-    this.topCentreRoot.unmount()
-    this.levelSelectorRoot.unmount()
-    this.cornerActionsRoot.unmount()
-    this.endTurnRoot.unmount()
-    this.targetStripRoot.unmount()
-    this.squadBarRoot.unmount()
-    this.actionPanelRoot.unmount()
-    this.turnOverlayRoot.unmount()
-    this.endScreenRoot.unmount()
-    this.contextMenuRoot.unmount()
-    this.tileReadoutRoot.unmount()
-
-    for (const el of [
-      this.topCentreEl,
-      this.levelSelectorEl,
-      this.bottomCentreEl,
-      this.actionPanelEl,
-      this.endTurnEl,
-      this.cornerActionsEl,
-      this.turnOverlayEl,
-      this.endScreenEl,
-      this.contextMenuEl,
-      this.tileReadoutEl,
+    for (const root of [
+      this.topCentreRoot,
+      this.levelSelectorRoot,
+      this.bottomCentreRoot,
+      this.actionPanelRoot,
+      this.endTurnRoot,
+      this.turnOverlayRoot,
+      this.endScreenRoot,
+      this.contextMenuRoot,
+      this.tileReadoutRoot,
+      this.cornerActionsRoot,
     ]) {
-      el.remove()
+      root.unmount()
     }
+    for (const element of this.mounts) element.remove()
+    this.mounts.length = 0
   }
 
   /**
    * What the pointer is over: the tile's surface, and whatever is on it.
-   * Written straight into its element rather than through the model, because
-   * it changes on every pointer move and nothing else on the HUD does.
+   * Drawn on its own, outside the model, because it changes on every pointer
+   * move and nothing else on the HUD does.
    */
   showTile(readout: TileReadout | null): void {
-    if (!readout) {
-      this.tileReadoutEl.classList.remove('visible')
-      this.tileReadoutRoot.render(null)
-      return
-    }
-    this.tileReadoutEl.classList.add('visible')
-    this.tileReadoutRoot.render(<TileReadoutView readout={readout} />)
+    this.tileReadoutRoot.render(readout ? <TileReadoutView readout={readout} /> : null)
   }
 
   /**
@@ -1033,18 +983,10 @@ export class Hud {
    * reading a unit's state turn by turn is the reason to watch a replay at all.
    */
   setHidden(hidden: boolean): void {
-    for (const el of [
-      this.topCentreEl,
-      this.levelSelectorEl,
-      this.bottomCentreEl,
-      this.actionPanelEl,
-      this.endTurnEl,
-      this.turnOverlayEl,
-      this.contextMenuEl,
-    ]) {
-      el.classList.toggle('hud-hidden', hidden)
-    }
-    this.panelsHidden = hidden
+    this.visible = { ...this.visible, panelsHidden: hidden }
+    this.drawPanels()
+    this.drawTurnOverlay()
+    this.drawContextMenu()
   }
 
   /**
@@ -1052,64 +994,119 @@ export class Hud {
    */
   render(model: HudModel): void {
     this.model = model
-    this.topCentreRoot.render(<TopCentreView model={model} onIntent={this.onIntent} />)
-    this.levelSelectorRoot.render(<LevelSelectorView model={model} onIntent={this.onIntent} />)
-    this.cornerActionsRoot.render(<CornerActionsView model={model} onIntent={this.onIntent} />)
-    this.endTurnRoot.render(<EndTurnView model={model} onIntent={this.onIntent} />)
-
-    const showTargets =
-      model.targets.length > 0 && (model.isMyTurn || model.networkMode === 'local')
-    this.targetStripEl.classList.toggle('visible', showTargets)
-    this.targetStripRoot.render(
-      showTargets ? <TargetStripView targets={model.targets} onIntent={this.onIntent} /> : null,
+    this.cornerActionsRoot.render(
+      <div className="hud-corner-actions">
+        <CornerActionsView model={model} onIntent={this.onIntent} />
+      </div>,
     )
-
-    this.squadBarRoot.render(<SquadBarView model={model} onIntent={this.onIntent} />)
-    this.renderActionPanel(model)
+    this.drawPanels()
+    // Until a cover has gone up it follows the model, so it is already in the
+    // page — hidden — when it first has to fade in.
+    if (this.turnCover === null) this.drawTurnOverlay()
   }
 
-  private renderActionPanel(model: HudModel): void {
+  private drawPanels(): void {
+    const model = this.visible.panelsHidden ? null : this.model
+    if (!model) {
+      for (const root of [
+        this.topCentreRoot,
+        this.levelSelectorRoot,
+        this.bottomCentreRoot,
+        this.actionPanelRoot,
+        this.endTurnRoot,
+      ]) {
+        root.render(null)
+      }
+      return
+    }
+    const onIntent = this.onIntent
+    this.topCentreRoot.render(
+      <div className="hud-top-centre">
+        <TopCentreView model={model} onIntent={onIntent} />
+      </div>,
+    )
+    this.levelSelectorRoot.render(
+      <div className="hud-level-selector">
+        <LevelSelectorView model={model} onIntent={onIntent} />
+      </div>,
+    )
+    this.endTurnRoot.render(
+      <div className="hud-end-turn">
+        <EndTurnView model={model} onIntent={onIntent} />
+      </div>,
+    )
+    // Strip and squad bar share one bottom-centred column: stacking them in the
+    // layout means they cannot overlap, whatever height the cards grow to.
+    const showTargets = model.targets.length > 0 && (model.isMyTurn || model.networkMode === 'local')
+    this.bottomCentreRoot.render(
+      <div className="hud-bottom-centre">
+        {showTargets && (
+          <div className="hud-target-strip">
+            <TargetStripView targets={model.targets} onIntent={onIntent} />
+          </div>
+        )}
+        <div className="hud-squad-bar">
+          <SquadBarView model={model} onIntent={onIntent} />
+        </div>
+      </div>,
+    )
+    this.drawActionPanel()
+  }
+
+  private drawActionPanel(): void {
+    const model = this.visible.panelsHidden ? null : this.model
     this.actionPanelRoot.render(
-      <ActionPanelView
-        model={model}
-        openGroup={this.openGroup}
-        onToggleGroup={(group) => {
-          this.openGroup = this.openGroup === group ? null : group
-          if (this.model) this.renderActionPanel(this.model)
-        }}
-        onIntent={this.onIntent}
-      />,
+      model && (
+        <div className="hud-action-panel">
+          <ActionPanelView
+            model={model}
+            openGroup={this.openGroup}
+            onToggleGroup={(group) => {
+              this.openGroup = this.openGroup === group ? null : group
+              this.drawActionPanel()
+            }}
+            onIntent={this.onIntent}
+          />
+        </div>
+      ),
     )
   }
 
   // ---------------------------------------------------------------------------
-  // Turn overlay & context menu
+  // Turn overlay, end screen & context menu
   // ---------------------------------------------------------------------------
 
   showTurnOverlay(): void {
-    if (this.model) {
-      this.turnOverlayRoot.render(
-        <TurnOverlayView
-          model={this.model}
-          onIntent={(intent) => {
-            if (intent.type === 'confirmTurnSwitch' && !this.turnOverlayVisible) return
-            this.onIntent(intent)
-          }}
-        />,
-      )
-    }
-    this.turnOverlayVisible = true
-    this.turnOverlayEl.classList.add('visible')
+    this.turnCover = this.model
+    this.visible = { ...this.visible, turnOverlay: true }
+    this.drawTurnOverlay()
   }
 
   hideTurnOverlay(): void {
-    this.turnOverlayVisible = false
-    this.turnOverlayEl.classList.remove('visible')
+    this.visible = { ...this.visible, turnOverlay: false }
+    this.drawTurnOverlay()
+  }
+
+  private drawTurnOverlay(): void {
+    const model = this.visible.panelsHidden ? null : (this.turnCover ?? this.model)
+    this.turnOverlayRoot.render(
+      model && (
+        <div className={this.visible.turnOverlay ? 'turn-overlay visible' : 'turn-overlay'}>
+          <TurnOverlayView
+            model={model}
+            onIntent={(intent) => {
+              if (intent.type === 'confirmTurnSwitch' && !this.visible.turnOverlay) return
+              this.onIntent(intent)
+            }}
+          />
+        </div>
+      ),
+    )
   }
 
   /** Whether the in-match panels are hidden, as they are for a replay. */
   get hidden(): boolean {
-    return this.panelsHidden
+    return this.visible.panelsHidden
   }
 
   /**
@@ -1117,29 +1114,25 @@ export class Hud {
    * the match is over, and the only way on is the page's own button.
    */
   showEndScreen(screen: EndScreen): void {
-    this.endScreenRoot.render(<EndScreenView screen={screen} onIntent={this.onIntent} />)
-    this.endScreenEl.classList.add('visible')
+    this.endScreenRoot.render(
+      <div className="turn-overlay end-screen visible">
+        <EndScreenView screen={screen} onIntent={this.onIntent} />
+      </div>,
+    )
   }
 
   showContextMenu(x: number, y: number, items: ContextMenuItem[]): void {
-    this.contextMenuRoot.render(
-      <ContextMenuView items={items} onClose={() => this.hideContextMenu()} />,
-    )
-    this.contextMenuEl.style.left = `${x}px`
-    this.contextMenuEl.style.top = `${y}px`
-    this.contextMenuEl.style.display = 'flex'
-
-    // Keep the menu fully on screen: a tap near the right or bottom edge of a
-    // phone would otherwise open it mostly outside the viewport.
-    const margin = 8
-    const rect = this.contextMenuEl.getBoundingClientRect()
-    const maxLeft = window.innerWidth - rect.width - margin
-    const maxTop = window.innerHeight - rect.height - margin
-    this.contextMenuEl.style.left = `${Math.max(margin, Math.min(x, maxLeft))}px`
-    this.contextMenuEl.style.top = `${Math.max(margin, Math.min(y, maxTop))}px`
+    this.contextMenu = { x, y, items }
+    this.drawContextMenu()
   }
 
   hideContextMenu(): void {
-    this.contextMenuEl.style.display = 'none'
+    this.contextMenu = null
+    this.drawContextMenu()
+  }
+
+  private drawContextMenu(): void {
+    const menu = this.visible.panelsHidden ? null : this.contextMenu
+    this.contextMenuRoot.render(menu && <ContextMenuView menu={menu} onClose={() => this.hideContextMenu()} />)
   }
 }

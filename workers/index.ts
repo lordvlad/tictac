@@ -1,4 +1,5 @@
-import { MATCH_SERVER } from '../src/server/Owner'
+import { REGIONS, regionMap } from '../src/server/Owner'
+import { DEFAULT_ANCHOR } from '../src/server/Squads'
 import { relatedOriginsHandler } from '../src/server/RelatedOrigins'
 import { MAP_TILE_MAX_ZOOM } from '../src/config'
 import {
@@ -10,7 +11,7 @@ import {
   type TileHandler,
   tileHandler,
 } from '../src/server/Tiles'
-import { type MatchDurableObject, relyingPartyOf } from './MatchDurableObject'
+import { type MatchDurableObject, placeOf, relyingPartyOf } from './MatchDurableObject'
 
 export interface Env {
   MATCH: DurableObjectNamespace<MatchDurableObject>
@@ -61,6 +62,14 @@ function demandOf(env: Env): DemandTiles | undefined {
       : undefined,
   }
 }
+
+/**
+ * The same partition table every region's own directory is built from
+ * (`REGIONS`, `src/server/Owner.ts`). The Worker has no database, so it asks
+ * only the half of it that is a function of a place; who keeps a given squad
+ * is the region's own committed row, which a Worker cannot read.
+ */
+const regions = regionMap(REGIONS)
 let relatedOrigins: ((request: Request) => Response | undefined) | undefined
 
 /**
@@ -73,10 +82,11 @@ let relatedOrigins: ((request: Request) => Response | undefined) | undefined
  * bound to this host (`src/server/RelatedOrigins.ts`).
  *
  * Everything else — a page load, an asset, a WebSocket upgrade — is forwarded
- * to the same Durable Object instance (`MATCH_SERVER`, `src/server/Owner.ts`)
- * rather than one derived from the request. `[ITEM-045]` plants a single DO on purpose:
- * a match server is one lobby of rooms, so there is one of it, the same way
- * `startGameServer` binds one port to one `Lobby` today.
+ * to the Durable Object of the region the connection starts in: the one
+ * `regions` says owns where Cloudflare placed it (or `DEFAULT_ANCHOR`, where
+ * a squad is placed when nothing is known). There is one region today
+ * (`[ITEM-045]`), so that is always the same instance: a match server is one
+ * lobby of rooms, the same way `startGameServer` binds one port to one `Lobby`.
  */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -86,7 +96,7 @@ export default {
     relatedOrigins ??= relatedOriginsHandler(relyingPartyOf(env))
     const related = relatedOrigins(request)
     if (related) return related
-    const id = env.MATCH.idFromName(MATCH_SERVER)
+    const id = env.MATCH.idFromName(regions.ownerOfPlace(placeOf(request.cf) ?? DEFAULT_ANCHOR))
     const stub = env.MATCH.get(id)
     return stub.fetch(request)
   },

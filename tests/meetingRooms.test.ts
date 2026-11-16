@@ -51,6 +51,7 @@ function meeting(
   over: Partial<MeetingContact> = {},
 ): MeetingContact {
   return {
+    roomId: crypto.randomUUID(),
     blue: { player: blue, squadId: `squad-${blue.id}`, standing: standing.blue ?? 'stand' },
     red: { player: red, squadId: `squad-${red.id}`, standing: standing.red ?? 'stand' },
     at: START,
@@ -597,7 +598,7 @@ describe('a meeting that does not happen', () => {
       await twoPlayers(w)
       await w.enlist(CY)
       const holder = await connect(w.lobby, busy, { kind: 'open' })
-      expect(holder.of('seated')).toHaveLength(1)
+      expect(holder.seats).toHaveLength(1)
 
       expect(await w.lobby.openMeeting(meeting(ADA, BO))).toEqual({ opened: false, passedFor: 'busy' } satisfies MeetingOpened)
       expect(w.lobby.view(null).rooms).toHaveLength(1)
@@ -883,6 +884,7 @@ describe('two squads on the road, end to end', () => {
     expect(await r.feed(r.bo)).toMatchObject([{ playedBy: 'ai', matchId: roomId }])
     // Hers, then, and busy: another meeting at the same moment finds her held.
     expect(await r.server.lobby.openMeeting({
+      roomId: crypto.randomUUID(),
       blue: { player: { id: r.ada.id, name: 'Ada' }, squadId: r.ada.squadId, standing: 'stand' },
       red: { player: { id: r.bo.id, name: 'Bo' }, squadId: r.bo.squadId, standing: 'stand' },
       at: r.found.at + HOUR,

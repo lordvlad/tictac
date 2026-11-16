@@ -190,8 +190,13 @@ describe('Getting back after a drop', () => {
       'Your match is on another build.',
     ])
   })
+})
 
-  test('a window replaced by a newer one of its player stops, and does not come back', async () => {
+describe('When the server ends the session', () => {
+  const ended = (reconnect: string, extra: Record<string, unknown> = {}) =>
+    push('tictac/api/session/ended', { reason: 'Said why.', reconnect, ...extra })
+
+  test('`never`: a window replaced by a newer one of its player stops, and does not come back', async () => {
     const { clock, server, connection } = setup()
     const seated = member()
     const room = connection.enter({ kind: 'open' }, seated)
@@ -199,12 +204,91 @@ describe('Getting back after a drop', () => {
     room.onClosed((reason) => lost.push(reason))
     await clock.advance(0)
 
-    server.last.send(push('tictac/api/session/replaced', { reason: SESSION_REPLACED }))
+    server.last.send(push('tictac/api/session/ended', { reason: SESSION_REPLACED, reconnect: 'never' }))
     expect(connection.state).toEqual({ kind: 'closed', reason: SESSION_REPLACED })
     expect(lost).toEqual([SESSION_REPLACED])
     await clock.advance(60_000)
     expect(server.sockets).toHaveLength(1)
     expect(seated.drops).toEqual([])
+  })
+
+  test('`never` at the version gate ends a window that was never in a room, and what it had asked is told why', async () => {
+    const clock = handClock()
+    const server = handServer(clock)
+    server.answer = null
+    const connection = new ServerConnection('ws://tictac.test/', { connect: server.connect, schedule: clock.schedule, tokens: heldTokens() })
+    const asked = connection.request('tictac/api/account/me', {}).catch((error: Error) => error.message)
+    await clock.advance(0)
+
+    server.last.send(ended('never', { reason: 'Protocol mismatch: nothing to dial again.' }))
+    expect(connection.state).toEqual({ kind: 'closed', reason: 'Protocol mismatch: nothing to dial again.' })
+    expect(await asked).toBe('Protocol mismatch: nothing to dial again.')
+    await clock.advance(60_000)
+    expect(server.sockets).toHaveLength(1)
+  })
+
+  test('`retry` is a drop the server announced: the window dials back and takes its seat again', async () => {
+    const { clock, server, connection } = setup()
+    const seated = member()
+    connection.enter({ kind: 'open' }, seated)
+    await clock.advance(0)
+
+    server.last.send(ended('retry'))
+    expect(connection.state).toEqual({ kind: 'reconnecting', attempt: 1 })
+    expect(seated.drops).toEqual([1])
+    await clock.advance(250)
+    expect(server.sockets).toHaveLength(2)
+    expect(connection.state).toEqual({ kind: 'open' })
+    expect(seated.seats).toEqual([SEAT, SEAT])
+  })
+
+  test('`elsewhere` names where the session went, ends this connection, and is not dialled again', async () => {
+    const { clock, server, connection } = setup()
+    const seated = member()
+    connection.enter({ kind: 'open' }, seated)
+    const moved: string[] = []
+    connection.onElsewhere((url) => moved.push(url))
+    await clock.advance(0)
+
+    server.last.send(ended('elsewhere', { url: 'wss://eu.tictac.test/' }))
+    expect(moved).toEqual(['wss://eu.tictac.test/'])
+    expect(connection.state).toEqual({ kind: 'closed', reason: 'Said why.' })
+    await clock.advance(60_000)
+    expect(server.sockets).toHaveLength(1)
+    expect(seated.drops).toEqual([])
+  })
+
+  test('`elsewhere` without a place to go, or a word this build does not know, is read as `never`', async () => {
+    for (const word of [ended('elsewhere'), ended('sideways')]) {
+      const { clock, server, connection } = setup()
+      const moved: string[] = []
+      connection.onElsewhere((url) => moved.push(url))
+      await clock.advance(0)
+
+      server.last.send(word)
+      expect(connection.state).toEqual({ kind: 'closed', reason: 'Said why.' })
+      expect(moved).toEqual([])
+      await clock.advance(60_000)
+      expect(server.sockets).toHaveLength(1)
+    }
+  })
+
+  test('an `abort` is a room\'s frame only: it ends the room, never the session, and means nothing outside one', async () => {
+    const { clock, server, connection } = setup()
+    const abort = push(RpcMethods.abort, { reason: 'The other player left.', side: null })
+
+    // Before any room was entered it is nobody's business — it used to end the connection.
+    await connection.request('tictac/api/account/me', {})
+    server.last.send(abort)
+    expect(connection.state).toEqual({ kind: 'open' })
+
+    const room = connection.enter({ kind: 'open' }, member())
+    const heard: JsonRpcFrame[] = []
+    room.onFrame((frame) => heard.push(frame))
+    await clock.advance(0)
+    server.last.send(abort)
+    expect(heard).toEqual([abort])
+    expect(connection.state).toEqual({ kind: 'open' })
   })
 })
 

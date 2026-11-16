@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { WALL_CLOCK } from '../src/server/Clock'
 import { Journeys } from '../src/server/Journeys'
 import { Lobby } from '../src/server/Lobby'
+import { regionDirectory } from '../src/server/Owner'
 import {
   LOCAL_RELYING_PARTY,
   persistenceOverDb,
@@ -100,8 +101,12 @@ export class MatchDurableObject extends DurableObject<Env> {
         },
         (message) => this.log(`[schedule] ${message}`),
       )
+      // One region today: every squad row reads `singleton` as its keeper.
+      const directory = regionDirectory({ owners: this.persistence.squads })
       const journeys = new Journeys({
+        directory,
         squads: this.persistence.squads,
+        accounts: this.persistence.accounts,
         encounters: this.persistence.encounters,
         schedule: this.schedule,
         clock,
@@ -113,7 +118,14 @@ export class MatchDurableObject extends DurableObject<Env> {
         log: this.log,
       })
       await journeys.restore()
-      this.sessions = new Sessions({ lobby: this.lobby, persistence: this.persistence, journeys, clock, log: this.log })
+      this.sessions = new Sessions({
+        lobby: this.lobby,
+        persistence: this.persistence,
+        journeys,
+        directory,
+        clock,
+        log: this.log,
+      })
     })
   }
 
@@ -156,7 +168,7 @@ export class MatchDurableObject extends DurableObject<Env> {
  * say — `wrangler dev`, or a zone without geolocation. Its coordinates are
  * decimal strings.
  */
-function placeOf(cf: unknown): LatLng | null {
+export function placeOf(cf: unknown): LatLng | null {
   if (typeof cf !== 'object' || cf === null) return null
   const { latitude, longitude } = cf as { latitude?: unknown; longitude?: unknown }
   const place = { lat: Number(latitude), lng: Number(longitude) }

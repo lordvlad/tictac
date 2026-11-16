@@ -126,7 +126,6 @@ describe('A wound on a real soldier', () => {
 
     soldier.hp -= Math.ceil(soldier.maxHp * 0.6)
 
-    expect(soldier.traits.moveCost).toBeGreaterThan(0)
     expect(soldier.moveCostMul).toBeGreaterThan(1)
   })
 

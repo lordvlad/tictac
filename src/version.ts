@@ -42,25 +42,17 @@
  * 7: one socket per window carries everything (`src/game/Rpc.ts`): signing
  * in, the roster, the lobby and taking a seat are JSON-RPC requests on it,
  * and the HTTP API is gone.
- */
-export const PROTOCOL_VERSION = 7
-
-/**
- * The oldest protocol a match server still serves — for finishing a match,
- * never for starting one.
  *
- * A deploy replaces the server while browsers keep running yesterday's
- * bundle. The rooms survive it (they are written down, `src/server/Lobby.ts`),
- * and each window reconnects to its own seat as if its wifi had dropped for a
- * moment. So the new server has to admit the old client long enough to finish
- * the match it was in: it serves this protocol and every one up to its own,
- * and speaks each socket's dialect back to it. Opening, joining or watching a
- * room still requires the current protocol and the room's own build.
- *
- * Protocol 7 is the floor: the protocol-6 keyed-resume compatibility shim
- * has been deleted.
+ * 8: three wire changes, one bump. The server ends a session with one push,
+ * `session/ended { reason, reconnect, url? }`, before every close it starts —
+ * `session/replaced` and the `abort` that stood in for it at the version gate are
+ * gone, and `abort` is a room's frame only. The room issues the match seed
+ * when it leaves `waiting` (`init`, sent by the server to both seats), and
+ * Blue's `matchHeader` has to carry it or is refused; a window's own `init`
+ * is ignored on a server. And the state digest carries `dice`, a snapshot of
+ * the match's random stream, compared as a divergence of its own.
  */
-export const OLDEST_SERVED_PROTOCOL = 7
+export const PROTOCOL_VERSION = 8
 
 /**
  * The commit this bundle was built from, or `dev` when it was not built.

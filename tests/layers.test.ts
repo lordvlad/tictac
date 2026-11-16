@@ -119,7 +119,6 @@ const ALLOWED: Record<string, readonly string[]> = {
     'src/server/Lobby.ts -> src/game/Rpc.ts',
     'src/server/MatchStore.ts -> src/game/NetworkManager.ts',
     'src/server/MatchStore.ts -> src/game/Recording.ts',
-    'src/server/Owner.ts -> src/game/Rpc.ts',
     'src/server/Room.ts -> src/game/Base64Url.ts',
     'src/server/Room.ts -> src/game/Encounter.ts',
     'src/server/Room.ts -> src/game/JsonRpc.ts',

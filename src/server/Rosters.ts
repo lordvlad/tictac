@@ -195,6 +195,19 @@ export class Rosters {
   }
 
   /**
+   * How a match settled, or null while it has not: the winning side, and the
+   * player each side's squad was credited to (null for a side with nobody
+   * registered, such as aliens). `match_results` is this store's table, so
+   * what reads an outcome asks here rather than joining it.
+   */
+  async result(matchId: string): Promise<{ winner: number; bluePlayer: string | null; redPlayer: string | null } | null> {
+    const rows = await this.db.query<{ winner: number; blue_player: string | null; red_player: string | null }>`
+      SELECT winner, blue_player, red_player FROM match_results WHERE match_id = ${matchId}`
+    const row = rows[0]
+    return row ? { winner: Number(row.winner), bluePlayer: row.blue_player, redPlayer: row.red_player } : null
+  }
+
+  /**
    * Every active member of this player's roster who did *not* deploy heals by
    * the same rule a survivor does — {@link HEALING.perMatch} of missing HP,
    * scaled by their own `healBonus` — and does not count a match: they were

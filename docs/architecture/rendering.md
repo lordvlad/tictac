@@ -115,9 +115,26 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
 - **Each surface's class owns a root.** `Hud`, `LoadoutScreen`, `RosterScreen`,
   `PlaybackControls`, `FullscreenPrompt`, `DebugMap` and `DebugPanel` keep the imperative API
   their callers use (`render(model)`, `showEndScreen`, `refresh`…): each creates its container,
-  holds a `createRoot`, and re-renders on every call. `main.ts` does the same for the menus.
-  So `InteractionController` and `main.ts` drive the UI as before, and React only decides what
-  in the DOM to change.
+  holds a `createRoot`, and re-renders on every call. The overlays the window shows over any
+  screen — the start menu, the interrupted-match notice, the flashed line, the reconnecting
+  line (`ScreenChrome.tsx`) — are roots owned by `main.tsx`'s `ScreenController`, made once and
+  drawn into or emptied, never built and found again by DOM id. So `InteractionController` and
+  `main.tsx` drive the UI as before, and React only decides what in the DOM to change.
+- **One way off a match.** The `ScreenController` holds the current screen's disposer
+  (`present`) and the network of the match on it (`holdNetwork`). `leaveMatch()` is every exit —
+  the end screen's *Back to menu* (`HudIntent` `backToMenu`, which `InteractionController` hands
+  to its `onLeave` callback rather than reloading the page), the interrupted overlay, the
+  spectator bar's *Leave*, the replay bar's *Leave*, a peer dropping during the loadout: it puts
+  away the screen (controller, HUD, rig, bodies, terrain, its frame subscription), closes the
+  network, clears the overlays and `window.tictac`, and draws the menu. The match server's
+  connection is the window's, not the match's, and stays.
+- **Visibility is data.** A piece of the HUD that is not showing is not rendered: `HudVisibility`
+  (`HudModel.ts`) says whether the panels are hidden (a replay, a watcher) and whether the turn
+  cover is up, and `Hud` draws each root from that and from what it was last handed. Nothing
+  toggles a class on an element from outside React. The HUD mounts on `#ui` (`uiMount()`),
+  and throws when it is missing rather than falling back to `<body>`. A tracer's miss is drawn
+  from `drawnImpact` — a new point and a presentation-only draw — so the resolved point the rules
+  agreed on is never moved (`tests/tracerScatter.test.ts`).
 - **Why React.** Every surface used to be a string template assigned to `innerHTML`, which threw
   the old elements away on each update: a scrolled panel jumped to the top, a button replaced
   under a press lost the click (the turn overlay was kept out of the 30 Hz redraw for exactly
@@ -212,8 +229,8 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
     comes back, and on `encounter/started` and `squad/changed`. Lines newer than the last time
     the feed was closed (kept per server in `localStorage`) carry a *new* badge. **Watch** reads
     `match/recording { matchId }`, parses it as a recording file is parsed (`parseRecording`), and
-    hands it to `main.tsx`'s `playBack`: the map and menu close and `startPlayback` runs, ending
-    like any replay. A recording this build cannot read (`RECORDING_VERSION`) or the server
+    hands it to `main.tsx`'s `playBack`: the map and menu close and `startPlayback` runs, left
+    with the replay bar's **Leave** like any other screen (`leaveMatch`). A recording this build cannot read (`RECORDING_VERSION`) or the server
     refuses is said on its line.
 - **Debug tooling and the command door.** The debug panel writes straight to the soldiers and the
   rules tables — not a command, so not recorded, not sent, not in the digest. In a shared match

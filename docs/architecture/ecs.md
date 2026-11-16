@@ -59,6 +59,7 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | `IdentityComponent` | Faction (`blue` / `red`), squad index, character name | Yes |
 | `PositionComponent` | Grid coordinate `(x, y)`, logical world position, target yaw (the view's facing), and `heading` — one of eight directions, the facing the rules read (from behind) | Yes |
 | `HealthComponent` | Current and maximum HP. The maximum is `derive(sheet).maxHp` — read off the character's Health attribute, not stated by the sheet — with traits moving it from there | Yes |
+| `CharacterComponent` | The sheet the unit was rolled or kept as, the role it trained for and the fatigue it deployed with. Not changed during a match (the sheet is replaced only when a peer's real one arrives, before the first turn), but state like the rest: it digests and rewinds with the unit, and the trait refold reads it | Yes |
 | `ArmorComponent` | Current and maximum armour. Worn plate raises the maximum; shred takes the current down for the rest of the match, and a repair kit is the one thing that puts it back, capped at the maximum | Yes |
 | `ActionPointsComponent` | Points left and the ceiling (`derive(sheet).maxAp`, from Agility, then traits, then the share of gear's AP bite Strength carries for free), plus `spentThisTurn` and `exhaustedTurns` — what a unit *used*, which is what exhaustion is judged on | Yes |
 | `StanceComponent` | Crouched (and a crouched unit moves crouched, at `RULES.crouchStepCost` a step), moving, the route being walked, corner peek, and `firedThisTurn` — a muzzle flash gives a position away until the unit's own next turn | Yes |
@@ -69,7 +70,7 @@ All entity data is stored in discrete component instances inheriting from `Compo
 | `SightedComponent` | What the other side perceives: `seen` (fog writes it, a view mirrors it onto a mesh) and `known` (whether its *sheet* has been worked out) | Local (per-peer knowledge) |
 | `AwarenessComponent` | What the unit knows is going on: unaware, alerted (heard something, turned toward it) or engaged (in the fight), plus the turns it has spent alerted without hearing anything new. Decides what a watcher reacts to, so both peers resolve it by the same rules (`core/Awareness`) | Yes |
 | `MoraleComponent` | Nerve left (0–100), the break the unit is in — panic, frenzy or freeze — and the turns it has begun broken. Moved by stress from resolved attacks and rolled at each handover from the match's dice (`core/Morale`); a broken unit takes no orders | Yes |
-| `TraitsComponent` | The trait-derived numbers an *enemy* must read: `evasion`, `critImmune`, `moveCostMul`. Everything a trait does to its own unit stays local or travels inside a resolved attack | Yes |
+| `TraitsComponent` | What a unit's sheet, wounds, role and gear fold to: the one place every trait-driven number is read from (evasion, crit immunity and chance, accuracy, range falloff, silenced, step cost, damage taken, whether gear drags). `Soldier.refreshTraits` writes it and the fold itself is private to that call, so a rewind that puts this component back puts every trait-driven number back | Yes |
 | `StatusesComponent` | Turn-decaying statuses, each with `turnsLeft` and `stacks`; absent stacks mean one, so a peer omitting the count cannot disarm a status | Yes |
 | `GrenadeSpecsComponent` | Per-unit ordnance: throw range from Strength, blast radius and armour shred from the thrower's Demolitions training. Stamped into the unit's own specs rather than applied at the throw site, so the planner's preview, the range check and the debug panel all read the numbers *this* arm can reach — and a peer sees the arm it is up against rather than its own stock copy | Yes |
 | `CoverRulesComponent`, `AimRulesComponent`, `MatchRulesComponent`, `StatusSpecsComponent` | Rule tables on the global entity, so both peers resolve against the same constants | Yes (global entity) |
@@ -130,10 +131,14 @@ the old dirty-diff broadcast (`syncDirty`, `onComponentChanged`, `applyRemote`) 
 with it. What `serialize` still serves:
 
 1. **The state digest**: `StateDigest.digestWorld` fingerprints a world from the same
-   serialisations, exchanged at each handover to catch a desynchronisation.
+   serialisations, plus the match dice's position, exchanged at each handover to catch a
+   desynchronisation (a die drawn on one side only shows up as a `dice` divergence).
 2. **Rewind (`World.snapshot(entityIds)` / `World.restore(snapshot)`)**: Record and put
-   back a whole moment rather than one component. `restore` just calls `deserialize`;
-   nothing observes components changing, so there is nothing to suppress or re-baseline.
+   back a whole moment rather than one component. `restore` calls `deserialize` on each
+   component and then the entity's `World.onRestored` hook, which for a soldier is
+   `refreshTraits`: a restore writes components one at a time and the traits are a fold of
+   several of them, so they are refolded once all are back. Nothing observes components
+   changing, so there is nothing to suppress or re-baseline.
    Takes named entities rather than all of them: spectator playback only rewinds soldiers,
    and snapshotting a map's worth of wall entities at every event would cost a
    great deal to restore terrain that nothing can change. See

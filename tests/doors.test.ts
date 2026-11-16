@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { CHARACTER, DOORS, Faction, RULES, SQUAD_SIZE } from '../src/config'
 import { AmmoId, WeaponId } from '../src/core/Arsenal'
-import { characterSheet } from '../src/core/Characters'
+import { type CharacterSheet, characterSheet } from '../src/core/Characters'
 import { NO_FOCUS, NO_FX } from '../src/core/Combatant'
 import { Grid, Side, type Tile } from '../src/core/Grid'
 import { facingYaw } from '../src/core/math'
@@ -24,9 +24,10 @@ const always = (value: number): Roll => () => value
 /**
  * A small match with no scene, on dice the test chooses, and walls the test
  * puts up before the wall entities are made. Everyone but Blue 0 and Red 0 is
- * parked in the bottom rows behind a wall.
+ * parked in the bottom rows behind a wall. `blueSheet` makes Blue 0 somebody
+ * in particular.
  */
-function match(roll: Roll, build: (grid: Grid) => void = () => {}) {
+function match(roll: Roll, build: (grid: Grid) => void = () => {}, blueSheet?: (rolled: CharacterSheet) => CharacterSheet) {
   const world = new World()
   createGlobalRules(world)
   const grid = new Grid(40)
@@ -39,7 +40,7 @@ function match(roll: Roll, build: (grid: Grid) => void = () => {}) {
     grid,
     { [Faction.Blue]: parked(1), [Faction.Red]: parked(30) },
     stockSquads({
-      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, sheet),
+      [Faction.Blue]: Array.from({ length: SQUAD_SIZE }, (_, i) => (i === 0 && blueSheet ? blueSheet(sheet()) : sheet())),
       [Faction.Red]: Array.from({ length: SQUAD_SIZE }, sheet),
     }),
   )
@@ -61,6 +62,12 @@ function match(roll: Roll, build: (grid: Grid) => void = () => {}) {
   const red = squads.byFaction[Faction.Red][0]!
   return { world, grid, walls, commands, blue, red, settle }
 }
+
+/** The bottom of the Strength scale. */
+const weak = (sheet: CharacterSheet): CharacterSheet => ({
+  ...sheet,
+  attributes: { ...sheet.attributes, strength: CHARACTER.attribute.min },
+})
 
 /** A door on the north side of (10, 10): between (10, 10) and (10, 9). */
 const door = (kind: WallKind) => (grid: Grid) => grid.setWall(10, 10, Side.North, kind)
@@ -123,8 +130,7 @@ describe('A locked door', () => {
     // roll just under it gives and a roll at it does not.
     const odds = CHARACTER.shoulder.min / 100
     const shoulder = (roll: number) => {
-      const m = match(always(roll), door(WallKind.Locked))
-      m.blue.adoptSheet({ ...m.blue.sheet, attributes: { ...m.blue.sheet.attributes, strength: CHARACTER.attribute.min } })
+      const m = match(always(roll), door(WallKind.Locked), weak)
       m.blue.tile = { x: 10, y: 10 }
       m.red.tile = { x: 10, y: 4 }
       const heard: Noise[] = []
@@ -214,9 +220,8 @@ describe('Working a door is something to watch', () => {
 
     // A shoulder that does not give still happened: the door is untouched and
     // the unit is still announced.
-    const held = match(always(0.99), door(WallKind.Locked))
+    const held = match(always(0.99), door(WallKind.Locked), weak)
     held.blue.tile = { x: 10, y: 10 }
-    held.blue.adoptSheet({ ...held.blue.sheet, attributes: { ...held.blue.sheet.attributes, strength: CHARACTER.attribute.min } })
     const shoves: string[] = []
     held.commands.onDoorWorked = (unit) => shoves.push(`${unit.faction}:${unit.squadIndex}`)
     expect(held.commands.apply({ type: 'operateDoor', faction: Faction.Blue, squadIndex: 0, edge, verb: 'force' }, 'local').applied).toBe(true)

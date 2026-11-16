@@ -1,4 +1,5 @@
 import { foldHashes, hashData, hashString } from '../core/digest'
+import type { Rng } from '../core/rng'
 import { GLOBAL_ENTITY_ID, type World } from '../ecs/World'
 
 /**
@@ -68,6 +69,16 @@ export interface StateDigest {
   terrain: number
   /** The global entity: rule tables, tunables. */
   rules: number
+  /**
+   * Where the match's dice have got to.
+   *
+   * Every later roll is a function of every roll before it, so a peer that drew
+   * one die more or fewer than the other holds an identical world right up to
+   * the next roll that matters — and the desync would then be reported turns
+   * late, against whichever command happened to roll. Compared on its own, it
+   * is reported at the handover where the draws first differ.
+   */
+  dice: number
   /** The whole world in one number, so agreement is a single comparison. */
   total: number
 }
@@ -77,9 +88,11 @@ export interface StateDigest {
  *
  * `unitIds` names the entities worth reporting in detail — the soldiers. They
  * are named by the caller rather than discovered here because "which entities
- * are units" is a game question, and this file is about hashing.
+ * are units" is a game question, and this file is about hashing. The dice are
+ * not in the world at all — they are a stream beside it — so they come in
+ * separately.
  */
-export function digestWorld(world: World, unitIds: Iterable<number>, turn: number): StateDigest {
+export function digestWorld(world: World, unitIds: Iterable<number>, turn: number, dice: Rng): StateDigest {
   const units: Record<string, Record<string, number>> = {}
   const detailed = new Set(unitIds)
   const terrainHashes: number[] = []
@@ -108,12 +121,15 @@ export function digestWorld(world: World, unitIds: Iterable<number>, turn: numbe
   )
   const terrain = foldHashes(terrainHashes)
 
+  const diceState = dice.snapshot()
+
   return {
     turn,
     units,
     terrain,
     rules,
-    total: foldHashes([...unitHashes, terrain, rules]),
+    dice: diceState,
+    total: foldHashes([...unitHashes, terrain, rules, hashString(`dice:${diceState}`)]),
   }
 }
 
@@ -163,6 +179,9 @@ export function compareDigests(
   }
   if (mine.rules !== theirs.rules) {
     out.push({ what: 'rules', mine: mine.rules, theirs: theirs.rules })
+  }
+  if (mine.dice !== theirs.dice) {
+    out.push({ what: 'dice', mine: mine.dice, theirs: theirs.dice })
   }
 
   // Totals differ but nothing named did: the fold has lost something the parts

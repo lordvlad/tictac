@@ -1,5 +1,7 @@
 import type { ServerClock } from './Clock'
 import { Refusal } from './Lobby'
+import type { RegionDirectory } from './Owner'
+import type { Squads } from './Squads'
 import { RPC_ERRORS } from '../game/Rpc'
 
 /**
@@ -11,7 +13,8 @@ import { RPC_ERRORS } from '../game/Rpc'
  * 2. Source DO pushes `handoverOffer` to client with a temporary ticket.
  * 3. Client connects second socket to Target DO and calls `region/arrive`.
  * 4. Target DO confirms arrival to Source DO via `confirmArrival`.
- * 5. Source DO purges local squad simulation and pushes `handoverComplete` to primary socket.
+ * 5. Source DO commits the new keeper (`Squads.setOwner`, the durable fact `RegionDirectory.ownerOfSquad`
+ *    reads), purges local squad simulation and pushes `handoverComplete` to primary socket.
  * 6. Client cleanly closes primary socket.
  *
  * If Target DO fails or client times out, the handover aborts and Source DO remains authoritative,
@@ -45,6 +48,8 @@ export interface PreparedHandover {
   handoverId: string
   playerId: string
   squadId: string
+  /** The region the squad is going to: the one that prepared this must be it. */
+  targetRegion: string
   token: string
   expiresAt: number
 }
@@ -58,9 +63,20 @@ export class HandoverCoordinator {
   private readonly attemptCount = new Map<string, number>()
   private readonly log: (msg: string) => void
   private readonly clock: ServerClock
+  private readonly directory: RegionDirectory
+  private readonly squads: Pick<Squads, 'setOwner'>
 
-  constructor(options: { clock: ServerClock; log?: (msg: string) => void }) {
+  constructor(options: {
+    clock: ServerClock
+    /** Who keeps which squad: a handover starts only from the region that keeps the squad, and arrives only at its target. */
+    directory: RegionDirectory
+    /** Where the new keeper is committed when a handover is confirmed. */
+    squads: Pick<Squads, 'setOwner'>
+    log?: (msg: string) => void
+  }) {
     this.clock = options.clock
+    this.directory = options.directory
+    this.squads = options.squads
     this.log = options.log ?? (() => {})
   }
 
@@ -69,6 +85,9 @@ export class HandoverCoordinator {
    * Invoked via DO-to-DO RPC or internal bridge.
    */
   prepare(handover: PreparedHandover): { prepared: boolean } {
+    if (handover.targetRegion !== this.directory.self) {
+      throw new Refusal(RPC_ERRORS.badInput, `Handover ${handover.handoverId} is for ${handover.targetRegion}, not ${this.directory.self}.`)
+    }
     this.cleanupExpired()
     this.incoming.set(handover.handoverId, handover)
     this.log(`Handover ${handover.handoverId} prepared for squad ${handover.squadId}`)
@@ -78,7 +97,7 @@ export class HandoverCoordinator {
   /**
    * Called on Source DO: initiate or retry an outgoing handover for a squad.
    */
-  initiate(options: {
+  async initiate(options: {
     handoverId: string
     playerId: string
     squadId: string
@@ -87,7 +106,14 @@ export class HandoverCoordinator {
     targetUrl: string
     token: string
     ttlMs?: number
-  }): HandoverReservation {
+  }): Promise<HandoverReservation> {
+    const { self } = this.directory
+    if (options.sourceRegion !== self || options.targetRegion === self) {
+      throw new Refusal(RPC_ERRORS.badInput, `A handover from ${options.sourceRegion} to ${options.targetRegion} is not this region's (${self}) to start.`)
+    }
+    if ((await this.directory.ownerOfSquad(options.squadId)) !== self) {
+      throw new Refusal(RPC_ERRORS.conflict, 'That squad is kept by another match server.')
+    }
     this.cleanupExpired()
     const currentAttempts = (this.attemptCount.get(options.squadId) ?? 0) + 1
     this.attemptCount.set(options.squadId, currentAttempts)
@@ -131,9 +157,12 @@ export class HandoverCoordinator {
 
   /**
    * Called on Source DO (via DO-to-DO confirmation or arrive completion):
-   * Confirms client arrival on target DO, transitions state to 'confirmed'.
+   * Confirms client arrival on target DO, commits the target as the squad's
+   * keeper, and transitions state to 'confirmed'. The commit is written
+   * before the reservation is dropped, so a failed write leaves it to be
+   * confirmed again.
    */
-  confirm(handoverId: string): HandoverReservation {
+  async confirm(handoverId: string): Promise<HandoverReservation> {
     const reservation = this.outgoing.get(handoverId)
     if (!reservation) {
       throw new Refusal(RPC_ERRORS.gone, 'Unknown handover reservation.')
@@ -141,6 +170,7 @@ export class HandoverCoordinator {
     if (reservation.state === 'cancelled') {
       throw new Refusal(RPC_ERRORS.conflict, 'Handover was cancelled.')
     }
+    await this.squads.setOwner(reservation.squadId, reservation.targetRegion)
     reservation.state = 'confirmed'
     this.outgoing.delete(handoverId)
     this.attemptCount.delete(reservation.squadId)

@@ -135,26 +135,30 @@ export class Accounts {
     if (!playerId || !name) throw new AuthError(400, 'that sign-in request is not a registration')
 
     const created = new Date(this.clock.now()).toISOString()
-    // Everything that needs reading or drawing is done before the batch: the
-    // squad is rolled by the server, from system randomness (a client that
-    // dealt its own would deal itself six prodigies), as a full roster, not a
-    // squad — the bench exists so resting anyone is a choice.
+    // Everything that needs reading is done before the batch: the roster is
+    // rolled by the server, from system randomness (a client that dealt its
+    // own would deal itself six prodigies), as a full roster, not a squad —
+    // the bench exists so resting anyone is a choice.
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!
     const sheets = rollSquadSheets(new Rng(seed), ROSTER.size)
-    const placement = await this.squads.draw(near)
     const session = await this.mintSession(playerId)
 
     // One commit, so a player never exists without a credential, a squad and a
-    // session — on a Durable Object as much as on Bun.
-    const batch = new Batch()
-    batch.query`INSERT INTO players (id, name, created_at) VALUES (${playerId}, ${name}, ${created})`
-    batch.query`INSERT INTO credentials (id, player_id, public_key, algorithm, sign_count, created_at)
-                VALUES (${answer.credentialId}, ${playerId}, ${answer.publicKey},
-                        ${answer.publicKeyAlgorithm}, ${authenticator.signCount}, ${created})`
-    this.rosters.enlistInto(batch, playerId, sheets)
-    this.squads.placeInto(batch, playerId, placement)
-    this.queueSession(batch, session)
-    await this.db.transaction(batch)
+    // session — on a Durable Object as much as on Bun. The squad's start is
+    // drawn inside `placing`, which holds every other placement back until
+    // this commit is done, so the 1 km separation holds between players
+    // registering at once.
+    await this.squads.placing(near, async (placement) => {
+      const batch = new Batch()
+      batch.query`INSERT INTO players (id, name, created_at) VALUES (${playerId}, ${name}, ${created})`
+      batch.query`INSERT INTO credentials (id, player_id, public_key, algorithm, sign_count, created_at)
+                  VALUES (${answer.credentialId}, ${playerId}, ${answer.publicKey},
+                          ${answer.publicKeyAlgorithm}, ${authenticator.signCount}, ${created})`
+      this.rosters.enlistInto(batch, playerId, sheets)
+      this.squads.placeInto(batch, playerId, placement)
+      this.queueSession(batch, session)
+      await this.db.transaction(batch)
+    })
     const token = session.token
     return { token, player: { id: playerId, name } }
   }
@@ -248,6 +252,13 @@ export class Accounts {
     if (!row) return null
     if (Date.parse(row.expires_at) <= this.clock.now()) return null
     return { id: row.id, name: row.name }
+  }
+
+  /** A player by id, or null for one who does not exist. */
+  async player(id: string): Promise<Player | null> {
+    const rows = await this.db.query<{ name: string }>`SELECT name FROM players WHERE id = ${id}`
+    const row = rows[0]
+    return row ? { id, name: row.name } : null
   }
 
   async logout(token: string): Promise<void> {

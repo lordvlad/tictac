@@ -1,9 +1,48 @@
 import { PLAYBACK } from '../config'
 import type { CombatRecording } from './Recording'
 import type { NetworkMessage } from './NetworkManager'
-import type { Moment } from './Rewind'
+import type { Moment, Rewindable } from './Rewind'
 
 export type PlaybackSpeed = 0.5 | 1 | 2
+
+/** The match as it is now. Only between commands: nothing walking, nothing queued. */
+function captureMoment(match: Rewindable): Moment {
+  return {
+    units: match.world.snapshot(match.unitIds),
+    walls: match.walls.kinds(match.world),
+    ground: match.world.snapshot([match.ground.entity]),
+    dice: match.dice.snapshot(),
+    activeFaction: match.turns.activeFaction,
+    turnNumber: match.turns.turnNumber,
+  }
+}
+
+/**
+ * Put the match back to `moment`.
+ *
+ * Private to this module on purpose: it writes the world, the walls, the
+ * ground, the dice and the turn straight past the command path, which is only
+ * acceptable while presenting a recording. Nothing that plays a live match can
+ * import it.
+ *
+ * Routes first: a unit's path is the one piece of movement state that is not
+ * a component, so a restored unit would otherwise walk on along a path it is
+ * no longer on. The same for whatever the rules had queued for a broken unit:
+ * it was decided about the moment being left.
+ */
+function restoreMoment(match: Rewindable, moment: Moment): void {
+  match.movement.clearRoutes(match.world, match.unitIds)
+  match.commands.clear()
+  match.world.restore(moment.units)
+  match.walls.restoreKinds(match.world, moment.walls)
+  match.world.restore(moment.ground)
+  // The grid is an index over the ground component; catch it up now rather
+  // than on the next tick, so the restored moment is whole at once.
+  match.ground.update(0, match.world)
+  match.dice.restore(moment.dice)
+  match.turns.activeFaction = moment.activeFaction
+  match.turns.turnNumber = moment.turnNumber
+}
 
 export interface PlaybackDeps {
   recording: CombatRecording
@@ -11,16 +50,18 @@ export interface PlaybackDeps {
   apply: (command: NetworkMessage) => void
   /** True while something is still animating; the next event waits for false. */
   busy: () => boolean
-  capture: () => Moment
-  restore: (frame: Moment) => void
+  /** The match, as the parts a moment is taken from and put back into. */
+  match: Rewindable
+  /** The view's catch-up after a moment is put back: selection, fog, scene. */
+  afterRestore: () => void
 }
 
 /**
- * Where a replay has got to, and how fast it is getting there.
- *
- * Owns only the clock. It never touches a soldier, a component or the scene:
- * applying a command and putting state back are both handed in, so the same
- * class paces a rendered replay and could pace a headless one.
+ * Owns the clock and the only way back. It never touches a soldier, a component
+ * or the scene: applying a command and catching the view up are handed in.
+ * Putting state back (`restoreMoment`) is done here and nowhere else — a rewind
+ * is the presentation of a recording, never a move in live play, so no match,
+ * host or controller is given a way to do it.
  *
  * Stepping *forward* is cheap — it is the command stream, played on. Stepping
  * *backward* is not possible at all by replaying, because nothing a command
@@ -43,7 +84,7 @@ export class Playback {
 
   constructor(private readonly deps: PlaybackDeps) {
     this.total = deps.recording.events.length
-    this.frames.push(deps.capture())
+    this.frames.push(captureMoment(deps.match))
   }
 
   get index(): number {
@@ -106,7 +147,8 @@ export class Playback {
     if (this.cursor === 0) return
     const frame = this.frames[this.cursor - 1]
     if (!frame) return
-    this.deps.restore(frame)
+    restoreMoment(this.deps.match, frame)
+    this.deps.afterRestore()
     this.cursor -= 1
     this.frames.length = this.cursor + 1
     this.dwell = PLAYBACK.eventDwell
@@ -142,7 +184,7 @@ export class Playback {
     if (!event) return
     // Taken before the command lands — and only ever here, where nothing is
     // animating — so this is exactly what stepping back one event returns to.
-    this.frames[this.cursor] ??= this.deps.capture()
+    this.frames[this.cursor] ??= captureMoment(this.deps.match)
     this.deps.apply(event.command)
     this.cursor += 1
     this.dwell = PLAYBACK.eventDwell

@@ -133,14 +133,6 @@ export type NetworkMessage =
    */
   | { type: 'log'; matchId: string; header: RecordingHeader; events: RecordedEvent[] }
   /**
-   * Which room a protocol-6 socket is in and as whom: the server's first
-   * frame to a window that still says its intent in its url. Protocol 7 asks
-   * with `room/enter` and is answered with the same shape, so this build
-   * never reads it; it goes with the protocol-6 resume path once
-   * `OLDEST_SERVED_PROTOCOL` reaches 7.
-   */
-  | { type: 'seated'; roomId: string; faction: Faction | null; phase: RoomPhase; redirected: boolean; seatKey: string | null }
-  /**
    * The match is over because it stopped being one match.
    *
    * Named side and stated reason, because "desynchronised" is not something a
@@ -298,6 +290,15 @@ export class NetworkManager {
    * after it was announced can still be told (`restate`).
    */
   private opened: { seed: number; seedLabel: string } | null = null
+  /**
+   * The seed the opening frame last carried, from a peer's `init` or from a
+   * match server's, which issues it when the second seat is taken
+   * (`Room.join`) and again to a seat that comes back to a room still being
+   * set up. Kept because it can arrive before whoever builds the match from
+   * it has asked (`awaitOpening`), and read at the moment the match starts so
+   * that a re-issue in between is the one used.
+   */
+  private issued: { seed: number; seedLabel: string } | null = null
   /** The squad this side has already deployed, for the same reason. */
   private deployed: Deployment[] | null = null
 
@@ -588,7 +589,8 @@ export class NetworkManager {
       // from, and a joiner is waiting on exactly this frame to have arrived
       // from a build it can play against.
       if (typeof params.seed === 'number' && typeof params.seedLabel === 'string') {
-        this.opening?.resolve({ seed: params.seed, seedLabel: params.seedLabel })
+        this.issued = { seed: params.seed, seedLabel: params.seedLabel }
+        this.opening?.resolve(this.issued)
       }
     }
 
@@ -646,7 +648,8 @@ export class NetworkManager {
    * a connection that ended first. A refusal leaves the connection as it
    * was: the player tries something else on the same socket. What follows
    * depends on the seat: a room still being set up goes on with
-   * `hostMatch`/`joinMatch` exactly as a data channel would; a match already
+   * `joinMatch` (Red) or `awaitOpening` (Blue), and both play from the seed
+   * the room issues — never a host-chosen one, which is refused; a match already
    * playing, or any room watched, is stated as a `log` (`waitForLog`).
    *
    * The server relays between clients as well as watching, so a room on it
@@ -689,19 +692,15 @@ export class NetworkManager {
   }
 
   /**
-   * Open the match this side is hosting, over whatever is attached.
+   * Open the match this side is hosting, over a data channel to a peer or to
+   * the AI in this window; never to a match server, whose room issues the
+   * seed (`awaitOpening`) and drops an `init` a window states.
    *
    * The host is Blue and Blue moves first, which is why the role comes with
-   * the announcement rather than with the channel: a socket to a referee and a
-   * data channel to a peer are the same match from here.
+   * the announcement rather than with the channel.
    *
-   * Announced immediately *and* remembered, because the two transports differ
-   * in when the other side exists. A data channel only exists once a peer has
-   * joined it, so the announcement always has a listener; a socket to a
-   * referee exists the moment the host opens the match, and the opponent
-   * connects minutes later. The referee relays rather than replays, so an
-   * `init` spoken into an empty room is simply gone — which is why `hello`
-   * is answered with it again (see `restate`).
+   * Announced immediately *and* remembered, because a joiner can arrive after
+   * the announcement: `hello` is answered with it again (see `restate`).
    */
   hostMatch(seed: number, seedLabel: string): void {
     this.mode = 'host'
@@ -740,10 +739,26 @@ export class NetworkManager {
   joinMatch(): Promise<{ seed: number; seedLabel: string }> {
     this.mode = 'join'
     this.myFaction = Faction.Red
-    this.opening = Promise.withResolvers()
     // Straight to the transport rather than through `send`: a version is a
     // fact about this bundle, not an intent the match can replay.
     this.sendRpc(frameOf({ type: 'hello', ...MY_VERSION }))
+    return this.awaitOpening()
+  }
+
+  /**
+   * The seed this match is played from, as the other end last stated it:
+   * already known, or the next `init` to arrive. Rejects on anything that
+   * makes a match impossible, as `joinMatch` does.
+   *
+   * On a match server both seats ask for it, Blue too: the room issues the
+   * seed, so a host there has nothing to announce and must not choose one.
+   */
+  awaitOpening(): Promise<{ seed: number; seedLabel: string }> {
+    if (this.issued) return Promise.resolve(this.issued)
+    this.opening = Promise.withResolvers()
+    // Whoever asks may not be waiting yet when a refusal comes; the refusal
+    // reaches them through the promise they are handed, not through this.
+    this.opening.promise.catch(() => {})
     return this.opening.promise
   }
 

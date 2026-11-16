@@ -4,6 +4,7 @@ import { loopback } from '../../src/game/Transport'
 import { WALL_CLOCK, type ServerClock } from '../../src/server/Clock'
 import type { OpenEncounter, OpenMeeting } from '../../src/server/EncounterPort'
 import { Journeys } from '../../src/server/Journeys'
+import { regionDirectory } from '../../src/server/Owner'
 import { Lobby, type LobbyOptions } from '../../src/server/Lobby'
 import type { Persistence } from '../../src/server/Persistence'
 import { Schedule } from '../../src/server/Schedule'
@@ -83,8 +84,11 @@ export function rpcServer(
   })
   const armed: (number | null)[] = []
   const schedule = new Schedule({ now: () => now, arm: (at) => armed.push(at) })
+  const directory = regionDirectory({ owners: persistence.squads })
   const journeys = new Journeys({
+    directory,
     squads: persistence.squads,
+    accounts: persistence.accounts,
     encounters: persistence.encounters,
     schedule,
     clock,
@@ -94,7 +98,7 @@ export function rpcServer(
     mintTrip: options.mintTrip,
     tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
   })
-  const sessions = new Sessions({ lobby, persistence, journeys, clock, log: () => {} })
+  const sessions = new Sessions({ lobby, persistence, journeys, directory, clock, log: () => {} })
 
   const window = (place: LatLng | null = null): Window => {
     const [page, socket] = loopback()
