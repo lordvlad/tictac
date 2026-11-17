@@ -37,6 +37,7 @@ export function inProcessPeers(): PeerRegistry {
         prepareHandover: async (request) => across(await crossings.prepareHandover(across(request))),
         confirmArrival: async (handoverId) => across(await crossings.confirmArrival(handoverId)),
         cancelHandover: async (handoverId) => across(await crossings.cancelHandover(handoverId)),
+        handoverStatus: async (handoverId) => across(await crossings.handoverStatus(handoverId)),
       }
       return wrappers.get(region)?.(copying) ?? copying
     },

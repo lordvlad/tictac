@@ -135,13 +135,36 @@ two-phase commit enforces it at the other end: if the player sits down between t
 source refuses `confirmArrival`, and the target undoes its commit and refuses `region/arrive` (`conflict`). While
 an offer is out the squad takes no order (`conflict`), so the rows the target holds cannot go stale.
 
-**What is in doubt, and what is lost.** A crossing's *intent* is memory (the order, the attempt count, the offer):
-a server that restarts between the order and the arrival forgets it, and the squad rests at the checkpoint for
-the player to send again; a restart with an offer out leaves the target a copy it does not keep, overwritten by
-the next attempt. A source's rows are deleted only after the target has committed, so none of this loses a
-squad. The one in-doubt window is the target committing and the source's reply (or the source itself) not
-answering: the target then keeps its commit and refuses the arrival, and the squad is briefly kept by both until
-the source's next attempt is told so; a refusal, by contrast, is definite, and the target rolls back.
+**What is in doubt, and how it is resolved (`tictac-dwq.7`, `tictac-dwq.8`).** Both regions write down what they
+hold of a handover (`HandoverStore`, the `handovers` table, keyed by handover id and told apart by `role`), and a
+crossing's *intent* (the order, its attempts, the moment of the next) is a row of its own (`crossings`), so a
+restart on either side resumes (`Crossings.restore`, before the squads' own schedule): a crossing goes back on
+the schedule at its moment with the attempts it had; an offer a restarted source finds is in doubt and
+resolved at once. The source writes its row *before* the window is told of the offer, because from then on the
+target may commit; the target writes `committed` *before* it sets the owner. A source's rows are deleted only
+after it knows the target committed, which is what keeps the squad from being kept by neither.
+
+Between the target committing and the source hearing of it (a reply lost, a source that restarted, a target
+that did not answer), neither region guesses:
+
+- **The source asks.** When an offer lapses, on restore, and on the backoff, it calls the target's
+  `handoverStatus(handoverId)` (DO RPC `MatchDurableObject.handoverStatus`). `committed` → the source
+  completes: commits the new keeper, deletes its rows, ends the window's session `elsewhere` if one is open.
+  `dropped` → the target has dropped its copy *in answering*, so it can never commit this handover; the source
+  keeps the squad and schedules the next attempt. No answer → the source stays the keeper and asks again at
+  2 s, 5 s, 10 s, 30 s, 60 s, 60 s …; the squad takes no order meanwhile.
+- **The target asks.** A target whose `confirmArrival` was not answered adopts the squad (it is the keeper) and
+  asks the source again on the same backoff: `ok`, or `gone` (a source that holds nothing of the handover has
+  completed it), settles it and the target forgets the record; a `conflict` is a definite refusal and the target
+  gives the squad back.
+- **A source that decides against** a handover (the window said it will not come, the player sat down in a match)
+  never completes it: the reservation stays, `cancelled`, until the target has let go — dropped its copy, or given
+  back a commit it had already made — and only then is the attempt over and the next scheduled.
+
+The two never contradict, because each decision is made once and by one region: the source completes only a
+reservation that is still `offered`, and decides against it only before it completes; the target answers
+`dropped` only after it can no longer commit. The squad is kept by both only between the commit and the first
+answer either side hears, and not after.
 
 **A partition is redrawn at the game's own natural disconnect windows, proactively rather than
 capacity signal measures — deliberately before the instance is actually struggling, not after —
@@ -256,6 +279,18 @@ Three consequences the split has to handle, found by reading the migrations:
 - **A match belongs to the region that hosted it (§6.4), but its two players may be keepers in
   different regions.** Settling writes each player's growth to the roster rows of the region
   that keeps them, through that region's own port.
+
+**Home region (`tictac-dwq.6`).** One squad per player across every region: `players.home_region`
+(`accountMigrations.ts`, existing players = `singleton`) is the region that keeps the player's squad.
+Registration sets it to the serving region (where the connection was first routed by its place);
+the handover's commit moves it (`AccountsPort.moveHome`, called by `Crossings.arrive` right after
+the target commits `squads.owner`, so the two are never left disagreeing by a recovery). A region
+only deals a roster and squad (`RegionStore.enlist`) to a player it is the home of; a sign-in,
+registration or login at any other region is answered with `session/ended { reconnect:
+'elsewhere', url }` (`RegionPeers.urlOf`: the configured address on Bun, the same host with
+`?region=<name>` on Cloudflare), holding no rows for them. The window of a handover is the one
+exception: it signs in at the target before it arrives, and `Crossings.expects` says so. Place
+routing stays for anonymous sockets and first registration only.
 
 **Built (`tictac-dwq.5`).** The split is in the code: `AccountStore` and `RegionStore`
 (`src/server/AccountStore.ts`, `src/server/RegionStore.ts`) over two `Db`s, with no foreign key or

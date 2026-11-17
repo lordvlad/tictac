@@ -7,8 +7,7 @@ describe('the debug panel and the console handle', () => {
     expect(debugEditable('host')).toBe(false)
     expect(debugEditable('join')).toBe(false)
     expect(debugEditable('spectate')).toBe(false)
-    // A replay or watched match is built with no network at all.
-    expect(debugEditable(null)).toBe(false)
+    expect(debugEditable('replay')).toBe(false)
   })
 
   test('window.tictac is for the development bundle only', () => {

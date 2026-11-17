@@ -5,9 +5,18 @@ import type { ItemId } from '../core/Items'
 import type { Soldier } from '../entities/Soldier'
 import type { CommandOrigin, Carried } from '../ecs/systems/CommandSystem'
 import type { Command } from '../rules/Command'
-import type { HudIntent } from '../rules/Intent'
+import type { HudIntent } from '../ui/Intent'
 import type { Debrief } from '../rules/MatchEnd'
 import type { NetworkMode } from './NetworkManager'
+
+/**
+ * What kind of window this is on a match: every way a session is held, as one
+ * value, so that "who may act" is a function of the mode (`MatchSession.canAct`)
+ * rather than a null check on the network that each caller reads its own way.
+ * `spectate` is a seat-less socket to a match server, `replay` a recording
+ * played back; neither commands anything.
+ */
+export type MatchMode = NetworkMode | 'replay'
 
 /**
  * What a `MatchSession` needs from whatever shows it.
@@ -140,8 +149,10 @@ export interface SessionState {
   rulesActing: boolean
   /** The item waiting for a patient, when one is being aimed. */
   item: AimedItem | null
-  networkMode: NetworkMode
-  myFaction: Faction
+  /** Whether this window may command the match right now: the one answer every control reads. */
+  canAct: boolean
+  /** The side this window plays when the match is shared with somebody; null on one screen and for a watcher. */
+  seat: Faction | null
 }
 
 /**

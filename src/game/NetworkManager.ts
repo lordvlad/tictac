@@ -634,14 +634,13 @@ export class NetworkManager {
   }
 
   /**
-   * Whether this side may act now. Never while it is getting its seat back:
-   * whatever the player did would go into a socket that is not there, and the
-   * server would have a match this window does not.
+   * Getting the seat back after a drop. Whatever the player did meanwhile
+   * would go into a socket that is not there, and the server would have a
+   * match this window does not, so the session's turn gate (`MatchSession.canAct`)
+   * holds everything until this is false.
    */
-  isMyTurn(activeFaction: Faction): boolean {
-    if (this.mode === 'local') return true
-    if (this.mode === 'spectate' || this.away) return false
-    return activeFaction === this.myFaction
+  get reconnecting(): boolean {
+    return this.away
   }
 
   /**

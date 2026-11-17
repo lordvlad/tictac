@@ -13,6 +13,7 @@ import { MatchStore } from './MatchStore'
 import { SINGLETON_REGION } from './Owner'
 import { RoomStore } from './RoomStore'
 import { Rosters, type RosterRecord } from './Rosters'
+import { HandoverStore } from './HandoverStore'
 import { Squads, type SquadRecord } from './Squads'
 
 /**
@@ -56,6 +57,8 @@ export interface RegionStore {
   rosters: Rosters
   squads: Squads
   encounters: Encounters
+  /** The squads crossing the border: each one's order, and each handover in flight from either side (`HandoverStore`). */
+  handovers: HandoverStore
   /**
    * The one door by which a player comes to exist in this region: their
    * roster and a squad on the map, made in one transaction for whichever of
@@ -119,6 +122,7 @@ export async function regionStoreOverDb(
     rosters,
     squads,
     encounters,
+    handovers: new HandoverStore(db),
     async enlist(playerId, near) {
       const held = async () => ({ squad: await squads.of(playerId), rostered: await rosters.has(playerId) })
       const already = await held()

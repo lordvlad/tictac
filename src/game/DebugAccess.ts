@@ -1,4 +1,4 @@
-import type { NetworkMode } from './NetworkManager'
+import type { MatchMode } from './MatchView'
 
 /**
  * Who may change the match from the debug panel.
@@ -7,11 +7,10 @@ import type { NetworkMode } from './NetworkManager'
  * command, so not recorded, not sent, not in the digest. On one screen that is
  * a developer's tool. In a shared match it is a desync: the peer never hears of
  * the edit and the referee's next digest compare names the editor's opponent
- * as the cheat. So the answer is a function of how the match is held, and
- * `null` — no network at all, as in a replay or a watched match — is the same
- * as being a guest in it.
+ * as the cheat. So the answer is a function of how the match is held; a replay
+ * and a watched match are modes of their own, and neither is editable.
  */
-export function debugEditable(mode: NetworkMode | null): boolean {
+export function debugEditable(mode: MatchMode): boolean {
   return mode === 'local'
 }
 

@@ -245,8 +245,8 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   stays pure, and the file I/O lives in `scripts/balance.ts`.
 - **Playback**: `startPlayback` in `src/main.ts` builds a match with no
   `NetworkManager`, equips both sides from the header, sets
-  `MatchSession.spectating` (reveals the whole field, takes input off
-  the units) and feeds commands to `applyRecordedCommand`, which is
+  `MatchSession` in `replay` mode (`MatchSessionParts.watching`: reveals the whole
+  field, takes input off the units) and feeds commands to `applyRecordedCommand`, which is
   `CommandSystem.apply(command, 'record')` — the same door as the player's own
   clicks and a peer's messages, so a replay exercises the path a live match
   takes.
@@ -358,7 +358,7 @@ On a fresh socket, in this order:
 | `account/registerVerify` | attestation, base64url (`PasskeyCreated`) | `{ token, player }`; the socket is bound, as by `signIn` | `400`/`401` a failed ceremony; `409` as `signIn` |
 | `account/loginOptions` | `{}` | `{ challengeId, publicKey }` | — |
 | `account/loginVerify` | assertion, base64url (`PasskeyAsserted`) | `{ token, player }`; the socket is bound | `400`/`401` a failed ceremony (*unknown passkey*, a bad signature); `409` as `signIn` |
-| `account/signIn` | `{ token }` | `{ player }` | `401` *that sign-in has expired; sign in again*; `409` the player's seat in a match being played is in a room this page's build cannot carry on (*Admission*) |
+| `account/signIn` | `{ token }` | `{ player }`; for a player whose home region is another, the reply is followed at once by `session/ended { reconnect: 'elsewhere', url }` and the socket is not bound (see *Home region* below) | `401` *that sign-in has expired; sign in again*; `409` the player's seat in a match being played is in a room this page's build cannot carry on (*Admission*) |
 | `account/signOut` | `{}` | `null`; the token is revoked and the socket anonymous | `401` *sign in first* |
 | `account/me` | `{}` | `{ player }`, null when anonymous | — |
 | `roster/list` | `{}` | `{ roster: RosterEntry[] }` | `401` |
@@ -750,8 +750,21 @@ and `region/cancelHandover` need a sign-in and the handover's own player (`signI
 `gone`, `conflict`); `arrive` answers the target's own region and `cancelHandover` whether a retry
 is scheduled (`retry`).
 
+#### Home region: a window sent to where its squad is
+
+A player's squad is kept by one region, their *home* (`players.home_region`); the Worker routes a
+socket by where it was placed, which is only right for a stranger. So `signIn`, `registerVerify` and
+`loginVerify` at a region that is not the player's home answer as usual (a ceremony's reply carries
+the token, good at every region) and then end the session with `session/ended { reconnect:
+'elsewhere', url }`, `url` being the home region's address (`RegionPeers.urlOf`); the socket is
+never bound and the region writes nothing for the player. `ServerConnection` hands the url to
+`onElsewhere` and closes — with no handover being taken, it is the caller that dials it. The
+handover's second socket is the one exception: it signs in at the target before `region/arrive`,
+while the player's home is still the source, and the target lets it through because a handover for
+that player is waiting (`Crossings.expects`); `arrive` then moves the home to the target.
+
 Everything else the manager holds — mode, side, opening, deployed squad, held commands, the
-world it is bound to — survives the new socket. While reconnecting `isMyTurn` is false and
+world it is bound to — survives the new socket. While reconnecting (`NetworkManager.reconnecting`) `MatchSession.canAct` is false and
 nothing is put on the wire, so the session takes no input for the seat; `main.tsx`'s
 `ScreenController` shows a click-through line (`ReconnectingNotice`: *Connection lost —
 reconnecting… (attempt N)*) over whatever is on screen and removes it on `onReconnected`.

@@ -2,13 +2,14 @@ import { ENCOUNTER } from '../config'
 import { SPEED_KMH, type LatLng, type Pace } from '../core/Travel'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification, type JsonRpcRequest } from '../wire/JsonRpc'
 import type { ServerIntent } from '../wire/Lobby'
-import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type SignedIn, type SquadOrder } from '../wire/Rpc'
+import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type SessionEnded, type SignedIn, type Squad, type SquadOrder } from '../wire/Rpc'
 import type { Transport } from '../wire/Transport'
 import type { StandingOrder } from '../wire/Rpc'
 import { SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
 import type { AccountsPort } from './AccountsPort'
 import type { ServerClock } from './Clock'
 import type { Crossings } from './Crossings'
+import type { RegionPeers } from './Handover'
 import { Refusal, type Lobby } from './Lobby'
 import type { RegionStore } from './RegionStore'
 import type { Journeys } from './Journeys'
@@ -49,11 +50,17 @@ export interface SessionsOptions {
   /** Who a player is: signing in, passkeys, names. The directory's, wherever it lives. */
   accounts: AccountsPort
   /** What this region keeps for the players standing in it. */
-  region: Pick<RegionStore, 'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'>
+  region: Pick<RegionStore, 'self' | 'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'>
   /** Squads on the move: the orders a window gives. */
   journeys: Journeys
   /** Squads crossing into and out of this region (RFC-0002): `region/arrive` and `region/cancelHandover`. */
-  crossings: Pick<Crossings, 'arrive' | 'cancel'>
+  crossings: Pick<Crossings, 'arrive' | 'cancel' | 'expects'>
+  /**
+   * Where a window dials to reach another region (`RegionPeers.urlOf`), for the
+   * player this region is not the home of. Unset on a host with no other
+   * region, which then has nobody to send away.
+   */
+  peers?: Pick<RegionPeers, 'urlOf'>
   /** The host's one clock: what travel runs by (`clock/now`). */
   clock: ServerClock
   /** Called for anything worth a line in a server log. */
@@ -71,9 +78,20 @@ interface Session {
    * off anything the page says, and written down nowhere.
    */
   readonly place: LatLng | null
+  /**
+   * Signed in at a region that is not the player's home, because a squad is
+   * crossing to it (`Crossings.expects`): the window of a handover signs in at
+   * the target before it arrives. Such a socket never enlists: the rows it
+   * reads are the ones the handover wrote, and a handover that falls through
+   * leaves it with nothing, not with a second squad.
+   */
+  visiting: boolean
   /** Every request not yet answered, one after another: each starts when the one before it is done. */
   queue: Promise<void>
 }
+
+/** Where a signed-in player belongs, from the region serving them (`Sessions.placed`). */
+type Placement = { kind: 'home' } | { kind: 'visiting' } | { kind: 'elsewhere'; ended: SessionEnded }
 
 type Fields = Record<string, unknown>
 
@@ -96,6 +114,7 @@ export class Sessions {
   private readonly region: SessionsOptions['region']
   private readonly journeys: Journeys
   private readonly crossings: SessionsOptions['crossings']
+  private readonly peers: SessionsOptions['peers']
   private readonly clock: ServerClock
   private readonly log: (message: string) => void
 
@@ -106,6 +125,7 @@ export class Sessions {
     this.journeys = options.journeys
     this.clock = options.clock
     this.crossings = options.crossings
+    this.peers = options.peers
     this.log = options.log ?? ((message) => console.info(`[session] ${message}`))
   }
 
@@ -116,6 +136,7 @@ export class Sessions {
       client,
       account: null,
       place: upgrade.place ?? null,
+      visiting: false,
       queue: Promise.resolve(),
     }
     this.lobby.arrive(client)
@@ -223,17 +244,21 @@ export class Sessions {
       reply(await this.accounts.registrationOptions(text(params, 'name')))
     },
     'tictac/api/account/registerVerify': async (session, params, reply) => {
-      const minted = await this.accounts.register({
-        challengeId: text(params, 'challengeId'),
-        credentialId: text(params, 'credentialId'),
-        clientDataJSON: text(params, 'clientDataJSON'),
-        authenticatorData: text(params, 'authenticatorData'),
-        publicKey: text(params, 'publicKey'),
-        publicKeyAlgorithm: number(params, 'publicKeyAlgorithm'),
-      })
-      // The account is the directory's; the roster and the squad are this
-      // region's, made by `adopt` because this is where the connection came from.
-      reply(await this.adopt(session, minted))
+      // A new player's home is the region that serves their registration:
+      // where the connection was routed by its place, and so where `adopt`
+      // makes their roster and squad.
+      const minted = await this.accounts.register(
+        {
+          challengeId: text(params, 'challengeId'),
+          credentialId: text(params, 'credentialId'),
+          clientDataJSON: text(params, 'clientDataJSON'),
+          authenticatorData: text(params, 'authenticatorData'),
+          publicKey: text(params, 'publicKey'),
+          publicKeyAlgorithm: number(params, 'publicKeyAlgorithm'),
+        },
+        this.region.self,
+      )
+      await this.adopt(session, minted, reply)
     },
     'tictac/api/account/loginOptions': async (_session, _params, reply) => {
       reply(await this.accounts.loginOptions())
@@ -246,15 +271,21 @@ export class Sessions {
         authenticatorData: text(params, 'authenticatorData'),
         signature: text(params, 'signature'),
       })
-      reply(await this.adopt(session, minted))
+      await this.adopt(session, minted, reply)
     },
     'tictac/api/account/signIn': async (session, params, reply) => {
       const token = text(params, 'token')
       const player = await this.accounts.playerFor(token)
       if (!player) throw new Refusal(RPC_ERRORS.signInFirst, EXPIRED)
+      const placed = await this.placed(player.id)
+      if (placed.kind === 'elsewhere') {
+        reply({ player })
+        return this.lobby.end(session.client, placed.ended)
+      }
       // Whoever's enlist failed after they registered is healed here, on the
-      // first sign-in that finds the region holding nothing of theirs.
-      await this.region.enlist(player.id, session.place)
+      // first sign-in that finds their home region holding nothing of theirs.
+      if (placed.kind === 'home') await this.region.enlist(player.id, session.place)
+      session.visiting = placed.kind === 'visiting'
       this.lobby.bind(session.client, player)
       session.account = { token, player }
       reply({ player })
@@ -271,7 +302,7 @@ export class Sessions {
     },
     'tictac/api/roster/list': async (session, _params, reply) => {
       const { player } = signedIn(session)
-      await this.region.enlist(player.id, session.place)
+      await this.kept(session)
       const members = await this.region.rosters.active(player.id)
       reply({ roster: members.map(entry) })
     },
@@ -279,7 +310,7 @@ export class Sessions {
       reply({ member: entry(await this.region.rosters.recruit(signedIn(session).player.id)) })
     },
     'tictac/api/squad/get': async (session, _params, reply) => {
-      reply({ squad: await this.region.enlist(signedIn(session).player.id, session.place) })
+      reply({ squad: await this.kept(session) })
     },
     'tictac/api/clock/now': (_session, _params, reply) => {
       reply({ now: this.clock.now() })
@@ -330,23 +361,69 @@ export class Sessions {
   }
 
   /**
-   * Bind the socket to a session a passkey ceremony just started. One this
-   * socket may not be bound to (`Lobby.bind`) is revoked on the spot, rather
-   * than left behind with nobody holding its token.
+   * Where `playerId` belongs, as this region sees it: it is their home; it is
+   * not, but a squad of theirs is crossing here and the window that signed in
+   * is the one that takes it (`Crossings.expects`); or their squad is kept by
+   * another region, whose address they are sent to.
+   *
+   * What the player is routed by on first contact is the place of the
+   * connection (`workers/index.ts`), which is only right for a stranger: a
+   * returning player's squad is where they left it, and dealing them a second
+   * one at whichever region the network happened to send them to is the bug
+   * this settles.
    */
-  private async adopt(session: Session, minted: SignedIn): Promise<SignedIn> {
+  private async placed(playerId: string): Promise<Placement> {
+    const home = await this.accounts.home(playerId)
+    if (home === null || home === this.region.self) return { kind: 'home' }
+    if (this.crossings.expects(playerId)) return { kind: 'visiting' }
+    const url = this.peers?.urlOf(home)
+    if (url === undefined) {
+      throw new Refusal(RPC_ERRORS.conflict, `Your squad is kept by ${home}, which this server has no way to send you to.`)
+    }
+    return { kind: 'elsewhere', ended: { reason: `Your squad is in ${home}.`, reconnect: 'elsewhere', url } }
+  }
+
+  /**
+   * The squad of the player this socket is signed in as. At their home region
+   * it is the one door by which the roster and squad come to exist
+   * (`RegionStore.enlist`); a visiting socket reads what the handover wrote
+   * and never deals anything.
+   */
+  private async kept(session: Session): Promise<Squad> {
+    const { player } = signedIn(session)
+    if (!session.visiting) return this.region.enlist(player.id, session.place)
+    const squad = await this.region.squads.of(player.id)
+    if (!squad) throw new Refusal(RPC_ERRORS.gone, 'Your squad is not here.')
+    return squad
+  }
+
+  /**
+   * Bind the socket to a session a passkey ceremony just started, and answer
+   * with it. One this socket may not be bound to (`Lobby.bind`) is revoked on
+   * the spot, rather than left behind with nobody holding its token. A player
+   * whose home is another region is answered with the session — its token is
+   * the directory's, good there too — and then sent on (`placed`), unbound,
+   * with nothing made for them here.
+   */
+  private async adopt(session: Session, minted: SignedIn, reply: (result: SignedIn) => void): Promise<void> {
+    const placed = await this.placed(minted.player.id)
+    if (placed.kind === 'elsewhere') {
+      reply(minted)
+      return this.lobby.end(session.client, placed.ended)
+    }
     // Registration spans two stores, so a player may have an account and no
     // roster here; the first thing a session is bound to does the region's
     // half, and does it again for one that has it already without harm.
-    await this.region.enlist(minted.player.id, session.place)
+    if (placed.kind === 'home') await this.region.enlist(minted.player.id, session.place)
     try {
       this.lobby.bind(session.client, minted.player)
     } catch (error) {
       await this.accounts.logout(minted.token)
       throw error
     }
+    session.visiting = placed.kind === 'visiting'
     session.account = minted
-    return minted
+    reply(minted)
   }
 }
 

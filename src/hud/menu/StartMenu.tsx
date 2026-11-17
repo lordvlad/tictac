@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
 import type { ServerIntent } from '../../wire/Lobby'
-import type { ServerConnection } from '../../game/ServerConnection'
 import { BUILD_ID } from '../../version'
 import { MENU_COLOURS, MenuButton, MenuGroup } from './controls'
 import { HostPanel, JoinPanel } from './PeerPanel'
+import type { ServerPanelPort } from '../ServerPorts'
 import { ServerPanel } from './ServerPanel'
 
 /**
@@ -35,8 +35,8 @@ export interface StartMenuProps {
   onLoadRecording: (file: File) => Promise<void>
   onInitHost: () => Promise<string>
   onJoinP2p: (hostId: string) => Promise<void>
-  /** The window's one connection to the match server (`ServerConnection`): the one it has while it is alive. */
-  connectionToServer: () => ServerConnection
+  /** The window's one connection to the match server, as the panel needs it: the one it has while it is alive. */
+  openServer: () => ServerPanelPort
   /** Leave the match server: the window's connection closes and is not dialled again. */
   leaveServer: () => void
   /**
@@ -59,7 +59,7 @@ export function StartMenu({
   onLoadRecording,
   onInitHost,
   onJoinP2p,
-  connectionToServer,
+  openServer,
   leaveServer,
   onServerConnect,
   onOpenMap,
@@ -180,7 +180,7 @@ export function StartMenu({
 
       {mode === 'server' && (
         <ServerPanel
-          connectionToServer={connectionToServer}
+          openServer={openServer}
           onServerConnect={onServerConnect}
           onOpenMap={onOpenMap}
           onBack={() => {

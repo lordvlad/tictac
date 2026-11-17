@@ -23,6 +23,14 @@ import { RPC_ERRORS, type RpcErrorCode } from '../wire/Rpc'
  *
  * If Target DO fails or client times out, the handover aborts and Source DO remains authoritative,
  * retrying according to `HANDOVER_RETRY_DELAYS_MS` up to `HANDOVER_MAX_ATTEMPTS`.
+ *
+ * **In doubt.** Once the offer is out the source cannot tell a window that never came from a target that
+ * committed whose `confirmArrival` was lost, so it does not guess: it asks the target (`handoverStatus`), which
+ * answers `committed` — the source then completes — or `dropped`, having forgotten the handover so that it can
+ * never commit it, which is what lets the source keep the squad and try again. A source that decides to give up
+ * (`abort`) keeps the reservation, as `cancelled`, until the target has let go: from then on the handover cannot be
+ * completed, whatever the target says. Both sides keep what they hold in the region's database
+ * (`HandoverStore`), so a restart on either side resumes the resolution (`Crossings.restore`).
  */
 
 export const HANDOVER_TIMEOUT_MS = 15_000
@@ -44,8 +52,8 @@ export interface HandoverReservation {
   token: string
   expiresAt: number
   attempts: number
-  /** State on source DO: 'offered' | 'confirmed' | 'cancelled' | 'failed' */
-  state: 'offered' | 'confirmed' | 'cancelled' | 'failed'
+  /** State on source DO: `offered`, `confirmed` while the keeper is being committed, or `cancelled` — decided against, kept until the target has let go. */
+  state: 'offered' | 'confirmed' | 'cancelled'
 }
 
 export interface PreparedHandover {
@@ -65,13 +73,20 @@ export interface PrepareRequest extends PreparedHandover {
   bundle: SquadBundle
 }
 
+/** A refusal: the code and words a region answers another with when it will not. */
+export type PeerRefusal = { ok: false; code: RpcErrorCode; message: string }
+
 /**
- * What a region answers another: done, or refused with a code and words. A
- * refusal is data because an exception loses its class crossing a Durable
- * Object boundary (`AccountsRpc.ts`); a call that fails outright — the other
- * region is down — rejects, which the caller treats as a refusal too.
+ * What a region answers another: done (with what it was asked, if it was
+ * asked something), or refused. A refusal is data because an exception loses
+ * its class crossing a Durable Object boundary (`AccountsRpc.ts`); a call that
+ * fails outright — the other region is down — rejects, which the caller
+ * treats as a refusal too.
  */
-export type PeerAnswer = { ok: true } | { ok: false; code: RpcErrorCode; message: string }
+export type PeerAnswer<Reply extends object = object> = ({ ok: true } & Reply) | PeerRefusal
+
+/** What a target keeps of a handover the source asks about: it committed to the squad, or it holds nothing of it any more and never will. */
+export type HandoverStatus = 'committed' | 'dropped'
 
 /**
  * What a region answers of another region's handover, over DO RPC
@@ -82,8 +97,16 @@ export interface HandoverPeer {
   prepareHandover(request: PrepareRequest): Promise<PeerAnswer>
   /** Source: the window has arrived at the target, which keeps the squad now; commit it, let go, end the window's session. */
   confirmArrival(handoverId: string): Promise<PeerAnswer>
-  /** Target: the handover will not happen; drop the copy. */
+  /**
+   * Target: the handover will not happen; drop the copy — and, if the target had committed, give the squad back.
+   * Only the source says so, once it has decided.
+   */
   cancelHandover(handoverId: string): Promise<PeerAnswer>
+  /**
+   * Target: what became of the handover. `committed` is final; anything else is answered only after the target has
+   * made sure it can no longer commit it (a copy it still held is dropped), so the source may keep the squad.
+   */
+  handoverStatus(handoverId: string): Promise<PeerAnswer<{ status: HandoverStatus }>>
 }
 
 /** The other regions, as this host reaches them. */
@@ -99,6 +122,8 @@ export class HandoverCoordinator {
   private readonly outgoing = new Map<string, HandoverReservation>()
   /** Active incoming reservations where this server is the Target DO. */
   private readonly incoming = new Map<string, PreparedHandover>()
+  /** Incoming handovers whose window has come: this region has committed to the squad, and answers for it until the source has confirmed. */
+  private readonly arrived = new Map<string, PreparedHandover>()
   /** Track retry attempts per squad across sequential failures. */
   private readonly attemptCount = new Map<string, number>()
   private readonly log: (msg: string) => void
@@ -195,6 +220,7 @@ export class HandoverCoordinator {
       throw new Refusal(RPC_ERRORS.conflict, 'Handover offer has expired.')
     }
     this.incoming.delete(handoverId)
+    this.arrived.set(handoverId, prepared)
     this.log(`Squad ${squadId} arrived at target DO under handover ${handoverId}`)
     return prepared
   }
@@ -232,6 +258,22 @@ export class HandoverCoordinator {
     this.attemptCount.delete(reservation.squadId)
     this.log(`Handover ${handoverId} confirmed by target DO`)
     return reservation
+  }
+
+  /**
+   * Decide against an outgoing handover that is in doubt: from now on it cannot
+   * be confirmed, whatever the target says, and it stays — `cancelled` — until
+   * the target has let go and `cancel` finishes it. A handover already being
+   * confirmed cannot be given up.
+   */
+  abort(handoverId: string): HandoverReservation {
+    const out = this.outgoing.get(handoverId)
+    if (!out) throw new Refusal(RPC_ERRORS.gone, 'Unknown handover reservation.')
+    if (out.state === 'confirmed') {
+      throw new Refusal(RPC_ERRORS.conflict, `Handover ${handoverId} is already confirmed; it cannot be cancelled.`)
+    }
+    out.state = 'cancelled'
+    return out
   }
 
   /**
@@ -278,6 +320,24 @@ export class HandoverCoordinator {
     return prepared
   }
 
+  /** The window arrived but the commit was not made after all: the offer is held again, as it was. */
+  unclaim(handoverId: string): void {
+    const prepared = this.arrived.get(handoverId)
+    if (!prepared) return
+    this.arrived.delete(handoverId)
+    this.incoming.set(handoverId, prepared)
+  }
+
+  /** The source has settled an arrival this region committed to, or the commit has been given back: nothing is left to remember of it. */
+  settle(handoverId: string): void {
+    this.arrived.delete(handoverId)
+  }
+
+  /** The arrival this region committed to under `handoverId`, until the source has settled it. */
+  arrivedAt(handoverId: string): PreparedHandover | undefined {
+    return this.arrived.get(handoverId)
+  }
+
   /** The outgoing reservation `handoverId` names, if this region is its source and it is still open. */
   reservation(handoverId: string): HandoverReservation | undefined {
     return this.outgoing.get(handoverId)
@@ -304,9 +364,29 @@ export class HandoverCoordinator {
     this.attemptCount.delete(squadId)
   }
 
-  /** Check if a handover is active on source DO. */
-  isPending(handoverId: string): boolean {
-    const out = this.outgoing.get(handoverId)
-    return out !== undefined && out.state === 'offered' && this.clock.now() <= out.expiresAt
+  /** The squad's attempts so far, as a restart finds them in the database. */
+  setAttempts(squadId: string, attempts: number): void {
+    this.attemptCount.set(squadId, attempts)
+  }
+
+  /** Whether `playerId` has a window expected here: an offer this region holds for them that nobody has claimed and whose time has not run out. */
+  expects(playerId: string): boolean {
+    const now = this.clock.now()
+    for (const prepared of this.incoming.values()) if (prepared.playerId === playerId && now <= prepared.expiresAt) return true
+    return false
+  }
+
+  /** Hold what a restarted source found in its database: its open reservations, with the attempts they were. */
+  restoreOutgoing(reservations: readonly HandoverReservation[]): void {
+    for (const reservation of reservations) {
+      this.outgoing.set(reservation.handoverId, reservation)
+      this.attemptCount.set(reservation.squadId, Math.max(this.attemptCount.get(reservation.squadId) ?? 0, reservation.attempts))
+    }
+  }
+
+  /** Hold what a restarted target found in its database: the offers it prepared and the arrivals it committed to. */
+  restoreIncoming(prepared: readonly PreparedHandover[], arrived: readonly PreparedHandover[]): void {
+    for (const handover of prepared) this.incoming.set(handover.handoverId, handover)
+    for (const handover of arrived) this.arrived.set(handover.handoverId, handover)
   }
 }

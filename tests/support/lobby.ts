@@ -87,6 +87,8 @@ export async function hostLobby(
   const accounts = {
     playerFor: async (token: string) => known.get(token) ?? null,
     player: async (id: string) => known.get(id) ?? null,
+    // Nobody here has crossed a border: everyone is at home in the region the test opened.
+    home: async () => persistence.region.self,
   }
   const server = await createMatchServer({
     clock,

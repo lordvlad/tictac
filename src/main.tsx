@@ -19,10 +19,11 @@ import { Account } from './game/Account'
 import { consoleHandleAllowed } from './game/DebugAccess'
 import { ServerConnection } from './game/ServerConnection'
 import { AiOpponent } from './game/AiOpponent'
-import { MatchSession } from './game/MatchSession'
+import { MatchSession, type MatchSessionParts } from './game/MatchSession'
 import { Battlefield } from './client/Battlefield'
 import { Input } from './client/Input'
 import { Presenter } from './client/Presenter'
+import { type ServerPorts, serverPortsOver } from './client/ServerAdapters'
 import type { Seated } from './wire/Lobby'
 import { winnerOf } from './rules/MatchEnd'
 import { NetworkManager } from './game/NetworkManager'
@@ -37,7 +38,7 @@ import { type EncounterPromptHandle, mountEncounterPrompt } from './hud/Encounte
 import { FpsCounter } from './hud/FpsCounter'
 import { FullscreenPrompt } from './hud/FullscreenPrompt'
 import { Hud } from './hud/Hud'
-import { LoadoutScreen } from './hud/LoadoutScreen'
+import { LoadoutScreen } from './client/LoadoutScreen'
 import { closeMap, openMap } from './hud/MapScreen'
 import { InterruptedOverlay } from './hud/menu/InterruptedOverlay'
 import { StartMenu } from './hud/menu/StartMenu'
@@ -124,7 +125,8 @@ function setupRng(): Rng {
  *   connected, and Back from the server panel (`leaveServer`) ends it.
  */
 class ScreenController {
-  private connection: ServerConnection | null = null
+  /** The window's connection, and the narrow views of it the screens are given. */
+  private server: { connection: ServerConnection; ports: ServerPorts } | null = null
   private prompt: EncounterPromptHandle | null = null
   private screen: (() => void) | null = null
   private network: NetworkManager | null = null
@@ -166,17 +168,27 @@ class ScreenController {
   // ---------------------------------------------------------------------------
 
   /** The window's connection to the match server: the existing one if it is still alive. */
+  private openServer(): { connection: ServerConnection; ports: ServerPorts } {
+    if (this.server && this.server.connection.state.kind !== 'closed') return this.server
+    this.server?.connection.close()
+    const connection = new ServerConnection(matchServerFor(new URL(window.location.href)))
+    this.server = { connection, ports: serverPortsOver(connection) }
+    this.prompt?.follow(this.server.ports.prompt)
+    return this.server
+  }
+
   connectionToServer(): ServerConnection {
-    if (this.connection && this.connection.state.kind !== 'closed') return this.connection
-    this.connection?.close()
-    this.connection = new ServerConnection(matchServerFor(new URL(window.location.href)))
-    this.prompt?.follow(this.connection)
-    return this.connection
+    return this.openServer().connection
+  }
+
+  /** The same connection, as the screens that show it are given it (`hud/ServerPorts`). */
+  serverPorts(): ServerPorts {
+    return this.openServer().ports
   }
 
   leaveServer(): void {
-    this.connection?.close()
-    this.connection = null
+    this.server?.connection.close()
+    this.server = null
     this.prompt?.follow(null)
   }
 
@@ -193,7 +205,7 @@ class ScreenController {
       take,
       showFeed: () => void this.showMap(),
     })
-    if (this.connection) this.prompt.follow(this.connection)
+    if (this.server) this.prompt.follow(this.server.ports.prompt)
   }
 
   // ---------------------------------------------------------------------------
@@ -263,7 +275,7 @@ class ScreenController {
       // frames: two render loops would share the GPU for nothing.
       const resume = pauseRendering(Game.instance())
       try {
-        await openMap(this.connectionToServer(), baseUrl, this.flows.watch)
+        await openMap(this.serverPorts().map, baseUrl, this.flows.watch)
       } finally {
         resume()
         this.map = null
@@ -428,7 +440,7 @@ function startMenu(screens: ScreenController, notice?: string): ReactElement {
         screens.closeMenu()
         equipThenStart(screens, { seed: initData.seed, label: initData.seedLabel }, network)
       }}
-      connectionToServer={() => screens.connectionToServer()}
+      openServer={() => screens.serverPorts().panel}
       leaveServer={() => screens.leaveServer()}
       onServerConnect={async (intent) => {
         const connection = screens.connectionToServer()
@@ -658,10 +670,11 @@ interface MatchScene extends Field {
  * player taking one back, a watcher, or a recording.
  *
  * `dice` is the match's stream, from the match's seed, so both peers, a
- * replay and a sweep draw the same numbers in the same order. `network` is
- * null where nothing is transmitted; `recordingHeader` is the opening a
- * recording armed from the debug panel replays from, and what the end screens
- * draw who carried out from.
+ * replay and a sweep draw the same numbers in the same order. How the window
+ * holds the match is `held`: a player has a `network` (null where nothing is
+ * transmitted) and a `recordingHeader`, the opening a recording armed from the
+ * debug panel replays from and what the end screens draw who carried out from;
+ * a watcher has no network and says what it watches (`watching`).
  */
 function buildMatch(
   screens: ScreenController,
@@ -669,8 +682,7 @@ function buildMatch(
   field: Field,
   seedLabel: string,
   dice: Rng,
-  network: NetworkManager | null,
-  recordingHeader: RecordingHeader | null,
+  held: Pick<MatchSessionParts, 'network' | 'recordingHeader' | 'watching'>,
 ): MatchScene {
   const { world, battlefield, squads } = field
   const rig = new OrbitRig(engine.camera, engine.canvas, {
@@ -702,8 +714,7 @@ function buildMatch(
     dice,
     fx: new SceneCombatFx(tracers, views),
     onLeave: () => screens.leaveMatch(),
-    network,
-    recordingHeader,
+    ...held,
   })
   const presenter = new Presenter({ session, battlefield, views, renderSystem, rig, hud, portraits, seedLabel, engine })
   const input = new Input(engine, rig, session, presenter)
@@ -789,7 +800,7 @@ function start(
 
   playMatch(
     screens,
-    buildMatch(screens, engine, field, seedLabel, new Rng(seed), network, recordingHeader),
+    buildMatch(screens, engine, field, seedLabel, new Rng(seed), { network, recordingHeader }),
     network,
     recordingHeader,
   )
@@ -812,7 +823,7 @@ function resumeMatch(screens: ScreenController, network: NetworkManager, log: Ma
   const { header } = log
   const engine = createEngineContext(Game.instance())
   const field = buildField(engine, header.seed, header.map, header.squads)
-  const scene = buildMatch(screens, engine, field, header.seedLabel, new Rng(header.seed), network, header)
+  const scene = buildMatch(screens, engine, field, header.seedLabel, new Rng(header.seed), { network, recordingHeader: header })
   catchUp(scene, log)
   playMatch(screens, scene, network, header)
   if (camera) restoreCamera(scene.rig, camera)
@@ -894,7 +905,7 @@ function playMatch(screens: ScreenController, scene: MatchScene, network: Networ
  *
  * A recording that is still being written: the world is built from the log
  * the way a replay is built from its file — every field revealed, the HUD
- * away, the session told it is spectating and given no network — and the
+ * away, the session held in `spectate` mode with no network — and the
  * intents the players send after that are applied the same way, as they
  * arrive. Nothing is ever sent back (`NetworkManager` in `spectate` mode).
  *
@@ -929,10 +940,9 @@ function watchMatch(screens: ScreenController, network: NetworkManager, seat: Se
     const { header } = log
     const engine = createEngineContext(Game.instance())
     const field = buildField(engine, header.seed, header.map, header.squads)
-    const built = buildMatch(screens, engine, field, header.seedLabel, new Rng(header.seed), null, null)
+    const built = buildMatch(screens, engine, field, header.seedLabel, new Rng(header.seed), { watching: 'spectate' })
     scene = built
     const { battlefield, squads, rig, tracers, turnManager, hud, session, presenter } = built
-    session.spectating = true
     hud.setHidden(true)
     turnManager.autoSelectFirst()
     presenter.recomputeVisibility()
@@ -1000,9 +1010,9 @@ function watchMatch(screens: ScreenController, network: NetworkManager, seat: Se
  *
  * The same construction a match uses, with three differences: both squads are
  * equipped from the file rather than one from a loadout screen, there is no
- * network (nothing to transmit, nothing to record), and the session is told
- * it is spectating — which reveals the whole field and takes the player's
- * hands off the units.
+ * network (nothing to transmit, nothing to record), and the session is held in
+ * `replay` mode — which reveals the whole field and takes the player's hands
+ * off the units.
  */
 function startPlayback(screens: ScreenController, recording: CombatRecording): void {
   const { header } = recording
@@ -1012,9 +1022,8 @@ function startPlayback(screens: ScreenController, recording: CombatRecording): v
   // Held as the generator rather than a wrapped stream, because stepping back
   // has to put the dice back as well as the world.
   const dice = new Rng(header.seed)
-  const scene = buildMatch(screens, engine, field, header.seedLabel, dice, null, null)
+  const scene = buildMatch(screens, engine, field, header.seedLabel, dice, { watching: 'replay' })
   const { world, battlefield, squads, rig, tracers, turnSystem, turnManager, hud, session, presenter } = scene
-  session.spectating = true
   hud.setHidden(true)
   turnManager.autoSelectFirst()
   presenter.recomputeVisibility()

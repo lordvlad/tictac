@@ -28,6 +28,7 @@ type Layer =
   | 'rules'
   | 'sim'
   | 'wire'
+  | 'ui'
   | 'server'
   | 'game'
   | 'client'
@@ -59,17 +60,21 @@ const MAY_IMPORT: Record<Layer, readonly Layer[]> = {
   server: ['leaf', 'core', 'rules', 'ecs', 'entities', 'sim', 'wire'],
   // Client orchestration with no scene: the session that turns intents into commands, the network, playback.
   // It knows nothing of render, hud or camera; what draws it implements the view port it declares.
-  game: ['leaf', 'core', 'rules', 'ecs', 'entities', 'sim', 'wire'],
+  game: ['leaf', 'core', 'rules', 'ecs', 'entities', 'sim', 'wire', 'ui'],
   // The presentation of a match: the planners, fog and x-ray that draw the scene, and the presenter
   // and input that join the session (game) to the screen (render, hud, camera). The one layer
   // that sees both sides, deliberately; nothing may import it except the composition root.
-  client: ['leaf', 'core', 'rules', 'ecs', 'entities', 'sim', 'wire', 'game', 'render', 'camera', 'hud', 'engine'],
+  client: ['leaf', 'core', 'rules', 'ecs', 'entities', 'sim', 'wire', 'ui', 'game', 'render', 'camera', 'hud', 'engine'],
   // The engine context (renderer, scene, clock) that client code is handed; it knows nothing of the game.
   engine: ['leaf'],
   render: ['leaf', 'core', 'rules', 'ecs', 'entities', 'engine'],
   camera: ['leaf', 'core'],
+  // What the player's screen and the session say to each other: the intents a press becomes. UI
+  // vocabulary, not rules and not the network's, so it sits beside `wire` — below both `game` and
+  // `hud`, which would otherwise have to import each other or a layer they do not share.
+  ui: ['leaf', 'core'],
   // The HUD reads view models and rules tables; it does not reach into the ECS or the scene.
-  hud: ['leaf', 'core', 'rules', 'wire'],
+  hud: ['leaf', 'core', 'rules', 'wire', 'ui'],
   workers: ['leaf', 'server'],
 }
 
@@ -89,28 +94,6 @@ const ALLOWED: Record<string, readonly string[]> = {
     'src/ecs/systems/CombatSystem.ts -> src/entities/Soldier.ts',
     'src/ecs/systems/CommandSystem.ts -> src/entities/Soldier.ts',
     'src/ecs/systems/ItemSystem.ts -> src/entities/Soldier.ts',
-  ],
-  // The HUD reads view models only; ServerConnection, planners and the scene are injected, never imported.
-  'tictac-uqt.25': [
-    'src/hud/DebugMap.tsx -> src/entities/Squads.ts',
-    'src/hud/DebugPanel.tsx -> src/entities/Soldier.ts',
-    'src/hud/EncounterFeed.tsx -> src/game/ServerConnection.ts',
-    'src/hud/EncounterPrompt.tsx -> src/game/ServerConnection.ts',
-    'src/hud/HudModel.ts -> src/camera/OrbitRig.ts',
-    'src/hud/HudModel.ts -> src/entities/Soldier.ts',
-    'src/hud/HudModel.ts -> src/entities/Squads.ts',
-    'src/hud/HudModel.ts -> src/client/GrenadePlanner.ts',
-    'src/hud/HudModel.ts -> src/client/ShootPlanner.ts',
-    'src/hud/HudModel.ts -> src/render/Portraits.ts',
-    'src/hud/HudModel.ts -> src/sim/TurnManager.ts',
-    'src/hud/LoadoutScreen.tsx -> src/engine.ts',
-    'src/hud/LoadoutScreen.tsx -> src/render/LoadoutScene.ts',
-    'src/hud/LoadoutScreen.tsx -> src/render/Portraits.ts',
-    'src/hud/MapScreen.tsx -> src/game/ServerConnection.ts',
-    'src/hud/PlaybackControls.tsx -> src/game/Playback.ts',
-    'src/hud/menu/ServerPanel.tsx -> src/game/Account.ts',
-    'src/hud/menu/ServerPanel.tsx -> src/game/ServerConnection.ts',
-    'src/hud/menu/StartMenu.tsx -> src/game/ServerConnection.ts',
   ],
   // The Durable Object takes the same host ports as the Bun server, not core types of its own.
   'tictac-uqt.24': [

@@ -3,11 +3,11 @@ import { createRoot } from 'react-dom/client'
 import { type LatLng, type Pace, positionAt, type TravelState } from '../core/Travel'
 import type { CombatRecording } from '../wire/Recording'
 import type { Squad, SquadOrder } from '../wire/Rpc'
-import type { ServerConnection } from '../game/ServerConnection'
 import type { StandingOrder } from '../wire/Rpc'
 import { EncounterFeed } from './EncounterFeed'
 import { STANDING_ORDERS } from './EncounterView'
 import type { WorldMap } from './map/WorldMap'
+import type { MapPort } from './ServerPorts'
 
 /**
  * The world map (`ITEM-065`, GDD-WORLD): the player's squad on the planet,
@@ -20,7 +20,7 @@ import type { WorldMap } from './map/WorldMap'
  *
  * Nothing here asks the server where the squad is: the route comes from
  * `squad/get` and every `squad/changed` push, and the position is
- * `positionAt(route, connection.now())` each frame — the server's own
+ * `positionAt(route, port.now())` each frame — the server's own
  * function, at the server's own time (its clock, measured over the socket),
  * so a refresh mid-journey lands exactly where the squad was drawn before
  * it, whatever this machine's clock says.
@@ -44,7 +44,7 @@ let closeOpen: (() => void) | null = null
  * stays open until it chooses to close it (`closeMap`).
  */
 export function openMap(
-  connection: ServerConnection,
+  port: MapPort,
   assetsUrl: string,
   onWatch: (recording: CombatRecording) => void,
 ): Promise<void> {
@@ -60,7 +60,7 @@ export function openMap(
     closed.resolve()
   }
   closeOpen = close
-  root.render(<MapView connection={connection} assetsUrl={assetsUrl} onClose={close} onWatch={onWatch} />)
+  root.render(<MapView port={port} assetsUrl={assetsUrl} onClose={close} onWatch={onWatch} />)
   return closed.promise
 }
 
@@ -75,12 +75,12 @@ interface Picked {
 }
 
 function MapView({
-  connection,
+  port,
   assetsUrl,
   onClose,
   onWatch,
 }: {
-  connection: ServerConnection
+  port: MapPort
   assetsUrl: string
   onClose: () => void
   onWatch: (recording: CombatRecording) => void
@@ -94,30 +94,25 @@ function MapView({
   const [busy, setBusy] = useState(false)
   const [standingBusy, setStandingBusy] = useState(false)
   /** A clock tick for the status line; the map redraws on its own loop. */
-  const [now, setNow] = useState(() => connection.now())
+  const [now, setNow] = useState(() => port.now())
 
   // The route: asked for when the map opens and again whenever the socket
   // comes back, since an arrival recorded while it was away was pushed to
   // nobody; kept current by `squad/changed` in between.
   useEffect(() => {
-    let wasOpen = connection.state.kind === 'open'
     const fetchSquad = () =>
-      connection.request('tictac/api/squad/get', {}).then(
-        ({ squad: read }) => setSquad(read),
+      port.squad().then(
+        setSquad,
         (error: unknown) => setProblem(error instanceof Error ? error.message : 'The squad could not be read.'),
       )
     void fetchSquad()
-    const stopWatching = connection.watchSquad(({ squad: pushed }) => setSquad(pushed))
-    const stopChanges = connection.onChange(() => {
-      const open = connection.state.kind === 'open'
-      if (open && !wasOpen) void fetchSquad()
-      wasOpen = open
-    })
+    const stopWatching = port.onSquadChanged(setSquad)
+    const stopReopened = port.onReopened(() => void fetchSquad())
     return () => {
       stopWatching()
-      stopChanges()
+      stopReopened()
     }
-  }, [connection])
+  }, [port])
 
   // The map itself, once there is a squad to centre on: built once per
   // opening, centred where the squad was then; later routes are drawn on it.
@@ -133,9 +128,9 @@ function MapView({
       ({ WorldMap: Loaded }) => {
         if (removed) return
         map.current = new Loaded(element, {
-          serverUrl: connection.url,
+          serverUrl: port.url,
           assetsUrl,
-          center: positionAt(first.waypoints, connection.now()).position,
+          center: positionAt(first.waypoints, port.now()).position,
           onPick: (at, screen) => setPicked({ at, screen }),
         })
       },
@@ -146,16 +141,16 @@ function MapView({
       map.current?.remove()
       map.current = null
     }
-  }, [started, connection, assetsUrl])
+  }, [started, port, assetsUrl])
 
   // Draw the squad where the clock puts it, a few times a second.
   useEffect(() => {
     if (!squad) return
-    const draw = () => map.current?.draw(squad.waypoints, connection.now())
+    const draw = () => map.current?.draw(squad.waypoints, port.now())
     draw()
     const timer = window.setInterval(() => {
       draw()
-      setNow(connection.now())
+      setNow(port.now())
     }, 1000 / DRAWS_PER_SECOND)
     return () => window.clearInterval(timer)
   }, [squad])
@@ -163,8 +158,7 @@ function MapView({
   const stand = async (order: StandingOrder) => {
     setStandingBusy(true)
     try {
-      const answer = await connection.request('tictac/api/squad/standing', { order })
-      setSquad(answer.squad)
+      setSquad(await port.stand(order))
       setProblem(null)
     } catch (error) {
       setProblem(error instanceof Error ? error.message : 'That standing order did not reach the squad.')
@@ -177,8 +171,7 @@ function MapView({
     setPicked(null)
     setBusy(true)
     try {
-      const answer = await connection.request('tictac/api/squad/order', { order })
-      setSquad(answer.squad)
+      setSquad(await port.order(order))
       setProblem(null)
     } catch (error) {
       setProblem(error instanceof Error ? error.message : 'That order did not reach the squad.')
@@ -261,10 +254,10 @@ function MapView({
           </button>
         </div>
         {problem && <div className="map-problem">{problem}</div>}
-        {connection.state.kind === 'reconnecting' && (
+        {port.reconnecting() && (
           <div className="map-problem">Reconnecting to the match server…</div>
         )}
-        <EncounterFeed connection={connection} onWatch={onWatch} />
+        <EncounterFeed port={port.feed} onWatch={onWatch} />
       </div>
       {picked && (
         <div className="map-orders" style={{ left: picked.screen.x, top: picked.screen.y }}>

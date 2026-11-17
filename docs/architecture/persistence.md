@@ -66,7 +66,13 @@ makes the player, their credential and a session in one commit; `RegionStore.enl
 them a roster and a squad in one commit of the region that served the connection. `enlist` is the
 one door by which a player comes to exist in a region, and it is idempotent: it runs on every
 sign-in (`signIn`, `registerVerify`, `loginVerify`) and on `squad/get` and `roster/list`, and
-deals whichever of the roster and the squad the region does not hold. A registration that dies
+deals whichever of the roster and the squad the region does not hold — but **only in the player's
+home region**: `players.home_region` names the region that keeps their squad (registration sets it
+to the serving region, `AccountsPort.register(answer, home)`; the handover's commit moves it,
+`AccountsPort.moveHome`, in the same step that makes the target the squad's keeper). A sign-in at
+any other region is answered with `session/ended { reconnect: 'elsewhere', url }` and nothing is
+written there; the one exception is the window of a handover, which signs in at the target before
+it arrives (`Crossings.expects`) and never enlists. A registration that dies
 between the two steps therefore leaves nothing to repair by hand: the next sign-in finishes it, and
 later ones find both and do nothing. Rows that arrived by handover (`importSquad`) count, so an
 arrived player is not dealt a second roster.
@@ -117,6 +123,21 @@ A squad changing region (RFC-0002 §6) is a few verbs on `RegionStore`, each ove
 
 `tests/regions.test.ts` runs them between two `RegionStore`s, the target with an empty database and
 no account for the player.
+
+### Crossings and handovers in flight
+
+What a restart resumes of a border crossing is two tables, owned by `HandoverStore`
+(`RegionStore.handovers`; migration 3 of the region schema). `crossings` is one row per squad sent to a
+checkpoint to cross: the region, the checkpoint (in millionths of a degree, as a squad's start is), the
+attempts it has had and `next_at`, the clock's moment the crossing is next due. It is written when the order
+is given and when an attempt fails, and deleted when the squad crosses, rests or is given another order;
+`Crossings.restore` puts each back on the schedule. `handovers` is one row per handover in flight, from either
+side (`role` is `source` or `target`): the source's is written when the offer goes out — before the window is
+told, because from then on the target may commit — as `offered`, or `cancelled` once the source has decided
+against it and is waiting for the target to let go, and deleted when the squad has crossed or the target has let
+go; the target's is `prepared` when it holds the copy, `committed` once the window has arrived (written *before*
+the owner, so a commit nobody can vouch for never exists) and deleted when the source has settled it. These
+rows are what lets one region answer the other after a lost reply or a restart; see RFC-0002 §2.
 
 ### Transactions are batches
 
@@ -215,6 +236,9 @@ rebuilding the table and Postgres by dropping the constraint.
 ### The account store's list
 
 1. **`accounts`** — `players`, `credentials`, `sessions`, `auth_challenges`.
+2. **`player home region`** — `players.home_region`, the region that keeps the player's squad
+   (`NOT NULL DEFAULT 'singleton'`, so every player that exists before regions were sharded is
+   in the one region there was).
 
 ### The region store's list
 

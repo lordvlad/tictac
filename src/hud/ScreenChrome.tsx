@@ -39,7 +39,7 @@ export function ScreenNotice({ text }: { text: string }) {
  * Small and click-through on purpose: a dropped socket is usually a server
  * being redeployed, back within a second or two, and the player should see a
  * stall rather than a screen that has stopped being their match. Their input
- * is held by the manager meanwhile (`isMyTurn`), not by covering the canvas.
+ * is held by the session meanwhile (`MatchSession.canAct`), not by covering the canvas.
  */
 export function ReconnectingNotice({ attempt }: { attempt: number }) {
   return (

@@ -15,7 +15,7 @@ import type {
   HudVisibility,
   TileReadout,
 } from './HudModel'
-import type { HudIntent } from '../rules/Intent'
+import type { HudIntent } from '../ui/Intent'
 import { Icon } from './Icon'
 import { uiMount } from './uiMount'
 
@@ -84,8 +84,8 @@ function TopCentreView({
       </div>
       <div className="hud-info-card">
         <span className={`hud-faction-badge ${model.factionIsBlue ? 'blue' : 'red'}`}>
-          {model.networkMode !== 'local' && (
-            <Icon file={model.isMyTurn ? 'ui-deploy' : 'ui-unit-turn'} className="tiny" />
+          {model.turnMarker !== null && (
+            <Icon file={model.turnMarker === 'mine' ? 'ui-deploy' : 'ui-unit-turn'} className="tiny" />
           )}
           {model.networkBadge}
         </span>
@@ -160,8 +160,7 @@ function EndTurnView({
   model: HudModel
   onIntent: (intent: HudIntent) => void
 }) {
-  const isMyTurn = model.isMyTurn || model.networkMode === 'local'
-  const ready = isMyTurn && !model.rulesActing
+  const ready = model.canAct && !model.rulesActing
   const retreat = model.retreat
   const lost =
     retreat && retreat.leftBehind.length > 0 ? ` Leaves ${retreat.leftBehind.join(', ')} behind.` : ''
@@ -170,7 +169,7 @@ function EndTurnView({
     ? `Everyone on your way out leaves; ${retreat.chance}% chance of getting away. A failed attempt ends the turn.${lost}`
     : ''
 
-  const endTurnTitle = !isMyTurn
+  const endTurnTitle = !model.canAct
     ? "Opponent's Turn"
     : ready
       ? 'Hand over to the other faction'
@@ -243,15 +242,13 @@ function SquadBarView({
   model: HudModel
   onIntent: (intent: HudIntent) => void
 }) {
-  const canInteract = model.isMyTurn || model.networkMode === 'local'
-
   return (
     <>
       {model.squad.map((card) => (
         <div
           key={card.index}
-          className={`squad-card ${canInteract ? 'interactive' : 'waiting'} ${card.selected ? 'selected' : ''} ${card.dead ? 'dead' : ''}`}
-          onClick={canInteract ? () => onIntent({ type: 'selectUnit', index: card.index }) : undefined}
+          className={`squad-card ${model.canAct ? 'interactive' : 'waiting'} ${card.selected ? 'selected' : ''} ${card.dead ? 'dead' : ''}`}
+          onClick={model.canAct ? () => onIntent({ type: 'selectUnit', index: card.index }) : undefined}
         >
           <img className="squad-portrait" src={card.portrait} alt={card.name} />
           <div className="squad-name">{card.name}</div>
@@ -639,7 +636,7 @@ function ActionPanelView({
   onToggleGroup: (group: 'items' | 'grenades') => void
   onIntent: (intent: HudIntent) => void
 }) {
-  if (!model.isMyTurn && model.networkMode !== 'local') {
+  if (!model.canAct) {
     return (
       <>
         <div className="action-header" style={{ color: '#cbd5e1' }}>
@@ -1037,7 +1034,7 @@ export class Hud {
     )
     // Strip and squad bar share one bottom-centred column: stacking them in the
     // layout means they cannot overlap, whatever height the cards grow to.
-    const showTargets = model.targets.length > 0 && (model.isMyTurn || model.networkMode === 'local')
+    const showTargets = model.targets.length > 0 && model.canAct
     this.bottomCentreRoot.render(
       <div className="hud-bottom-centre">
         {showTargets && (

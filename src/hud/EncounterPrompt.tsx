@@ -1,8 +1,8 @@
 import { createRoot } from 'react-dom/client'
 import type { EncounterStarted } from '../wire/Encounter'
 import type { LobbyView } from '../wire/Lobby'
-import type { ServerConnection } from '../game/ServerConnection'
 import { formatCountdown, lapsedNote, offerNote, offerQuestion, type Prompt, promptFor } from './EncounterView'
+import type { EncounterPromptPort } from './ServerPorts'
 
 /**
  * The question a fight on the road asks (`ITEM-048`, decision 5; `ITEM-053`
@@ -16,7 +16,7 @@ import { formatCountdown, lapsedNote, offerNote, offerQuestion, type Prompt, pro
  * putting the map and the menu away. It knows of a fight two ways — the
  * `encounter/started` push, and `LobbyView.you.control === 'reserved'`, which
  * is how a window that connected after the push learns the same — and the
- * countdown runs on the server's clock (`connection.now()`), so a machine
+ * countdown runs on the server's clock (`port.now()`), so a machine
  * whose own is off still shows the time the server will act on.
  */
 
@@ -32,9 +32,9 @@ export interface EncounterPromptActions {
   showFeed: () => void
 }
 
-/** Point the prompt at a connection (or at none); the one it follows before is let go of. */
+/** Point the prompt at a server (or at none); the one it follows before is let go of. */
 export interface EncounterPromptHandle {
-  follow: (connection: ServerConnection | null) => void
+  follow: (port: EncounterPromptPort | null) => void
 }
 
 export function mountEncounterPrompt(actions: EncounterPromptActions): EncounterPromptHandle {
@@ -43,7 +43,7 @@ export function mountEncounterPrompt(actions: EncounterPromptActions): Encounter
   document.body.appendChild(container)
   const root = createRoot(container)
 
-  let following: ServerConnection | null = null
+  let following: EncounterPromptPort | null = null
   let release: () => void = () => {}
   let pushed: EncounterStarted | null = null
   let you: LobbyView['you'] | undefined
@@ -93,26 +93,26 @@ export function mountEncounterPrompt(actions: EncounterPromptActions): Encounter
   }
 
   return {
-    follow: (connection) => {
-      if (connection === following) return
+    follow: (port) => {
+      if (port === following) return
       release()
-      following = connection
+      following = port
       pushed = null
       you = undefined
       taken = null
       dismissed = null
       busy = false
       problem = null
-      if (!connection) {
+      if (!port) {
         release = () => {}
         draw()
         return
       }
-      const stopLobby = connection.watchLobby((view) => {
+      const stopLobby = port.onLobby((view) => {
         you = view.you
         draw()
       })
-      const stopPushes = connection.watchEncounters((started) => {
+      const stopPushes = port.onEncounter((started) => {
         pushed = started
         problem = null
         draw()

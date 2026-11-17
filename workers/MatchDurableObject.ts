@@ -4,7 +4,7 @@ import type { AccountsPort } from '../src/server/AccountsPort'
 import { type AccountsReply, type AccountsRequest, accountsOverRpc, serveAccounts } from '../src/server/AccountsRpc'
 import { LOCAL_RELYING_PARTY, type RelyingParty } from '../src/server/AccountStore'
 import { WALL_CLOCK } from '../src/server/Clock'
-import type { HandoverPeer, PeerAnswer, PrepareRequest } from '../src/server/Handover'
+import type { HandoverPeer, HandoverStatus, PeerAnswer, PrepareRequest } from '../src/server/Handover'
 import { createMatchServer, type MatchServer } from '../src/server/MatchServer'
 import { DIRECTORY_REGION, SINGLETON_REGION } from '../src/server/Owner'
 import { persistenceOverDb } from '../src/server/Persistence'
@@ -128,9 +128,10 @@ export class MatchDurableObject extends DurableObject<Env> {
   }
 
   /**
-   * The three calls another region's object makes of this one while a squad
+   * The calls another region's object makes of this one while a squad
    * crosses (`HandoverPeer`, `Crossings`): the target prepares, the source
-   * confirms, and either may be told the handover is off. Answers are data
+   * confirms, either may be told the handover is off, and a source that lost
+   * an answer asks what became of the handover. Answers are data
    * (`PeerAnswer`): an exception loses its class crossing this boundary.
    */
   prepareHandover(request: PrepareRequest): Promise<PeerAnswer> {
@@ -143,6 +144,11 @@ export class MatchDurableObject extends DurableObject<Env> {
 
   cancelHandover(handoverId: string): Promise<PeerAnswer> {
     return this.server.crossings.cancelHandover(handoverId)
+  }
+
+  /** A source in doubt asks what became of its handover: committed, or dropped for good. */
+  handoverStatus(handoverId: string): Promise<PeerAnswer<{ status: HandoverStatus }>> {
+    return this.server.crossings.handoverStatus(handoverId)
   }
 
   /** Where a window dials to reach `region`: this host, asking the Worker for that region. */
@@ -196,6 +202,7 @@ function peerOf(stub: DurableObjectStub<MatchDurableObject>): HandoverPeer {
     prepareHandover: (request) => stub.prepareHandover(request),
     confirmArrival: (handoverId) => stub.confirmArrival(handoverId),
     cancelHandover: (handoverId) => stub.cancelHandover(handoverId),
+    handoverStatus: (handoverId) => stub.handoverStatus(handoverId),
   }
 }
 

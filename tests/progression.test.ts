@@ -16,7 +16,7 @@ import { Squads } from '../src/entities/Squads'
 import { stockSquads } from './support/squads'
 import { TurnManager } from '../src/sim/TurnManager'
 import { carriedOut, debrief, winnerOf } from '../src/rules/MatchEnd'
-import { endScreens } from '../src/hud/HudModel'
+import { endScreens } from '../src/client/HudModelBuilder'
 
 /** A sheet with every attribute and proficiency set where the test wants it. */
 function sheet(attributes: Partial<CharacterSheet['attributes']> = {}): CharacterSheet {

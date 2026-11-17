@@ -248,9 +248,9 @@ export class Journeys {
       this.plan(next)
       // The crossing is intended after the route is planned, so at the moment the squad arrives its arrival and checkpoints are handled before it crosses.
       if (order.kind === 'crossBorder') {
-        this.crossings!.intend(playerId, next.id, order.destinationRegion, order.to, plannedArrivals(next.waypoints).at(-1) ?? now)
+        await this.crossings!.intend(playerId, next.id, order.destinationRegion, order.to, plannedArrivals(next.waypoints).at(-1) ?? now)
       } else {
-        this.crossings?.withdraw(next.id)
+        await this.crossings?.withdraw(next.id)
       }
       await this.scheduleMeetings(next, now)
       this.tell(playerId, next)

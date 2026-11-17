@@ -6,14 +6,15 @@ import { RPC_ERRORS } from '../src/wire/Rpc'
 import { accountsOverRpc, serveAccounts } from '../src/server/AccountsRpc'
 import { openDb, openPersistence } from '../src/server/db/BunSqlDb'
 import { startGameServer } from '../src/server/GameServer'
-import { HandoverCoordinator } from '../src/server/Handover'
-import { regionDirectory, type RegionPartition } from '../src/server/Owner'
+import { HandoverCoordinator, type RegionPeers } from '../src/server/Handover'
+import { regionDirectory, SINGLETON_REGION, type RegionPartition } from '../src/server/Owner'
 import { portsOf, type Persistence } from '../src/server/Persistence'
 import { regionStoreOverDb, type SquadBundle } from '../src/server/RegionStore'
 import { START_RADIUS_KM } from '../src/server/Squads'
 import { AuthError } from '../src/server/WebAuthn'
 import { softwareAuthenticator } from './support/authenticator'
 import { seedContact } from './support/encounters'
+import { inProcessPeers } from './support/peers'
 
 /**
  * The account store and a region's store apart (RFC-0002 §4, tictac-dwq.5):
@@ -39,7 +40,7 @@ function accountsAcross(directory: Persistence) {
 }
 
 /** A region of its own, with a database of its own and nothing in it, behind a server of its own. */
-async function emptyRegion(directory: Persistence, self: string) {
+async function emptyRegion(directory: Persistence, self: string, peers?: RegionPeers) {
   const accounts = accountsAcross(directory)
   const region = await regionStoreOverDb(await openDb(':memory:'), WALL_CLOCK, accounts, self)
   const server = await startGameServer({
@@ -50,15 +51,54 @@ async function emptyRegion(directory: Persistence, self: string) {
     clock: WALL_CLOCK,
     port: 0,
     log: () => {},
+    peers,
+    // Nothing is rolled for on the road: a squad's trip here is only its crossing.
+    journeys: { openEncounter: undefined, openMeeting: undefined },
   })
   return {
     region,
     server,
+    wsUrl: server.url.replace('http', 'ws'),
     connect: (token: string | null = null) =>
       new ServerConnection(server.url.replace('http', 'ws'), { tokens: heldTokens(token) }),
     stop: async () => {
       await server.stop()
       await region.close()
+    },
+  }
+}
+
+/**
+ * Two regions behind one directory, each its own server over its own database,
+ * reaching each other as Durable Objects do: the one the directory lives in
+ * (the singleton) and `region-east`.
+ */
+async function homeAndEast(directory: Persistence) {
+  const peers = inProcessPeers()
+  const home = await startGameServer({
+    ...portsOf(directory),
+    regions: PARTITIONS,
+    clock: WALL_CLOCK,
+    port: 0,
+    log: () => {},
+    peers,
+    journeys: { openEncounter: undefined, openMeeting: undefined },
+  })
+  const east = await emptyRegion(directory, 'region-east', peers)
+  const homeWs = home.url.replace('http', 'ws')
+  peers.add(SINGLETON_REGION, { crossings: home.crossings, url: homeWs })
+  peers.add('region-east', { crossings: east.server.crossings, url: east.wsUrl })
+  return {
+    home: {
+      server: home,
+      region: directory.region,
+      wsUrl: homeWs,
+      connect: (token: string | null = null) => new ServerConnection(homeWs, { tokens: heldTokens(token) }),
+    },
+    east,
+    stop: async () => {
+      await home.stop()
+      await east.stop()
     },
   }
 }
@@ -77,43 +117,142 @@ async function register(connection: ServerConnection, name: string): Promise<str
 }
 
 describe('A second region, whose database holds no account', () => {
-  test('serves a signed-in player whose account lives only in the directory', async () => {
+  test('serves a player whose account lives only in the directory by sending them to the region that keeps their squad', async () => {
     const directory = await openPersistence(WALL_CLOCK)
-    const home = await startGameServer({ ...portsOf(directory), clock: WALL_CLOCK, port: 0, log: () => {} })
-    const east = await emptyRegion(directory, 'region-east')
+    const world = await homeAndEast(directory)
 
     // Ada is made where the directory is, and so are her roster and squad.
-    const first = new ServerConnection(home.url.replace('http', 'ws'), { tokens: heldTokens() })
+    const first = world.home.connect()
     const token = await register(first, 'Ada')
+    const ada = first.player!
     first.close()
     expect(await directory.accounts.accounts.playerFor(token)).toMatchObject({ name: 'Ada' })
-    await expect(east.region.db.query`SELECT id FROM players`).rejects.toThrow()
-    expect(await east.region.squads.all()).toEqual([])
+    expect(await directory.accounts.accounts.home(ada.id)).toBe(SINGLETON_REGION)
+    await expect(world.east.region.db.query`SELECT id FROM players`).rejects.toThrow()
+    expect(await world.east.region.squads.all()).toEqual([])
 
-    // East has never heard of her. Her token is the directory's, and east asks.
-    const there = east.connect(token)
-    const me = await there.request('tictac/api/account/me', {})
-    expect(me.player?.name).toBe('Ada')
-    expect(there.player?.name).toBe('Ada')
-    // The roster and squad she is given there are east's to keep, from the first
-    // moment: a region that holds nothing of a signed-in player enlists them.
-    const squad = (await there.request('tictac/api/squad/get', {})).squad
-    expect(await east.server.directory.ownerOfSquad(squad.id)).toBe('region-east')
-    expect(await east.region.squads.of(there.player!.id)).toMatchObject({ id: squad.id })
-    expect(await east.region.rosters.active(there.player!.id)).toHaveLength(6)
-    // And she is her name in east's encounter feed, not an id: asked of the directory.
-    expect(await there.request('tictac/api/encounter/feed', {})).toEqual({ entries: [] })
+    // East has never heard of her, and does not deal her a squad: her token is the
+    // directory's, east asks who she is and where her squad is, and sends her there.
+    const there = world.east.connect(token)
+    const sentTo = Promise.withResolvers<string>()
+    there.onElsewhere((url) => sentTo.resolve(url))
+    const asked = there.request('tictac/api/account/me', {}).catch((e: unknown) => e)
+    expect(await sentTo.promise).toBe(world.home.wsUrl)
+    await asked
+    expect(await world.east.region.squads.of(ada.id)).toBeNull()
+    expect(await world.east.region.rosters.active(ada.id)).toEqual([])
+    expect(await world.east.region.squads.all()).toEqual([])
 
-    // A token nobody issued is turned down by the directory, and the refusal is the same one as at home.
-    const stranger = east.connect()
+    // Where she is sent, she is let in, with the roster and squad she already had.
+    const home = world.home.connect(token)
+    expect((await home.request('tictac/api/account/me', {})).player?.name).toBe('Ada')
+    expect(await home.request('tictac/api/roster/list', {})).toMatchObject({ roster: expect.any(Array) })
+    expect(await world.home.region.rosters.active(ada.id)).toHaveLength(6)
+
+    // The refusal of a token nobody issued is the same at either region.
+    const stranger = world.east.connect()
     const refused = await stranger.request('tictac/api/account/signIn', { token: 'not-a-token' }).catch((e: unknown) => e)
     expect(refused).toBeInstanceOf(RpcError)
     expect((refused as RpcError).code).toBe(RPC_ERRORS.signInFirst)
 
     there.close()
+    home.close()
     stranger.close()
-    await east.stop()
-    await home.stop()
+    await world.stop()
+    await directory.close()
+  })
+
+  test('a passkey login at a region that is not the player\'s home hands back the session and sends the window home', async () => {
+    const directory = await openPersistence(WALL_CLOCK)
+    const world = await homeAndEast(directory)
+    const key = await softwareAuthenticator()
+
+    const registering = world.home.connect()
+    const created = await registering.request('tictac/api/account/registerOptions', { name: 'Bo' })
+    const made = await key.create({
+      challengeId: created.challengeId,
+      challenge: (created.publicKey as { challenge: string }).challenge,
+    })
+    const bo = (await registering.request('tictac/api/account/registerVerify', made)).player
+    registering.close()
+
+    const there = world.east.connect()
+    const sentTo = Promise.withResolvers<string>()
+    there.onElsewhere((url) => sentTo.resolve(url))
+    const options = await there.request('tictac/api/account/loginOptions', {})
+    const asserted = await key.assert({
+      challengeId: options.challengeId,
+      challenge: (options.publicKey as { challenge: string }).challenge,
+    })
+    const signed = await there.request('tictac/api/account/loginVerify', asserted)
+    // The session is the directory's: it is good at the home region, which is where the window is sent.
+    expect(signed.player.id).toBe(bo.id)
+    expect(await sentTo.promise).toBe(world.home.wsUrl)
+    expect(await directory.accounts.accounts.playerFor(signed.token)).toMatchObject({ id: bo.id })
+    expect(await world.east.region.squads.of(bo.id)).toBeNull()
+
+    there.close()
+    await world.stop()
+    await directory.close()
+  })
+
+  test('a player registered in the east is the east\'s, and the home region sends them there', async () => {
+    const directory = await openPersistence(WALL_CLOCK)
+    const world = await homeAndEast(directory)
+
+    const registering = world.east.connect()
+    const token = await register(registering, 'Cy')
+    const cy = registering.player!
+    registering.close()
+    expect(await directory.accounts.accounts.home(cy.id)).toBe('region-east')
+
+    const there = world.home.connect(token)
+    const sentTo = Promise.withResolvers<string>()
+    there.onElsewhere((url) => sentTo.resolve(url))
+    void there.request('tictac/api/account/me', {}).catch(() => {})
+    expect(await sentTo.promise).toBe(world.east.wsUrl)
+    expect(await world.home.region.squads.of(cy.id)).toBeNull()
+
+    there.close()
+    await world.stop()
+    await directory.close()
+  })
+
+  test('a crossing makes the target the player\'s home: the source then sends their windows over, and the target lets them in', async () => {
+    const directory = await openPersistence(WALL_CLOCK)
+    const world = await homeAndEast(directory)
+
+    const first = world.home.connect()
+    const token = await register(first, 'Di')
+    const di = first.player!
+    const squad = (await first.request('tictac/api/squad/get', {})).squad
+    const here = squad.waypoints.at(-1)!
+    const moved = Promise.withResolvers<void>()
+    first.onHandover((event) => {
+      if (event.kind === 'complete') moved.resolve()
+    })
+    await first.request('tictac/api/squad/order', {
+      order: { kind: 'crossBorder', to: { lat: here.lat, lng: here.lng }, destinationRegion: 'region-east' },
+    })
+    await moved.promise
+    expect(await directory.accounts.accounts.home(di.id)).toBe('region-east')
+    expect(await world.east.server.directory.ownerOfSquad(squad.id)).toBe('region-east')
+
+    // The old region sends a window that comes back to the new one, and keeps nothing of her.
+    const back = world.home.connect(token)
+    const sentTo = Promise.withResolvers<string>()
+    back.onElsewhere((url) => sentTo.resolve(url))
+    void back.request('tictac/api/account/me', {}).catch(() => {})
+    expect(await sentTo.promise).toBe(world.east.wsUrl)
+    expect(await world.home.region.squads.of(di.id)).toBeNull()
+
+    const there = world.east.connect(token)
+    expect((await there.request('tictac/api/squad/get', {})).squad.id).toBe(squad.id)
+
+    first.close()
+    back.close()
+    there.close()
+    await world.stop()
     await directory.close()
   })
 

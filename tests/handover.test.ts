@@ -160,7 +160,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
     // 2. Source initiates handover offer
     const reservation = await source.coordinator.initiate(OFFER)
     expect(reservation.state).toBe('offered')
-    expect(source.coordinator.isPending(OFFER.handoverId)).toBe(true)
+    expect(source.coordinator.reservation(OFFER.handoverId)?.state).toBe('offered')
 
     // 3. Client calls arrive on Target DO (2nd socket)
     const arrived = target.coordinator.arrive(OFFER.handoverId, OFFER.token, OFFER.squadId, OFFER.playerId)
@@ -172,7 +172,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
     // 4. Target DO confirms arrival to Source DO
     const confirmed = await source.coordinator.confirm(OFFER.handoverId)
     expect(confirmed.state).toBe('confirmed')
-    expect(source.coordinator.isPending(OFFER.handoverId)).toBe(false)
+    expect(source.coordinator.reservation(OFFER.handoverId)).toBeUndefined()
     expect(await source.directory.ownerOfSquad(OFFER.squadId)).toBe('region-east')
   })
 
@@ -224,7 +224,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
     const cancelResult = source.coordinator.cancel('h-abort', 'Client secondary connect failed')
     expect(cancelResult.retryable).toBe(true)
     expect(cancelResult.nextDelayMs).toBe(2000)
-    expect(source.coordinator.isPending('h-abort')).toBe(false)
+    expect(source.coordinator.reservation('h-abort')).toBeUndefined()
     await expect(source.coordinator.confirm('h-abort')).rejects.toThrow(/Unknown handover reservation/)
     expect(await source.directory.ownerOfSquad('sq-1')).toBe('region-west')
   })
@@ -269,7 +269,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
     await coordinator.initiate({ ...OFFER, handoverId: 'h-retry', squadId: 'sq-1' })
 
     await expect(coordinator.confirm('h-retry')).rejects.toThrow(/the write failed/)
-    expect(coordinator.isPending('h-retry')).toBe(true)
+    expect(coordinator.reservation('h-retry')?.state).toBe('offered')
     expect(await directory.ownerOfSquad('sq-1')).toBe('region-west')
 
     failing = false
@@ -314,14 +314,51 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
     expect(() => target.arrive('h-later', 'tok', 'sq-1', 'p-1')).toThrow(/expired/)
   })
 
-  test('an outgoing handover stops being pending once its ttl has run out', async () => {
+  test('an outgoing handover expires when its ttl has run out, and stays held until it is settled', async () => {
     const clock = turnedClock()
     const { coordinator: source } = coordinatorFor('region-west', { 'sq-1': 'region-west' }, clock)
-    await source.initiate({ ...OFFER, handoverId: 'h-ttl', squadId: 'sq-1', ttlMs: 5_000 })
-    clock.advance(5_000)
-    expect(source.isPending('h-ttl')).toBe(true)
-    clock.advance(1)
-    expect(source.isPending('h-ttl')).toBe(false)
+    const reservation = await source.initiate({ ...OFFER, handoverId: 'h-ttl', squadId: 'sq-1', ttlMs: 5_000 })
+    expect(reservation.expiresAt).toBe(clock.now() + 5_000)
+    clock.advance(5_001)
+    // Nothing forgets it on its own: only the source's resolution does, once the target has said what became of it.
+    expect(source.reservation('h-ttl')?.state).toBe('offered')
+  })
+
+  test('a handover decided against stays held, cancelled, and can no longer be confirmed, until it is cancelled for good', async () => {
+    const { coordinator: source } = coordinatorFor('region-west', { 'sq-1': 'region-west' })
+    await source.initiate({ ...OFFER, handoverId: 'h-abort', squadId: 'sq-1' })
+
+    expect(source.abort('h-abort').state).toBe('cancelled')
+    expect(source.reservationOf('sq-1')?.handoverId).toBe('h-abort')
+    await expect(source.confirm('h-abort')).rejects.toThrow(/was cancelled/)
+    expect(source.cancel('h-abort', 'the target let go').retryable).toBe(true)
+    expect(source.reservation('h-abort')).toBeUndefined()
+    expect(() => source.abort('h-abort')).toThrow(/Unknown handover reservation/)
+  })
+
+  test('an arrival is remembered until it is settled, and an offer is expected only while it is unclaimed and live', () => {
+    const clock = turnedClock(1_000)
+    const { coordinator: target } = coordinatorFor('region-east', {}, clock)
+    const offer = { handoverId: 'h-1', playerId: 'p-1', squadId: 'sq-1', sourceRegion: 'region-west', targetRegion: 'region-east', token: 'tok', expiresAt: 2_000 }
+    target.prepare(offer)
+    expect(target.expects('p-1')).toBe(true)
+    expect(target.expects('p-2')).toBe(false)
+
+    target.arrive('h-1', 'tok', 'sq-1', 'p-1')
+    expect(target.expects('p-1')).toBe(false)
+    expect(target.arrivedAt('h-1')).toEqual(offer)
+    // A commit that could not be written gives the offer back, as it was.
+    target.unclaim('h-1')
+    expect(target.arrivedAt('h-1')).toBeUndefined()
+    expect(target.prepared('h-1')).toEqual(offer)
+    target.arrive('h-1', 'tok', 'sq-1', 'p-1')
+    target.settle('h-1')
+    expect(target.arrivedAt('h-1')).toBeUndefined()
+    expect(target.prepared('h-1')).toBeUndefined()
+
+    target.prepare({ ...offer, handoverId: 'h-2' })
+    clock.advance(1_001)
+    expect(target.expects('p-1')).toBe(false)
   })
 })
 
@@ -482,15 +519,18 @@ describe('A window crossing between two real servers', () => {
           await world.east.server.stop()
           return answer
         },
-        // The source hears from the window that it could not arrive, and tells the target to let go.
+        // The source hears from the window that it could not arrive, and tells the target to let go; it lets go of the squad once the target has.
         cancelHandover: async (handoverId) => {
+          const answer = await peer.cancelHandover(handoverId)
           dropped.resolve()
-          return peer.cancelHandover(handoverId)
+          return answer
         },
       }))
 
       await connection.request('tictac/api/squad/order', { order: { kind: 'crossBorder', to, destinationRegion: EAST } })
       await dropped.promise
+      // Real servers over real sockets, so no clock to turn: one turn of the event loop for the source to finish letting go once the target has answered.
+      await Bun.sleep(0)
 
       expect(await world.west.server.directory.ownerOfSquad(squadId)).toBe(WEST)
       expect(world.west.server.crossings.inFlight(squadId)).toBe(false)

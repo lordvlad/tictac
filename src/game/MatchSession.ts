@@ -12,7 +12,7 @@ import type { Soldier } from '../entities/Soldier'
 import type { Squads } from '../entities/Squads'
 import { ailmentCost } from '../rules/Combat'
 import { type Command, isCommand } from '../rules/Command'
-import type { HudIntent, PointerIntent } from '../rules/Intent'
+import type { HudIntent, PointerIntent } from '../ui/Intent'
 import { carriedOut, debrief, escaped, winnerOf } from '../rules/MatchEnd'
 import { compareDigests, reportDivergence, type StateDigest } from '../rules/StateDigest'
 import { Recorder } from '../sim/Recorder'
@@ -21,7 +21,7 @@ import { digestWorld } from '../sim/WorldDigest'
 import { RpcMethods } from '../wire/JsonRpc'
 import type { NetworkMessage } from '../wire/NetworkMessage'
 import type { CombatRecording, RecordingHeader } from '../wire/Recording'
-import { headlessView, type MatchView, type SessionState } from './MatchView'
+import { headlessView, type MatchMode, type MatchView, type SessionState } from './MatchView'
 import type { NetworkManager } from './NetworkManager'
 
 /**
@@ -41,7 +41,7 @@ const ITEM_REACH = 1
  * a unit, because in a replay the file is the only authority over that.
  */
 const SPECTATOR_INTENTS: Partial<Record<HudIntent['type'], true>> = {
-  // Inspection only: with no network the panel is built read-only (`debugEditable`).
+  // Inspection only: only a local match is built editable (`debugEditable`).
   openDebug: true,
   toggleDebugMap: true,
   selectLevel: true,
@@ -90,6 +90,12 @@ export interface MatchSessionParts {
   /** The match is over for this window and the player is going back to the menu. */
   onLeave: () => void
   network?: NetworkManager | null
+  /**
+   * Held as a watcher rather than a player: a recording played back (`replay`),
+   * or a match on a server without a seat in it (`spectate`). Absent for a
+   * window that plays, whose mode is its network's.
+   */
+  watching?: 'spectate' | 'replay'
   /** The match's opening position, for a recording armed from the debug panel. */
   recordingHeader?: RecordingHeader | null
 }
@@ -129,14 +135,7 @@ export class MatchSession {
   /** The recorder, as the debug panel is allowed to touch it; null where no opening is known. */
   readonly recording: RecordingPort | null
   readonly network: NetworkManager | null
-  /**
-   * Watching a recording rather than commanding a match.
-   *
-   * Two things change: nothing is hidden, because the point of a replay is to
-   * watch both sides; and input cannot move a unit, because the only authority
-   * over what happens is the file.
-   */
-  spectating = false
+  private readonly watchedAs: 'spectate' | 'replay' | null
 
   private view: MatchView = headlessView()
   private readonly dice: Rng
@@ -178,6 +177,7 @@ export class MatchSession {
     this.dice = dice
     this.onLeave = parts.onLeave
     this.network = parts.network ?? null
+    this.watchedAs = parts.watching ?? null
     this.recordingHeader = parts.recordingHeader ?? null
 
     this.movementSystem = new MovementSystem(grid)
@@ -274,14 +274,36 @@ export class MatchSession {
         this.aimedItem !== null && shooter
           ? { itemId: this.aimedItem, candidates: this.itemCandidates(shooter), target: this.itemTarget }
           : null,
-      networkMode: this.network?.mode ?? 'local',
-      myFaction: this.network?.myFaction ?? Faction.Blue,
+      canAct: this.canAct,
+      seat: this.seat,
     }
+  }
+
+  /** How this window holds the match: a watcher's mode wins, otherwise the network's, otherwise one screen. */
+  get mode(): MatchMode {
+    return this.watchedAs ?? this.network?.mode ?? 'local'
+  }
+
+  /** The network this window shares the match over: only a player with a seat has one. */
+  private get peer(): NetworkManager | null {
+    const { mode } = this
+    return mode === 'host' || mode === 'join' ? this.network : null
+  }
+
+  /** The side this window plays when it shares the match with someone; null on one screen and for a watcher. */
+  get seat(): Faction | null {
+    return this.peer?.myFaction ?? null
   }
 
   /** Whose eyes the screen is: one's own over the network, whoever is up when sharing a screen. */
   get viewerFaction(): Faction {
-    return this.network && this.network.mode !== 'local' ? this.network.myFaction : this.turnManager.activeFaction
+    return this.seat ?? this.turnManager.activeFaction
+  }
+
+  /** Watching rather than playing: a replay, or a match on a server without a seat in it. */
+  get watching(): boolean {
+    const { mode } = this
+    return mode === 'spectate' || mode === 'replay'
   }
 
   private get enemyFaction(): Faction {
@@ -342,24 +364,45 @@ export class MatchSession {
   }
 
   /**
-   * Whether this window may act on the match now: the turn gate, which a
-   * match with nobody else in it (hot seat, a replay) always passes.
+   * Whether this window may command the match now. The one answer: the HUD
+   * reads it from {@link SessionState}, and every intent and press on the field
+   * is checked against it here. A mode that is added is decided in this switch
+   * or fails to compile, rather than being missed by whichever caller tested
+   * for the modes it knew.
    */
-  private mayAct(): boolean {
-    return !this.network || this.network.isMyTurn(this.turnManager.activeFaction)
+  get canAct(): boolean {
+    switch (this.mode) {
+      case 'local':
+        return true
+      case 'host':
+      case 'join':
+        // Not while getting the seat back: see `NetworkManager.reconnecting`.
+        return this.peer !== null && !this.peer.reconnecting && this.turnManager.activeFaction === this.peer.myFaction
+      case 'spectate':
+      case 'replay':
+        return false
+    }
+  }
+
+  /**
+   * Whether this window may press an intent: whoever can act may, the end
+   * screen's buttons answer on any side, and a watcher may use the view
+   * controls — which change only what is on screen, never the match.
+   */
+  private permits(intent: HudIntent): boolean {
+    // The match is over, so whose turn it ended on decides nothing, and without
+    // this the side that was waiting — or a spectator — could never leave it.
+    if (END_SCREEN_INTENTS[intent.type] === true) return true
+    if (this.canAct) return true
+    // A replay is not commanded: the panels that would spend a unit's points
+    // are hidden, and this is what makes that a rule rather than a consequence
+    // of the layout.
+    return this.watching && SPECTATOR_INTENTS[intent.type] === true
   }
 
   /** Single place where a HUD press becomes a change to the game. */
   handleIntent(intent: HudIntent): void {
-    // The end screen belongs to everybody at the table: the match is over, so
-    // whose turn it ended on decides nothing, and without this the side that
-    // was waiting — or a spectator — could never leave it.
-    const leaving = END_SCREEN_INTENTS[intent.type] === true
-    if (!leaving && !this.mayAct()) return
-    // A replay is not commanded. Only the view controls answer: the panels that
-    // would spend a unit's points are hidden, and this is what makes that a rule
-    // rather than a consequence of the layout.
-    if (!leaving && this.spectating && !SPECTATOR_INTENTS[intent.type]) return
+    if (!this.permits(intent)) return
 
     // Retreat asks twice; anything else pressed in between means not now.
     if (this.retreatArmed && intent.type !== 'requestRetreat' && intent.type !== 'confirmRetreat') {
@@ -522,7 +565,7 @@ export class MatchSession {
       case 'requestTurnSwitch':
         // Hot seat asks the next player to take the chair first; a networked
         // match has nobody to hand the screen to.
-        if (this.network && this.network.mode !== 'local') {
+        if (this.peer) {
           this.commands.apply({ type: 'endTurn', faction: this.turnManager.activeFaction }, 'local')
         } else {
           this.view.show(intent)
@@ -542,10 +585,11 @@ export class MatchSession {
    * down an armed retreat, because it is not an answer to the prompt.
    */
   handlePointer(intent: PointerIntent): void {
-    if (!this.mayAct()) return
+    // A watcher may look (below); a player out of turn may not even do that.
+    if (!this.canAct && !this.watching) return
     switch (intent.type) {
       case 'face': {
-        if (this.spectating) return
+        if (!this.canAct) return
         const selected = this.turnManager.selectedSoldier
         if (!selected || selected.isMoving || selected.isDead) return
         this.commands.apply(
@@ -567,7 +611,7 @@ export class MatchSession {
     // Watching: picking a unit to inspect is welcome, ordering it anywhere is
     // not. Selection is view state — `selectSoldier` refuses a unit whose side
     // is not up, so this cannot desynchronise the replay either.
-    if (this.spectating) {
+    if (!this.canAct) {
       if (tap.friendly !== null) this.clickSoldier(tap.friendly, active)
       else if (tap.enemy !== null) this.clickSoldier(tap.enemy, this.enemyFaction)
       return
@@ -694,8 +738,8 @@ export class MatchSession {
     this.view.turnSwitched()
     this.standDown()
 
-    if (this.network && this.network.mode !== 'local') {
-      const myFaction = this.network.myFaction
+    const myFaction = this.seat
+    if (myFaction !== null) {
       if (this.turnManager.activeFaction === myFaction) {
         const living = this.squads.getLiving(myFaction)
         if (living.length > 0) this.turnManager.selectSoldier(living[0]!)
@@ -732,8 +776,9 @@ export class MatchSession {
    * drifting apart — which is why it runs every handover rather than on demand.
    */
   private sendStateDigest(): void {
-    if (!this.network || this.network.mode === 'local') return
-    this.network.sendRpc({
+    const { peer } = this
+    if (!peer) return
+    peer.sendRpc({
       jsonrpc: '2.0',
       method: RpcMethods.digest,
       params: { digest: this.localDigest() },
@@ -908,7 +953,7 @@ export class MatchSession {
     // The match is over once a side has nobody standing — checked once
     // everything has settled, so the last shot's walk and reactions are done.
     // Not in a replay: there is nobody to show it to.
-    if (!this.over && !this.spectating && !this.busy) {
+    if (!this.over && !this.watching && !this.busy) {
       const winner = winnerOf(this.squads)
       if (winner !== null) this.conclude(winner)
     }
@@ -921,7 +966,7 @@ export class MatchSession {
    */
   private conclude(winner: Faction): void {
     this.over = true
-    const viewer = this.network && this.network.mode !== 'local' ? this.network.myFaction : null
+    const viewer = this.seat
     const loser = winner === Faction.Blue ? Faction.Red : Faction.Blue
     // Picked from the match seed, so both sides carry out the same one.
     const carried = this.recordingHeader

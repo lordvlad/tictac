@@ -96,8 +96,8 @@ export class Accounts implements AccountsPort {
     }
   }
 
-  /** Take a created passkey, and with it make a player and a session. */
-  async register(answer: PasskeyCreated): Promise<SignedIn> {
+  /** Take a created passkey, and with it make a player — whose home is `home`, the region that served the registration — and a session. */
+  async register(answer: PasskeyCreated, home: string): Promise<SignedIn> {
     const challenge = await this.takeChallenge(answer.challengeId, 'register')
     readClientData(fromBase64Url(answer.clientDataJSON), {
       type: 'webauthn.create',
@@ -131,7 +131,7 @@ export class Accounts implements AccountsPort {
     // session — on a Durable Object as much as on Bun. Their roster and squad
     // are the region's to make, straight after (`RegionStore.enlist`).
     const batch = new Batch()
-    batch.query`INSERT INTO players (id, name, created_at) VALUES (${playerId}, ${name}, ${created})`
+    batch.query`INSERT INTO players (id, name, created_at, home_region) VALUES (${playerId}, ${name}, ${created}, ${home})`
     batch.query`INSERT INTO credentials (id, player_id, public_key, algorithm, sign_count, created_at)
                 VALUES (${answer.credentialId}, ${playerId}, ${answer.publicKey},
                         ${answer.publicKeyAlgorithm}, ${authenticator.signCount}, ${created})`
@@ -236,6 +236,15 @@ export class Accounts implements AccountsPort {
     const rows = await this.db.query<{ name: string }>`SELECT name FROM players WHERE id = ${id}`
     const row = rows[0]
     return row ? { id, name: row.name } : null
+  }
+
+  async home(id: string): Promise<string | null> {
+    const rows = await this.db.query<{ home_region: string }>`SELECT home_region FROM players WHERE id = ${id}`
+    return rows[0]?.home_region ?? null
+  }
+
+  async moveHome(id: string, region: string): Promise<void> {
+    await this.db.query`UPDATE players SET home_region = ${region} WHERE id = ${id}`
   }
 
   async logout(token: string): Promise<void> {

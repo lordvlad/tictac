@@ -5,14 +5,19 @@ import { Faction } from '../config'
 import type { Grid, Tile } from '../core/Grid'
 import { Block, Side, StairDirection } from '../core/Grid'
 import { WallKind } from '../core/Walls'
-import type { Squads } from '../entities/Squads'
+
+/** A living unit as the minimap marks it: where it stands and whose it is. */
+export interface DebugMapUnit {
+  tile: Tile
+  faction: Faction
+}
 
 const TILE_PX = 11
 const WALL_PX = 3
 
 interface DebugMapViewProps {
   grid: Grid
-  squads: Squads
+  units: readonly DebugMapUnit[]
   activeLevelFilter: number
   seedLabel: string
   selectedLevelView: number | 'all'
@@ -22,18 +27,18 @@ interface DebugMapViewProps {
 
 function LevelCanvas({
   grid,
-  squads,
+  units,
   level,
   size,
   dpr,
   drawLevel,
 }: {
   grid: Grid
-  squads: Squads
+  units: readonly DebugMapUnit[]
   level: number
   size: number
   dpr: number
-  drawLevel: (ctx: CanvasRenderingContext2D, grid: Grid, squads: Squads, level: number, size: number) => void
+  drawLevel: (ctx: CanvasRenderingContext2D, grid: Grid, units: readonly DebugMapUnit[], level: number, size: number) => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const cssPx = size * TILE_PX
@@ -49,16 +54,16 @@ function LevelCanvas({
     if (ctx) {
       ctx.scale(dpr, dpr)
       ctx.imageSmoothingEnabled = false
-      drawLevel(ctx, grid, squads, level, size)
+      drawLevel(ctx, grid, units, level, size)
     }
-  }, [grid, squads, level, size, dpr, drawLevel, cssPx])
+  }, [grid, units, level, size, dpr, drawLevel, cssPx])
 
   return <canvas ref={canvasRef} className="debug-map-canvas" />
 }
 
 function DebugMapView({
   grid,
-  squads,
+  units,
   activeLevelFilter,
   seedLabel,
   selectedLevelView,
@@ -119,7 +124,7 @@ function DebugMapView({
             </div>
             <LevelCanvas
               grid={grid}
-              squads={squads}
+              units={units}
               level={level}
               size={size}
               dpr={dpr}
@@ -161,7 +166,7 @@ export class DebugMap {
   private keyListenerAttached = false
   private lastArgs: {
     grid: Grid
-    squads: Squads
+    units: readonly DebugMapUnit[]
     activeLevelFilter: number
     seedLabel: string
   } | null = null
@@ -229,15 +234,15 @@ export class DebugMap {
     }
   }
 
-  refresh(grid: Grid, squads: Squads, activeLevelFilter: number, seedLabel: string): void {
-    this.lastArgs = { grid, squads, activeLevelFilter, seedLabel }
+  refresh(grid: Grid, units: readonly DebugMapUnit[], activeLevelFilter: number, seedLabel: string): void {
+    this.lastArgs = { grid, units, activeLevelFilter, seedLabel }
     if (!this.visible) return
 
     flushSync(() => {
       this.reactRoot.render(
         <DebugMapView
           grid={grid}
-          squads={squads}
+          units={units}
           activeLevelFilter={activeLevelFilter}
           seedLabel={seedLabel}
           selectedLevelView={this.selectedLevelView}
@@ -246,7 +251,7 @@ export class DebugMap {
             if (this.lastArgs) {
               this.refresh(
                 this.lastArgs.grid,
-                this.lastArgs.squads,
+                this.lastArgs.units,
                 this.lastArgs.activeLevelFilter,
                 this.lastArgs.seedLabel,
               )
@@ -261,7 +266,7 @@ export class DebugMap {
   static drawLevel(
     ctx: CanvasRenderingContext2D,
     grid: Grid,
-    squads: Squads,
+    units: readonly DebugMapUnit[],
     level: number,
     size: number,
   ): void {
@@ -376,25 +381,20 @@ export class DebugMap {
     }
 
     // 3. Units on this level
-    if (squads && squads.soldiers) {
-      for (const soldier of squads.soldiers) {
-        if (soldier.isDead) continue
-        const tile = soldier.tile as Tile
-        if (!tile) continue
-        if (grid.levelAt(tile.x, tile.y) !== level) continue
+    for (const { tile, faction } of units) {
+      if (grid.levelAt(tile.x, tile.y) !== level) continue
 
-        const cx = tile.x * TILE_PX + TILE_PX / 2
-        const cy = tile.y * TILE_PX + TILE_PX / 2
+      const cx = tile.x * TILE_PX + TILE_PX / 2
+      const cy = tile.y * TILE_PX + TILE_PX / 2
 
-        ctx.fillStyle = soldier.faction === Faction.Blue ? '#38bdf8' : '#f87171'
-        ctx.beginPath()
-        ctx.arc(cx, cy, TILE_PX / 2 - 1.5, 0, Math.PI * 2)
-        ctx.fill()
+      ctx.fillStyle = faction === Faction.Blue ? '#38bdf8' : '#f87171'
+      ctx.beginPath()
+      ctx.arc(cx, cy, TILE_PX / 2 - 1.5, 0, Math.PI * 2)
+      ctx.fill()
 
-        ctx.strokeStyle = '#ffffff'
-        ctx.lineWidth = 1
-        ctx.stroke()
-      }
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 1
+      ctx.stroke()
     }
   }
 

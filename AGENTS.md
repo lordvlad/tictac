@@ -88,10 +88,11 @@ bun run build
 | `src/entities/` | `Soldier` (the wrapper over a unit's components), `Squads` (the units on the field) and `applyUnitLoadout` (`Kit`). |
 | `src/wire/` | The contract two sides share: `NetworkMessage`, `Rpc`, `JsonRpc`, `Lobby`, `Encounter`, `Transport`, the `Recording` format, `Base64Url`. Headless; imports only `core` and `rules`. |
 | `src/sim/` | Headless match simulation engine (`SimUnit`, `SimMatch`, `Balance`), plus what drives a match's turns and moments: `TurnManager`, the `Rewind` types and `digestWorld`. |
-| `src/game/` | Client orchestration with no scene: `MatchSession` (intents to commands, the turn/act gate, state out as view models; headless-testable), the `MatchView` port it is drawn through, `NetworkManager`, `ServerConnection`, `Playback`. Imports none of `render`, `hud`, `camera`. |
-| `src/client/` | The presentation of a match: `Presenter` (draws the session: HUD from its view models, fog, overlays, effects), `Input` (canvas and key events to intents), the planners (`MovementPlanner`, `ShootPlanner`, `GrenadePlanner`), `FogOfWar`, `WallXray`, `Battlefield`. The one layer that sees `game` and `render`/`hud`/`camera` both; only `main.tsx` builds it. |
+| `src/game/` | Client orchestration with no scene: `MatchSession` (intents to commands, the one `canAct` gate per `MatchMode`, state out as view models; headless-testable), the `MatchView` port it is drawn through, `NetworkManager`, `ServerConnection`, `Playback`. Imports none of `render`, `hud`, `camera`. |
+| `src/client/` | The presentation of a match: `Presenter` (draws the session: HUD from its view models, fog, overlays, effects), `Input` (canvas and key events to intents), the planners (`MovementPlanner`, `ShootPlanner`, `GrenadePlanner`), `FogOfWar`, `WallXray`, `Battlefield`, the `HudModelBuilder` that projects the session into the HUD's view data, the loadout screen and debug panel (which touch the scene and live units), and `ServerAdapters` (the HUD's server ports over `ServerConnection`). The one layer that sees `game` and `render`/`hud`/`camera` both; only `main.tsx` builds it. |
 | `src/render/` | Three.js meshes, animations, tracers, visual FX, materials. |
-| `src/hud/` | DOM HUD overlays, loadout screen, portraits, debug panels. |
+| `src/ui/` | The vocabulary the player's screen and the session speak: `HudIntent`, `PointerIntent`, the playback speeds. Below both `game` and `hud`. |
+| `src/hud/` | DOM HUD overlays, menus, map, roster: plain view-model props in, `HudIntent`s out. Server-backed screens take the ports of `ServerPorts.ts`; imports no entity, sim, planner, scene or connection. |
 | `src/camera/` | Orbit rig, camera controls, pointer raycaster picking. |
 | `docs/` | Living documentation: architecture, GDD, ADRs, backlog, plans, guides, schemas. |
 | `scripts/` | Tooling: balance runner, icon compiler, character optimizer, doc linter. |

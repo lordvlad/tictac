@@ -58,6 +58,8 @@ async function lobbyOnASocket(seed = 1) {
   const accounts = {
     playerFor: async (token: string): Promise<Player | null> =>
       token.startsWith('id-') ? { id: token, name: token.slice(3) } : null,
+    // Everybody is at home in the one region there is.
+    home: async () => 'region',
   } as unknown as AccountsPort
   const newLobby = () =>
     new Lobby({
@@ -74,9 +76,9 @@ async function lobbyOnASocket(seed = 1) {
       lobby: over,
       accounts,
       // These windows sign in with an id-token and hold no rosters: enlisting is nothing here.
-      region: { rosters: {}, squads: {}, encounters: {}, matches: store, enlist: async () => ({ id: 'squad', waypoints: [], standing: 'stand' }) } as unknown as Pick<
+      region: { self: 'region', rosters: {}, squads: {}, encounters: {}, matches: store, enlist: async () => ({ id: 'squad', waypoints: [], standing: 'stand' }) } as unknown as Pick<
         RegionStore,
-        'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'
+        'self' | 'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'
       >,
       // Nothing here travels.
       journeys: {} as Journeys,

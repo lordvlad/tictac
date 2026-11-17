@@ -110,8 +110,16 @@ roster and loadout screens, playback controls, the debug map and panel — is **
 components in `.tsx` files under `src/hud/` (`src/hud/menu/` for the menus, `src/hud/hud/` for
 the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-jsx`).
 
-- **Model in, markup out.** `HudModel.ts` stays a pure function of the match state
-  (`buildHudModel`, `endScreens`, `tileReadout`) and knows nothing of React; components read it.
+- **Model in, markup out.** `HudModel.ts` is plain view data (`HudModel`, `EndScreen`,
+  `tileReadout`) and knows nothing of React or of the match; `src/client/HudModelBuilder.ts`
+  (`buildHudModel`, `endScreens`) projects the session's state into it, and components read it.
+  `src/hud` imports no entity, simulation, planner, scene or connection (`tests/layers.test.ts`).
+  Who may press is one value, `HudModel.canAct`, which is `MatchSession.canAct` — the HUD never
+  works out whose turn it is. The screens that talk to a match server (the panel, the map, the
+  return feed, the encounter prompt) are handed the narrow ports of `src/hud/ServerPorts.ts`,
+  built over the window's `ServerConnection` by `src/client/ServerAdapters.ts` in `main.tsx`.
+  `LoadoutScreen` (it owns a 3D scene) and `DebugPanel` (it writes straight to the live units)
+  live in `src/client`, not in the HUD.
 - **Each surface's class owns a root.** `Hud`, `LoadoutScreen`, `RosterScreen`,
   `PlaybackControls`, `FullscreenPrompt`, `DebugMap` and `DebugPanel` keep the imperative API
   their callers use (`render(model)`, `showEndScreen`, `refresh`…): each creates its container,
@@ -130,7 +138,7 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   connection is the window's, not the match's, and stays.
 - **Input, session and presenter are three things.** `Input` (`src/client/Input.ts`) owns the
   canvas and key listeners and turns them into a `HudIntent` or a `PointerIntent`
-  (`src/rules/Intent.ts`) — what is under the pointer, never what it means. `MatchSession`
+  (`src/ui/Intent.ts`) — what is under the pointer, never what it means. `MatchSession`
   (`src/game/MatchSession.ts`) gates the intent by whose turn it is and whether this window is only
   watching, turns what survives into a `Command` through `CommandSystem`, and hands state out as
   view models (`session.state`, the `Outcome` of a decided match). It imports nothing from `render`,
@@ -168,7 +176,7 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   `style` object per element, ten near-copies of the same button, and a flat list of six choices
   that each hid which kind it was.
 - **The match-server panel is the lobby.** `ServerPanel.tsx` keeps the account
-  line and the passkey ceremony over the window's one `ServerConnection` (`connectionToServer()`,
+  line and the passkey ceremony over the window's one `ServerConnection` (`serverPorts().panel`,
   taken when the panel opens), and below them the room list,
   pushed by the server through `ServerConnection.watchLobby` (`src/wire/Lobby.ts`) and never
   polled; the subscription ends when the panel unmounts. `LobbyList.tsx` draws the rooms in two

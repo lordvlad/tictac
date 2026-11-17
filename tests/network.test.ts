@@ -769,8 +769,6 @@ describe('A spectator', () => {
     const socket = server.last
     const before = socket.heard.length
     expect(net.mode).toBe('spectate')
-    expect(net.isMyTurn(Faction.Blue)).toBe(false)
-    expect(net.isMyTurn(Faction.Red)).toBe(false)
 
     // Everything a seat would have put on the wire, through every door it has.
     net.send({ type: 'endTurn', faction: Faction.Blue })
@@ -843,7 +841,7 @@ describe('A window that loses its socket to the match server', () => {
     server.last.drop()
     // Nothing is reported as over: the window is getting its seat back.
     expect(told.disconnects).toEqual([])
-    expect(net.isMyTurn(Faction.Blue)).toBe(false)
+    expect(net.reconnecting).toBe(true)
 
     await clock.advance(30_000)
     const tries = server.sockets.slice(1).map((socket) => socket.at)
@@ -926,7 +924,7 @@ describe('A window that loses its socket to the match server', () => {
     expect(told.reconnected).toEqual([seatIn('playing')])
     expect(told.resyncs).toEqual([{ kind: 'caughtUp', missed: 1 }])
     expect(heard).toEqual([cover, redEnds])
-    expect([net.mode, net.isMyTurn(Faction.Blue)]).toEqual(['host', true])
+    expect([net.mode, net.reconnecting]).toEqual(['host', false])
     // Its own seat, by the key it came with; and nothing else on the way —
     // a match being played says nothing it has not played.
     expect(intentsOn([server.last])).toEqual([{ kind: 'resume', roomId: 'r00m', seatKey: 'k3y' }])

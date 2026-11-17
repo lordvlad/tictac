@@ -1,8 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { Account } from '../../game/Account'
 import type { LobbyView, ServerIntent } from '../../wire/Lobby'
-import type { ServerConnection } from '../../game/ServerConnection'
 import { autoResumes } from '../EncounterView'
+import type { ServerPanelPort, ServerState } from '../ServerPorts'
 import {
   MENU_COLOURS,
   MenuButton,
@@ -21,8 +20,8 @@ import { LobbyList } from './LobbyList'
  * share one panel, and the status line above them says which of the two the
  * next match will be.
  *
- * Everything on it travels over the window's one connection to the server
- * (`ServerConnection`): who this window is, the room list — pushed by the
+ * Everything on it travels over the window's one connection to the server,
+ * reached through a {@link ServerPanelPort} that `main.tsx` builds: who this window is, the room list — pushed by the
  * server as it changes, never polled — and every way in, which is one
  * `onServerConnect(intent)`; the server decides where the window
  * actually lands, and says so.
@@ -54,8 +53,7 @@ interface ServerIdentity {
   colour: string
 }
 
-function identify(connection: ServerConnection | null): ServerIdentity {
-  const state = connection?.state ?? { kind: 'connecting' as const }
+function identify(state: ServerState): ServerIdentity {
   switch (state.kind) {
     case 'connecting':
       return { signedIn: false, reachable: true, text: '…', colour: MENU_COLOURS.muted }
@@ -69,7 +67,7 @@ function identify(connection: ServerConnection | null): ServerIdentity {
         colour: MENU_COLOURS.warning,
       }
   }
-  const player = connection!.player
+  const { player } = state
   if (player) {
     return {
       signedIn: true,
@@ -78,7 +76,7 @@ function identify(connection: ServerConnection | null): ServerIdentity {
       colour: MENU_COLOURS.signedIn,
     }
   }
-  const refused = connection!.signInRefused
+  const refused = state.signInRefused
   if (refused) return { signedIn: false, reachable: true, text: refused, colour: MENU_COLOURS.warning }
   return {
     signedIn: false,
@@ -89,13 +87,13 @@ function identify(connection: ServerConnection | null): ServerIdentity {
 }
 
 export function ServerPanel({
-  connectionToServer,
+  openServer,
   onServerConnect,
   onOpenMap,
   onBack,
 }: {
-  /** The window's one connection to the match server (`main.tsx`). */
-  connectionToServer: () => ServerConnection
+  /** The window's one connection to the match server (`main.tsx`), as this panel needs it. */
+  openServer: () => ServerPanelPort
   /**
    * Go into a room with `intent`. Resolves once the match,
    * loadout or spectator view has taken over; rejects with a player-readable
@@ -106,7 +104,7 @@ export function ServerPanel({
   onOpenMap: () => Promise<void>
   onBack: () => void
 }) {
-  const [connection, setConnection] = useState<ServerConnection | null>(null)
+  const [server, setServer] = useState<ServerPanelPort | null>(null)
   /** Redraw on every change of the connection's state or of who it is signed in as. */
   const [, redraw] = useReducer((n: number) => n + 1, 0)
   const [accountName, setAccountName] = useState('')
@@ -120,12 +118,12 @@ export function ServerPanel({
 
   /**
    * The window's connection, taken when the panel opens. The window keeps
-   * one (`connectionToServer`): coming back to this panel without a page
+   * one (`openServer`): coming back to this panel without a page
    * load — a room refused, a match aborted — finds it still open.
    */
-  useEffect(() => setConnection(connectionToServer()), [connectionToServer])
+  useEffect(() => setServer(openServer()), [openServer])
 
-  useEffect(() => connection?.onChange(redraw), [connection])
+  useEffect(() => server?.onChange(redraw), [server])
 
   /**
    * The room list, as the server pushes it. A new connection shows nothing
@@ -133,11 +131,11 @@ export function ServerPanel({
    */
   useEffect(() => {
     setLobby(null)
-    if (!connection) return
-    return connection.watchLobby((view) => setLobby({ view, at: Date.now() }))
-  }, [connection])
+    if (!server) return
+    return server.onLobby((view) => setLobby({ view, at: Date.now() }))
+  }, [server])
 
-  const identity = identify(connection)
+  const identity = identify(server?.state() ?? { kind: 'connecting' })
   const view = lobby?.view ?? null
   const you = view?.you ?? null
 
@@ -145,10 +143,10 @@ export function ServerPanel({
    * Run a passkey ceremony. Who the window then is comes from the
    * connection, which the ceremony's answer has already told.
    */
-  const ceremony = async (act: (it: Account) => Promise<unknown>) => {
-    if (!connection) return
+  const ceremony = async (act: (it: ServerPanelPort) => Promise<unknown>) => {
+    if (!server) return
     try {
-      await act(new Account(connection))
+      await act(server)
       setStatus(null)
     } catch (err) {
       setStatus({

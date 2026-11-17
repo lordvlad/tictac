@@ -302,6 +302,15 @@ seat in a room that is not over, or who has no window open, does not start a cro
 every `HANDOVER_RECHECK_MS` (30 s), costing no attempt. All of it runs on the injected clock, so
 `tests/crossings.test.ts` turns it by hand.
 
+A crossing survives a restart (`tictac-dwq.7`, `.8`): the order, its attempts and the moment of the next are a
+`crossings` row, put back on the schedule by `Crossings.restore` before `Journeys.restore`, and each handover in
+flight is a `handovers` row on both regions (`HandoverStore`, [persistence](persistence.md)). An offer that is out
+is *in doubt* until the target says what became of it: the source asks (`handoverStatus`) when the offer lapses and
+when it restarts, completes if the target committed, keeps the squad and tries again if the target has dropped
+its copy, and asks again on the backoff if the target does not answer. The target, if its `confirmArrival` was not
+answered, keeps its commit and asks the source again. See RFC-0002 §2 for why neither can then lose the squad
+or keep it alongside the other.
+
 ## 5. The client
 
 `src/hud/MapScreen.tsx` reads the route with `squad/get`, keeps it current from `squad/changed`

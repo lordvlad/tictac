@@ -5,7 +5,7 @@ import { AMMO, AmmoId, GRENADES, GrenadeId, STATUSES, type StatusKind, WEAPONS, 
 import { ITEMS, ItemId } from '../core/Items'
 import type { Soldier } from '../entities/Soldier'
 import { applyStatus } from '../rules/Combat'
-import { Icon } from './Icon'
+import { Icon } from '../hud/Icon'
 
 /** A group of live values the panel can edit. */
 interface EditGroup {
@@ -407,8 +407,9 @@ function DebugPanelView({
  * and nobody else would hear of it.
  *
  * Deliberately outside the HUD's model/intent discipline — it writes straight to
- * the objects the systems read. That is the point of a debug tool, and keeping it
- * separate means the production HUD stays a pure view.
+ * the objects the systems read. That is the point of a debug tool, and it is why
+ * it lives in `src/client` with the presenter that owns it, not in `src/hud`:
+ * the production HUD stays a pure view that imports no entity or rules mutator.
  *
  * Rows are generated from the objects themselves, so a weapon stat or status
  * effect added later shows up here without touching this file.

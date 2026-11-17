@@ -133,7 +133,7 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
       new RegExp(`region database is at migration 99.*up to ${REGION_SCHEMA.migrations.length}`, 's'),
     )
     // The other store's ledger is its own: the account store opens as ever.
-    await expect(migrate(db, WALL_CLOCK, ACCOUNT_SCHEMA)).resolves.toEqual([1])
+    await expect(migrate(db, WALL_CLOCK, ACCOUNT_SCHEMA)).resolves.toEqual(ACCOUNT_SCHEMA.migrations.map((m) => m.id))
 
     await db.close()
   })
@@ -165,6 +165,8 @@ describe.each(DATABASE_URLS)('A database written before the account/region split
 
     const persistence = await persistenceOverDb(db, WALL_CLOCK)
     expect(await persistence.accounts.accounts.player('ada')).toEqual({ id: 'ada', name: 'Ada' })
+    // Everyone who existed before regions were sharded lives in the one region there was.
+    expect(await persistence.accounts.accounts.home('ada')).toBe('singleton')
     expect((await persistence.region.rosters.active('ada')).map((member) => member.characterId)).toEqual(['alive'])
     expect((await persistence.region.rosters.records('ada')).map((row) => [row.characterId, row.status, row.diedIn])).toEqual([
       ['alive', 'active', null],
@@ -175,9 +177,8 @@ describe.each(DATABASE_URLS)('A database written before the account/region split
     expect(await persistence.region.rosters.result('m1')).toEqual({ winner: 0, bluePlayer: 'ada', redPlayer: null })
     expect((await persistence.region.encounters.feed('ada', 5)).map((entry) => entry.matchId)).toEqual(['m1'])
     expect(await db.query<{ store: string; id: number }>`SELECT store, id FROM store_migrations ORDER BY store, id`).toEqual([
-      { store: 'accounts', id: 1 },
-      { store: 'region', id: 1 },
-      { store: 'region', id: 2 },
+      ...ACCOUNT_SCHEMA.migrations.map(({ id }) => ({ store: 'accounts', id })),
+      ...REGION_SCHEMA.migrations.map(({ id }) => ({ store: 'region', id })),
     ])
 
     // The keys are gone: a region now holds a squad for a player it has no

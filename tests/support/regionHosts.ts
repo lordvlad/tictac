@@ -40,6 +40,8 @@ export interface RegionHost {
   window(): Window
   /** The address a window is offered for this host. */
   url: string
+  /** The server stopped and started again over the same database, as a deploy or a crash does: nothing but what it wrote down survives. */
+  restart(): Promise<void>
 }
 
 export interface RegionHosts {
@@ -81,28 +83,36 @@ export async function regionHosts(start = Date.UTC(2026, 9, 8, 9)): Promise<Regi
 
   const host = async (region: RegionStore, url: string): Promise<RegionHost> => {
     const armed: (number | null)[] = []
-    const match = await createMatchServer({
-      clock,
-      accounts,
-      region,
-      alarm: { arm: (at) => void armed.push(at) },
-      placeOf: () => null,
-      party,
-      regions: PARTITIONS,
-      peers,
-      log: () => {},
-      // Nothing is rolled for on the road: a squad's trip here is only its crossing.
-      journeys: { openEncounter: undefined, openMeeting: undefined },
-    })
-    peers.add(region.self, { crossings: match.crossings, url })
-    return {
-      match,
+    const open = () =>
+      createMatchServer({
+        clock,
+        accounts,
+        region,
+        alarm: { arm: (at) => void armed.push(at) },
+        placeOf: () => null,
+        party,
+        regions: PARTITIONS,
+        peers,
+        log: () => {},
+        // Nothing is rolled for on the road: a squad's trip here is only its crossing.
+        journeys: { openEncounter: undefined, openMeeting: undefined },
+      })
+    const started: RegionHost = {
+      match: await open(),
       region,
       armed,
       url,
-      wake: () => match.alarm(),
-      window: () => window(match),
+      wake: () => started.match.alarm(),
+      window: () => window(started.match),
+      async restart() {
+        // The database is the host's, and outlives the server: what the new one finds there is all it has.
+        await started.match.dispose()
+        started.match = await open()
+        peers.add(region.self, { crossings: started.match.crossings, url })
+      },
     }
+    peers.add(region.self, { crossings: started.match.crossings, url })
+    return started
   }
   const west = await host(persistence.region, 'ws://west.test/')
   const east = await host(eastRegion, 'ws://east.test/')

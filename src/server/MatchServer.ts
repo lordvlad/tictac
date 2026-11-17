@@ -165,6 +165,7 @@ export async function createMatchServer(ports: MatchServerPorts): Promise<MatchS
     clock,
     directory,
     region,
+    accounts,
     schedule,
     serially,
     lobby,
@@ -188,9 +189,11 @@ export async function createMatchServer(ports: MatchServerPorts): Promise<MatchS
     log,
     ...ports.journeys,
   })
+  // Before the squads' own schedule: a crossing's squads that were committed here are this region's to adopt.
+  await crossings.restore()
   await journeys.restore()
 
-  const sessions = new Sessions({ lobby, accounts, region, journeys, crossings, clock, log })
+  const sessions = new Sessions({ lobby, accounts, region, journeys, crossings, peers: ports.peers, clock, log })
   const relatedOrigins = relatedOriginsHandler(ports.party)
 
   return {

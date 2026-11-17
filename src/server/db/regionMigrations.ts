@@ -287,7 +287,43 @@ const WITHOUT_PLAYER_KEYS: Migration = {
   ],
 }
 
+const HANDOVER_RECOVERY: Migration = {
+  id: 3,
+  name: 'handover recovery',
+  // What a restart resumes of a squad crossing the border (`HandoverStore`).
+  // `crossings` is the order, one per squad; `handovers` is a handover in
+  // flight as the region on either end of it keeps it, told apart by `role`
+  // ('source' or 'target'). Times are the server's clock in ms, BIGINT because
+  // a millisecond epoch does not fit Postgres's INTEGER. A squad's crossing
+  // is not a foreign key to `squads`: a squad that has crossed is no longer
+  // here, and its row is deleted by the crossing, not by cascade.
+  up: [
+    `CREATE TABLE IF NOT EXISTS crossings (
+       squad_id  TEXT    PRIMARY KEY,
+       player_id TEXT    NOT NULL,
+       region    TEXT    NOT NULL,
+       to_lat_e6 INTEGER NOT NULL,
+       to_lng_e6 INTEGER NOT NULL,
+       attempts  INTEGER NOT NULL,
+       next_at   BIGINT  NOT NULL
+     )`,
+    `CREATE TABLE IF NOT EXISTS handovers (
+       handover_id   TEXT    PRIMARY KEY,
+       role          TEXT    NOT NULL,
+       squad_id      TEXT    NOT NULL,
+       player_id     TEXT    NOT NULL,
+       source_region TEXT    NOT NULL,
+       target_region TEXT    NOT NULL,
+       target_url    TEXT,
+       token         TEXT    NOT NULL,
+       expires_at    BIGINT  NOT NULL,
+       attempts      INTEGER NOT NULL DEFAULT 0,
+       state         TEXT    NOT NULL
+     )`,
+  ],
+}
+
 export const REGION_SCHEMA: Schema = {
   store: 'region',
-  migrations: [BASELINE, WITHOUT_PLAYER_KEYS],
+  migrations: [BASELINE, WITHOUT_PLAYER_KEYS, HANDOVER_RECOVERY],
 }

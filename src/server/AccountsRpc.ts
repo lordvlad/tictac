@@ -23,7 +23,7 @@ export type AccountsRequest = {
 
 /** What a call came to: what the directory returned, or the refusal it threw. */
 export type AccountsReply =
-  | { ok: true; value: PasskeyOptions | SignedIn | Player | null | undefined }
+  | { ok: true; value: PasskeyOptions | SignedIn | Player | string | null | undefined }
   | { ok: false; status: 400 | 401; message: string }
 
 /** Answer one call against the directory's accounts. Anything but an `AuthError` is the directory's failure and propagates. */
@@ -42,6 +42,11 @@ export async function serveAccounts(accounts: AccountsPort, request: AccountsReq
         return { ok: true, value: await accounts.playerFor(...request.args) }
       case 'player':
         return { ok: true, value: await accounts.player(...request.args) }
+      case 'home':
+        return { ok: true, value: await accounts.home(...request.args) }
+      case 'moveHome':
+        await accounts.moveHome(...request.args)
+        return { ok: true, value: undefined }
       case 'logout':
         await accounts.logout(...request.args)
         return { ok: true, value: undefined }
@@ -62,11 +67,15 @@ export function accountsOverRpc(call: (request: AccountsRequest) => Promise<Acco
   }
   return {
     registrationOptions: (name) => ask({ method: 'registrationOptions', args: [name] }),
-    register: (answer) => ask({ method: 'register', args: [answer] }),
+    register: (answer, home) => ask({ method: 'register', args: [answer, home] }),
     loginOptions: () => ask({ method: 'loginOptions', args: [] }),
     login: (answer) => ask({ method: 'login', args: [answer] }),
     playerFor: (token) => ask({ method: 'playerFor', args: [token] }),
     player: (id) => ask({ method: 'player', args: [id] }),
+    home: (id) => ask({ method: 'home', args: [id] }),
+    moveHome: async (id, region) => {
+      await ask<undefined>({ method: 'moveHome', args: [id, region] })
+    },
     logout: async (token) => {
       await ask<undefined>({ method: 'logout', args: [token] })
     },

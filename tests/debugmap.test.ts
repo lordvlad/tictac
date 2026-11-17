@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { Faction } from '../src/config'
 import { Grid, Side } from '../src/core/Grid'
 import { WallKind } from '../src/core/Walls'
-import type { Squads } from '../src/entities/Squads'
-import { DebugMap } from '../src/hud/DebugMap'
+import { DebugMap, type DebugMapUnit } from '../src/hud/DebugMap'
 
 describe('DebugMap panel', () => {
   beforeAll(() => {
@@ -45,20 +45,18 @@ describe('DebugMap panel', () => {
     return p.root
   }
 
-  function setup(): { map: DebugMap; grid: Grid; squads: Squads } {
+  function setup(): { map: DebugMap; grid: Grid; units: DebugMapUnit[] } {
     const grid = new Grid(12)
     grid.setLevel(5, 5, 1)
     grid.setWall(5, 5, Side.North, WallKind.Solid)
 
-    const squads = {
-      soldiers: [
-        { isDead: false, faction: 0, tile: { x: 2, y: 2 } },
-        { isDead: false, faction: 1, tile: { x: 8, y: 8 } },
-      ],
-    } as unknown as Squads
+    const units: DebugMapUnit[] = [
+      { faction: Faction.Blue, tile: { x: 2, y: 2 } },
+      { faction: Faction.Red, tile: { x: 8, y: 8 } },
+    ]
 
     const map = new DebugMap()
-    return { map, grid, squads }
+    return { map, grid, units }
   }
 
   test('toggles open and closed state', () => {
@@ -76,9 +74,9 @@ describe('DebugMap panel', () => {
   })
 
   test('renders header, level cards, tabs, and legend when refreshed', () => {
-    const { map, grid, squads } = setup()
+    const { map, grid, units } = setup()
     map.open()
-    map.refresh(grid, squads, 0, '1234')
+    map.refresh(grid, units, 0, '1234')
 
     const root = getPrivateRoot(map)
     const header = root.querySelector('.debug-map-header')
@@ -106,9 +104,9 @@ describe('DebugMap panel', () => {
   })
 
   test('switching level tab filters displayed cards', () => {
-    const { map, grid, squads } = setup()
+    const { map, grid, units } = setup()
     map.open()
-    map.refresh(grid, squads, 0, '1234')
+    map.refresh(grid, units, 0, '1234')
 
     const root = getPrivateRoot(map)
 
@@ -126,9 +124,9 @@ describe('DebugMap panel', () => {
   })
 
   test('escape key closes the minimap', () => {
-    const { map, grid, squads } = setup()
+    const { map, grid, units } = setup()
     map.open()
-    map.refresh(grid, squads, 0, '1234')
+    map.refresh(grid, units, 0, '1234')
     expect(map.isOpen).toBe(true)
 
     const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
@@ -139,9 +137,9 @@ describe('DebugMap panel', () => {
   })
 
   test('clicking backdrop closes the minimap', () => {
-    const { map, grid, squads } = setup()
+    const { map, grid, units } = setup()
     map.open()
-    map.refresh(grid, squads, 0, '1234')
+    map.refresh(grid, units, 0, '1234')
     expect(map.isOpen).toBe(true)
 
     const root = getPrivateRoot(map)

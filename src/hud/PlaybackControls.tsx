@@ -1,5 +1,5 @@
 import { createRoot, type Root } from 'react-dom/client'
-import type { PlaybackSpeed } from '../game/Playback'
+import { PLAYBACK_SPEEDS, type PlaybackSpeed } from '../ui/Playback'
 import { uiMount } from './uiMount'
 
 /** Everything the transport bar shows, as one snapshot. */
@@ -21,8 +21,6 @@ export type PlaybackCommand =
   /** The replay is over as far as the viewer is concerned: back to the menu. */
   | { type: 'leave' }
 
-const SPEEDS: readonly PlaybackSpeed[] = [0.5, 1, 2]
-
 function PlaybackBar({ view, onCommand }: { view: PlaybackView; onCommand: (command: PlaybackCommand) => void }) {
   const atEnd = view.index >= view.total
   return (
@@ -39,7 +37,7 @@ function PlaybackBar({ view, onCommand }: { view: PlaybackView; onCommand: (comm
         >
           {'\u23EE'}
         </button>
-        {SPEEDS.map((speed) => (
+        {PLAYBACK_SPEEDS.map((speed) => (
           <button
             key={speed}
             className={view.playing && view.speed === speed ? 'hud-btn interactive active' : 'hud-btn interactive'}

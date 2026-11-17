@@ -58,5 +58,14 @@ export const ACCOUNT_SCHEMA: Schema = {
          )`,
       ],
     },
+    {
+      id: 2,
+      name: 'player home region',
+      // Which region keeps the player's squad: where a sign-in is let in, and
+      // where every other region sends them (RFC-0002 §3). Everyone who exists
+      // before this has only ever had one region, `singleton` (`SINGLETON_REGION`,
+      // spelled out because a migration must not change meaning when a constant does).
+      up: [`ALTER TABLE players ADD COLUMN home_region TEXT NOT NULL DEFAULT 'singleton'`],
+    },
   ],
 }

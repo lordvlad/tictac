@@ -14,9 +14,8 @@ import type { Carried, CommandOrigin } from '../ecs/systems/CommandSystem'
 import type { EngineContext } from '../engine'
 import type { Soldier } from '../entities/Soldier'
 import { DebugMap } from '../hud/DebugMap'
-import { DebugPanel, type RecordingControls } from '../hud/DebugPanel'
 import type { Hud } from '../hud/Hud'
-import { buildHudModel, type EndScreen, endScreens, tileReadout } from '../hud/HudModel'
+import { type EndScreen, tileReadout } from '../hud/HudModel'
 import { downloadJson } from '../hud/download'
 import { debugEditable } from '../game/DebugAccess'
 import type { MatchSession } from '../game/MatchSession'
@@ -34,8 +33,10 @@ import type { SquadViews } from '../render/SquadViews'
 import type { NetworkMessage } from '../wire/NetworkMessage'
 import { calculateHitChance } from '../rules/Combat'
 import type { Battlefield } from './Battlefield'
+import { DebugPanel, type RecordingControls } from './DebugPanel'
 import { FogOfWar } from './FogOfWar'
 import { GrenadePlanner } from './GrenadePlanner'
+import { buildHudModel, endScreens } from './HudModelBuilder'
 import { MovementPlanner } from './MovementPlanner'
 import { ShootPlanner } from './ShootPlanner'
 import { WallXray } from './WallXray'
@@ -156,7 +157,7 @@ export class Presenter implements MatchView {
       },
       () => turnManager.selectedSoldier,
       this.recordingControls(),
-      debugEditable(session.network?.mode ?? null),
+      debugEditable(session.mode),
     )
     this.battlefield.blocks.setLevelFilter(0)
 
@@ -278,9 +279,20 @@ export class Presenter implements MatchView {
         grenade: { armed: this.grenade.armed, pending: this.grenade.pending(shooter) },
         item: state.item,
         unitViewRequested: this.unitViewRequested,
-        networkMode: state.networkMode,
-        myFaction: state.myFaction,
+        canAct: state.canAct,
+        seat: state.seat,
       }),
+    )
+  }
+
+  /** The minimap, handed who is standing where as plain data rather than the squads themselves. */
+  private refreshDebugMap(): void {
+    const units = this.session.squads.soldiers.filter((soldier) => !soldier.isDead)
+    this.debugMap.refresh(
+      this.session.grid,
+      units.map(({ tile, faction }) => ({ tile, faction })),
+      this.selectedLevelFilter,
+      this.seedLabel,
     )
   }
 
@@ -361,7 +373,7 @@ export class Presenter implements MatchView {
         break
       case 'toggleDebugMap':
         this.debugMap.toggle()
-        this.debugMap.refresh(this.session.grid, this.session.squads, this.selectedLevelFilter, this.seedLabel)
+        this.refreshDebugMap()
         this.refreshHud()
         break
       case 'endScreenNext': {
@@ -377,7 +389,7 @@ export class Presenter implements MatchView {
         this.grenade.viewStorey(intent.level)
         this.renderOverlay()
         if (this.debugMap.isOpen) {
-          this.debugMap.refresh(this.session.grid, this.session.squads, this.selectedLevelFilter, this.seedLabel)
+          this.refreshDebugMap()
         }
         this.refreshHud()
         break
@@ -429,7 +441,7 @@ export class Presenter implements MatchView {
 
   /** Is either side of this wall in the viewer's sight right now? A replay watches everything. */
   private edgeInSight(edge: number): boolean {
-    if (this.session.spectating) return true
+    if (this.session.watching) return true
     const grid = this.session.grid
     const { x, y, side } = grid.edgeTile(edge)
     const [dx, dz] = FACE_OFFSET[side]!
@@ -443,7 +455,7 @@ export class Presenter implements MatchView {
   recomputeVisibility(): void {
     // A replay is watched, not played: hiding half the fight from the only
     // person in the room would be hiding it from nobody's advantage.
-    if (this.session.spectating) {
+    if (this.session.watching) {
       this.battlefield.ground.revealAll()
       this.battlefield.blocks.revealAll()
       for (const soldier of this.session.squads.soldiers) soldier.seen = true

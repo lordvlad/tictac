@@ -312,12 +312,17 @@ describe('A crossing that does not come off', () => {
 })
 
 describe('Region RPCs authenticate and authorize (tictac-dwq.4)', () => {
-  /** An offer to ada, and a second player, bob, standing in the east. */
-  async function offered(): Promise<{ ada: Enlisted; bob: Enlisted; offer: Offer }> {
+  /**
+   * An offer to ada, and two other players, each at home in the region they can
+   * sign in at: bob in the east, where ada's window is to arrive, and cy in the
+   * west, which she is to leave (a region signs in only its own players).
+   */
+  async function offered(): Promise<{ ada: Enlisted; bob: Enlisted; cy: Enlisted; offer: Offer }> {
     const { ada } = await sentAcross()
     const bob = await enlistAt(hosts, hosts.east, 'bob', { lat: 48.9, lng: 12 })
+    const cy = await enlistAt(hosts, hosts.west, 'cy', { lat: 48.9, lng: 8 })
     await hosts.at(hosts.now)
-    return { ada, bob, offer: offersTo(ada)[0]! }
+    return { ada, bob, cy, offer: offersTo(ada)[0]! }
   }
 
   test('arriving and cancelling need a sign-in', async () => {
@@ -333,16 +338,16 @@ describe('Region RPCs authenticate and authorize (tictac-dwq.4)', () => {
   })
 
   test('another player can neither arrive on a handover nor cancel it, even with its ticket', async () => {
-    const { ada, bob, offer } = await offered()
+    const { ada, bob, cy, offer } = await offered()
     const bobEast = await signedInAt(hosts.east, bob)
-    const bobWest = await signedInAt(hosts.west, bob)
+    const cyWest = await signedInAt(hosts.west, cy)
     const arrive = await bobEast.call('tictac/api/region/arrive', {
       handoverId: offer.handoverId,
       token: offer.token,
       squadId: ada.squadId,
     })
     expect(arrive.code).toBe(RPC_ERRORS.notYours)
-    const cancel = await bobWest.call('tictac/api/region/cancelHandover', { handoverId: offer.handoverId, reason: 'mine now' })
+    const cancel = await cyWest.call('tictac/api/region/cancelHandover', { handoverId: offer.handoverId, reason: 'mine now' })
     expect(cancel.code).toBe(RPC_ERRORS.notYours)
 
     // Ada's handover is as it was.
@@ -395,5 +400,277 @@ describe('Region RPCs authenticate and authorize (tictac-dwq.4)', () => {
     const cancel = await second.call('tictac/api/region/cancelHandover', { handoverId: offer.handoverId, reason: 'too late' })
     expect(cancel.code).toBe(RPC_ERRORS.gone)
     expect(await hosts.east.match.directory.ownerOfSquad(ada.squadId)).toBe(EAST)
+  })
+})
+
+/**
+ * How the confirmation of an arrival fares between the east and the west: it
+ * `works`, its reply is lost after the west acted on it, or it never gets to
+ * the west at all.
+ */
+function confirmations(how: 'works' | 'reply lost' | 'never delivered'): void {
+  hosts.peers.through(WEST, (peer) => ({
+    ...peer,
+    confirmArrival: async (handoverId: string) => {
+      if (how === 'never delivered') throw new Error('connect ECONNREFUSED')
+      const answer = await peer.confirmArrival(handoverId)
+      if (how === 'reply lost') throw new Error('the reply was lost')
+      return answer
+    },
+  }))
+}
+
+/** Ada's window arrives at the east with `offer`. */
+async function arrivesAt(ada: Enlisted, offer: Offer) {
+  const second = await signedInAt(hosts.east, ada)
+  const arrived = await second.call('tictac/api/region/arrive', { handoverId: offer.handoverId, token: offer.token, squadId: ada.squadId })
+  return { second, arrived }
+}
+
+/** Which regions hold rows for ada's squad: the keeper can be only one of them. */
+async function holders(ada: Enlisted): Promise<{ west: boolean; east: boolean; keeper: string | null }> {
+  return {
+    west: (await hosts.west.region.squads.byId(ada.squadId)) !== null,
+    east: (await hosts.east.region.squads.byId(ada.squadId)) !== null,
+    keeper: (await hosts.east.region.squads.ownerOf(ada.squadId)) ?? (await hosts.west.region.squads.ownerOf(ada.squadId)),
+  }
+}
+
+describe('A handover in doubt (tictac-dwq.7)', () => {
+  /** An offer out of the west, ada's window about to take it. */
+  async function offered(): Promise<{ ada: Enlisted; offer: Offer }> {
+    const { ada } = await sentAcross()
+    await hosts.at(hosts.now)
+    return { ada, offer: offersTo(ada)[0]! }
+  }
+
+  test('a confirmation whose reply is lost, after the source acted on it, leaves the squad with the target alone, and the target settles it', async () => {
+    const { ada, offer } = await offered()
+    confirmations('reply lost')
+
+    const { second, arrived } = await arrivesAt(ada, offer)
+    expect(arrived.code).toBe(RPC_ERRORS.conflict)
+    // The source had completed, and told the window where to go: one keeper, the east.
+    expect(await holders(ada)).toEqual({ west: false, east: true, keeper: EAST })
+    expect(pushed<SessionEnded>(ada.window, ENDED)).toEqual([{ reason: expect.stringContaining(EAST), reconnect: 'elsewhere', url: hosts.east.url }])
+    // The target keeps what it holds of the handover until the source has said it is settled, and takes the squad on meanwhile.
+    expect(await hosts.east.region.handovers.incoming()).toMatchObject([{ handoverId: offer.handoverId, state: 'committed' }])
+    expect((await second.call('tictac/api/squad/order', { order: { kind: 'goHere', to: CHECKPOINT, pace: 'normal' } })).code).toBeNull()
+
+    // The target asks again, and a source that has nothing of the handover has completed it.
+    confirmations('works')
+    await hosts.at(hosts.now + HANDOVER_RETRY_DELAYS_MS[0]!)
+    expect(await hosts.east.region.handovers.incoming()).toEqual([])
+    expect(await holders(ada)).toEqual({ west: false, east: true, keeper: EAST })
+  })
+
+  test('a confirmation that never reaches the source is settled within one recovery cycle: the source asks the target, which committed, and completes', async () => {
+    const { ada, offer } = await offered()
+    confirmations('never delivered')
+
+    const { arrived } = await arrivesAt(ada, offer)
+    expect(arrived.code).toBe(RPC_ERRORS.conflict)
+    // In doubt: the target committed, the source has not heard, and still holds its rows.
+    expect(await holders(ada)).toMatchObject({ west: true, east: true })
+    expect(hosts.west.match.crossings.inFlight(ada.squadId)).toBe(true)
+    expect(await hosts.west.region.handovers.outgoing()).toMatchObject([{ handoverId: offer.handoverId, state: 'offered' }])
+    expect(pushed(ada.window, ENDED)).toEqual([])
+
+    await hosts.at(offer.expiresAt + 1)
+    expect(await holders(ada)).toEqual({ west: false, east: true, keeper: EAST })
+    expect(pushed<SessionEnded>(ada.window, ENDED)).toEqual([{ reason: expect.stringContaining(EAST), reconnect: 'elsewhere', url: hosts.east.url }])
+    expect(hosts.west.match.crossings.inFlight(ada.squadId)).toBe(false)
+    expect(await hosts.west.region.handovers.outgoing()).toEqual([])
+    expect(await hosts.west.region.handovers.intents()).toEqual([])
+
+    // The target's own asking is answered by a source with nothing left of it, which settles it.
+    confirmations('works')
+    await hosts.at(hosts.now + 60_000)
+    expect(await hosts.east.region.handovers.incoming()).toEqual([])
+    expect(await holders(ada)).toEqual({ west: false, east: true, keeper: EAST })
+  })
+
+  test('a target that cannot be asked leaves the source the keeper, which asks again on the backoff until it is told', async () => {
+    const { ada, offer } = await offered()
+    confirmations('never delivered')
+    const asked: number[] = []
+    let down = true
+    hosts.peers.through(EAST, (peer) => ({
+      ...peer,
+      handoverStatus: async (handoverId: string) => {
+        asked.push(hosts.now)
+        if (down) throw new Error('connect ECONNREFUSED')
+        return peer.handoverStatus(handoverId)
+      },
+    }))
+    expect((await arrivesAt(ada, offer)).arrived.code).toBe(RPC_ERRORS.conflict)
+
+    const lapsed = offer.expiresAt + 1
+    await hosts.at(lapsed)
+    await hosts.at(lapsed + HANDOVER_RETRY_DELAYS_MS[0]!)
+    await hosts.at(lapsed + HANDOVER_RETRY_DELAYS_MS[0]! + HANDOVER_RETRY_DELAYS_MS[1]!)
+    expect(asked).toEqual([lapsed, lapsed + 2_000, lapsed + 7_000])
+    // Nobody has heard anything: the source still keeps the squad it may not delete, and the squad is its to protect.
+    expect(await hosts.west.region.squads.byId(ada.squadId)).not.toBeNull()
+    expect(hosts.west.match.crossings.inFlight(ada.squadId)).toBe(true)
+    expect(pushed(ada.window, ENDED)).toEqual([])
+
+    down = false
+    await hosts.at(lapsed + 7_000 + HANDOVER_RETRY_DELAYS_MS[2]!)
+    expect(asked).toHaveLength(4)
+    expect(await holders(ada)).toEqual({ west: false, east: true, keeper: EAST })
+    expect(pushed(ada.window, ENDED)).toHaveLength(1)
+  })
+
+  test('a window that never came is asked about too: the target drops its copy for good, and the source keeps the squad and tries again', async () => {
+    const { ada, offer } = await offered()
+    expect(await hosts.east.region.handovers.incoming()).toMatchObject([{ state: 'prepared' }])
+
+    await hosts.at(offer.expiresAt + 1)
+    expect(await holders(ada)).toEqual({ west: true, east: false, keeper: WEST })
+    expect(await hosts.west.region.handovers.outgoing()).toEqual([])
+    expect(await hosts.east.region.handovers.incoming()).toEqual([])
+    expect(hosts.west.match.crossings.inFlight(ada.squadId)).toBe(false)
+    // The next attempt is scheduled, and the first offer can never be taken now.
+    expect(hosts.west.armed.at(-1)).toBe(offer.expiresAt + 1 + HANDOVER_RETRY_DELAYS_MS[0]!)
+    await expect(hosts.east.match.crossings.arrive(ada.id, offer.handoverId, offer.token, ada.squadId)).rejects.toMatchObject({ code: RPC_ERRORS.gone })
+  })
+
+  test('a source that restarts with an offer out asks the target at once: a copy never claimed is dropped, and the attempt count carries on', async () => {
+    const { ada } = await offered()
+    expect(await hosts.west.region.handovers.outgoing()).toHaveLength(1)
+
+    await hosts.west.restart()
+    expect(hosts.west.match.crossings.inFlight(ada.squadId)).toBe(true)
+    expect(hosts.west.match.crossings.coordinator.attemptsFor(ada.squadId)).toBe(1)
+    const resumed = hosts.now
+    await hosts.at(resumed)
+
+    expect(await holders(ada)).toEqual({ west: true, east: false, keeper: WEST })
+    expect(await hosts.west.region.handovers.outgoing()).toEqual([])
+    expect(await hosts.east.region.handovers.incoming()).toEqual([])
+    expect(hosts.west.match.crossings.inFlight(ada.squadId)).toBe(false)
+    expect(hosts.west.armed.at(-1)).toBe(resumed + HANDOVER_RETRY_DELAYS_MS[0]!)
+  })
+
+  test('a source that restarts after the target committed completes the crossing it finds in doubt', async () => {
+    const { ada, offer } = await offered()
+    confirmations('never delivered')
+    expect((await arrivesAt(ada, offer)).arrived.code).toBe(RPC_ERRORS.conflict)
+    expect(await holders(ada)).toMatchObject({ west: true, east: true })
+
+    await hosts.west.restart()
+    await hosts.at(hosts.now)
+    expect(await holders(ada)).toEqual({ west: false, east: true, keeper: EAST })
+    expect(await hosts.west.region.handovers.outgoing()).toEqual([])
+    expect(hosts.west.match.crossings.inFlight(ada.squadId)).toBe(false)
+  })
+
+  test('a source that restarts mid-completion, after it committed the keeper and before it deleted its rows, finishes', async () => {
+    const { ada, offer } = await offered()
+    confirmations('never delivered')
+    expect((await arrivesAt(ada, offer)).arrived.code).toBe(RPC_ERRORS.conflict)
+    // What a crash between the two writes leaves: the keeper committed, the rows and the reservation still there.
+    await hosts.west.region.squads.setOwner(ada.squadId, EAST)
+
+    await hosts.west.restart()
+    await hosts.at(hosts.now)
+    expect(await holders(ada)).toEqual({ west: false, east: true, keeper: EAST })
+    expect(await hosts.west.region.handovers.outgoing()).toEqual([])
+  })
+
+  test('a target that restarts keeps the offer it prepared: the window arrives on the new server with the same ticket', async () => {
+    const { ada, offer } = await offered()
+    await hosts.east.restart()
+    expect(hosts.east.match.crossings.expects(ada.id)).toBe(true)
+
+    const { arrived } = await arrivesAt(ada, offer)
+    expect(arrived).toMatchObject({ code: null, result: { committed: true, targetRegion: EAST } })
+    expect(await holders(ada)).toEqual({ west: false, east: true, keeper: EAST })
+    expect(hosts.east.match.crossings.expects(ada.id)).toBe(false)
+  })
+
+  test('a target that restarts after committing answers for the commit and asks the source again: the source completes, and the squad is the target\'s', async () => {
+    const { ada, offer } = await offered()
+    confirmations('never delivered')
+    expect((await arrivesAt(ada, offer)).arrived.code).toBe(RPC_ERRORS.conflict)
+
+    await hosts.east.restart()
+    expect(hosts.east.match.crossings.coordinator.arrivedAt(offer.handoverId)).toBeDefined()
+    expect(await hosts.east.match.directory.ownerOfSquad(ada.squadId)).toBe(EAST)
+    expect(await hosts.east.match.crossings.handoverStatus(offer.handoverId)).toEqual({ ok: true, status: 'committed' })
+
+    confirmations('works')
+    await hosts.at(hosts.now)
+    expect(await holders(ada)).toEqual({ west: false, east: true, keeper: EAST })
+    expect(await hosts.east.region.handovers.incoming()).toEqual([])
+    expect(await hosts.west.region.handovers.outgoing()).toEqual([])
+  })
+
+  test('a source that decided against a handover gets a target that had committed to give the squad back, and never completes it', async () => {
+    const { ada, offer } = await offered()
+    // The window arrives and the target commits, but the source has meanwhile been told by the player that it will not come.
+    confirmations('never delivered')
+    expect((await arrivesAt(ada, offer)).arrived.code).toBe(RPC_ERRORS.conflict)
+    const cancelled = await ada.window.call('tictac/api/region/cancelHandover', { handoverId: offer.handoverId, reason: 'no second socket' })
+    expect(cancelled).toMatchObject({ code: null, result: { cancelled: true, retry: true } })
+
+    expect(await holders(ada)).toEqual({ west: true, east: false, keeper: WEST })
+    expect(await hosts.east.region.handovers.incoming()).toEqual([])
+    expect(hosts.east.match.crossings.coordinator.arrivedAt(offer.handoverId)).toBeUndefined()
+    expect(pushed(ada.window, ENDED)).toEqual([])
+  })
+})
+
+describe('A crossing across a restart (tictac-dwq.8)', () => {
+  test('a server restarted between the order and the squad\'s arrival crosses it at its moment', async () => {
+    const { ada, squad } = await sentAcross(CHECKPOINT)
+    const arrival = plannedArrivals(squad.waypoints).at(-1)!
+    expect(await hosts.west.region.handovers.intents()).toMatchObject([{ squadId: ada.squadId, region: EAST, attempts: 0, nextAt: arrival }])
+
+    await hosts.west.restart()
+    const back = await signedInAt(hosts.west, ada)
+    await hosts.at(arrival - 1)
+    expect(offersTo(ada)).toEqual([])
+    expect(pushed<Offer>(back, OFFER)).toEqual([])
+
+    await hosts.at(arrival)
+    expect(pushed<Offer>(back, OFFER)).toHaveLength(1)
+    expect(await hosts.east.region.squads.ownerOf(ada.squadId)).toBe(WEST)
+  })
+
+  test('the attempts it had had are kept: a restart does not give the squad five more', async () => {
+    const { ada } = await sentAcross()
+    const prepares = eastCalls('refuses')
+    const start = hosts.now
+    await hosts.at(start)
+    await hosts.at(start + 2_000)
+    expect(prepares).toEqual([start, start + 2_000])
+    expect(await hosts.west.region.handovers.intents()).toMatchObject([{ squadId: ada.squadId, attempts: 2, nextAt: start + 7_000 }])
+
+    await hosts.west.restart()
+    expect(hosts.west.match.crossings.coordinator.attemptsFor(ada.squadId)).toBe(2)
+    const back = await signedInAt(hosts.west, ada)
+    await hosts.at(start + 7_000 - 1)
+    expect(prepares).toHaveLength(2)
+    for (const at of [start + 7_000, start + 17_000, start + 47_000]) await hosts.at(at)
+
+    // Five attempts in all, across the restart, and then the squad rests.
+    expect(prepares).toEqual([start, start + 2_000, start + 7_000, start + 17_000, start + 47_000])
+    await hosts.at(start + 3_600_000)
+    expect(prepares).toHaveLength(5)
+    expect(pushed<{ squadId: string }>(back, FAILED)).toHaveLength(1)
+    expect(await hosts.west.region.handovers.intents()).toEqual([])
+  })
+
+  test('an order that is given up, withdrawn or carried out leaves nothing to resume', async () => {
+    const { ada } = await sentAcross(CHECKPOINT)
+    expect(await hosts.west.region.handovers.intents()).toHaveLength(1)
+    expect((await ada.window.call('tictac/api/squad/order', { order: { kind: 'stop' } })).code).toBeNull()
+    expect(await hosts.west.region.handovers.intents()).toEqual([])
+
+    await hosts.west.restart()
+    await hosts.at(hosts.now + 3_600_000)
+    expect(offersTo(ada)).toEqual([])
   })
 })

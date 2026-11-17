@@ -79,7 +79,7 @@ interface Rig {
   told: Told
 }
 
-function build(options: { network?: NetworkManager; aiming?: Aiming; spectating?: boolean } = {}): Rig {
+function build(options: { network?: NetworkManager; aiming?: Aiming; watching?: 'spectate' | 'replay' } = {}): Rig {
   const world = new World()
   createGlobalRules(world)
   const grid = new Grid(GRID_SIZE)
@@ -104,10 +104,10 @@ function build(options: { network?: NetworkManager; aiming?: Aiming; spectating?
     fx: NO_FX,
     onLeave: () => left.count++,
     network: options.network ?? null,
+    ...(options.watching ? { watching: options.watching } : {}),
   })
   const { view, told } = watching(options.aiming)
   session.attach(view)
-  session.spectating = options.spectating ?? false
 
   const issued: Rig['issued'] = []
   const apply = session.commands.apply.bind(session.commands)
@@ -280,6 +280,31 @@ describe('MatchSession: the turn gate', () => {
     expect(frames).toEqual([RpcMethods.toggleCover])
   })
 
+  test('canAct is one answer per mode, and the HUD is handed it', () => {
+    expect(build().session.canAct).toBe(true)
+
+    const { network: blue } = seated('host', Faction.Blue)
+    const host = build({ network: blue })
+    expect(host.session.mode).toBe('host')
+    expect(host.session.state).toMatchObject({ canAct: true, seat: Faction.Blue })
+
+    const { network: red } = seated('join', Faction.Red)
+    const guest = build({ network: red })
+    expect(guest.session.mode).toBe('join')
+    expect(guest.session.state).toMatchObject({ canAct: false, seat: Faction.Red })
+
+    // The turn passing is what flips it, for both seats.
+    host.session.handleIntent({ type: 'requestTurnSwitch' })
+    expect(host.turnManager.activeFaction).toBe(Faction.Red)
+    expect(host.session.canAct).toBe(false)
+
+    for (const watching of ['spectate', 'replay'] as const) {
+      const watcher = build({ watching })
+      expect(watcher.session.mode).toBe(watching)
+      expect(watcher.session.state).toMatchObject({ canAct: false, seat: null })
+    }
+  })
+
   test('the end screen answers on any side: leaving is not gated by whose turn it was', () => {
     const { network } = seated('join', Faction.Red)
     const { session, left, told } = build({ network })
@@ -292,7 +317,7 @@ describe('MatchSession: the turn gate', () => {
   })
 
   test('a spectator may look around but never command', () => {
-    const { session, issued, told, left } = build({ spectating: true })
+    const { session, issued, told, left } = build({ watching: 'replay' })
 
     session.handleIntent({ type: 'toggleCover' })
     session.handleIntent({ type: 'endUnitTurn' })
@@ -308,7 +333,7 @@ describe('MatchSession: the turn gate', () => {
   })
 
   test('a spectator tapping a unit of the side that is up selects it, and nothing is commanded', () => {
-    const { session, issued, turnManager, squads } = build({ spectating: true })
+    const { session, issued, turnManager, squads } = build({ watching: 'replay' })
 
     session.handlePointer({ type: 'tap', tile: { x: 8, y: 3 }, friendly: 3, enemy: null, additive: false })
 
@@ -349,8 +374,8 @@ describe('MatchSession: state out', () => {
     const { session } = build({ network })
 
     expect(session.state).toMatchObject({
-      networkMode: 'host',
-      myFaction: Faction.Blue,
+      canAct: true,
+      seat: Faction.Blue,
       rulesActing: false,
       retreatArmed: false,
       retreatNote: null,
@@ -361,7 +386,7 @@ describe('MatchSession: state out', () => {
 
   test('a match with nobody else in it is local, and the screen is the side whose turn it is', () => {
     const { session } = build()
-    expect(session.state.networkMode).toBe('local')
+    expect(session.state).toMatchObject({ canAct: true, seat: null })
 
     session.handleIntent({ type: 'confirmTurnSwitch' })
     expect(session.viewerFaction).toBe(Faction.Red)
@@ -380,7 +405,7 @@ describe('MatchSession: state out', () => {
   })
 
   test('a spectator is never shown an end: there is nobody to show it to', () => {
-    const { session, squads, told } = build({ spectating: true })
+    const { session, squads, told } = build({ watching: 'replay' })
     for (const unit of squads.byFaction[Faction.Red]) unit.hp = 0
 
     session.update(1 / 60)

@@ -1,12 +1,18 @@
 import { distanceKm, isAtRest, type LatLng, positionAt, settle } from '../core/Travel'
 import { RPC_ERRORS } from '../wire/Rpc'
+import type { AccountsPort } from './AccountsPort'
 import type { ServerClock } from './Clock'
 import {
+  HANDOVER_MAX_ATTEMPTS,
+  HANDOVER_RETRY_DELAYS_MS,
   HANDOVER_TIMEOUT_MS,
   HandoverCoordinator,
   type HandoverPeer,
   type HandoverReservation,
+  type HandoverStatus,
   type PeerAnswer,
+  type PeerRefusal,
+  type PreparedHandover,
   type PrepareRequest,
   type RegionPeers,
 } from './Handover'
@@ -47,17 +53,37 @@ import type { Serially } from './Serial'
  * checked every `HANDOVER_RECHECK_MS`. The same wait covers a player with no
  * window open: an offer is for a window to take.
  *
- * What a crossing *intends* is memory only. A server that restarts between the
- * order and the squad's arrival forgets it, and the squad simply rests at the
- * checkpoint; so does one that restarts with an offer out, whose copy at the
- * target is overwritten by the next attempt. Neither loses a squad: the
- * source's rows are only ever deleted after the target has committed.
+ * **In doubt, and recovery** (`tictac-dwq.7`). Once an offer is out, the
+ * source cannot tell a window that never came from a target that committed
+ * whose confirmation was lost, and deleting its rows on a guess could leave
+ * the squad with nobody. So it does not guess, and neither side forgets what it
+ * holds across a restart (`HandoverStore`): when the offer lapses, and when
+ * the server is restored, the source asks the target (`handoverStatus`) —
+ * `committed` and the source completes the crossing, `dropped` and the target
+ * has made sure it never will, so the source keeps the squad and tries again;
+ * no answer and the source stays the keeper and asks again, on the same
+ * backoff. A source that decides against the handover (the window said it will
+ * not come, the player sat down in a match) keeps the reservation, as
+ * `cancelled`, until the target has let go of a commit it may already have made,
+ * and never completes it. The target, for its part, asks the source to confirm
+ * again until it hears: `ok`, or that the source holds nothing of it (it has
+ * completed), settles it; a refusal makes the target give the squad back. Between
+ * them the squad is kept by exactly one region once both have heard the other.
+ *
+ * What a crossing *intends* is kept too: the order, the attempts it has had and
+ * the moment of the next are restored onto the schedule (`restore`), so a restart
+ * between the order and the squad's arrival crosses it at its moment.
  */
 
 /** The schedule's kind for "a squad that was sent across the border is due to start crossing", keyed by squad. */
 export const HANDOVER = 'handover'
-/** The schedule's kind for "an offer's time has run out", keyed by handover, on the source and the target alike. */
+/**
+ * The schedule's kind for "a handover needs resolving", keyed by handover, on the source and the target alike: an
+ * offer's time has run out, or an answer that did not come is asked for again.
+ */
 export const HANDOVER_LAPSE = 'handover-lapse'
+/** The schedule's kind for "a target that committed to a squad asks its source again to confirm", keyed by handover. */
+export const HANDOVER_SETTLE = 'handover-settle'
 /** How long a crossing that cannot start yet (the player is seated, or has no window) waits before looking again. */
 export const HANDOVER_RECHECK_MS = 30_000
 /** How close to the checkpoint a squad must be to cross from it: a route's end is exact, a squad stopped elsewhere is not there. */
@@ -67,6 +93,8 @@ const NO_PEERS = 'This server has no other region to send a squad to.'
 /** What an order to a squad that is crossing is refused with. */
 export const CROSSING_IN_FLIGHT = 'Your squad is crossing the border: wait for the crossing to finish.'
 const SEATED = 'Your squad is in a match, and a match does not cross the border: it can go when the match is over.'
+const NOT_TAKEN = 'The target server did not take the squad in time.'
+const CALLED_OFF = 'The crossing was called off.'
 
 /** Where a squad was sent across the border, and for whom. */
 interface Intent {
@@ -76,11 +104,16 @@ interface Intent {
   to: LatLng
 }
 
+/** What a target learns of an arrival it committed to, by asking the source to confirm it. */
+type Settlement = { kind: 'kept' } | { kind: 'returned'; reason: string } | { kind: 'unknown' }
+
 export interface CrossingsOptions {
   clock: ServerClock
   /** Who keeps which squad: a crossing starts only from the region that keeps the squad. */
   directory: RegionDirectory
-  region: Pick<RegionStore, 'squads' | 'exportSquad' | 'importSquad' | 'deleteSquad'>
+  region: Pick<RegionStore, 'squads' | 'exportSquad' | 'importSquad' | 'deleteSquad' | 'handovers'>
+  /** Where a player's home is moved when a squad of theirs is kept here: the target's commit, and its undoing. */
+  accounts: Pick<AccountsPort, 'moveHome'>
   schedule: Schedule
   /** The queue every writer of a squad's route shares (`Journeys`). */
   serially: Serially
@@ -95,6 +128,10 @@ export interface CrossingsOptions {
 export class Crossings implements HandoverPeer {
   readonly coordinator: HandoverCoordinator
   private readonly intents = new Map<string, Intent>()
+  /** The arrivals this region is writing the commit of, so a question about one waits for what it will answer. */
+  private readonly arriving = new Map<string, Promise<void>>()
+  /** How many times each handover's resolution (the source's) or settlement (the target's) has had to be asked again. */
+  private readonly asks = new Map<string, number>()
   private readonly options: CrossingsOptions
   private readonly log: (message: string) => void
 
@@ -113,12 +150,51 @@ export class Crossings implements HandoverPeer {
           await this.depart(squadId)
         } catch (error) {
           // The squad rests where it is; the player may send it across again.
-          this.intents.delete(squadId)
+          await this.forget(squadId)
           this.log(`crossing of squad ${squadId} failed: ${error instanceof Error ? error.stack : String(error)}`)
         }
       }),
     )
     options.schedule.handle(HANDOVER_LAPSE, (handoverId) => this.lapse(handoverId))
+    options.schedule.handle(HANDOVER_SETTLE, (handoverId) => this.settleArrival(handoverId))
+  }
+
+  /**
+   * Take up what this region was doing when it last stopped, before a socket
+   * is let in and before the squads' own schedule is restored
+   * (`Journeys.restore`, which adopts the squads committed here):
+   *
+   * - **Crossings** go back on the schedule at their moment, with the attempts
+   *   they had had.
+   * - **Offers this region made as the source** are in doubt: each is
+   *   resolved at once, by asking the target.
+   * - **Offers it prepared as the target** lapse at their time; and **arrivals
+   *   it committed to** are written again as its own (the commit may have been
+   *   cut short) and asked of the source until the source has settled them.
+   */
+  async restore(): Promise<void> {
+    const { clock, directory, region: store, schedule } = this.options
+    const [intents, outgoing, incoming] = await Promise.all([store.handovers.intents(), store.handovers.outgoing(), store.handovers.incoming()])
+    const now = clock.now()
+
+    for (const intent of intents) this.coordinator.setAttempts(intent.squadId, intent.attempts)
+    this.coordinator.restoreOutgoing(outgoing)
+    const out = new Set(outgoing.map((reservation) => reservation.squadId))
+    for (const { squadId, playerId, region, to, nextAt } of intents) {
+      this.intents.set(squadId, { playerId, region, to })
+      // A squad with an offer out is crossing already: resolving the offer schedules its next attempt.
+      if (!out.has(squadId)) schedule.set(HANDOVER, squadId, nextAt)
+    }
+    for (const reservation of outgoing) schedule.set(HANDOVER_LAPSE, reservation.handoverId, now)
+
+    const prepared = incoming.filter(({ state }) => state === 'prepared')
+    const committed = incoming.filter(({ state }) => state === 'committed')
+    this.coordinator.restoreIncoming(prepared, committed)
+    for (const handover of prepared) schedule.set(HANDOVER_LAPSE, handover.handoverId, handover.expiresAt + 1)
+    for (const handover of committed) {
+      await store.squads.setOwner(handover.squadId, directory.self)
+      schedule.set(HANDOVER_SETTLE, handover.handoverId, now)
+    }
   }
 
   // --- The source: what `Journeys` asks -------------------------------------------------------
@@ -134,7 +210,8 @@ export class Crossings implements HandoverPeer {
    * crosses when it gets there, `at`. Replaces whatever it was going to do, and
    * starts its attempts from the first.
    */
-  intend(playerId: string, squadId: string, region: string, to: LatLng, at: number): void {
+  async intend(playerId: string, squadId: string, region: string, to: LatLng, at: number): Promise<void> {
+    await this.options.region.handovers.saveIntent({ squadId, playerId, region, to, attempts: 0, nextAt: at })
     this.intents.set(squadId, { playerId, region, to })
     this.coordinator.resetAttempts(squadId)
     // Cleared first so it is the last of the squad's moments at `at`: the arrival and the checkpoints due then are handled before it crosses.
@@ -143,15 +220,26 @@ export class Crossings implements HandoverPeer {
   }
 
   /** The squad was given another order, or was found by one: it is not going to cross. */
-  withdraw(squadId: string): void {
-    this.intents.delete(squadId)
+  async withdraw(squadId: string): Promise<void> {
     this.options.schedule.clear(HANDOVER, squadId)
     this.coordinator.resetAttempts(squadId)
+    // Nothing is written for a squad that was never going to cross: most orders are not crossings.
+    if (this.intents.has(squadId)) await this.forget(squadId)
   }
 
   /** Whether a handover of `squadId` is out: its rows are copied at another region, and neither may change before it is settled. */
   inFlight(squadId: string): boolean {
     return this.coordinator.reservationOf(squadId) !== undefined
+  }
+
+  /**
+   * Whether `playerId`'s window is expected here, as the target of a handover:
+   * an offer held for them that nobody has claimed and whose time has not run
+   * out. It signs in here before it arrives, while the squad is still the
+   * source's.
+   */
+  expects(playerId: string): boolean {
+    return this.coordinator.expects(playerId)
   }
 
   /**
@@ -164,14 +252,14 @@ export class Crossings implements HandoverPeer {
     if (!intent || !peers) return
     const row = await store.squads.byId(squadId)
     if (!row || (await directory.ownerOfSquad(squadId)) !== directory.self) {
-      this.intents.delete(squadId)
+      await this.forget(squadId)
       return
     }
     const now = clock.now()
     const settled = settle(row.squad.waypoints, now)
     if (!isAtRest(settled) || distanceKm(positionAt(settled, now).position, intent.to) > AT_CHECKPOINT_KM) {
       // Something else moved the squad off its route: the order is spent.
-      this.intents.delete(squadId)
+      await this.forget(squadId)
       return
     }
     if (lobby.holdsSeat(intent.playerId) || !lobby.hasWindow(intent.playerId)) {
@@ -180,7 +268,7 @@ export class Crossings implements HandoverPeer {
     }
     const bundle = await store.exportSquad(squadId)
     if (!bundle) {
-      this.intents.delete(squadId)
+      await this.forget(squadId)
       return
     }
 
@@ -212,11 +300,18 @@ export class Crossings implements HandoverPeer {
         }),
       )
     } catch (error) {
-      await this.failed(handoverId, `${intent.region} could not be reached: ${error instanceof Error ? error.message : String(error)}`)
+      await this.failedBeforeOffer(reservation, `${intent.region} could not be reached: ${error instanceof Error ? error.message : String(error)}`)
       return
     }
     if (!answer.ok) {
-      await this.failed(handoverId, answer.message)
+      await this.failedBeforeOffer(reservation, answer.message)
+      return
+    }
+    // Written before the window is told: from the moment it has the ticket the target may commit, and a restart must find the handover in doubt.
+    try {
+      await store.handovers.saveOutgoing(reservation)
+    } catch (error) {
+      await this.failedBeforeOffer(reservation, `the offer could not be recorded: ${error instanceof Error ? error.message : String(error)}`)
       return
     }
     lobby.tell(intent.playerId, 'tictac/api/region/handoverOffer', {
@@ -239,9 +334,9 @@ export class Crossings implements HandoverPeer {
     const outgoing = this.coordinator.reservation(handoverId)
     if (outgoing) {
       if (outgoing.playerId !== playerId) throw new Refusal(RPC_ERRORS.notYours, 'That handover is another player\'s.')
-      const { retry, targetTold } = await this.failed(handoverId, reason)
+      await this.abort(handoverId)
       // The window is waiting to hear that the target let go.
-      await targetTold
+      const { retry } = await this.letGo(outgoing, reason)
       return { cancelled: true, retry }
     }
     // The window may also say so to the region it was going to.
@@ -253,36 +348,80 @@ export class Crossings implements HandoverPeer {
   }
 
   /**
-   * Give up this attempt of handover `handoverId`, which this region is the
-   * source of: the target drops its copy, and the next attempt is scheduled or
-   * the squad rests. Nothing for one that is settled already.
+   * Decide against handover `handoverId`, which is out: from now on it cannot
+   * be completed, whatever the target says. It stays, `cancelled`, until the
+   * target has let go (`letGo`). `gone` for one this server holds no longer,
+   * `conflict` for one already being completed.
    */
-  private async failed(handoverId: string, reason: string): Promise<{ retry: boolean; targetTold: Promise<void> }> {
+  private async abort(handoverId: string): Promise<void> {
+    const reservation = this.coordinator.abort(handoverId)
+    // A restart that does not find this finds the offer in doubt and asks the target: if it committed, the crossing completes, which is a decision too.
+    await this.recorded(this.options.region.handovers.saveOutgoing(reservation), `that handover ${handoverId} was called off`)
+  }
+
+  /**
+   * Make the target let go of a handover this region has decided against, and
+   * only then finish it: until the target says so it may hold a commit, and
+   * the squad must not be kept by both. A target that cannot be asked is asked
+   * again on the backoff.
+   */
+  private async letGo(reservation: HandoverReservation, reason: string): Promise<{ retry: boolean }> {
+    const { peers } = this.options
+    const { handoverId, squadId, targetRegion } = reservation
+    try {
+      if (!peers) throw new Refusal(RPC_ERRORS.conflict, NO_PEERS)
+      const answer = await this.asked(() => peers.peer(targetRegion).cancelHandover(handoverId))
+      if (answer.ok) return await this.failed(handoverId, reason)
+      this.log(`${targetRegion} would not let go of ${squadId}: ${answer.message}`)
+    } catch (error) {
+      this.log(`could not tell ${targetRegion} to let go of ${squadId}: ${String(error)}`)
+    }
+    this.askAgain(HANDOVER_LAPSE, handoverId)
+    return { retry: reservation.attempts < HANDOVER_MAX_ATTEMPTS }
+  }
+
+  /**
+   * End this attempt of handover `handoverId`, which this region is the
+   * source of and which the target is known not to hold: the next attempt is
+   * scheduled, or the squad rests. Nothing for one that is settled already.
+   */
+  private async failed(handoverId: string, reason: string): Promise<{ retry: boolean }> {
     const { clock, lobby, region: store, schedule } = this.options
     const reservation = this.coordinator.reservation(handoverId)
-    if (!reservation) return { retry: false, targetTold: Promise.resolve() }
+    if (!reservation) return { retry: false }
     const outcome = this.coordinator.cancel(handoverId, reason)
     schedule.clear(HANDOVER_LAPSE, handoverId)
-    const targetTold = this.tellTarget(reservation)
+    this.asks.delete(handoverId)
     const { squadId, playerId, targetRegion } = reservation
+    const intent = this.intents.get(squadId)
+    await this.recorded(store.handovers.remove(handoverId), `the end of handover ${handoverId}`)
     if (outcome.retryable) {
-      schedule.set(HANDOVER, squadId, clock.now() + outcome.nextDelayMs)
+      const nextAt = clock.now() + outcome.nextDelayMs
+      schedule.set(HANDOVER, squadId, nextAt)
+      if (intent) await this.recorded(store.handovers.saveIntent({ squadId, ...intent, attempts: outcome.attempts, nextAt }), `attempt ${outcome.attempts} of ${squadId}`)
       this.log(`crossing of squad ${squadId} to ${targetRegion} failed (${reason}); next attempt in ${outcome.nextDelayMs} ms`)
-      return { retry: true, targetTold }
+      return { retry: true }
     }
-    this.intents.delete(squadId)
+    await this.forget(squadId)
     this.log(`crossing of squad ${squadId} to ${targetRegion} given up after ${outcome.attempts} attempts (${reason})`)
     const row = await store.squads.byId(squadId)
     if (row) lobby.tell(playerId, 'tictac/api/squad/changed', { squad: row.squad })
     lobby.tell(playerId, 'tictac/api/region/handoverFailed', { squadId, targetRegion, reason })
-    return { retry: false, targetTold }
+    return { retry: false }
   }
 
   /**
-   * Tell the target to drop its copy: it would anyway when the offer lapses,
-   * so a failure to say so is only worth a line, and callers that are not
-   * waiting on the answer (the schedule's firing) do not wait on it.
+   * An attempt that failed before the offer was out: the target cannot have
+   * been given a window that could commit, so it is simply over, and the
+   * target told to drop its copy — it would anyway when the offer lapses, so
+   * a failure to say so is only worth a line, and the schedule's firing does
+   * not wait on the answer.
    */
+  private async failedBeforeOffer(reservation: HandoverReservation, reason: string): Promise<void> {
+    await this.failed(reservation.handoverId, reason)
+    void this.tellTarget(reservation)
+  }
+
   private tellTarget(reservation: HandoverReservation): Promise<void> {
     const { peers } = this.options
     if (!peers) return Promise.resolve()
@@ -294,17 +433,69 @@ export class Crossings implements HandoverPeer {
     )
   }
 
-  /** The time of handover `handoverId` ran out, on whichever side this region is. */
+  /** The time of handover `handoverId` ran out, or a question about it is asked again, on whichever side this region is. */
   private async lapse(handoverId: string): Promise<void> {
     const now = this.options.clock.now()
     try {
-      const outgoing = this.coordinator.reservation(handoverId)
-      if (outgoing && now > outgoing.expiresAt) await this.failed(handoverId, 'The target server did not take the squad in time.')
+      if (this.coordinator.reservation(handoverId)) await this.resolve(handoverId)
       const incoming = this.coordinator.prepared(handoverId)
       if (incoming && now > incoming.expiresAt) await this.dropCopy(handoverId)
     } catch (error) {
       this.log(`lapse of handover ${handoverId} failed: ${error instanceof Error ? error.stack : String(error)}`)
     }
+  }
+
+  /**
+   * An offer this region made is in doubt: the target says what became of
+   * it. Whatever it commits to is final — `committed` completes the crossing,
+   * and `dropped` means it holds nothing and never will, so the squad is kept
+   * and the attempt over — and a target that does not answer changes nothing:
+   * the source is still the keeper, and asks again.
+   */
+  private async resolve(handoverId: string): Promise<void> {
+    const { peers, serially } = this.options
+    const reservation = this.coordinator.reservation(handoverId)
+    if (!reservation) return
+    if (reservation.state === 'cancelled') {
+      await this.letGo(reservation, CALLED_OFF)
+      return
+    }
+    let answer: PeerAnswer<{ status: HandoverStatus }>
+    try {
+      if (!peers) throw new Refusal(RPC_ERRORS.conflict, NO_PEERS)
+      // Not on the squads' queue: the target may be waiting on this region's confirmation to answer.
+      answer = await this.asked(() => peers.peer(reservation.targetRegion).handoverStatus(handoverId))
+    } catch (error) {
+      this.log(`${reservation.targetRegion} did not say what became of handover ${handoverId}: ${String(error)}`)
+      this.askAgain(HANDOVER_LAPSE, handoverId)
+      return
+    }
+    if (!answer.ok) {
+      this.log(`${reservation.targetRegion} refused to say what became of handover ${handoverId}: ${answer.message}`)
+      this.askAgain(HANDOVER_LAPSE, handoverId)
+      return
+    }
+    const { status } = answer
+    await serially(async () => {
+      const current = this.coordinator.reservation(handoverId)
+      if (!current) return
+      if (status === 'dropped') {
+        await this.failed(handoverId, NOT_TAKEN)
+      } else if (current.state === 'offered') {
+        await this.complete(current)
+      } else {
+        // The target committed, and this region has decided against it: it is told to give the squad back.
+        await this.letGo(current, CALLED_OFF)
+      }
+    })
+  }
+
+  /** Ask again after the next of the backoff's delays: `kind`'s handler runs for `handoverId` then. */
+  private askAgain(kind: string, handoverId: string): void {
+    const asked = this.asks.get(handoverId) ?? 0
+    this.asks.set(handoverId, asked + 1)
+    const delay = HANDOVER_RETRY_DELAYS_MS[Math.min(asked, HANDOVER_RETRY_DELAYS_MS.length - 1)]!
+    this.options.schedule.set(kind, handoverId, this.options.clock.now() + delay)
   }
 
   // --- The target: what `Sessions` and the source ask -----------------------------------------
@@ -325,9 +516,12 @@ export class Crossings implements HandoverPeer {
       }
       this.coordinator.prepare(prepared)
       try {
+        // The record first: one without a copy is dropped at its lapse, a copy without a record would be nobody's to drop.
+        await store.handovers.saveIncoming(prepared, 'prepared')
         await store.importSquad(bundle)
       } catch (error) {
         this.coordinator.withdraw(prepared.handoverId)
+        await this.recorded(store.handovers.remove(prepared.handoverId), `that handover ${prepared.handoverId} was not prepared`)
         throw error
       }
       schedule.set(HANDOVER_LAPSE, prepared.handoverId, prepared.expiresAt + 1)
@@ -343,30 +537,118 @@ export class Crossings implements HandoverPeer {
    * answers. A source that refuses leaves the squad its own, as it was.
    */
   async arrive(playerId: string, handoverId: string, token: string, squadId: string): Promise<{ committed: boolean; targetRegion: string }> {
-    const { adopt, directory, peers, region: store, schedule } = this.options
+    const { adopt, directory, schedule } = this.options
     const prepared = this.coordinator.arrive(handoverId, token, squadId, playerId)
     schedule.clear(HANDOVER_LAPSE, handoverId)
-    await store.squads.setOwner(squadId, directory.self)
+    const committing = this.commit(prepared)
+    this.arriving.set(handoverId, committing)
+    try {
+      await committing
+    } catch (error) {
+      // Not committed after all: the offer is held again, and lapses at its time.
+      this.coordinator.unclaim(handoverId)
+      schedule.set(HANDOVER_LAPSE, handoverId, prepared.expiresAt + 1)
+      throw error
+    } finally {
+      this.arriving.delete(handoverId)
+    }
+
+    const settlement = await this.settlement(prepared)
+    if (settlement.kind === 'returned') throw new Refusal(RPC_ERRORS.conflict, settlement.reason)
+    // This region keeps the squad from here whatever the source says: a lost confirmation settles later.
+    await adopt(squadId)
+    if (settlement.kind === 'unknown') {
+      this.askAgain(HANDOVER_SETTLE, handoverId)
+      throw new Refusal(RPC_ERRORS.conflict, 'The source server did not answer; the crossing is being settled.')
+    }
+    return { committed: true, targetRegion: directory.self }
+  }
+
+  /**
+   * Write this region down as the squad's keeper, and the player's home with
+   * it. The record goes first: a keeper nobody can say is a keeper is the one
+   * way the source could be told `dropped` while a squad is kept here.
+   */
+  private async commit(prepared: PreparedHandover): Promise<void> {
+    const { accounts, directory, region: store } = this.options
+    await store.handovers.saveIncoming(prepared, 'committed')
+    try {
+      await store.squads.setOwner(prepared.squadId, directory.self)
+      await accounts.moveHome(prepared.playerId, directory.self)
+    } catch (error) {
+      await store.squads.setOwner(prepared.squadId, prepared.sourceRegion)
+      await store.handovers.saveIncoming(prepared, 'prepared')
+      throw error
+    }
+  }
+
+  /**
+   * Ask the source to confirm an arrival this region committed to, and take
+   * its word. `ok` settles it, and so does `gone`: a source that holds
+   * nothing of it has completed — one that decided against it keeps the
+   * reservation until this region has let go. A refusal is definite: the
+   * source keeps the squad, and this region's copy goes. Anything else, and a
+   * source that cannot be reached, leaves the commit as it is: the source
+   * deletes its rows on confirming, and a squad kept by neither is lost where
+   * one kept by both is only a conflict to settle.
+   */
+  private async settlement(prepared: PreparedHandover): Promise<Settlement> {
+    const { peers, region: store, schedule } = this.options
+    const { handoverId, squadId, sourceRegion } = prepared
     let answer: PeerAnswer
     try {
       if (!peers) throw new Refusal(RPC_ERRORS.conflict, NO_PEERS)
-      answer = await this.asked(() => peers.peer(prepared.sourceRegion).confirmArrival(handoverId))
+      answer = await this.asked(() => peers.peer(sourceRegion).confirmArrival(handoverId))
     } catch (error) {
-      // Whether the source heard of the arrival is not known: this region's
-      // commit stays, because the source deletes its rows on confirming and a
-      // squad kept by neither is lost, where one kept by both is only a
-      // conflict to settle.
-      this.log(`${prepared.sourceRegion} did not answer the arrival of ${squadId}: ${String(error)}`)
-      throw new Refusal(RPC_ERRORS.conflict, 'The source server did not answer; the crossing is being settled.')
+      this.log(`${sourceRegion} did not answer the arrival of ${squadId}: ${String(error)}`)
+      return { kind: 'unknown' }
     }
-    if (!answer.ok) {
-      // A refusal is definite: the source keeps the squad, and this region's copy goes.
-      await store.squads.setOwner(squadId, prepared.sourceRegion)
-      await store.deleteSquad(squadId)
-      throw new Refusal(answer.code, answer.message)
+    // The source decided against it and has been let go of it meanwhile (`cancelHandover`): there is nothing to settle.
+    if (!this.coordinator.arrivedAt(handoverId)) return { kind: 'returned', reason: CALLED_OFF }
+    if (answer.ok || answer.code === RPC_ERRORS.gone) {
+      this.coordinator.settle(handoverId)
+      schedule.clear(HANDOVER_SETTLE, handoverId)
+      this.asks.delete(handoverId)
+      await this.recorded(store.handovers.remove(handoverId), `that handover ${handoverId} is settled`)
+      return { kind: 'kept' }
     }
-    await adopt(squadId)
-    return { committed: true, targetRegion: directory.self }
+    if (answer.code === RPC_ERRORS.conflict) {
+      await this.giveBack(prepared)
+      return { kind: 'returned', reason: answer.message }
+    }
+    this.log(`${sourceRegion} would not settle the arrival of ${squadId}: ${answer.message}`)
+    return { kind: 'unknown' }
+  }
+
+  /** The source has not confirmed an arrival this region committed to: ask again. */
+  private async settleArrival(handoverId: string): Promise<void> {
+    const { accounts } = this.options
+    const prepared = this.coordinator.arrivedAt(handoverId)
+    if (!prepared) return
+    try {
+      // The player's home was moved with the commit; a restart may have cut that short, and it is as much a part of the commit as the keeper.
+      await accounts.moveHome(prepared.playerId, this.options.directory.self)
+      const settlement = await this.settlement(prepared)
+      if (settlement.kind === 'unknown') this.askAgain(HANDOVER_SETTLE, handoverId)
+    } catch (error) {
+      this.log(`settling the arrival of ${prepared.squadId} failed: ${error instanceof Error ? error.stack : String(error)}`)
+      this.askAgain(HANDOVER_SETTLE, handoverId)
+    }
+  }
+
+  /** Undo a commit this region made: the squad is the source's, and nothing of it is kept here. */
+  private async giveBack(prepared: PreparedHandover): Promise<void> {
+    const { accounts, region: store, schedule } = this.options
+    const { handoverId, squadId, playerId, sourceRegion } = prepared
+    // Whoever gets here first undoes it, and the other finds nothing left to undo.
+    if (!this.coordinator.arrivedAt(handoverId)) return
+    this.coordinator.settle(handoverId)
+    schedule.clear(HANDOVER_SETTLE, handoverId)
+    this.asks.delete(handoverId)
+    await accounts.moveHome(playerId, sourceRegion)
+    await store.squads.setOwner(squadId, sourceRegion)
+    await store.deleteSquad(squadId)
+    await store.handovers.remove(handoverId)
   }
 
   /** Drop what this region wrote for an offer that will not be taken, unless it has since become the squad's keeper. */
@@ -376,13 +658,37 @@ export class Crossings implements HandoverPeer {
     if (!prepared) return
     schedule.clear(HANDOVER_LAPSE, handoverId)
     if ((await directory.ownerOfSquad(prepared.squadId)) !== directory.self) await store.deleteSquad(prepared.squadId)
+    await store.handovers.remove(handoverId)
   }
 
-  /** The target's cancel: the source will not send this squad after all. */
+  /**
+   * The source has decided against the handover: the copy goes, and so does a
+   * commit this region made, which is given back. Only the source says so.
+   */
   async cancelHandover(handoverId: string): Promise<PeerAnswer> {
     try {
-      await this.dropCopy(handoverId)
+      await this.arriving.get(handoverId)?.catch(() => {})
+      const arrived = this.coordinator.arrivedAt(handoverId)
+      if (arrived) await this.giveBack(arrived)
+      else await this.dropCopy(handoverId)
       return { ok: true }
+    } catch (error) {
+      return this.answered(error)
+    }
+  }
+
+  /**
+   * What became of the handover, for a source that is in doubt: `committed` if
+   * this region keeps the squad for it, and otherwise `dropped` — said only
+   * after the copy it may still hold is gone, so that it can never commit it.
+   * A commit being written waits to be answered for.
+   */
+  async handoverStatus(handoverId: string): Promise<PeerAnswer<{ status: HandoverStatus }>> {
+    try {
+      await this.arriving.get(handoverId)?.catch(() => {})
+      if (this.coordinator.arrivedAt(handoverId)) return { ok: true, status: 'committed' }
+      await this.dropCopy(handoverId)
+      return { ok: true, status: 'dropped' }
     } catch (error) {
       return this.answered(error)
     }
@@ -392,28 +698,22 @@ export class Crossings implements HandoverPeer {
    * The target says the window arrived and keeps the squad: commit the new
    * keeper, let go of the rows, and end the window's session so it moves.
    * Refused while the player holds a seat, which they may have taken since the
-   * offer: the target then puts the squad back.
+   * offer: the target then puts the squad back. Not refused for an offer whose
+   * time has run out: the target committed before it did, which is why it asks.
    */
   confirmArrival(handoverId: string): Promise<PeerAnswer> {
-    const { lobby, region: store, schedule } = this.options
+    const { lobby } = this.options
     return this.options.serially(async () => {
       try {
         const reservation = this.coordinator.reservation(handoverId)
         if (!reservation) throw new Refusal(RPC_ERRORS.gone, 'Unknown handover reservation.')
-        if (!this.coordinator.isPending(handoverId)) throw new Refusal(RPC_ERRORS.conflict, 'Handover offer has expired.')
-        if (lobby.holdsSeat(reservation.playerId)) throw new Refusal(RPC_ERRORS.conflict, SEATED)
-        await this.coordinator.confirm(handoverId)
-        schedule.clear(HANDOVER_LAPSE, handoverId)
-        this.intents.delete(reservation.squadId)
-        // The keeper is committed: a failure to tidy up what was left is a line in the log, not a crossing undone.
-        await store.deleteSquad(reservation.squadId).catch((error: unknown) => {
-          this.log(`could not delete squad ${reservation.squadId} after it crossed: ${String(error)}`)
-        })
-        lobby.endWindow(reservation.playerId, {
-          reason: `Your squad crossed into ${reservation.targetRegion}.`,
-          reconnect: 'elsewhere',
-          url: reservation.targetUrl,
-        })
+        if (reservation.state === 'cancelled') throw new Refusal(RPC_ERRORS.conflict, 'Handover was cancelled.')
+        if (lobby.holdsSeat(reservation.playerId)) {
+          // Decided: the lapse tells the target to let go if its commit survives this refusal.
+          await this.abort(handoverId)
+          throw new Refusal(RPC_ERRORS.conflict, SEATED)
+        }
+        await this.complete(reservation)
         return { ok: true }
       } catch (error) {
         return this.answered(error)
@@ -421,10 +721,51 @@ export class Crossings implements HandoverPeer {
     })
   }
 
+  /**
+   * The target keeps the squad: commit the new keeper, let go of the rows, and
+   * end the window's session. On the squads' queue.
+   */
+  private async complete(reservation: HandoverReservation): Promise<void> {
+    const { lobby, region: store, schedule } = this.options
+    const { handoverId, squadId } = reservation
+    await this.coordinator.confirm(handoverId)
+    schedule.clear(HANDOVER_LAPSE, handoverId)
+    this.asks.delete(handoverId)
+    await this.forget(squadId)
+    // The keeper is committed: a failure to tidy up what was left is a line in the log, not a crossing undone.
+    await store.deleteSquad(squadId).catch((error: unknown) => {
+      this.log(`could not delete squad ${squadId} after it crossed: ${String(error)}`)
+    })
+    await this.recorded(store.handovers.remove(handoverId), `that handover ${handoverId} is complete`)
+    lobby.endWindow(reservation.playerId, {
+      reason: `Your squad crossed into ${reservation.targetRegion}.`,
+      reconnect: 'elsewhere',
+      url: reservation.targetUrl,
+    })
+  }
+
   // --- Both ----------------------------------------------------------------------------------
 
+  /** The squad is not going to cross: forget its order, here and in the database. */
+  private async forget(squadId: string): Promise<void> {
+    this.intents.delete(squadId)
+    await this.recorded(this.options.region.handovers.removeIntent(squadId), `that squad ${squadId} is not crossing`)
+  }
+
+  /**
+   * A write that records what happened, which does not decide it: when it
+   * fails the crossing goes on, and the line says what a restart will find.
+   */
+  private async recorded(write: Promise<void>, what: string): Promise<void> {
+    try {
+      await write
+    } catch (error) {
+      this.log(`could not record ${what}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   /** A refusal as the answer to a peer; anything else is this region's failure and is told as one. */
-  private answered(error: unknown): PeerAnswer {
+  private answered(error: unknown): PeerRefusal {
     if (error instanceof Refusal) return { ok: false, code: error.code, message: error.message }
     this.log(`a handover call failed: ${error instanceof Error ? error.stack : String(error)}`)
     return { ok: false, code: RPC_ERRORS.serverFailed, message: 'the server failed' }
@@ -437,8 +778,8 @@ export class Crossings implements HandoverPeer {
    * A region that does not answer, or whose call fails, rejects: not knowing
    * what it did is not the same as being refused.
    */
-  private async asked(call: () => Promise<PeerAnswer>): Promise<PeerAnswer> {
-    const { promise, resolve, reject } = Promise.withResolvers<PeerAnswer>()
+  private async asked<Reply extends object>(call: () => Promise<PeerAnswer<Reply>>): Promise<PeerAnswer<Reply>> {
+    const { promise, resolve, reject } = Promise.withResolvers<PeerAnswer<Reply>>()
     const cancel = this.options.clock.schedule(() => reject(new Error('the other region did not answer in time')), HANDOVER_TIMEOUT_MS)
     Promise.resolve().then(call).then(resolve, reject)
     try {
