@@ -13,7 +13,7 @@ import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
 import { replay } from '../src/sim/Replay'
 import type { CombatRecording, RecordingHeader } from '../src/wire/Recording'
-import { DATABASE_URLS, freshPersistence } from './support/db'
+import { freshPersistence } from './support/db'
 
 /**
  * A real intent log, not a handmade one: the store exists so a match can be
@@ -60,10 +60,10 @@ beforeAll(() => {
   expect(log.events.length).toBeGreaterThan(20)
 })
 
-describe.each(DATABASE_URLS)('The match store on %s', (url) => {
+describe('The match store', () => {
   describe('A match goes into the store as its intents and comes back out as a match', () => {
     test('the header and every event survive, in order', async () => {
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const id = await store.region.matches.create(log.header)
       await store.region.matches.appendAll(id, unsequenced(log))
 
@@ -83,7 +83,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       // The property the store exists to preserve. A log that does not replay is
       // not a store of record, so a skipped event here is a store failure and
       // not a rules finding.
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const id = await store.region.matches.create(log.header)
       await store.region.matches.appendAll(id, unsequenced(log))
 
@@ -101,7 +101,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
 
   describe('Rejoin reads the tail', () => {
     test('afterSeq is exclusive and returns exactly what came later', async () => {
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const id = await store.region.matches.create(log.header)
       await store.region.matches.appendAll(id, unsequenced(log))
 
@@ -120,7 +120,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
     })
 
     test('a client that has nothing gets the whole log', async () => {
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const id = await store.region.matches.create(log.header)
       await store.region.matches.appendAll(id, unsequenced(log))
 
@@ -132,7 +132,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
 
   describe('The store owns the numbering', () => {
     test('appends are numbered densely from zero however they arrive', async () => {
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const id = await store.region.matches.create(header('2026-09-18T10:00:00Z', 'dense'))
 
       expect((await store.region.matches.append(id, END_TURN)).seq).toBe(0)
@@ -151,7 +151,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
     test('two logs are numbered independently', async () => {
       // Numbering is per match, because what a rejoining client counts is its own
       // match's intents and nothing else in the store.
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const first = await store.region.matches.create(header('2026-09-18T10:00:00Z', 'first'))
       const second = await store.region.matches.create(header('2026-09-18T11:00:00Z', 'second'))
 
@@ -168,7 +168,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       // Append-only is a property of the database, not a courtesy of this class:
       // the log is what tells a foul from a bug in the rules, and one that can be
       // edited proves nothing about either.
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const id = await store.region.matches.create(header('2026-09-18T12:00:00Z', 'evidence'))
       await store.region.matches.append(id, END_TURN)
 
@@ -182,7 +182,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
 
   describe('A store that has never heard of a match says so', () => {
     test('reading an unknown id answers nothing rather than throwing', async () => {
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
 
       expect(await store.region.matches.header('nobody')).toBeNull()
       expect(await store.region.matches.match('nobody')).toBeNull()
@@ -194,7 +194,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
     test('appending to an unknown id is refused', async () => {
       // The asymmetry is deliberate: a failed read has its answer, a failed write
       // has lost an intent.
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
 
       await expect(store.region.matches.append('nobody', END_TURN)).rejects.toThrow(/no match nobody/)
       await expect(store.region.matches.appendAll('nobody', [END_TURN])).rejects.toThrow(/no match nobody/)
@@ -203,7 +203,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
     })
 
     test('a recording from another format version is not stored as if current', async () => {
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const stale = { ...header('2026-09-18T10:00:00Z', 'stale'), version: RECORDING_VERSION - 1 }
 
       await expect(store.region.matches.create(stale)).rejects.toThrow(/cannot store a version/)
@@ -215,7 +215,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
 
   describe('Listing matches', () => {
     test('recent orders newest first and counts each log', async () => {
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const older = await store.region.matches.create(header('2026-09-17T08:00:00Z', 'older'))
       const newest = await store.region.matches.create(header('2026-09-18T09:00:00Z', 'newest'))
       const middle = await store.region.matches.create(header('2026-09-17T20:00:00Z', 'middle'))
@@ -249,7 +249,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
     })
 
     test('a room comes back as it was written, and each transition rewrites its one row', async () => {
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       const waiting = room('r1', '2026-09-18T10:00:00.000Z')
       await store.region.rooms.save(waiting)
       expect(await store.region.rooms.live()).toEqual([waiting])
@@ -271,9 +271,9 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
     })
 
     test('who moves each seat, what its AI fights to, the deadline of a reserved one, and whether the server opened the room come back as written', async () => {
-      const store = await freshPersistence(url)
-      // A millisecond clock is far past what Postgres's INTEGER holds, which is
-      // why the deadline is kept as a timestamp: it has to come back exactly.
+      const store = await freshPersistence()
+      // The deadline is kept as a timestamp, not a millisecond clock: it has
+      // to come back exactly.
       const joinBy = Date.UTC(2026, 9, 8, 9, 1, 0, 123)
       const fight: StoredRoom = {
         ...room('fight', '2026-10-08T09:00:00.000Z'),
@@ -294,7 +294,7 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
     })
 
     test('live rooms come back oldest first, and a room that ended does not come back', async () => {
-      const store = await freshPersistence(url)
+      const store = await freshPersistence()
       await store.region.rooms.save(room('newest', '2026-09-18T12:00:00.000Z'))
       await store.region.rooms.save(room('oldest', '2026-09-18T10:00:00.000Z'))
       await store.region.rooms.save(room('ended', '2026-09-18T11:00:00.000Z'))
@@ -319,8 +319,6 @@ describe('A match outlives the process that played it', () => {
   })
 
   test('a match survives close and reopen on disk', async () => {
-    // SQLite only: what is being tested is a file, and a Postgres database is
-    // already somebody else's process.
     const url = `sqlite://${join(dir, 'roundtrip.sqlite')}`
 
     const writing = await openPersistence(WALL_CLOCK, url)

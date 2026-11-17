@@ -206,8 +206,8 @@ what it is: the rules, in the page, with nothing in between.
    - Unwatched matches cannot abort on a foul. With no referee there is no third opinion, so
      peer-to-peer play detects disagreement and can only stop; it cannot attribute.
 4. ~~Does the referee store the log durably, and in what?~~ **Decided: one database, behind a
-   portable port.** `src/server/db/Db.ts` wraps `Bun.SQL`, which speaks SQLite and Postgres
-   through one interface, so the log, the accounts and the rosters are one store. The hosting
+   portable port.** `src/server/db/Db.ts` wraps `Bun.SQL` (SQLite; Postgres was weighed and dropped,
+   `tictac-uqt.33`), so the log, the accounts and the rosters are one store. The hosting
    decision moved (`[ITEM-045]`, §7): a Durable Object now runs the same referee over its own
    `Db` adapter — see [ARCH-DEPLOYMENT §3](../../architecture/deployment.md) for what that
    adapter does and does not guarantee.
@@ -276,9 +276,10 @@ Two consequences follow, and both are cheap now and expensive later:
   RFC has decided not to have.
 - **Server-side WebRTC.** §6.
 
-## 11. A standing invariant this will retire
+## 11. A standing invariant this retired
 
-`AGENTS.md` states sender-resolved combat as a core architectural invariant, and
-`docs/architecture/overview.md` documents `WireHit` as how an attack travels. Both are accurate
-today and both become wrong the moment `ITEM-023` lands. They are named here so the change is a
-deliberate edit at that point rather than a document that quietly stops being true.
+`AGENTS.md` stated sender-resolved combat as a core architectural invariant, and
+`docs/architecture/overview.md` documented `WireHit` as how an attack travels. Both were accurate
+until `ITEM-023` landed, and were named here so the change would be a deliberate edit rather than
+a document that quietly stopped being true. Both now say "intent on the wire, resolved on both
+sides" ([ADR-0004](../adr/0004-full-knowledge-lockstep.md)).

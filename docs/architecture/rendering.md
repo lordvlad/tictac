@@ -107,8 +107,8 @@ the same place and their gun hands in different ones.
 
 Everything drawn over or instead of the canvas — the in-match HUD, the menus and lobby, the
 roster and loadout screens, playback controls, the debug map and panel — is **React 19**
-components in `.tsx` files under `src/hud/` (`src/hud/menu/` for the menus, `src/hud/hud/` for
-the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-jsx`).
+components in `.tsx` files under `src/hud/` (`src/hud/menu/` for the menus, `Hud.tsx` for the
+in-match HUD), compiled by Bun with no extra tooling (`jsx: react-jsx`).
 
 - **Model in, markup out.** `HudModel.ts` is plain view data (`HudModel`, `EndScreen`,
   `tileReadout`) and knows nothing of React or of the match; `src/client/HudModelBuilder.ts`

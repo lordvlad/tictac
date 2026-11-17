@@ -4,7 +4,7 @@ import { WALL_CLOCK } from '../src/server/Clock'
 import { Batch, type Db, type SqlValue } from '../src/server/db/Db'
 import { migrate, type Migration } from '../src/server/db/migrate'
 import { dbOverStorage, type DoStorage } from '../workers/DoSqliteDb'
-import { DATABASE_URLS, freshDb } from './support/db'
+import { freshDb } from './support/db'
 
 /**
  * What `Db.transaction` promises, asserted once and run against every adapter.
@@ -40,7 +40,7 @@ function fakeStorage(): FakeStorage {
 }
 
 const adapters: (readonly [string, () => Promise<Db>])[] = [
-  ...DATABASE_URLS.map((url) => [`Bun.SQL on ${url}`, () => freshDb(url)] as const),
+  ['Bun.SQL on :memory:', () => freshDb()],
   ['Durable Object storage (fake transactionSync)', async () => dbOverStorage(fakeStorage())],
 ]
 

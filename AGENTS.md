@@ -20,7 +20,7 @@ Welcome to **TicTac (No Way Home)**. This document establishes guidelines, archi
 ### 1. Headless-First Pure Rules Layer
 - Code under `src/core/`, `src/rules/`, `src/wire/`, `src/ecs/`, and `src/sim/` must remain **100% headless** and free of DOM or WebGL dependencies.
 - **Rule**: Never import from `src/render/`, `src/hud/`, or `src/camera/` inside `src/core/` or `src/ecs/`.
-- **Enforced**: `tests/layers.test.ts` checks every runtime import against the layer DAG (core ← ecs ← rules ← sim ← wire ← server/client; render/hud/camera client-only; `workers/` reaches only `src/server`). Edges that still violate it are an allowlist, each under the ticket that removes it. A new violating edge fails the test, and so does a listed edge that no longer exists — delete its line when you delete the import. The list only shrinks.
+- **Enforced**: `tests/layers.test.ts` checks every runtime import against the layer DAG (bottom to top: core, rules, ecs, entities, wire, sim, then the hosts `server` and `game`/`client`; render/hud/camera are client-only; `workers/` reaches only `src/server`). Edges that still violate it are an allowlist, each under the ticket that removes it. A new violating edge fails the test, and so does a listed edge that no longer exists — delete its line when you delete the import. The list only shrinks.
 - Three.js imports in core/ECS are restricted to pure vector arithmetic (`Vector3`, `Quaternion`, `MathUtils`).
 
 ### 2. Deterministic PRNG
@@ -30,7 +30,7 @@ Welcome to **TicTac (No Way Home)**. This document establishes guidelines, archi
 ### 3. Intent on the Wire, Resolved on Both Sides
 - A command carries what a player **decided**, never what it produced: `fireShot` is a shooter, a target and a mode. `WireHit` is gone.
 - Both peers resolve every command through the same rules, from one seeded stream per match (`matchDice(seed)`), against state they both hold. See [ADR-0004](docs/design/adr/0004-full-knowledge-lockstep.md).
-- Therefore: **only the rules may draw from the match stream**, and they must draw the same numbers in the same order on both sides. Setup (dealing squads) and presentation (tracer scatter, smoke) take their own randomness. Enforced by `tests/determinism.test.ts`.
+- Therefore: **only the rules may draw from the match stream**, and they must draw the same numbers in the same order on both sides. Setup (dealing squads) and presentation (tracer scatter, smoke) take their own randomness; what both peers must agree on besides the dice (the ground's surfaces, the doors, who is carried out alive) takes a *named derived stream* of the seed (`SURFACE_STREAM`, `DOOR_STREAM`, `SURVIVOR_STREAM`; ADR-0004). Enforced by `tests/determinism.test.ts`.
 - Disagreement is no longer a wrong number applied quietly; it is a desynchronisation, reported by the state digest exchanged at every handover.
 
 ### 4. Pure Intent Lockstep (ADR-0004)
@@ -94,6 +94,8 @@ bun run build
 | `src/ui/` | The vocabulary the player's screen and the session speak: `HudIntent`, `PointerIntent`, the playback speeds. Below both `game` and `hud`. |
 | `src/hud/` | DOM HUD overlays, menus, map, roster: plain view-model props in, `HudIntent`s out. Server-backed screens take the ports of `ServerPorts.ts`; imports no entity, sim, planner, scene or connection. |
 | `src/camera/` | Orbit rig, camera controls, pointer raycaster picking. |
+| `src/server/` | The match server both hosts build through one factory (`createMatchServer`, `MatchServer.ts`): `Lobby` and its rooms, `Session` (the one door a window's frames enter by), the account/region stores (`AccountStore`, `RegionStore`) over the `Db` port, `Journeys`, `Crossings` and `Handover` (a squad changing region), the injected `Clock`. Host-agnostic: no Bun or Cloudflare API outside `db/BunSqlDb.ts`, `GameServer.ts` and `SocketTransport.ts`. |
+| `workers/` | The Cloudflare host: the Worker router (`index.ts`), the `MatchDurableObject` and its DO-SQLite `Db` adapter. Reaches only `src/server`. |
 | `docs/` | Living documentation: architecture, GDD, ADRs, backlog, plans, guides, schemas. |
 | `scripts/` | Tooling: balance runner, icon compiler, character optimizer, doc linter. |
 

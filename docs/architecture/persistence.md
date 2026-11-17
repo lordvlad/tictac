@@ -13,13 +13,13 @@ appliesTo:
   - "src/rules/MatchEnd.ts"
   - "src/wire/Recording.ts"
   - "src/core/Characters.ts"
-  - "src/hud/RosterScreen.ts"
+  - "src/hud/RosterScreen.tsx"
   - "src/config.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
   - "docs/architecture/networking.md"
   - "docs/backlog/active-backlog.md"
-tags: ["persistence", "database", "sqlite", "postgres", "webauthn", "passkeys", "roster", "squads"]
+tags: ["persistence", "database", "sqlite", "webauthn", "passkeys", "roster", "squads"]
 ---
 
 # Persistence: Database Port, Migrations, Accounts & Rosters
@@ -32,11 +32,10 @@ fresh squad per match and write nothing anywhere.
 
 ## 1. Two Stores, One Port
 
-Where the database will finally live is open — a Durable Object per match, or
-one central Postgres — so nothing above `src/server/db/Db.ts` knows which engine
-it is speaking to. `Bun.SQL` already speaks SQLite and Postgres through one
-tagged-template interface, so the port is thin: no ORM, no driver, no
-dependency.
+The database is SQLite: a file or memory under Bun, or a Durable Object's own
+storage. Nothing above `src/server/db/Db.ts` knows which of those it is speaking
+to. `Bun.SQL` speaks SQLite through one tagged-template interface, so the port
+is thin: no ORM, no driver, no dependency.
 
 What the server keeps is two stores, over two databases (RFC-0002 §4):
 
@@ -179,28 +178,20 @@ lobby, the journeys and the handover coordinator. `Date.now` appears only in
 the wall-clock factory (`tests/determinism.test.ts` scans `src/server` and
 `workers`).
 
-### Portability rules
+### Conventions
 
-Stated in `Db.ts` and obeyed by every query in `src/server/`:
+Stated in `Db.ts` and followed by every query in `src/server/`:
 
 - Values are TEXT or INTEGER. A timestamp is an ISO string written from JS,
   never `CURRENT_TIMESTAMP`. Binary data is base64url TEXT.
-- A count is `CAST(COUNT(*) AS INTEGER)`; Postgres returns `bigint` as a string.
-- camelCase aliases are double-quoted (`AS "createdAt"`), or Postgres folds them.
-- No generated columns, no JSON operators in SQL, no `rowid`, no `WITHOUT ROWID`.
+- A count is `CAST(COUNT(*) AS INTEGER)`, so its type is stated rather than inferred.
+- camelCase aliases are double-quoted (`AS "createdAt"`).
 - `RETURNING`, partial indexes, `INSERT … VALUES (…, (subselect))` and
-  `INSERT … ON CONFLICT (…) DO UPDATE SET … = excluded.…` are fair game: both
-  engines have them.
+  `INSERT … ON CONFLICT (…) DO UPDATE SET … = excluded.…` are fair game.
 
-The claim is kept honest by running the suite against both engines:
-
-```sh
-docker run --rm -d --name tictac-pg -p 55432:5432 -e POSTGRES_PASSWORD=tictac postgres:17
-TICTAC_TEST_POSTGRES_URL=postgres://postgres:tictac@localhost:55432/postgres bun test
-```
-
-`tests/support/db.ts` adds the Postgres url to `DATABASE_URLS` when that
-variable is set, and every persistence test is a `describe.each` over it.
+The database is SQLite everywhere: `Bun.SQL` over a file or `:memory:`, or a Durable Object's own
+storage. `openDb` refuses any other url by name. Postgres was weighed as one central database and
+dropped (tictac-uqt.33): no deployment used it, and its adapter paths were never run in CI.
 
 ---
 
@@ -228,10 +219,9 @@ Before it applies anything it refuses four things by name:
 | an old-ledger database that stops before its last migration | see "Databases from before the split" below |
 
 Each migration runs as one batch with the `store_migrations` row that
-records it (§1), so a half-applied schema is not reachable — on a Durable Object as much as on Bun. A statement may be a
-plain string or `{ sqlite, postgres }` (each half a string or a list): the append-only trigger,
-which the engines spell differently, and the removal of a foreign key, which SQLite can only do by
-rebuilding the table and Postgres by dropping the constraint.
+records it (§1), so a half-applied schema is not reachable — on a Durable Object as much as on Bun. A
+statement is a plain string; SQLite cannot drop a constraint, so removing a foreign key is a rebuild of
+the table (migration 2 of the region list).
 
 ### The account store's list
 
@@ -247,12 +237,12 @@ rebuilding the table and Postgres by dropping the constraint.
    lobby's live rooms, §3, with the encounter, control, join-window and standing columns), `squads`
    (with `standing` and `owner`, §5a) and `encounters` (§5b, with `opponent_player_id` and
    `settled`) — each in its final shape and with **no reference to `players`** (see §2.1). The
-   `deeds` default is a literal: a column DEFAULT is DDL and takes no bound parameter on either
-   engine; the text is exactly what the earlier `JSON.stringify` produced.
+   `deeds` default is a literal: a column DEFAULT is DDL and takes no bound parameter; the text is
+   exactly what the earlier `JSON.stringify` produced.
 2. **`no player foreign keys`** — takes the `players` keys out of the tables that had them
    (`roster.player_id`, `roster.died_in`'s key to `matches`, `match_results.blue_player`/`red_player`,
    `squads.player_id`, `encounters.player_id`). On a database from before the split that is a rebuild
-   of those tables (SQLite) or a dropped constraint (Postgres); on a fresh region database it
+   of those tables; on a fresh region database it
    rebuilds empty tables into the shape they already have.
 
 ### 2.1 Databases from before the split
@@ -291,11 +281,11 @@ inside the insert (`COALESCE(MAX(seq) + 1, 0)`), so there is no window between
 reading the end of a log and writing to it.
 
 Append-only is a property of the database, not a courtesy of the class: a
-trigger refuses `UPDATE` and `DELETE` on `events` on both engines. A log that
+trigger refuses `UPDATE` and `DELETE` on `events`. A log that
 can be rewritten is not evidence.
 
 `created_at` and `seed_label` are copied out of the header at write time rather
-than derived in SQL — a generated column is SQLite's alone.
+than derived in SQL.
 
 ### Rooms, so a restart loses none
 
@@ -315,7 +305,7 @@ restarted server needs to hold it again (`Lobby.restore`,
 | `red_player_id`, `red_name`, `red_key_hash` | the same for Red, all null while the room waits |
 | `encounter` | 1 for a fight the server opened on the road (`ITEM-048`): not listed, and the AI plays on where a human leaves. 0 for every room a player opened |
 | `blue_control`, `red_control` | who moves each seat: `player` (a window holds it, or can take it back), `reserved` (kept for a player who has not arrived) or `ai`. A seat's *player* above is whose it is, whoever moves it |
-| `blue_join_by`, `red_join_by` | when a `reserved` seat passes to the AI, an ISO timestamp like every other here — a millisecond epoch does not fit Postgres's `INTEGER`. Null otherwise |
+| `blue_join_by`, `red_join_by` | when a `reserved` seat passes to the AI, an ISO timestamp like every other here. Null otherwise |
 
 A seat's key is never stored, only its hash — the same reason `sessions` keeps
 no token. There are no foreign keys: an anonymous seat names nobody, and nothing
@@ -545,7 +535,7 @@ step is invisible on its own) and level 4 at 20 (two steps land as a whole
 point) — both inside their bands, and a live demonstration that this clamp
 applies to a stored ceiling exactly as it already did to a status effect's.
 
-**Picking who deploys.** `src/hud/RosterScreen.ts` is a DOM-only overlay shown
+**Picking who deploys.** `src/hud/RosterScreen.tsx` is a DOM-only overlay shown
 ahead of `LoadoutScreen` to a signed-in player: every active roster member,
 identified by slot number rather than callsign (`FACTION_INFO.squadNames[index]`
 is assigned by *deployed* position, so a name here would promise a character a
@@ -604,7 +594,7 @@ see a clear disc. `Squads.placing` draws and commits under one queue, so each pl
 every start written before it; `RegionStore.enlist` is the only caller, and does its own
 "has this player a roster or a squad yet?" reads inside the queue too, so it is idempotent. That holds for the one process that writes the table
 — one Durable Object or one Bun server per database — which is the rule here; two Bun servers sharing
-a Postgres would need a constraint the database enforces. `tests/squads.test.ts` places five players
+a database file would need a constraint the database enforces. `tests/squads.test.ts` places five players
 at once onto five candidate spots.
 
 **Players from before squads.** The squads migration added no rows: a random draw is not something SQL
@@ -624,7 +614,7 @@ nothing writes no row — it is a function of its key, so a row would only be a 
 |---|---|
 | `squad_id`, `trip`, `checkpoint` | the roll's key, `UNIQUE`: a checkpoint is handled once, which is what makes an alarm fired again after a restart harmless |
 | `player_id` | whose squad it was; the feed reads by it (`encounters_player`) |
-| `found_at` | the server's clock in ms when the squad was found. `BIGINT`: a millisecond epoch does not fit Postgres's `INTEGER` |
+| `found_at` | the server's clock in ms when the squad was found. `BIGINT`: a millisecond epoch is past 32 bits |
 | `lat_e6`, `lng_e6` | where the squad stood, in millionths of a degree, as a start is kept |
 | `aliens` | how many came; 0 when passed by |
 | `room_id` | the fight's room, which is its match id; reserved on the row when it is begun (below), null once a contact is settled as passed by (`encounters_room`) |
@@ -687,7 +677,7 @@ default to `localhost` and `http://localhost:5173`. For a GitHub Pages
 deployment the server runs with `--rp-id=lordvlad.github.io
 --origins=https://lordvlad.github.io` behind HTTPS/WSS. The server restores
 every live room from the database before it opens its port, so a server
-restarted over a file or a Postgres keeps its matches; one on `:memory:` has
+restarted over a file keeps its matches; one on `:memory:` has
 nothing to restore.
 
 Each room's referee writes through **one queue** (`Room.enqueue`; `Room.idle`, and

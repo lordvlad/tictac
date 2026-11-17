@@ -20,7 +20,7 @@ const ADA: Player = { id: 'ada', name: 'Ada' }
 const BO: Player = { id: 'bo', name: 'Bo' }
 
 async function harness() {
-  const persistence = await freshPersistence(':memory:')
+  const persistence = await freshPersistence()
   const lobby = await hostLobby(persistence, WALL_CLOCK)
   return { persistence, lobby }
 }

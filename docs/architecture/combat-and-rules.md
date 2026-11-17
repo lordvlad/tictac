@@ -178,7 +178,7 @@ modifier without either knowing the other exists, and it is still what every rul
 - `resolveSourcedInto(out, traits, source?)` is the same fold over tagged traits, filtered to
   one source when asked. With no source it is exactly the source-blind fold. `resolveTraits` /
   `resolveTraitsInto` are unchanged and remain the default; a unit keeps a full fold and a
-  gear-only fold side by side and exposes `gearOnlyTraits`.
+  gear-only fold side by side (`Soldier`'s private `gearTraits`, which Strength's `gearRelief` reads).
 - **One combining rule.** `addEffects` is the single place that knows how each `TraitEffects`
   field combines — numbers sum, flags OR — and both folds go through it. That is the whole
   defence against the obvious hazard of a second fold: a newly added field cannot be honoured
@@ -452,7 +452,7 @@ that asks for Intelligence, each lock opened with keys or forced, and at the han
 outgoing side's turns spent to the last point that will not wind them). Friendly fire teaches
 nobody. Nothing in a match reads the record.
 
-Once one side has nobody on the field (`game/MatchEnd.winnerOf`: dead, or withdrawn by a
+Once one side has nobody on the field (`rules/MatchEnd.winnerOf`: dead, or withdrawn by a
 retreat), `debrief` turns the winning side's survivors' records into growth with
 `core/Progression.growthFrom` — a pure function of the sheet going in and the record (numbers in
 `PROGRESSION`, catalogue §10) — and the controller shows the end screen (`HudModel.endScreens`):
@@ -502,9 +502,9 @@ sequenceDiagram
   permanent loss, which is what earns it a pouch slot; it needs Intelligence to operate and a
   mechanic's training makes it both cheaper and worth more.
 - **Suppression**: rounds that *miss* stack `Suppressed` on the target (accuracy and points,
-  per stack, pinned at the cap). It is derived on both sides rather than sent — `executeShot`
-  counts the rounds that went past and `replayShot` counts the false entries in the rolls it
-  was given, so no message had to grow.
+  per stack, pinned at the cap). It is derived on both sides rather than sent — `CombatSystem`
+  counts the false entries in the `rolls` of the `ShotResult` it resolved (`misses`), the same
+  count on both sides, so no message had to grow.
 - **Wounds**: `Limping` at or below half health and `Concussed` at or below a quarter, from
   `woundTraits(hp, maxHp)`. They are **derived from current health, not stamped on** when a
   threshold is crossed: hit points already replicate, so both peers reach the same answer with

@@ -16,7 +16,7 @@ import { RPC_ERRORS, type RpcErrorCode } from '../wire/Rpc'
  * 3. Client connects second socket to Target DO and calls `region/arrive`, the first staying open.
  * 4. Target DO commits itself as the keeper and confirms arrival to Source DO via `confirmArrival`.
  * 5. Source DO commits the new keeper (`Squads.setOwner`, the durable fact `RegionDirectory.ownerOfSquad`
- *    reads), purges local squad simulation and ends the session with `session/ended`
+ *    reads), deletes its own rows for the squad (`RegionStore.deleteSquad`) and ends the session with `session/ended`
  *    `{ reconnect: 'elsewhere', url }` on the primary socket.
  * 6. Client moves onto the second socket in place and lets the primary go without redialling it
  *    (`ServerConnection.moveOver`).

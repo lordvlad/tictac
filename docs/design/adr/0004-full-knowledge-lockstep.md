@@ -3,7 +3,7 @@ title: "ADR-0004: Full-Knowledge Lockstep With an Optional Referee"
 id: "ADR-0004"
 type: "adr"
 status: "accepted"
-lastReviewed: "2026-09-17"
+lastReviewed: "2026-11-17"
 appliesTo:
   - "src/game/NetworkManager.ts"
   - "src/wire/JsonRpc.ts"
@@ -49,6 +49,19 @@ entry points, and persistence is the foundation the rest stands on.
    and intel fog stay filters over what a client *draws*.
 2. **Intent only on the wire.** Both peers recompute every outcome. Resolved payloads
    (`WireHit`) are deleted rather than deprecated.
+   **One dice stream per match, drawn only by the rules** (`matchDice(seed)`, `src/core/rng.ts`). Anything
+   else that needs randomness both peers must agree on, without drawing from it and moving every later
+   roll, takes a **named derived stream**: the seed XOR a fixed constant, its own `Rng`, so nothing in
+   it can disturb the dice. There are three:
+   - `SURFACE_STREAM` (`src/core/MapGenerator.ts`): the ground's materials, drawn after everything else
+     so no wall, crate or spawn of an existing seed moved.
+   - `DOOR_STREAM` (`src/core/MapGenerator.ts`): which doorways hang a door, for the same reason.
+   - `SURVIVOR_STREAM` (`src/rules/MatchEnd.ts`): which of a losing side is carried out alive, picked
+     the same on both peers without anything travelling.
+
+   Setup (dealing squads, whose result travels in the match header) and presentation (tracer scatter,
+   smoke) take their own randomness and are not derived streams. That only the rules draw from the match
+   stream is enforced by `tests/determinism.test.ts`.
 3. **An optional referee**, a `Bun.serve` process, recomputes the same intent stream. It is a
    **witness, not an authority**: it is not in the data path, costs no latency, and a match
    plays on unwatched without it. What it buys is persistence, rejoin after a lost client, and

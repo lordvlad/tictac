@@ -32,7 +32,7 @@ interface Traveller {
 
 /** A registered player near Stuttgart, at rest, with the window they registered on. */
 async function traveller(): Promise<Traveller> {
-  const persistence = await freshPersistence(':memory:')
+  const persistence = await freshPersistence()
   const server = await rpcServer(persistence)
   const window = server.window()
   await register(window, await softwareAuthenticator())
@@ -133,7 +133,7 @@ describe('The five orders', () => {
   })
 
   test('only a signed-in window gives orders', async () => {
-    const persistence = await freshPersistence(':memory:')
+    const persistence = await freshPersistence()
     const refused = await (await rpcServer(persistence)).window().call('tictac/api/squad/order', { order: { kind: 'stop' } })
     expect(refused.code).toBe(RPC_ERRORS.signInFirst)
   })

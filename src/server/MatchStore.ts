@@ -30,9 +30,9 @@ import { Batch, type Db } from './db/Db'
  * audited by replaying it in front of somebody.
  *
  * The store is handed a migrated {@link Db} rather than opening one: where the
- * database lives is `Persistence`'s business, and this class works the same on
- * SQLite and on Postgres because every query in it obeys the portability rules
- * in `db/Db.ts`.
+ * database lives is `Persistence`'s business, and this class works the same
+ * over a file, memory or a Durable Object's storage because every query in it
+ * follows the conventions in `db/Db.ts`.
  */
 
 /**

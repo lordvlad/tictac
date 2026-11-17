@@ -12,28 +12,6 @@ import type { Migration } from '../../src/server/db/migrate'
  * keys to `players` and all.
  */
 
-/**
- * The append-only guard, spelled for both engines.
- *
- * The log is evidence: it is the only way to tell a foul from a bug in the
- * rules, so the refusal lives in the database rather than in the class in front
- * of it. A guard a caller can route around guards nothing.
- *
- * SQLite needs one trigger per operation; Postgres needs a function and one
- * trigger covering both. They are paired so each engine runs two statements.
- */
-const APPEND_ONLY_FUNCTION = `
-CREATE FUNCTION events_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  RAISE EXCEPTION 'the intent log is append-only: an event cannot be %',
-    CASE TG_OP WHEN 'UPDATE' THEN 'rewritten' ELSE 'deleted' END;
-END $$`
-
-const APPEND_ONLY_TRIGGER = `
-CREATE TRIGGER events_append_only
-  BEFORE UPDATE OR DELETE ON events
-  FOR EACH ROW EXECUTE FUNCTION events_append_only()`
-
 const LEGACY_MIGRATIONS: readonly Migration[] = [
   {
     id: 1,
@@ -61,18 +39,12 @@ const LEGACY_MIGRATIONS: readonly Migration[] = [
          command  TEXT    NOT NULL,
          PRIMARY KEY (match_id, seq)
        )`,
-      {
-        sqlite: `CREATE TRIGGER events_append_only_update
-                   BEFORE UPDATE ON events
-                   BEGIN SELECT RAISE(ABORT, 'the intent log is append-only: an event cannot be rewritten'); END`,
-        postgres: APPEND_ONLY_FUNCTION,
-      },
-      {
-        sqlite: `CREATE TRIGGER events_append_only_delete
-                   BEFORE DELETE ON events
-                   BEGIN SELECT RAISE(ABORT, 'the intent log is append-only: an event cannot be deleted'); END`,
-        postgres: APPEND_ONLY_TRIGGER,
-      },
+      `CREATE TRIGGER events_append_only_update
+         BEFORE UPDATE ON events
+         BEGIN SELECT RAISE(ABORT, 'the intent log is append-only: an event cannot be rewritten'); END`,
+      `CREATE TRIGGER events_append_only_delete
+         BEFORE DELETE ON events
+         BEGIN SELECT RAISE(ABORT, 'the intent log is append-only: an event cannot be deleted'); END`,
     ],
   },
   {
@@ -84,10 +56,9 @@ const LEGACY_MIGRATIONS: readonly Migration[] = [
          name       TEXT NOT NULL,
          created_at TEXT NOT NULL
        )`,
-      // `public_key` is the SPKI bytes as base64url, because binary columns are
-      // where the two engines differ most. `sign_count` is the authenticator's
-      // u32 counter; Postgres returns a BIGINT as a string, so every read of it
-      // goes through `Number`.
+      // `public_key` is the SPKI bytes as base64url, because the port binds
+      // only TEXT and INTEGER. `sign_count` is the authenticator's u32
+      // counter, declared BIGINT.
       `CREATE TABLE credentials (
          id         TEXT   PRIMARY KEY,
          player_id  TEXT   NOT NULL REFERENCES players(id),
@@ -248,7 +219,7 @@ const LEGACY_MIGRATIONS: readonly Migration[] = [
       "ALTER TABLE rooms ADD COLUMN blue_control TEXT NOT NULL DEFAULT 'player'",
       "ALTER TABLE rooms ADD COLUMN red_control TEXT NOT NULL DEFAULT 'player'",
       // When a reserved seat passes to the AI, as an ISO string like every
-      // timestamp here: a millisecond clock does not fit Postgres's INTEGER.
+      // timestamp here.
       // Null for a seat that is not reserved.
       'ALTER TABLE rooms ADD COLUMN blue_join_by TEXT',
       'ALTER TABLE rooms ADD COLUMN red_join_by TEXT',
@@ -262,8 +233,8 @@ const LEGACY_MIGRATIONS: readonly Migration[] = [
       // fight opened or a squad passed by, never for a roll that found
       // nothing — that is reproducible from its key. The unique key is what
       // makes a checkpoint handled once across a restart. `found_at` is the
-      // server's clock in ms, a BIGINT because a millisecond epoch does not
-      // fit Postgres's INTEGER; the place is in millionths of a degree, as a
+      // server's clock in ms, a BIGINT because a millisecond epoch is past
+      // 32 bits; the place is in millionths of a degree, as a
       // squad's start is. `room_id` is the fight's room, which is its match:
       // how it ended is read from `match_results`, not copied here.
       `CREATE TABLE encounters (
@@ -343,10 +314,7 @@ export async function legacyDb(db: Db, upTo = LEGACY_MIGRATIONS.length): Promise
   await db.exec('CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)')
   for (const migration of LEGACY_MIGRATIONS.slice(0, upTo)) {
     const batch = new Batch()
-    for (const statement of migration.up) {
-      const chosen = typeof statement === 'string' ? statement : statement[db.dialect]
-      for (const text of typeof chosen === 'string' ? [chosen] : chosen) batch.exec(text)
-    }
+    for (const statement of migration.up) batch.exec(statement)
     batch.query`INSERT INTO schema_migrations (id, name, applied_at) VALUES (${migration.id}, ${migration.name}, ${'2026-01-01T00:00:00Z'})`
     await db.transaction(batch)
   }

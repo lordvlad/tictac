@@ -78,7 +78,7 @@ interface Walker {
 
 /** A registered player at rest, whose next trip is `trip`, and what answers a contact. */
 async function walker(trip: (squadId: string) => string, answer: (persistence: Persistence) => Contacts): Promise<Walker & { contacts: Contacts }> {
-  const persistence = await freshPersistence(':memory:')
+  const persistence = await freshPersistence()
   const found = answer(persistence)
   let next = ''
   const server = await rpcServer(persistence, undefined, { openEncounter: found.open, mintTrip: () => next })

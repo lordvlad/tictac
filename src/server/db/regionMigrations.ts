@@ -1,4 +1,4 @@
-import type { Migration, Schema, Statement } from './migrate'
+import type { Migration, Schema } from './migrate'
 
 /**
  * A region's store schema (RFC-0002 §4): the intent log a referee keeps, the
@@ -12,29 +12,12 @@ import type { Migration, Schema, Statement } from './migrate'
  * database can keep.
  *
  * Append only, and never edit one that has shipped (see `migrate`).
- */
-
-/**
- * The append-only guard, spelled for both engines.
  *
- * The log is evidence: it is the only way to tell a foul from a bug in the
- * rules, so the refusal lives in the database rather than in the class in front
- * of it. A guard a caller can route around guards nothing.
- *
- * SQLite needs one trigger per operation; Postgres needs a function and one
- * trigger covering both. They are paired so each engine runs two statements.
+ * The intent log is evidence: it is the only way to tell a foul from a bug in
+ * the rules, so its append-only refusal lives in the database (a trigger per
+ * operation, in the baseline) rather than in the class in front of it. A guard
+ * a caller can route around guards nothing.
  */
-const APPEND_ONLY_FUNCTION = `
-CREATE OR REPLACE FUNCTION events_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  RAISE EXCEPTION 'the intent log is append-only: an event cannot be %',
-    CASE TG_OP WHEN 'UPDATE' THEN 'rewritten' ELSE 'deleted' END;
-END $$`
-
-const APPEND_ONLY_TRIGGER = `
-CREATE OR REPLACE TRIGGER events_append_only
-  BEFORE UPDATE OR DELETE ON events
-  FOR EACH ROW EXECUTE FUNCTION events_append_only()`
 
 /**
  * The tables whose last shape is spelled once and used twice: by the baseline
@@ -97,8 +80,8 @@ const TABLES = {
   // What found a squad on the road (`ITEM-048`): one row per contact, a fight
   // opened or a squad passed by, never for a roll that found nothing — that is
   // reproducible from its key. The unique key is what makes a checkpoint
-  // handled once across a restart. `found_at` is the server's clock in ms, a
-  // BIGINT because a millisecond epoch does not fit Postgres's INTEGER; the
+  // handled once across a restart. `found_at` is the server's clock in ms,
+  // declared BIGINT because a millisecond epoch is past 32 bits; the
   // place is in millionths of a degree, as a squad's start is. `room_id` is
   // the fight's room, which is its match. `settled` is 0 while the outcome
   // is still being carried out and 1 once it is written (the contact is
@@ -192,18 +175,12 @@ const BASELINE: Migration = {
        command  TEXT    NOT NULL,
        PRIMARY KEY (match_id, seq)
      )`,
-    {
-      sqlite: `CREATE TRIGGER IF NOT EXISTS events_append_only_update
-                 BEFORE UPDATE ON events
-                 BEGIN SELECT RAISE(ABORT, 'the intent log is append-only: an event cannot be rewritten'); END`,
-      postgres: APPEND_ONLY_FUNCTION,
-    },
-    {
-      sqlite: `CREATE TRIGGER IF NOT EXISTS events_append_only_delete
-                 BEFORE DELETE ON events
-                 BEGIN SELECT RAISE(ABORT, 'the intent log is append-only: an event cannot be deleted'); END`,
-      postgres: APPEND_ONLY_TRIGGER,
-    },
+    `CREATE TRIGGER IF NOT EXISTS events_append_only_update
+       BEFORE UPDATE ON events
+       BEGIN SELECT RAISE(ABORT, 'the intent log is append-only: an event cannot be rewritten'); END`,
+    `CREATE TRIGGER IF NOT EXISTS events_append_only_delete
+       BEFORE DELETE ON events
+       BEGIN SELECT RAISE(ABORT, 'the intent log is append-only: an event cannot be deleted'); END`,
     TABLES.roster('CREATE TABLE IF NOT EXISTS'),
     ROSTER_INDEX,
     TABLES.match_results('CREATE TABLE IF NOT EXISTS'),
@@ -214,8 +191,8 @@ const BASELINE: Migration = {
     // never the key — the same reason `sessions` keeps no token. `encounter`
     // marks a room the server opened for a fight on the road (`ITEM-048`);
     // `*_control` says who moves each seat (`player`, `reserved` or `ai`),
-    // `*_join_by` when a reserved seat passes to the AI (an ISO string: a
-    // millisecond clock does not fit Postgres's INTEGER), `*_standing` what
+    // `*_join_by` when a reserved seat passes to the AI (an ISO string, like
+    // every timestamp here), `*_standing` what
     // each AI seat plays to (`ITEM-053`).
     `CREATE TABLE IF NOT EXISTS rooms (
        id             TEXT    PRIMARY KEY,
@@ -261,29 +238,17 @@ const WITHOUT_PLAYER_KEYS: Migration = {
   // remade last, and no table is renamed or dropped while another still
   // refers to it.
   up: [
-    {
-      sqlite: [
-        ...rebuild('roster', ROSTER_COLUMNS),
-        ROSTER_INDEX,
-        ...rebuild('match_results', MATCH_RESULT_COLUMNS),
-        `CREATE TABLE encounters_stash AS SELECT ${ENCOUNTER_COLUMNS} FROM encounters`,
-        'DROP TABLE encounters',
-        ...rebuild('squads', SQUAD_COLUMNS),
-        ...SQUAD_INDEXES,
-        TABLES.encounters('CREATE TABLE'),
-        `INSERT INTO encounters (${ENCOUNTER_COLUMNS}) SELECT ${ENCOUNTER_COLUMNS} FROM encounters_stash`,
-        'DROP TABLE encounters_stash',
-        ...ENCOUNTER_INDEXES,
-      ],
-      postgres: [
-        'ALTER TABLE roster DROP CONSTRAINT IF EXISTS roster_player_id_fkey',
-        'ALTER TABLE roster DROP CONSTRAINT IF EXISTS roster_died_in_fkey',
-        'ALTER TABLE match_results DROP CONSTRAINT IF EXISTS match_results_blue_player_fkey',
-        'ALTER TABLE match_results DROP CONSTRAINT IF EXISTS match_results_red_player_fkey',
-        'ALTER TABLE squads DROP CONSTRAINT IF EXISTS squads_player_id_fkey',
-        'ALTER TABLE encounters DROP CONSTRAINT IF EXISTS encounters_player_id_fkey',
-      ],
-    } satisfies Statement,
+    ...rebuild('roster', ROSTER_COLUMNS),
+    ROSTER_INDEX,
+    ...rebuild('match_results', MATCH_RESULT_COLUMNS),
+    `CREATE TABLE encounters_stash AS SELECT ${ENCOUNTER_COLUMNS} FROM encounters`,
+    'DROP TABLE encounters',
+    ...rebuild('squads', SQUAD_COLUMNS),
+    ...SQUAD_INDEXES,
+    TABLES.encounters('CREATE TABLE'),
+    `INSERT INTO encounters (${ENCOUNTER_COLUMNS}) SELECT ${ENCOUNTER_COLUMNS} FROM encounters_stash`,
+    'DROP TABLE encounters_stash',
+    ...ENCOUNTER_INDEXES,
   ],
 }
 
@@ -293,8 +258,9 @@ const HANDOVER_RECOVERY: Migration = {
   // What a restart resumes of a squad crossing the border (`HandoverStore`).
   // `crossings` is the order, one per squad; `handovers` is a handover in
   // flight as the region on either end of it keeps it, told apart by `role`
-  // ('source' or 'target'). Times are the server's clock in ms, BIGINT because
-  // a millisecond epoch does not fit Postgres's INTEGER. A squad's crossing
+  // ('source' or 'target'). Times are the server's clock in ms, declared BIGINT
+  // because a millisecond epoch is past 32 bits (SQLite stores it as the same
+  // 64-bit integer either way). A squad's crossing
   // is not a foreign key to `squads`: a squad that has crossed is no longer
   // here, and its row is deleted by the crossing, not by cascade.
   up: [

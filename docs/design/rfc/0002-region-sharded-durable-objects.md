@@ -24,17 +24,20 @@ tags: ["network", "cloudflare", "durable-objects", "scaling", "rfc"]
 
 # RFC 0002: Region-Sharded Durable Objects
 
-**Status: design accepted; implementation in progress** under `tictac-dwq.2`–`.4`. `[ITEM-045]`
-runs one Durable Object for the whole deployment today, deliberately — see
+**Status: design accepted; the handover protocol is implemented and verified; production sharding is
+gated.** `[ITEM-045]` runs one Durable Object for the whole deployment today, deliberately — see
 [ARCH-DEPLOYMENT §2.1](../../architecture/deployment.md#21-one-durable-object-not-one-per-match).
-What is built: the 2PC coordinator and its client half (`src/server/Handover.ts`,
-`src/game/ServerConnection.ts`), the ownership directory (`src/server/Owner.ts`, §4–§5), the
-per-region store split with the directory's accounts behind `AccountsPort` (§4, `tictac-dwq.5`) and
-the one host factory both hosts call (`src/server/MatchServer.ts`), and the hand-off itself end to end —
-the order, the offer, the DO-to-DO calls, the commit, the retries (`src/server/Crossings.ts`, `tictac-dwq.2`,
-`.4`). What is not: the shared world that makes a second region worth having (§1); sharding stays off in
-production. The plan is gated on that world; it is written now because the
-shape of the replacement changes what "a match server" is allowed to assume in the meantime — see §5.
+What is built (`tictac-dwq` and its children, all closed): the 2PC coordinator and its client half
+(`src/server/Handover.ts`, `src/game/ServerConnection.ts`), the ownership directory (`src/server/Owner.ts`,
+§4–§5), the per-region store split with the directory's accounts behind `AccountsPort` (§4,
+`tictac-dwq.5`), a signed-in player's home region (`tictac-dwq.6`), the one host factory both hosts call
+(`src/server/MatchServer.ts`), and the hand-off itself end to end — the order, the offer, the DO-to-DO
+calls, the commit, the retries, the resolution of an in-doubt crossing and the persisted crossing intent
+(`src/server/Crossings.ts`, `tictac-dwq.2`, `.4`, `.7`, `.8`). What is not: the shared world that makes a
+second region worth having (§1). Sharding stays off in production until that world exists (the deployment
+has one region, `REGIONS` in `src/server/Owner.ts`); the protocol is exercised by tests against two
+servers, not by a second Durable Object in production. The shape of the replacement changes what "a match
+server" is allowed to assume, which is why §5 constrains the single instance now.
 
 ## 1. Why this is not urgent, and why it is written anyway
 
@@ -60,7 +63,7 @@ unpicked under load.
 
 **Shard by game region, not by match.** A Durable Object owns one region of the shared world —
 its real-time state, and the squads currently present in it — addressed by a region id rather
-than the fixed `'singleton'` name `workers/index.ts` uses today. A connection routes to
+than a fixed name (`workers/index.ts` once addressed only `'singleton'`; it now asks the partition table, which still holds one region). A connection routes to
 whichever Durable Object owns the region a player's squad currently stands in.
 
 **A zone is not a thing with an identity.** It is shorthand for whatever spatial partition of
@@ -188,28 +191,26 @@ a natural seam — a boundary, made deliberate rather than ambient — instead o
 shard key (player id, connection order) that would turn every cross-region interaction between
 two players into a cross-shard one regardless of whether they are standing next to each other.
 
-## 3. What has to exist before this can be built
+## 3. What had to exist, and what still does not
 
-None of it exists yet:
+Two of the three prerequisites are built; the third is the reason sharding stays off:
 
 - **The shared world itself**, as one whole partition to start: a coordinate space bigger than
-  one battlefield, and something for a squad to be "present" in between matches. Today's game
-  has neither; a match is the entire unit of play and ends in a debrief screen, not a place a
-  squad keeps standing in. The *many* partitions this RFC eventually needs do not have to exist
-  up front — see §2 — but the single whole-world partition, and the fiction's capacity to
-  eventually redraw it, do.
-- **A directory: region id → owning Durable Object.** `env.MATCH.idFromName('singleton')` is a
-  constant today; a region's owner is not, once a region can split. **Decided, staged by DO
-  count rather than fixed on one mechanism (§6.3):** while there are few enough partitions that
-  the mapping is comfortable to read in a diff, it is baked straight into the Worker's own
-  deployed code (a literal region-id → Durable-Object-name table, no separate store at all) —
-  which costs nothing extra to maintain, because §2 already decided every split and merge lands
-  at a deploy, and this mapping is part of that same deploy. Workers KV is deferred to the point
-  where redeploying the Worker for every reassignment stops being the easy option — not reached
-  for, by default, at hobby scale.
-- **A hand-off protocol between two Durable Object instances.** Cloudflare Durable Objects can
-  call each other directly (RPC, or a Worker-mediated fetch); nothing today exercises that path.
-  §4 is the shape of what needs to cross it.
+  one battlefield, and something for a squad to be "present" in between matches. **Not built as
+  a place** — a squad's position is a durable route on the world map (`ARCH-WORLD`), but there
+  is nothing yet to fill a second region with, and the game's load does not need one. The
+  *many* partitions this RFC eventually needs do not have to exist up front — see §2 — but the
+  single whole-world partition, and the fiction's capacity to eventually redraw it, do.
+- **A directory: region id → owning Durable Object.** Built as the first stage of the staged
+  decision (§6.3): while there are few enough partitions that the mapping is comfortable to read
+  in a diff, it is a literal table in the deployed code — `REGIONS` in `src/server/Owner.ts`,
+  read by the Worker through `regionMap` — which costs nothing extra to maintain, because §2
+  already decided every split and merge lands at a deploy, and this mapping is part of that
+  same deploy. Workers KV is deferred to the point where redeploying the Worker for every
+  reassignment stops being the easy option — not reached for, by default, at hobby scale.
+- **A hand-off protocol between two Durable Object instances.** Built: DO RPC between
+  `MatchDurableObject`s (the `peers` port, `src/server/Handover.ts`), with §4 as the shape of
+  what crosses it and §2 as the protocol.
 
 ## 4. What actually transfers at a boundary
 
@@ -341,8 +342,8 @@ second deployment model to migrate to, only for that instance to keep two things
 not accidentally load-bearing for an assumption this RFC removes:
 
 1. **Who owns what is a lookup, not a constant.** `RegionDirectory` (`src/server/Owner.ts`) is
-   built by each host from its config and handed to `Journeys`, `Sessions` and
-   `HandoverCoordinator`; the Worker routes through the same partition table
+   built by each host from its config and handed to `Journeys` and `Crossings` (which gives it to
+   its `HandoverCoordinator`); the Worker routes through the same partition table
    (`regionMap(REGIONS)`). Where a *place* goes is a function of the table; who keeps a *squad* is
    a durable fact (`squads.owner`, written when a handover commits), never recomputed from where
    the squad stands. `env.MATCH.idFromName` is called with a name that lookup returns, and
@@ -350,7 +351,7 @@ not accidentally load-bearing for an assumption this RFC removes:
    is debt against this RFC.
 2. **A match today is not "in" a region**, and does not need to become one before combat ships —
    `[ITEM-045]`'s single referee is correct for a game with no persistent world to place a match
-   in. This RFC only starts mattering once §3's prerequisites exist.
+   in. This RFC only starts mattering once §3's shared world exists.
 
 ## 6. Open questions
 

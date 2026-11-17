@@ -14,8 +14,8 @@
  * systems a match uses.
  *
  * Rooms are kept in the database as well as their matches, and taken up again
- * when the server starts, so restarting it over a file (`--db=sqlite://…`) or
- * a Postgres costs no match in progress: every window reconnects to its seat.
+ * when the server starts, so restarting it over a file (`--db=sqlite://…`)
+ * costs no match in progress: every window reconnects to its seat.
  * The default, `:memory:`, has nothing to take up.
  *
  * The process holds both stores (`Persistence`): the accounts (`--db`) and the

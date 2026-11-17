@@ -50,23 +50,11 @@ const MONOLITH_NAMES: readonly string[] = [
   'encounter intent',
 ]
 
-/**
- * One statement, either identical on both engines or spelled per engine.
- *
- * The per-engine form exists for what the engines cannot share: an append-only
- * trigger, which SQLite writes as `RAISE(ABORT, …)` and Postgres as a plpgsql
- * function, and a table's removal of a foreign key, which SQLite can only do
- * by rebuilding the table and Postgres by dropping the constraint. A
- * single-statement half is a string; a half that needs several is a list.
- */
-export type Statement =
-  | string
-  | { readonly sqlite: string | readonly string[]; readonly postgres: string | readonly string[] }
-
 export interface Migration {
   readonly id: number
   readonly name: string
-  readonly up: readonly Statement[]
+  /** SQL statements, run in order under one commit with the ledger row. */
+  readonly up: readonly string[]
 }
 
 interface AppliedRow {
@@ -77,7 +65,7 @@ interface AppliedRow {
 /**
  * Bring `db` up to the end of `schema`'s migrations, and say what was applied now.
  *
- * Two processes migrating one Postgres database at the same moment are not
+ * Two processes migrating one database at the same moment are not
  * handled: the `store_migrations` primary key makes the loser fail, which is
  * loud and recoverable, unlike two half-applied schemas.
  */
@@ -141,12 +129,7 @@ export async function migrate(db: Db, clock: ServerClock, schema: Schema): Promi
  * migration left. A fresh database has no such ledger and passes.
  */
 async function checkMonolith(db: Db): Promise<void> {
-  const found =
-    db.dialect === 'sqlite'
-      ? await db.query<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${MONOLITH_LEDGER}`
-      : await db.query<{ name: string }>`
-          SELECT table_name AS name FROM information_schema.tables
-           WHERE table_name = ${MONOLITH_LEDGER} AND table_schema = current_schema()`
+  const found = await db.query<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${MONOLITH_LEDGER}`
   if (found.length === 0) return
   const rows = await db.query<AppliedRow>`SELECT id, name FROM schema_migrations ORDER BY id`
   const names = rows.map((row) => row.name)
@@ -173,10 +156,7 @@ async function checkMonolith(db: Db): Promise<void> {
  */
 async function apply(db: Db, store: string, migration: Migration, appliedAt: string): Promise<void> {
   const batch = new Batch()
-  for (const statement of migration.up) {
-    const chosen = typeof statement === 'string' ? statement : statement[db.dialect]
-    for (const text of typeof chosen === 'string' ? [chosen] : chosen) batch.exec(text)
-  }
+  for (const statement of migration.up) batch.exec(statement)
   batch.query`INSERT INTO store_migrations (store, id, name, applied_at)
               VALUES (${store}, ${migration.id}, ${migration.name}, ${appliedAt})`
   try {

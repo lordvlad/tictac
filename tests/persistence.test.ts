@@ -23,7 +23,7 @@ import type { MatchSettlement, RosterMember } from '../src/server/Rosters'
 import { MatchHost } from '../src/sim/MatchHost'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
-import { DATABASE_URLS, freshPersistence } from './support/db'
+import { freshPersistence } from './support/db'
 import {
   connect,
   decisive,
@@ -114,7 +114,7 @@ describe('What a finished match did to both squads', () => {
   })
 })
 
-describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
+describe('Rosters', () => {
   /** Two players with squads, and the character ids of each. */
   async function enlisted(persistence: Persistence) {
     const sheets = (from: number): CharacterSheet[] =>
@@ -135,7 +135,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   }
 
   test('a settled match grows the winners, buries the dead and keeps the carried', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const { a, b } = await enlisted(persistence)
     const grownSheet: CharacterSheet = {
       ...a[0]!.sheet,
@@ -248,7 +248,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     // match. A roster using the bare band would enlist this character
     // already short of their real ceiling, and clamp their healing below it
     // on every match after.
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const tough: CharacterSheet = { ...characterSheet(new Rng(1)), traits: [TraitId.Juggernaut] }
     const trueMax = maxHpOf(tough)
     expect(trueMax).toBe(derive(tough).maxHp + 25)
@@ -282,7 +282,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   })
 
   test('recruit fills the lowest empty slot and leaves the dead row as history', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const { a } = await enlisted(persistence)
 
     await persistence.region.rosters.settle({
@@ -331,7 +331,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     // The bench (`[ITEM-042]`) is what makes resting somebody mean anything:
     // a settled match now has to say what it did to the roster members it
     // did *not* deploy, not only the ones it did.
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const { a } = await enlisted(persistence)
     const benched = a[3]!
     const damagedHp = 1
@@ -368,7 +368,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   })
 
   test('fatigue rises by one when deployed, capped at FATIGUE.max, and falls twice as fast when benched', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const { a } = await enlisted(persistence)
     // a[0] deploys already at the cap; a[3] is benched, mid-recovery.
     await persistence.region.db.query`UPDATE roster SET fatigue = ${FATIGUE.max} WHERE character_id = ${a[0]!.characterId}`
@@ -408,7 +408,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   })
 
   test('a carried-out or concussed survivor enters the medical bay; a healthy one does not', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const { a } = await enlisted(persistence)
     const maxHp = maxHpOf(a[1]!.sheet)
     const concussedHp = Math.floor(WOUNDS.concussed * maxHp)
@@ -440,7 +440,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   })
 
   test('recruit refuses a full roster', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     await enlisted(persistence)
     // `enlisted` deals a squad (SQUAD_SIZE); recruiting tops the roster up to
     // ROSTER.size before the slot really is full.
@@ -454,7 +454,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   test('settling the same match twice changes nothing the second time', async () => {
     // A referee that is asked twice — a retry, a restart — must not grow
     // anybody twice, which is what the result row is for.
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const { a, b } = await enlisted(persistence)
     const result: {
       matchId: string
@@ -497,7 +497,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   })
 
   test('a settlement that fails before match_results is inserted allows a retry', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const { a } = await enlisted(persistence)
 
     // An un-inserted match_id causes died_in foreign key constraint to fail
@@ -548,8 +548,8 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
 })
 
 describe('A refereed match is kept on the rosters it was played with', () => {
-  async function playing(url: string, blueSheets: CharacterSheet[], redSheets: CharacterSheet[], seed: number) {
-    const persistence = await freshPersistence(url)
+  async function playing(blueSheets: CharacterSheet[], redSheets: CharacterSheet[], seed: number) {
+    const persistence = await freshPersistence()
     for (const { id, name } of [ADA, BO]) {
       await persistence.accounts.db
         .query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${name}, ${'2026-01-01T00:00:00Z'})`
@@ -565,9 +565,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test('the survivors come back grown and the dead do not come back', async () => {
     const recording = decisive()
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      sheetsOf(recording.header, Faction.Blue),
+    const { persistence, lobby, verdicts } = await playing(sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
@@ -635,9 +633,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     // real character it holds and still lie about who that character is.
     const recording = decisive()
     const others = Array.from({ length: SQUAD_SIZE }, (_, i) => characterSheet(new Rng(900 + i)))
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      others,
+    const { persistence, lobby, verdicts } = await playing(others,
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
@@ -667,9 +663,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     // its wounds would otherwise deploy a signed-in player's character
     // healthier than the roster it belongs to says they are.
     const recording = decisive()
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      sheetsOf(recording.header, Faction.Blue),
+    const { persistence, lobby, verdicts } = await playing(sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
@@ -693,9 +687,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test("a signed-in squad's stated starting health that does not match the roster is aborted", async () => {
     const recording = decisive()
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      sheetsOf(recording.header, Faction.Blue),
+    const { persistence, lobby, verdicts } = await playing(sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
@@ -724,9 +716,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test("a signed-in squad's stated fatigue that does not match the roster is aborted", async () => {
     const recording = decisive()
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      sheetsOf(recording.header, Faction.Blue),
+    const { persistence, lobby, verdicts } = await playing(sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
@@ -759,9 +749,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test('a squad that deploys a member still in the medical bay is aborted', async () => {
     const recording = decisive()
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      sheetsOf(recording.header, Faction.Blue),
+    const { persistence, lobby, verdicts } = await playing(sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
@@ -798,9 +786,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     // new window: the first one's room is abandoned before the join is even
     // weighed, so there is nothing left to join and nothing to keep.
     const recording = decisive()
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      sheetsOf(recording.header, Faction.Blue),
+    const { persistence, lobby, verdicts } = await playing(sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
@@ -824,9 +810,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test('an anonymous match is watched and written down, and kept on nobody', async () => {
     const recording = decisive()
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      sheetsOf(recording.header, Faction.Blue),
+    const { persistence, lobby, verdicts } = await playing(sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
@@ -859,9 +843,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     // Four enlisted and the one in slot 1 killed, so the living three sit in
     // slots 0, 2 and 3 — the squad deploys them in slot order, gap closed.
     const fallen = characterSheet(new Rng(77))
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      [first!, fallen, second!, third!],
+    const { persistence, lobby, verdicts } = await playing([first!, fallen, second!, third!],
       sheetsOf(header, Faction.Red),
       header.seed,
     )
@@ -899,9 +881,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
 
   test('a signed-in player with nobody left on the roster is refused', async () => {
     const recording = decisive()
-    const { persistence, lobby, verdicts } = await playing(
-      ':memory:',
-      sheetsOf(recording.header, Faction.Blue),
+    const { persistence, lobby, verdicts } = await playing(sheetsOf(recording.header, Faction.Blue),
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )

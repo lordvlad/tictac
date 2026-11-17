@@ -2,11 +2,11 @@ import { SQL } from 'bun'
 import type { RelyingParty } from '../AccountStore'
 import { persistenceOverDb, type Persistence } from '../Persistence'
 import type { ServerClock } from '../Clock'
-import { dialectOf, type Batch, type Db, type Dialect, type SqlValue } from './Db'
+import type { Batch, Db, SqlValue } from './Db'
 
 /**
- * The `Db` port (`./Db.ts`), over `Bun.SQL` — the adapter that runs today, in
- * a file, in memory, or against Postgres. Split out of `Db.ts` itself so that
+ * The `Db` port (`./Db.ts`), over `Bun.SQL` — the adapter that runs today, over
+ * a SQLite file or in memory. Split out of `Db.ts` itself so that
  * file stays free of `bun`'s own types: importing `SQL`'s type pulls in
  * `@types/bun`, which pulls in `@types/node`'s ambient `NodeJS` namespace,
  * which conflicts with `@cloudflare/workers-types`' own globals the moment
@@ -51,25 +51,29 @@ export async function openPersistence(
   })
 }
 
-/** Open a database. It is not migrated here — see `migrate`. */
+/**
+ * Open a SQLite database: a file or `:memory:`. It is not migrated here — see
+ * `migrate`.
+ *
+ * The accepted forms are `Bun.SQL`'s own SQLite detection, restated so an
+ * unsupported url fails with a sentence: Bun treats any unrecognised string as
+ * a network database's connection string and would try to connect to one.
+ */
 export async function openDb(url: string): Promise<Db> {
-  const dialect = dialectOf(url)
-  const sql = new SQL(url)
-  const db = wrap(sql, dialect)
-  if (dialect === 'sqlite') {
-    // A row may not name a parent that is not there. SQLite has to be told;
-    // Postgres enforces it natively.
-    await db.exec('PRAGMA foreign_keys = ON')
-    // Readers never block the append path, which is what lets an audit read a
-    // match that is still being played.
-    await db.exec('PRAGMA journal_mode = WAL')
+  if (url !== ':memory:' && !url.startsWith('sqlite:') && !url.startsWith('file:')) {
+    throw new Error(`unsupported database url "${url}": use :memory:, sqlite://… or file://…`)
   }
+  const db = wrap(new SQL(url))
+  // A row may not name a parent that is not there; SQLite has to be told.
+  await db.exec('PRAGMA foreign_keys = ON')
+  // Readers never block the append path, which is what lets an audit read a
+  // match that is still being played.
+  await db.exec('PRAGMA journal_mode = WAL')
   return db
 }
 
-function wrap(sql: SQL, dialect: Dialect): Db {
+function wrap(sql: SQL): Db {
   return {
-    dialect,
     async query<T>(strings: TemplateStringsArray, ...values: SqlValue[]): Promise<T[]> {
       const rows = await sql<T[]>(strings, ...values)
       // Copied out of Bun's result array, which carries `count` and `command`

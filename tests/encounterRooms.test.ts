@@ -105,7 +105,7 @@ interface World {
 }
 
 async function world({ manual = false }: { manual?: boolean } = {}): Promise<World> {
-  const persistence = await freshPersistence(':memory:')
+  const persistence = await freshPersistence()
   const clock = handClock()
   const verdicts: RefereeVerdict[] = []
   const logs: string[] = []

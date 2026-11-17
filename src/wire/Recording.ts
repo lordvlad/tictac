@@ -71,9 +71,9 @@ export interface RecordingHeader {
   /**
    * Both squads, one entry per deploying soldier: who they are, what they
    * carry, and what state they start in. A played match only ever equips one
-   * side from a loadout screen — the other keeps the stock spread, because a
-   * peer's attacks arrive already resolved — but a replay has no sender, so
-   * it needs both sides' kit regardless of which one a player chose.
+   * side from a loadout screen — the other keeps the stock spread — but a
+   * replay resolves every attack itself, for both sides, so it needs both
+   * sides' kit regardless of which one a player chose.
    */
   squads: Record<Faction, Deployment[]>
   /**

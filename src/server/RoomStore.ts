@@ -188,7 +188,7 @@ export class RoomStore {
   }
 }
 
-/** A deadline as it is written: an ISO string, like every timestamp here, because a millisecond clock does not fit Postgres's INTEGER. */
+/** A deadline as it is written: an ISO string, like every timestamp here. */
 function isoOf(ms: number | null): string | null {
   return ms === null ? null : new Date(ms).toISOString()
 }

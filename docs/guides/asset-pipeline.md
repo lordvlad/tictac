@@ -54,7 +54,7 @@ bun run build:character
 ```
 
 No Draco pass runs today: the mesh is small and the file is nearly all animation. The runtime
-still points `DRACOLoader` at `public/draco/` (`src/main.ts`), so a Draco-compressed asset would
+still points `DRACOLoader` at `public/draco/` (`src/main.tsx`), so a Draco-compressed asset would
 load if one were produced.
 
 ---
@@ -99,4 +99,3 @@ HUD, weapon, ammo, grenade, and trait icons are sourced from `vendor/game-icons`
 4. This outputs:
    - Optimized SVG files in `public/icons/<name>.svg`
    - Generated attribution in `public/icons/CREDITS.txt`
-   - TypeScript identifiers in `src/hud/icons.ts` (if applicable)

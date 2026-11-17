@@ -7,7 +7,7 @@ import { distanceKm, type LatLng } from '../src/core/Travel'
 import type { Squad } from '../src/wire/Rpc'
 import { DEFAULT_ANCHOR, START_RADIUS_KM } from '../src/server/Squads'
 import { softwareAuthenticator, type SoftwareAuthenticator } from './support/authenticator'
-import { DATABASE_URLS, freshPersistence } from './support/db'
+import { freshPersistence } from './support/db'
 import { register, rpcServer, type Window } from './support/rpcServer'
 
 /**
@@ -34,9 +34,9 @@ async function assertion(window: Window, key: SoftwareAuthenticator, extra: { co
   return key.assert({ challengeId: options.result.challengeId as string, challenge: publicKey.challenge, ...extra })
 }
 
-describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
+describe('Passkey accounts', () => {
   test('registering makes a player, a squad and a session, and binds the socket that did it', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
     const key = await softwareAuthenticator()
 
@@ -59,7 +59,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('recruiting fills a dead slot, and refuses once the roster is full', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
     await register(window, await softwareAuthenticator())
     const before = await window.call('tictac/api/roster/list')
@@ -83,7 +83,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('the same passkey signs in again on another socket, and the new token works on a third', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const key = await softwareAuthenticator()
     const first = await register(await windowOn(persistence), key)
 
@@ -103,7 +103,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   test('a challenge is worth exactly one answer', async () => {
     // Replay is the attack a challenge exists to stop, so the row is deleted as
     // it is read rather than marked afterwards.
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
     const key = await softwareAuthenticator()
     await register(window, key)
@@ -122,7 +122,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
     // The challenge id says which row to spend; the challenge *value* is what
     // the authenticator actually signed. Checking only the first would accept a
     // signature collected for any other sign-in attempt.
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
     const key = await softwareAuthenticator()
     await register(window, key)
@@ -145,7 +145,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
     // The origin is what makes a passkey unphishable: a page on another domain
     // cannot make the authenticator write this one. It is read out of what the
     // authenticator signed, not off the connection.
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
     const key = await softwareAuthenticator()
 
@@ -164,7 +164,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('a signature that does not check out is refused', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
     const key = await softwareAuthenticator()
     await register(window, key)
@@ -183,7 +183,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('a counter that did not move says the passkey was copied', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
     const key = await softwareAuthenticator()
     await register(window, key)
@@ -201,7 +201,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('a roster is not a stranger to read, and a dead token does not make one somebody', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
 
     const anonymous = await window.call('tictac/api/roster/list')
@@ -216,7 +216,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('signing out ends the session everywhere, not only on this socket', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
     const token = await register(window, await softwareAuthenticator())
 
@@ -231,7 +231,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('a method the server does not answer says so rather than failing', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const missing = await (await windowOn(persistence)).call('tictac/api/nothing')
     expect(missing.code).toBe(RPC_ERRORS.noSuchMethod)
     expect(missing.message).toMatch(/does not answer/)
@@ -240,7 +240,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('a registration through Cloudflare starts the squad near where it came from, and keeps only the start', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const tokyo: LatLng = { lat: 35.6895, lng: 139.6917 }
     const window = await windowOn(persistence, tokyo)
     await register(window, await softwareAuthenticator())
@@ -272,7 +272,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('a registration from nowhere in particular starts near Stuttgart', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const window = await windowOn(persistence)
     await register(window, await softwareAuthenticator())
 
@@ -283,7 +283,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('a squad is its player\'s alone to read', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const anonymous = await (await windowOn(persistence)).call('tictac/api/squad/get')
     expect(anonymous.code).toBe(RPC_ERRORS.signInFirst)
 
@@ -291,7 +291,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('a player from before squads existed is placed the first time anybody asks, and stays there', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const lyon: LatLng = { lat: 45.764, lng: 4.8357 }
     const token = await register(await windowOn(persistence), await softwareAuthenticator())
     // As every account registered before migration 7 is: a player with no row.
@@ -307,7 +307,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
   })
 
   test('a player whose enlist failed after they registered is given a full roster and a squad by the next sign-in, once', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const key = await softwareAuthenticator()
     // The account store commits; the region then fails, as two databases can.
     const failing: Persistence = {

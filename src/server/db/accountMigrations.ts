@@ -25,10 +25,9 @@ export const ACCOUNT_SCHEMA: Schema = {
            name       TEXT NOT NULL,
            created_at TEXT NOT NULL
          )`,
-        // `public_key` is the SPKI bytes as base64url, because binary columns are
-        // where the two engines differ most. `sign_count` is the authenticator's
-        // u32 counter; Postgres returns a BIGINT as a string, so every read of it
-        // goes through `Number`.
+        // `public_key` is the SPKI bytes as base64url, because the port binds
+        // only TEXT and INTEGER. `sign_count` is the authenticator's u32
+        // counter, declared BIGINT; it is read through `Number` all the same.
         `CREATE TABLE IF NOT EXISTS credentials (
            id         TEXT   PRIMARY KEY,
            player_id  TEXT   NOT NULL REFERENCES players(id),

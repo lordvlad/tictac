@@ -2,37 +2,37 @@ import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { accountStoreOverDb } from '../src/server/AccountStore'
 import { ACCOUNT_SCHEMA } from '../src/server/db/accountMigrations'
-import { dialectOf, type Db } from '../src/server/db/Db'
+import { openDb } from '../src/server/db/BunSqlDb'
+import type { Db } from '../src/server/db/Db'
 import { migrate, type Migration } from '../src/server/db/migrate'
 import { REGION_SCHEMA } from '../src/server/db/regionMigrations'
 import { persistenceOverDb } from '../src/server/Persistence'
 import { regionStoreOverDb } from '../src/server/RegionStore'
-import { DATABASE_URLS, freshDb } from './support/db'
+import { freshDb } from './support/db'
 import { legacyDb } from './support/legacySchema'
 
-describe('A url names an engine, or is refused', () => {
-  test('the shapes Bun detects are the shapes this build accepts', () => {
-    expect(dialectOf(':memory:')).toBe('sqlite')
-    expect(dialectOf('sqlite://matches.sqlite')).toBe('sqlite')
-    expect(dialectOf('file:///tmp/matches.sqlite')).toBe('sqlite')
-    expect(dialectOf('postgres://user@localhost/tictac')).toBe('postgres')
-    expect(dialectOf('postgresql://user@localhost/tictac')).toBe('postgres')
+describe('A url names a SQLite database, or is refused', () => {
+  test('the shapes Bun detects as SQLite are the shapes this build accepts', async () => {
+    for (const url of [':memory:', 'sqlite://:memory:']) {
+      await (await openDb(url)).close()
+    }
   })
 
-  test('anything else is refused rather than guessed at', () => {
-    // Bun treats an unrecognised string as Postgres. A typo would therefore
-    // reach for a server instead of a file, which is a confusing failure at
-    // best and the wrong database at worst.
-    expect(() => dialectOf('mysql://localhost/tictac')).toThrow(/unsupported database url/)
-    expect(() => dialectOf('matches.sqlite')).toThrow(/unsupported database url/)
+  test('anything else is refused rather than guessed at', async () => {
+    // Bun treats an unrecognised string as a network database's connection
+    // string. A typo would therefore reach for a server instead of a file,
+    // which is a confusing failure at best and the wrong database at worst.
+    for (const url of ['mysql://localhost/tictac', 'mariadb://localhost/tictac', 'matches.sqlite']) {
+      await expect(openDb(url)).rejects.toThrow(/unsupported database url/)
+    }
   })
 })
 
-describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
+describe('Migrations', () => {
   const stores = [ACCOUNT_SCHEMA, REGION_SCHEMA]
 
   test('a fresh database gets every migration of both stores, and a second run gets none', async () => {
-    const db = await freshDb(url)
+    const db = await freshDb()
 
     for (const schema of stores) {
       expect(await migrate(db, WALL_CLOCK, schema)).toEqual(schema.migrations.map((m) => m.id))
@@ -51,7 +51,7 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
   })
 
   test('a store opened alone makes only its own tables', async () => {
-    const accounts = await freshDb(url)
+    const accounts = await freshDb()
     await migrate(accounts, WALL_CLOCK, ACCOUNT_SCHEMA)
     await expect(accounts.query`SELECT id FROM squads`).rejects.toThrow()
     expect(await accounts.query`SELECT id FROM players`).toEqual([])
@@ -59,7 +59,7 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
 
     // A region's database has no `players` to point at, and holds a row for a
     // player it has never heard of: the id is all a region knows.
-    const region = await freshDb(url)
+    const region = await freshDb()
     await migrate(region, WALL_CLOCK, REGION_SCHEMA)
     await expect(region.query`SELECT id FROM players`).rejects.toThrow()
     await region.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at)
@@ -71,7 +71,7 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
   })
 
   test('a build whose own list has a gap refuses before touching the database', async () => {
-    const db = await freshDb(url)
+    const db = await freshDb()
     const gapped = { store: 'test', migrations: [REGION_SCHEMA.migrations[0]!, { ...REGION_SCHEMA.migrations[1]!, id: 3 }] }
 
     await expect(migrate(db, WALL_CLOCK, gapped)).rejects.toThrow(/numbered 1\.\.n/)
@@ -82,7 +82,7 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
   })
 
   test('a migration that fails part way leaves nothing of itself behind', async () => {
-    const db = await freshDb(url)
+    const db = await freshDb()
     const list: Migration[] = [
       { id: 1, name: 'first', up: ['CREATE TABLE alpha (id TEXT PRIMARY KEY)'] },
       {
@@ -107,7 +107,7 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
   })
 
   test('a migration renamed underneath a database is refused by both names', async () => {
-    const db = await freshDb(url)
+    const db = await freshDb()
     await migrate(db, WALL_CLOCK, REGION_SCHEMA)
     const renamed = {
       ...REGION_SCHEMA,
@@ -124,7 +124,7 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
   test('a database from a newer build is refused, not opened as if current', async () => {
     // The dangerous direction. An older build reading a newer schema writes
     // rows the newer build will not recognise, so it never gets that far.
-    const db = await freshDb(url)
+    const db = await freshDb()
     await migrate(db, WALL_CLOCK, REGION_SCHEMA)
     await db.query`INSERT INTO store_migrations (store, id, name, applied_at)
                    VALUES (${'region'}, ${99}, ${'from the future'}, ${new Date().toISOString()})`
@@ -139,12 +139,12 @@ describe.each(DATABASE_URLS)('Migrations on %s', (url) => {
   })
 })
 
-describe.each(DATABASE_URLS)('A database written before the account/region split, on %s', (url) => {
+describe('A database written before the account/region split,', () => {
   const WHEN = '2026-01-01T00:00:00Z'
 
   /** What the old build's database holds for one player: an account, a roster with a casualty, a squad, a contact, a settled match. */
   async function seeded(): Promise<Db> {
-    const db = await freshDb(url)
+    const db = await freshDb()
     await legacyDb(db)
     await db.query`INSERT INTO players (id, name, created_at) VALUES (${'ada'}, ${'Ada'}, ${WHEN})`
     await db.query`INSERT INTO matches (id, header, created_at, seed_label) VALUES (${'m1'}, ${'{}'}, ${WHEN}, ${'seed'})`
@@ -212,7 +212,7 @@ describe.each(DATABASE_URLS)('A database written before the account/region split
   })
 
   test('one the old build had not finished is refused, with the way out', async () => {
-    const db = await freshDb(url)
+    const db = await freshDb()
     await legacyDb(db, 11)
 
     await expect(persistenceOverDb(db, WALL_CLOCK)).rejects.toThrow(/stops at migration 11 of 12: open it once with the previous build/)

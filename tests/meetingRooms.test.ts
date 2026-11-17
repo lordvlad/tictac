@@ -105,7 +105,7 @@ interface World {
 }
 
 async function world({ manual = false }: { manual?: boolean } = {}): Promise<World> {
-  const persistence = await freshPersistence(':memory:')
+  const persistence = await freshPersistence()
   const clock = handClock()
   const verdicts: RefereeVerdict[] = []
   const logs: string[] = []
@@ -787,7 +787,7 @@ describe('two squads on the road, end to end', () => {
 
   /** Two registered players, both with a window open, walking at each other; the real lobby opens what they meet. */
   async function road() {
-    const persistence = await freshPersistence(':memory:')
+    const persistence = await freshPersistence()
     const clock = handClock()
     const marks: Promise<void>[] = []
     const server = await rpcServer(persistence, undefined, {

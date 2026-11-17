@@ -12,7 +12,7 @@ import type { PasskeyAsserted, PasskeyCreated, PasskeyOptions, Player, SignedIn 
  * Two implementations answer it: the `Accounts` class itself, in the process
  * that holds the account store (the Bun host, and the singleton Durable
  * Object, which is the directory and a region at once), and
- * `workers/AccountsRpc.ts`, which asks the directory's Durable Object.
+ * `src/server/AccountsRpc.ts`, which asks the directory's Durable Object.
  * Refusals are `AuthError`s from either.
  */
 export interface AccountsPort {

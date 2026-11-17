@@ -5,7 +5,7 @@ import { distanceKm, type LatLng } from '../src/core/Travel'
 import { Batch, type Db } from '../src/server/db/Db'
 import { DEFAULT_ANCHOR, drawAround, Squads, START_RADIUS_KM, START_SEPARATION_KM } from '../src/server/Squads'
 import type { Squad } from '../src/wire/Rpc'
-import { DATABASE_URLS, freshPersistence } from './support/db'
+import { freshPersistence } from './support/db'
 
 /**
  * Where squads start (`src/server/Squads.ts`, GDD-WORLD §4): uniform over the
@@ -65,7 +65,7 @@ async function place(squads: Squads, db: Db, playerId: string, anchor: LatLng | 
   })
 }
 
-describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
+describe('Starts kept apart', () => {
   /** `count` players, each given a squad around `anchor` by `squads`. */
   async function placed(squads: Squads, db: Db, count: number, anchor: LatLng | null) {
     const starts: LatLng[] = []
@@ -77,7 +77,7 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
   }
 
   test('three hundred players from one anchor: all within the disc, none within a kilometre of another', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const starts = await placed(persistence.region.squads, persistence.region.db, 300, null)
 
     for (const start of starts) expect(distanceKm(DEFAULT_ANCHOR, start)).toBeLessThanOrEqual(START_RADIUS_KM + 1e-6)
@@ -91,7 +91,7 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
   }, 60_000)
 
   test('an anchor with no room left takes the last draw rather than refusing the player, and says so', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const lines: string[] = []
     // Every draw lands on the same spot, so the second player can never be
     // a kilometre clear of the first.
@@ -106,7 +106,7 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
   })
 
   test('players placed at the same moment still start a kilometre apart', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     // Every draw lands on one of five spots ten kilometres apart, so a
     // placement that read the starts before the others had written theirs
     // would very likely choose a spot that is taken. `random` is asked for a

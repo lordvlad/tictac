@@ -68,7 +68,8 @@ playable game, local and peer-to-peer matches included, because neither needs a 
 options for a public referee and built neither: "a Durable Object per match, or one central
 Postgres." `[ITEM-045]` starts on the first, because a Durable Object's per-instance storage and
 per-instance billing fit a referee's own shape — one match server, one place its state lives —
-better than a Postgres instance answering every match server that exists.
+better than a central database answering every match server that exists. The central database was
+never built and the port no longer carries an engine for it (`tictac-uqt.33`).
 
 ### 2.1 One Durable Object, not one per match
 
@@ -101,10 +102,12 @@ This is a deliberate first stage, not a ceiling this deployment is meant to live
 a single Durable Object is one thread, and cannot be scaled up, only replaced.
 [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) is the plan for what replaces
 it — sharding by *region* of the game's shared world rather than by match — once that world
-exists and the player base needs more than one instance. Nothing about that plan is built; it
-is written down so the single instance here stays easy to retire rather than becoming an
-assumption other code quietly depends on: the Worker addresses the instance through
-the region table (`regionMap(REGIONS)`), and squad requests go through the host's
+exists and the player base needs more than one instance. The design is accepted and its
+handover protocol is implemented and verified against two servers (the squad's crossing,
+[ARCH-WORLD §4a](world.md)), but production sharding is gated on that world: the Worker's table
+holds one region, so no second object is addressed. The single instance stays easy to retire
+rather than becoming an assumption other code quietly depends on: the Worker addresses the
+instance through the region table (`regionMap(REGIONS)`), and squad requests go through the host's
 `RegionDirectory.ownerOfSquad` (`src/server/Owner.ts`, [ARCH-WORLD §4](world.md)), the two
 lookups a split replaces.
 
@@ -254,8 +257,8 @@ turned away and the remedy differs: a stale tab reloads, a mis-stamped server re
 ## 3. The `Db` adapter: `workers/DoSqliteDb.ts`
 
 `src/server/db/Db.ts` is an async port, built around `Bun.SQL`'s genuinely asynchronous wire
-protocol — a real network round trip for Postgres, and for SQLite a promise that resolves once
-Bun's own binding has run the statement.
+protocol, which for SQLite is a promise that resolves once Bun's own binding has run the
+statement.
 
 A Durable Object's SQLite storage, `ctx.storage.sql`, is **synchronous** — `sql.exec()` runs and
 returns immediately, no promise involved — and its own explicit-transaction primitive,
@@ -295,7 +298,7 @@ with `@cloudflare/workers-types`' own the moment both are reachable from one Typ
 Wiring the real referee into `workers/` made that true transitively (`Session.ts` →
 `Persistence.ts`/`Rosters.ts`/`Accounts.ts` → `Db.ts`), so the Bun-specific half moved to
 `src/server/db/BunSqlDb.ts` (`openDb`, and `openPersistence`, which also needed `openDb`),
-leaving `Db.ts` itself — the port: `Dialect`, `SqlValue`, the `Db` interface, `dialectOf` — free
+leaving `Db.ts` itself — the port: `SqlValue`, `Batch`, the `Db` interface — free
 of any engine's own import. `GameServer.ts`'s `socketTransport` moved to
 `src/server/SocketTransport.ts` for the identical reason: it shared a file with `startGameServer`,
 which calls `Bun.serve` directly, and importing `socketTransport` alone still pulled the whole

@@ -79,7 +79,7 @@ const restingAt = (squad: Squad): PastWaypoint => squad.waypoints.at(-1) as Past
  * one database; a lobby that answers `answer` to whatever meets.
  */
 async function world({ on = true, answer = OPENED }: { on?: boolean; answer?: MeetingOpened } = {}): Promise<World> {
-  const persistence = await freshPersistence(':memory:')
+  const persistence = await freshPersistence()
   const calls: Call[] = []
   const state = { answer, on }
   const open: OpenMeeting = async (meeting) => {
@@ -230,7 +230,7 @@ describe('Two squads whose routes cross', () => {
   test('are Blue and Red by the pair and the moment, so neither the one who moved nor the one who waited is always Blue', async () => {
     // Thirty-two pairs, each a squad walking at one that waits, with ids the
     // test picks so the answer is always the same.
-    const persistence = await freshPersistence(':memory:')
+    const persistence = await freshPersistence()
     const calls: MeetingContact[] = []
     const server = await rpcServer(persistence, undefined, {
       openMeeting: async (meeting) => {

@@ -1,4 +1,4 @@
-import type { Batch, Db, Dialect, SqlValue } from '../src/server/db/Db'
+import type { Batch, Db, SqlValue } from '../src/server/db/Db'
 
 /**
  * The slice of a Durable Object's `ctx.storage` this adapter uses, stated
@@ -44,14 +44,12 @@ export interface DoStorage {
  * in between.
  */
 export function dbOverStorage(storage: DoStorage): Db {
-  const dialect: Dialect = 'sqlite'
   const { sql } = storage
 
   const placeholders = (strings: readonly string[]): string =>
     strings.slice(1).reduce((text, part) => `${text}?${part}`, strings[0] ?? '')
 
   return {
-    dialect,
     async query<T>(strings: TemplateStringsArray, ...values: SqlValue[]): Promise<T[]> {
       return sql.exec(placeholders(strings), ...values).toArray() as T[]
     },

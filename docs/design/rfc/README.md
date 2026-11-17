@@ -3,7 +3,7 @@ title: "Request for Comments (RFCs) Index"
 id: "RFC-INDEX"
 type: "rfc"
 status: "active"
-lastReviewed: "2026-09-17"
+lastReviewed: "2026-11-17"
 appliesTo:
   - "docs/design/rfc/**"
 relatedDocs:
@@ -31,4 +31,4 @@ An RFC that gets built graduates into an ADR, and the RFC stays as the reasoning
 | RFC ID | Title | Status | Date | Area |
 | --- | --- | --- | --- | --- |
 | [RFC-0001](./0001-referee-and-transports.md) | Full-Knowledge Lockstep, With an Optional Referee | Accepted → [ADR-0004](../adr/0004-full-knowledge-lockstep.md) | 2026-09-17 | Network / Authority |
-| [RFC-0002](./0002-region-sharded-durable-objects.md) | Region-Sharded Durable Objects | Proposed | 2026-10-01 | Infrastructure / Scaling |
+| [RFC-0002](./0002-region-sharded-durable-objects.md) | Region-Sharded Durable Objects | Accepted (handover implemented; production sharding gated) | 2026-10-01 | Infrastructure / Scaling |

@@ -3,7 +3,7 @@ title: "Active Kanban Focus: M5 The Shared World"
 id: "PLAN-ACTIVE-FOCUS"
 type: "plan"
 status: "active"
-lastReviewed: "2026-10-28"
+lastReviewed: "2026-11-17"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -43,6 +43,16 @@ window. Fights between players (`[ITEM-053]`) followed: squads meet within 1 km,
 absent player's squad to a standing order they set, and a switch (`PLAYER_ENCOUNTERS`) turns it
 off without new code.
 
+**The 2026-11 architecture review** (`tictac-uqt`, `bd show tictac-uqt`) ran alongside: one door per
+concern and boundaries that a test enforces, not convention. Landed: the layer DAG and the determinism
+test as ratchets (`tests/layers.test.ts`, `tests/determinism.test.ts`); `src/rules` and `src/wire`
+split out of `src/game`; one injected `Clock`; one host factory for the Bun server and the Durable
+Object; an `AccountStore`/`RegionStore` split; a server-issued match seed and a protocol-8 gate; unit
+state only in components; one command door and one `canAct` gate; the HUD behind view models and ports.
+Region handover (`[ITEM-046]`, `tictac-dwq`) was built and verified on top of that, and is still off in
+production. What remains of the review is this documentation sweep (`tictac-uqt.14`) and the decision
+to drop the Postgres adapter (`tictac-uqt.33`). The summary is in the [archive](../backlog/completed.md).
+
 **How the client reaches its server.** One address, `MATCH_SERVER_URL` in `src/config.ts` (the
 Cloudflare Worker); the menu has no address to type. A page served from this machine may add
 `?server=ws://…` to use a server of its own (`matchServerFor`); on any other host the parameter is
@@ -53,8 +63,9 @@ ignored.
 Nothing is ready: the queue is empty. What is left is in the backlog below and in "Left open".
 
 ## 🧊 Backlog — not yet queued (tracked in Beads: `bd list`)
-- `[ITEM-046]` (`tictac-dwq`) Region-sharded Durable Objects — depends on the shared world having load to
-  shard.
+- `[ITEM-046]` (`tictac-dwq`) Region-sharded Durable Objects — design accepted, the handover protocol
+  implemented and verified (`tictac-dwq.1`–`.8`), production sharding still gated on the shared world
+  having load to shard; splitting and merging a loaded region are not started.
 - `[ITEM-047]` (`tictac-0al`) Uncap the roster (bench grows with bases/vehicles, squad cap set per combat) —
   depends on the base/vehicle economy and a scenario/mission system, neither built.
 - `[ITEM-054]` (`tictac-bvf`) Capture and rescue — an idea; the left-behind of a retreat are lost until then.
@@ -94,8 +105,9 @@ Nothing is ready: the queue is empty. What is left is in the backlog below and i
   so it fights to measure guns and its weaknesses cost real characters; (6) nothing stops a player
   parking a squad next to another's route to farm it — no cooldown, no zones yet.
 - **ITEM-048** (built; seen in Chromium against the Bun server and over RPC, not yet on the
-  deployed Worker): (1) a crash between a room opening and its `encounters` row being written
-  could open two rooms for one contact; (2) a fight whose room ends without a result row reads
+  deployed Worker): (1) ~~a crash between a room opening and its `encounters` row being written
+  could open two rooms for one contact~~ — fixed by `tictac-uqt.18` (the intent row is written first
+  and keys the room); (2) a fight whose room ends without a result row reads
   *In progress* in the feed forever, and while a seat is still `reserved` the feed already says
   *The AI is playing for you*; (3) an order given right after contact can set the squad off
   while its fight runs; (4) the join prompt is hidden while a match, end screen or replay is on

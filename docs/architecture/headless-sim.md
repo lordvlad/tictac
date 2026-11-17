@@ -334,7 +334,7 @@ A match is still one number. Its dice are a function of that number alone.
 
 Neither stream reads the clock. The recording header's `createdAt` is a
 `MatchSetup` input (the epoch when absent), so the same seed records
-byte-identical and `src/core`, `src/ecs` and `src/sim` hold no `Date.now`.
+byte-identical and `src/core`, `src/rules`, `src/wire`, `src/ecs` and `src/sim` hold no `Date.now`.
 
 ## One engine, not two
 

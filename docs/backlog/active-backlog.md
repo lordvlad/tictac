@@ -3,7 +3,7 @@ title: "Active Engineering & Gameplay Backlog"
 id: "BACKLOG-ACTIVE"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-10-28"
+lastReviewed: "2026-11-17"
 appliesTo:
   - "src/**"
   - "workers/**"
@@ -30,7 +30,7 @@ Finished and rejected items move to the [archive](./completed.md).
 ### [ITEM-046] Region-Sharded Durable Objects (`tictac-dwq`)
 **Type:** Infrastructure
 **Priority:** P3
-**Status:** Backlog — a design only ([RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md)); not started, and not startable yet (see Why)
+**Status:** In progress — design accepted ([RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md)); the handover protocol is implemented and verified (`tictac-dwq.1`–`.8`, closed); **production sharding is still gated** on the shared world (see Why); splitting and merging a loaded region are not started
 **Milestone:** Unscheduled — gated on the shared world existing, which is not a milestone deliverable today
 
 #### Why
@@ -43,17 +43,21 @@ RFC-0002 is that plan: shard by region of the shared world, not by match, with a
 splitting into two Durable Objects under load and players handed off between them as they
 cross a boundary or as a split moves the boundary through them.
 
-**This item cannot be started today.** It depends on the shared world itself — regions, a
+**Production sharding is gated.** What load would shard needs the shared world itself — regions, a
 coordinate space bigger than one battlefield, a reason a character keeps existing somewhere
-between matches — none of which the current game has. It is filed now, at Backlog rather than
-Ready, so the dependency is visible rather than the plan being reinvented later under pressure.
-M5 — The Shared World (`ITEM-060`–`ITEM-065`) builds the first of these: a squad position as
-its own durable row (`ITEM-063`) and the one routing seam, `ownerOf(squad)` (`ITEM-064`), that
-this item later replaces. It still leaves nothing to shard until there is load.
+between matches — which the current game only has the first piece of. Everything that is
+independent of that gate was built and verified ahead of it, so that the single instance is a
+deliberate first stage rather than an accident: a squad position as its own durable row
+(`ITEM-063`), the routing seam (`ITEM-064`, now `RegionDirectory` in `src/server/Owner.ts`), the
+account/region store split, a player's home region, and the two-phase handover of a live window
+between two Durable Objects with in-doubt recovery and a persisted crossing intent (see the
+status line of RFC-0002 for the list). `REGIONS` holds one region, so no deployment crosses
+anything yet.
 
 #### Change
 See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; summarised:
-1. A region id replaces `workers/index.ts`'s fixed `env.MATCH.idFromName('singleton')`. The
+1. A region id replaces `workers/index.ts`'s fixed `env.MATCH.idFromName('singleton')` (built: the
+   Worker asks `regionMap(REGIONS)`, a one-region table today). The
    region id → Durable Object lookup is **staged by Durable Object count, not fixed on one
    mechanism**: baked straight into the Worker's own deployed code while the count is low (no
    extra store at all — it is redeployed at the same disconnect-window deploy every split or
@@ -74,13 +78,14 @@ See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; su
    destination the moment a crossing happens (RFC-0002 §4) — not a directory, and not the
    destination reaching in to pull it over.
 4. A squad's position on the world map is its own durable property, not the connection's
-   transient state (RFC-0002 §4 — a correction from this item's first draft). This is what
-   answers cold-start routing (look up a squad's last known position, route through the
-   directory) without a separate system, and is why a presence connection may end up able to use
-   Cloudflare's Hibernation API where a match's referee socket today cannot. What still is not
-   the roster: accounts, sheet, deeds, growth and the match log stay one logical `Persistence`
-   store every region-owning instance can reach, per RFC-0001 §8.4's "one database, behind a
-   portable port"; splitting *that* by region is explicitly rejected in RFC-0002 §4.
+   transient state (RFC-0002 §4 — a correction from this item's first draft; built, `ITEM-063`).
+   This is what answers cold-start routing (look up a squad's last known position, route through
+   the directory) without a separate system, and is why a presence connection may end up able to use
+   Cloudflare's Hibernation API where a match's referee socket today cannot. What is not the
+   roster is split as RFC-0002 §4 decided (`tictac-dwq.1`, built in `tictac-dwq.5`): the
+   directory's `AccountStore` (who a player is) and a per-region `RegionStore` (the squad, its
+   roster, its encounters), each over its own database, reached across regions through
+   `AccountsPort` and owner-routed calls — not one store every region reads.
 5. A partition facing too much load — measured by CPU time and by client latency read against
    what a player's real-world physical distance would predict, thresholds still to be tuned
    against real traffic (RFC-0002 §6.1) — spins up a second Durable Object *proactively*, at
@@ -101,26 +106,30 @@ See [RFC-0002](../design/rfc/0002-region-sharded-durable-objects.md) in full; su
 #### Affected Files
 - `workers/index.ts` (routing; a baked-in table at first, a Workers KV namespace later once DO
   count outgrows it — RFC-0002 §6.3)
-- The `squads` table (`ITEM-063`) and the travel scheduler's `ownerOf(squad)` (`ITEM-064`) —
-  the one seam the directory replaces
+- `src/server/Owner.ts` (`RegionDirectory`, `REGIONS`), `src/server/Handover.ts`,
+  `src/server/Crossings.ts`, `src/server/AccountStore.ts`, `src/server/RegionStore.ts`,
+  `src/server/AccountsRpc.ts`, `workers/MatchDurableObject.ts` — built
+- The split and merge of a loaded region: nothing built
 
 #### Acceptance Criteria
-- [ ] The shared world exists as at least one partition with a squad's position tracked as its
+- [x] The shared world exists as at least one partition with a squad's position tracked as its
       own durable property — built by `ITEM-063` (the `squads` table) and `ITEM-064`, not this one.
-- [ ] A connection routes to the Durable Object currently owning a squad's position, through
+- [x] A connection routes to the Durable Object currently owning a squad's position, through
       whichever directory mechanism is in force (baked-in table, or Workers KV once DO count
-      outgrows it).
-- [ ] Crossing a boundary (a deliberate, designed act, not continuous position tracking) hands a
+      outgrows it) — the baked-in table (`REGIONS`), and a signed-in player to their home region.
+- [x] Crossing a boundary (a deliberate, designed act, not continuous position tracking) hands a
       live session off without the player having to reconnect, verified by an automated test
-      that plays a session across a scripted boundary.
+      that plays a session across a scripted boundary — `tests/handover.test.ts` (a real client
+      between two Bun servers) and `tests/crossings.test.ts` (two servers, hand-turned clock,
+      lost replies and restarts).
 - [ ] A partition under simulated load splits proactively (before, not after, the measured
       trigger), new arrivals route to whichever half owns their location immediately, and an
       already-connected player is reassigned at the next disconnect rather than mid-session.
 - [ ] A partition whose load drops is merged back at the same disconnect windows, verified by an
       automated test or a documented cost model, not left permanently fragmented.
-- [ ] `Persistence` remains reachable by every region-owning instance without being partitioned
-      by region (RFC-0002 §4) — or, if that changes, the change is a deliberate edit to this
-      item and RFC-0002, not a quiet divergence.
+- [x] The store split is a deliberate edit to this item and RFC-0002 (§4), not a quiet divergence:
+      per-region stores, owner-routed, with the directory's accounts behind `AccountsPort`.
+- [ ] Production runs more than one region — gated on the shared world.
 
 ---
 
@@ -178,7 +187,7 @@ reinvented later, the same reasoning `ITEM-046` was filed on.
 - `src/wire/Recording.ts` (`deploymentsFrom` bound)
 - `src/server/Rosters.ts` (`recruit`)
 - `src/server/Room.ts` (`verifyRosters`)
-- `src/hud/RosterScreen.ts` (deploy toggle, defaulting, empty-slot rendering)
+- `src/hud/RosterScreen.tsx` (deploy toggle, defaulting, empty-slot rendering)
 - `docs/architecture/networking.md`, `docs/architecture/persistence.md`
 - Whatever the base/vehicle economy and the scenario/mission system turn out to be, once they
   exist — not yet files in this repository

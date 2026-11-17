@@ -211,7 +211,7 @@ is how the receiving side gets tested without two browsers and a signalling
 broker: `src/sim/Replay.ts` and `bun run replay <file>`.
 
 - **Format** (`src/wire/Recording.ts`): `{ header, events[] }`, version
-  `RECORDING_VERSION = 5` (bumped four times: to 2 when edge deployment became
+  `RECORDING_VERSION = 6` (bumped five times: to 2 when edge deployment became
   the game's layout, since the same seed now builds a different map and a
   version-1 file must not be refought on terrain it was never fought on; to 3
   when the header gained `startingHp?` — ITEM-038's wounds — since a version-2
@@ -222,7 +222,9 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   `startingHp` — three same-length arrays matched by position only — became one
   `squads: Record<Faction, Deployment[]>` — `ITEM-043` — since a version-4
   header's three arrays would zip a sheet against the wrong unit's kit the
-  moment they disagreed). The header carries `seed` and, per side, one
+  moment they disagreed; to 6 when `throwGrenade` gained `targetLevel` and a throw began
+  to stray and fly off walls and onto roofs, so a version-5 file's throws, which have no
+  storey, would land somewhere else). The header carries `seed` and, per side, one
   `Deployment` per deploying soldier (one to `SQUAD_SIZE`): its `CharacterSheet`,
   its `UnitLoadout` (both squads', since a replay resolves both sides' attacks
   and needs the numbers each fought with), and — only for a kept match — a
@@ -243,7 +245,7 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   commands from its decision points. `bun run balance -- --record=<dir>` writes
   one file per simulated match via `SweepOptions.onMatch`; the sweep itself
   stays pure, and the file I/O lives in `scripts/balance.ts`.
-- **Playback**: `startPlayback` in `src/main.ts` builds a match with no
+- **Playback**: `startPlayback` in `src/main.tsx` builds a match with no
   `NetworkManager`, equips both sides from the header, sets
   `MatchSession` in `replay` mode (`MatchSessionParts.watching`: reveals the whole
   field, takes input off the units) and feeds commands to `applyRecordedCommand`, which is
@@ -463,8 +465,8 @@ Every room records the build and protocol it was opened under.
   protocol (`PROTOCOL_VERSION`), at any build: a page still on the build before a deploy has a
   match to finish here, so what a page may start is weighed when it asks, not at the gate. Any
   other protocol, a `hello` that states nothing usable, or any other first notification (an
-  `init` included) is refused as in §5 (*Protocol mismatch: the match server speaks protocol 7,
-  this page speaks protocol 5. …*, or the reload text for a page that reports no version) with
+  `init` included) is refused as in §5 (*Protocol mismatch: the match server speaks protocol 8,
+  this page speaks protocol 7. …*, or the reload text for a page that reports no version) with
   `session/ended` (`reconnect: 'never'`), and the socket is closed.
 - **`open`, `join` and `watch`** start something on this server, so they take its own build
   (`409` *Build mismatch: the match server is running build b, this page is running build a.

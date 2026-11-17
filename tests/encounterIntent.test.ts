@@ -9,7 +9,7 @@ import { Batch, type Db } from '../src/server/db/Db'
 import type { Persistence } from '../src/server/Persistence'
 import { regionStoreOverDb } from '../src/server/RegionStore'
 import { softwareAuthenticator } from './support/authenticator'
-import { DATABASE_URLS, freshPersistence } from './support/db'
+import { freshPersistence } from './support/db'
 import { seedContact } from './support/encounters'
 import { handClock, type HandClock } from './support/handServer'
 import { register, registerAt, rpcServer, type RpcServer } from './support/rpcServer'
@@ -25,7 +25,7 @@ const HOUR = 60 * MIN
 const ORIGIN: LatLng = { lat: 48.1, lng: 11.5 }
 const north = (from: LatLng, km: number): LatLng => ({ lat: from.lat + km / 111.2, lng: from.lng })
 
-describe.each(DATABASE_URLS)('The record of a contact on %s', (url) => {
+describe('The record of a contact', () => {
   /** A player and a squad for the rows to name, since both are foreign keys. */
   async function people(persistence: Persistence, count = 2) {
     const named: { id: string; squadId: string }[] = []
@@ -48,7 +48,7 @@ describe.each(DATABASE_URLS)('The record of a contact on %s', (url) => {
   })
 
   test('begin reserves one room id per contact, and asking again finds the same row, unsettled and unseen', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const [ada] = await people(persistence)
     const first = await persistence.region.encounters.begin([intent(ada!)])
     const again = await persistence.region.encounters.begin([intent(ada!)])
@@ -65,7 +65,7 @@ describe.each(DATABASE_URLS)('The record of a contact on %s', (url) => {
   })
 
   test('a meeting is begun, settled and discarded for both players together', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const [ada, bo] = await people(persistence)
     const sides = [intent(ada!, { opponentPlayerId: bo!.id }), intent(bo!, { opponentPlayerId: ada!.id })] as const
     const handling = await persistence.region.encounters.begin(sides)
@@ -85,7 +85,7 @@ describe.each(DATABASE_URLS)('The record of a contact on %s', (url) => {
   })
 
   test('a meeting that an older build wrote one side at a time is made whole, not opened again', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const [ada, bo] = await people(persistence)
     await seedContact(persistence.region.encounters, {
       squadId: ada!.squadId, playerId: ada!.id, trip: 'trip', checkpoint: 0, at: 5, place: ORIGIN,
@@ -105,7 +105,7 @@ describe.each(DATABASE_URLS)('The record of a contact on %s', (url) => {
   })
 
   test('a seat taken while the contact is still unsettled is kept, because the row was there first', async () => {
-    const persistence = await freshPersistence(url)
+    const persistence = await freshPersistence()
     const [ada] = await people(persistence)
     const handling = await persistence.region.encounters.begin([intent(ada!)])
     await persistence.region.encounters.markTaken(handling.roomId, ada!.id)
@@ -170,7 +170,6 @@ async function restart(persistence: Persistence, clock: HandClock, old: Boot): P
  */
 function diesAfterTheMatchRow(db: Db): Db {
   return {
-    dialect: db.dialect,
     query: db.query.bind(db),
     exec: (statement) => db.exec(statement),
     close: () => db.close(),
@@ -203,7 +202,7 @@ async function sendIntoAliens(server: RpcServer, trip: { current: string }) {
 describe('A server that dies between opening the room and recording the contact', () => {
   test('opens one fight against aliens, not two, when it comes back', async () => {
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
-    const persistence = await freshPersistence(':memory:')
+    const persistence = await freshPersistence()
     const clock = handClock()
     const trip = { current: '' }
     const first = await boot(persistence, clock, { dies: true, mintTrip: () => trip.current })
@@ -238,7 +237,7 @@ describe('A server that dies between opening the room and recording the contact'
 
   test('a fight whose match row landed and room row did not is not lost: the transaction took both back, and the restart opens it once', async () => {
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
-    const persistence = await freshPersistence(':memory:')
+    const persistence = await freshPersistence()
     const clock = handClock()
     const trip = { current: '' }
     // The first server's database dies after the match insert, before the room insert is committed.
@@ -278,7 +277,7 @@ describe('A server that dies between opening the room and recording the contact'
 
   test('opens one meeting, not two, and writes it for both players or neither', async () => {
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
-    const persistence = await freshPersistence(':memory:')
+    const persistence = await freshPersistence()
     const clock = handClock()
     const first = await boot(persistence, clock, { dies: true, aliens: false })
     const ada = await registerAt(first.server, persistence, 'Ada', ORIGIN)

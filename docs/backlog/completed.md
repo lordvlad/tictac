@@ -3,7 +3,7 @@ title: "Completed Work Archive"
 id: "BACKLOG-COMPLETED"
 type: "backlog"
 status: "active"
-lastReviewed: "2026-10-07"
+lastReviewed: "2026-11-17"
 appliesTo:
   - "src/**"
 relatedDocs:
@@ -1500,9 +1500,10 @@ persistence is the foundation the rest of the GDD stands on.
 #### Key Changes
 - **A portable database port** (`src/server/db/Db.ts`) on `Bun.SQL`: one tagged-template
   interface over SQLite and Postgres, no ORM and no driver. Where the database finally lives
-  (Durable Objects or a central Postgres) is still open, so every query obeys stated
-  portability rules and the whole suite runs against both engines when
-  `TICTAC_TEST_POSTGRES_URL` is set.
+  (Durable Objects or a central Postgres) was still open, so every query obeyed stated
+  portability rules and the whole suite ran against both engines when
+  `TICTAC_TEST_POSTGRES_URL` was set. (Postgres was dropped later, `tictac-uqt.33`: nothing
+  deployed it and its paths never ran in CI.)
 - **Forward-only migrations** (`src/server/db/migrate.ts`): no `down`, idempotent, one
   transaction per migration together with the row recording it, and three refusals — ids not
   `1..n`, a name that disagrees with the database's, and a database from a *newer* build.
@@ -2600,7 +2601,7 @@ away at the door. A deploy has to be something a player in a match barely notice
   the old build; cross-build divergence witnessed; protocol floor), keyed-reclaim tests in
   `tests/lobby.test.ts`, the backoff/give-up/resync decisions in `tests/network.test.ts`, and real
   server restarts mid-match, mid-deploy, with a lost intent and with a spectator in
-  `tests/refereed.test.ts`. Store tests also run on Postgres.
+  `tests/refereed.test.ts`. Store tests also ran on Postgres then (dropped, `tictac-uqt.33`).
 - A rolling update under `wrangler dev` with persisted storage: two browsers on build `3713528`
   played a turn; the server was replaced by build `c3df148` over the same storage; both windows
   reconnected by themselves, played two more handovers whose digests the new server accepted, and
@@ -3281,6 +3282,90 @@ away, so most crossings involve at least one absent player. Decisions are in GDD
       attached as environment variable, feed answered with `opponent_player_id` column present.
       Live two-player crossing under the DO alarm awaits two persistent accounts crossing on the
       map.
+---
+
+### Architecture Review 2026-11 (`tictac-uqt`)
+**Completed Date:** 2026-11-17  
+**Type:** Architecture / Refactor  
+**Milestone:** Cross-cutting — no milestone  
+
+#### Why
+A review in six read-only slices (layering, lockstep, protocol, persistence, client, docs) found
+that the stated invariants — headless rules, intent-only wire, one socket per window, an injected
+clock, clean cutover — were mostly kept by convention, each with at least one bypass. The fixes
+were ordered so each handed the next a narrower, enforced interface: ratchets first, then single
+owners, then the features that rest on both. Region handover (`[ITEM-046]`, `tictac-dwq`) was
+finished last, on top of the clock, the directory, a real transaction and a decided store split.
+
+#### What Landed
+- **Wave 1 (`d5b0ca3`) — ratchets, clock port, real transactions, command door.**
+  `tests/layers.test.ts` enforces the layer DAG on runtime and type-only imports, with an
+  allowlist that can only shrink. One `ServerClock` (`src/server/Clock.ts`) is injected into every
+  server module and a scan test refuses clock reads elsewhere. `Db.transaction` takes a write batch
+  and is atomic on both hosts (`transactionSync` on the Durable Object, `BEGIN`/`COMMIT` on Bun).
+  `rollSquadSheets` and `SimMatch` take their entropy and `createdAt` as input. The dead
+  component-replication path (`syncDirty`, `onComponentChanged`, `applyRemote`) and the
+  compatibility re-exports were deleted. Debug edits are for local matches only and `window.tictac`
+  for the development bundle only. Engine systems, callbacks and lights are disposed by whoever
+  added them.
+- **Wave 2 (`5751e6e`) — protocol 8, durable ownership, encounter intent, one screen controller.**
+  The server ends a session one way, `session/ended { reason, reconnect, url? }`;
+  `session/replaced` and `OLDEST_SERVED_PROTOCOL` are gone. The room issues the match seed and
+  refuses another from Blue. The state digest carries the dice position. `RegionDirectory` is
+  constructed by each host and `squads.owner` is the durable keeper; `Owner.ts` has no module
+  state. An encounter's intent row is written before its room opens, and a meeting is recorded
+  and settled as one batch. Unit state lives only in components (`CharacterComponent`,
+  `TraitsComponent`) and traits are refolded on every restore. `ScreenController` and one
+  `leaveMatch` replace module globals and the page reload. Every table is queried by one store
+  (`tests/tableOwnership.test.ts`).
+- **Layers (`ea8a54b`) — `src/rules` and `src/wire` out of `src/game`.** The pure rules and
+  the wire contract moved down; the DAG reads core < rules < ecs < entities < wire < sim < the
+  hosts. The determinism test scans clock APIs across the headless directories and the server,
+  allowlists library maths per file, and replays one recording through two `MatchHost`s comparing
+  digests, dice included, after every command.
+- **One host factory, store split (`db4931f`).** `createMatchServer(ports)` assembles the lobby,
+  journeys, schedule, handover coordinator, sessions and directory; the Bun server and the Durable
+  Object only adapt their platform. `AccountStore` and `RegionStore` run over two `Db`s with their
+  own migration ledgers, and existing single-database deployments are adopted without a manual step.
+  A match and its room row are written in one transaction. World-aware modules left `src/rules`
+  (`Squads`, `Kit` to `entities`; `TurnManager`, `Rewind`, `WorldDigest` to `sim`).
+  `startingGrenades` is the single issuer of the starting pouch. `ServerConnection` takes a region
+  handover in place: a second socket, then `session/ended` `elsewhere`, with no redial of the source.
+- **Handover source side (`7a7c032`).** `crossBorder` walks a squad to the checkpoint and its
+  arrival starts the two-phase handover over a `peers` port (in process on Bun, DO RPC on
+  Cloudflare). The target commits as keeper on `region/arrive`; the source deletes its rows only
+  after the confirm. Failures retry on the schedule, and a seated player's squad waits until the
+  room is over. Region RPCs authenticate the caller and answer real values. `InteractionController`
+  was split into `Input`, `MatchSession` and `Presenter`, with the planners, fog and `Battlefield`
+  in `src/client`. `RegionStore.enlist` is the one idempotent door that deals a missing roster or
+  squad on sign-in. Test harnesses build through the factory.
+- **Home regions and recovery (`bee6737`).** A player has a home region, set at registration
+  and moved by the handover commit in the same step as `squads.owner`. Source and target persist
+  their side of a handover (`crossings`, `handovers` tables); a lapsed or restarted offer asks the
+  target (`handoverStatus`) and completes, retries or keeps authority, so exactly one region keeps
+  the squad. A crossing's intent survives a restart. `MatchSession.canAct` is the one act gate per
+  mode. HUD components take view-model props and narrow server ports; nothing under `src/hud`
+  imports `game`, `sim`, `entities` or `client`.
+
+#### What Stayed Gated
+Production sharding. `REGIONS` holds one region, the handover protocol is exercised by tests
+against two servers, and the shared world that would give a second region something to hold does
+not exist. `[ITEM-046]` stays open for that and for splitting and merging a loaded region.
+
+#### Documentation
+The drift the review found that no code ticket owned (`tictac-uqt.14`) was swept in the same pass:
+RFC-0002's status, `rfc/README.md`, ITEM-046 and the "nothing is built" claims of `deployment.md`;
+`RECORDING_VERSION` in `networking.md`; ADR-0004's derived streams (`SURFACE_STREAM`,
+`DOOR_STREAM`, `SURVIVOR_STREAM`); the directory maps of `AGENTS.md` and `overview.md`, which now
+list `src/server/` and `workers/` and the real layer order.
+
+#### Acceptance Criteria
+- [x] Every stated invariant that had a bypass has either an enforced boundary (a test that
+      fails on a new violation) or no bypass left.
+- [x] Region handover is implemented end to end and verified, including a lost reply and a restart
+      on either side (`tests/crossings.test.ts`, `tests/handover.test.ts`).
+- [ ] Production sharding — gated on the shared world, tracked under `[ITEM-046]`.
+
 ---
 
 ## Rejected — kept for the reasoning

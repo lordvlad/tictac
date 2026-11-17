@@ -38,7 +38,7 @@ describe('Every table is read and written by exactly one module', async () => {
   // The tables the migrations leave behind in a real database, not the ones
   // their text names: a rebuild's scratch tables are created and dropped, and
   // a table may be spelled by a template.
-  const db = await freshDb(':memory:')
+  const db = await freshDb()
   await migrate(db, WALL_CLOCK, ACCOUNT_SCHEMA)
   await migrate(db, WALL_CLOCK, REGION_SCHEMA)
   const tables = (
