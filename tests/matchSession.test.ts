@@ -253,6 +253,28 @@ describe('MatchSession: intents become commands through the one door', () => {
     expect(turnManager.activeFaction).toBe(Faction.Red)
     expect(told.turnsSwitched).toBe(1)
   })
+
+  test('on one screen the side taking the chair has its first unit selected', () => {
+    const { session, turnManager, squads } = build()
+    expect(turnManager.selectedSoldier?.faction).toBe(Faction.Blue)
+
+    session.handleIntent({ type: 'confirmTurnSwitch' })
+
+    expect(turnManager.selectedSoldier).toBe(squads.byFaction[Faction.Red][0]!)
+  })
+
+  test("over a network the other side's turn selects nothing, and this side's turn selects its first unit", () => {
+    const { network } = seated('host', Faction.Blue)
+    const { session, turnManager, squads } = build({ network })
+
+    session.handleIntent({ type: 'requestTurnSwitch' })
+    expect(turnManager.selectedSoldier).toBeNull()
+
+    session.handleRemoteNetworkMessage({ type: 'endTurn', faction: Faction.Red })
+    session.update(0)
+    expect(turnManager.activeFaction).toBe(Faction.Blue)
+    expect(turnManager.selectedSoldier).toBe(squads.byFaction[Faction.Blue][0]!)
+  })
 })
 
 describe('MatchSession: the turn gate', () => {

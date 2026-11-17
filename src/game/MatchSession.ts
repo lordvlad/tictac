@@ -715,9 +715,6 @@ export class MatchSession {
       case 'endTurn':
         this.retreatNote = null
         this.turnSwitched()
-        // The played game picks the incoming side's first unit for the player;
-        // a replay does it so the camera follows whoever acts next.
-        if (origin === 'record') this.turnManager.autoSelectFirst()
         break
       case 'retreat':
         // The left-behind fall when the side escaped; the match is over, which `update` notices.
@@ -725,7 +722,6 @@ export class MatchSession {
         // Caught: the attempt was the side's turn.
         this.retreatNote = `${FACTION_INFO[command.faction].name} tried to retreat (${result.retreat?.chance ?? 0}%) and was caught.`
         this.turnSwitched()
-        if (origin === 'record') this.turnManager.autoSelectFirst()
         break
       default:
         break
@@ -733,21 +729,17 @@ export class MatchSession {
     this.view.commandApplied(command, result, origin)
   }
 
-  /** The turn changed hands: nothing aimed carries over, and over a network the screen follows its own side. */
+  /**
+   * The turn changed hands: nothing aimed carries over, and the screen follows
+   * whoever's eyes it is. On one screen and for a watcher that is the side now
+   * up, so its first unit is picked and framed; over a network it is this
+   * window's own side, so the other side's turn leaves nothing selected.
+   */
   private turnSwitched(): void {
     this.view.turnSwitched()
     this.standDown()
-
-    const myFaction = this.seat
-    if (myFaction !== null) {
-      if (this.turnManager.activeFaction === myFaction) {
-        const living = this.squads.getLiving(myFaction)
-        if (living.length > 0) this.turnManager.selectSoldier(living[0]!)
-      } else {
-        this.turnManager.selectSoldier(null)
-      }
-    }
-
+    if (this.turnManager.activeFaction === this.viewerFaction) this.turnManager.autoSelectFirst()
+    else this.turnManager.selectSoldier(null)
     this.view.recomputeVisibility()
   }
 
