@@ -5,13 +5,12 @@ import { Faction } from '../src/config'
 import type { CombatRecording } from '../src/wire/Recording'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import type { Player } from '../src/wire/Rpc'
-import { Lobby } from '../src/server/Lobby'
 import type { RefereeVerdict } from '../src/server/Room'
 import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'
 import { SimMatch, type SquadPlan } from '../src/sim/SimMatch'
 import { MY_VERSION } from '../src/version'
-import { connect, seatBoth } from './support/lobby'
+import { connect, hostLobby, seatBoth } from './support/lobby'
 
 const STOCK: SquadPlan = {
   weapons: [WeaponId.Rifle, WeaponId.Gatling, WeaponId.Sniper, WeaponId.Shotgun],
@@ -37,15 +36,12 @@ async function harness(seed = 4242) {
   const recording = recorded(seed)
   const persistence = await openPersistence(WALL_CLOCK)
   const verdicts: RefereeVerdict[] = []
-  const lobby = new Lobby({
-    matches: persistence.region.matches,
-    rooms: persistence.region.rooms,
-    onVerdict: (v) => verdicts.push(v),
-    log: () => {},
-    mapSeed: () => recording.header.seed,
+  const lobby = await hostLobby(
+    persistence,
     // A dropped seat is held on a clock nothing here ever runs out.
-    clock: { now: WALL_CLOCK.now, schedule: () => () => {} },
-  })
+    { now: WALL_CLOCK.now, schedule: () => () => {} },
+    { lobby: { onVerdict: (v) => verdicts.push(v), mapSeed: () => recording.header.seed } },
+  )
   return { recording, store: persistence.region.matches, persistence, lobby, verdicts }
 }
 

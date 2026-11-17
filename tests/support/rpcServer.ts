@@ -3,18 +3,16 @@ import type { LatLng, PastWaypoint } from '../../src/core/Travel'
 import { loopback } from '../../src/wire/Transport'
 import { WALL_CLOCK, type ServerClock } from '../../src/server/Clock'
 import type { OpenEncounter, OpenMeeting } from '../../src/server/EncounterPort'
-import { Journeys } from '../../src/server/Journeys'
-import { HandoverCoordinator } from '../../src/server/Handover'
-import { regionDirectory } from '../../src/server/Owner'
-import { Lobby, type LobbyOptions } from '../../src/server/Lobby'
+import { LOCAL_RELYING_PARTY } from '../../src/server/AccountStore'
+import type { Journeys } from '../../src/server/Journeys'
+import type { Lobby } from '../../src/server/Lobby'
+import { createMatchServer, type MatchServerPorts } from '../../src/server/MatchServer'
 import type { Persistence } from '../../src/server/Persistence'
-import { Schedule } from '../../src/server/Schedule'
-import { Sessions } from '../../src/server/Session'
 import { MY_VERSION } from '../../src/version'
 import { softwareAuthenticator, type SoftwareAuthenticator } from './authenticator'
 
 /**
- * A match server in-process — lobby, sessions, the travel schedule — with
+ * The match server `createMatchServer` assembles, in-process — lobby, sessions, the travel schedule — with
  * windows that speak raw JSON-RPC to it over loopback sockets, and a clock the
  * test turns by hand.
  *
@@ -54,64 +52,48 @@ export interface RpcServerOptions {
   openEncounter?: OpenEncounter
   /**
    * What two squads meeting opens here (`ITEM-053`): a fake, or `'lobby'` for
-   * this server's own lobby, which then keeps rosters and runs by the test's
-   * clock. Unset, squads never meet.
+   * this server's own lobby, which runs by the test's clock. Unset, squads never meet.
    */
   openMeeting?: OpenMeeting | 'lobby'
   /** The trial switch; on unless this says otherwise. */
   playerEncounters?: () => boolean
   /** The timers the lobby's grace periods and join windows run on; real ones unless a test turns them. */
   schedule?: ServerClock['schedule']
-  /** More of the lobby's own options, over the rosters `openMeeting: 'lobby'` gives it. */
-  lobby?: Partial<Omit<LobbyOptions, 'clock'>>
+  /** What the test replaces of the lobby's own options. */
+  lobby?: MatchServerPorts['lobby']
   /** A new trip's id; random unless a test needs to pick what its checkpoints roll. */
   mintTrip?: () => string
 }
 
-export function rpcServer(
+export async function rpcServer(
   persistence: Persistence,
   start = Date.UTC(2026, 9, 8, 9),
   options: RpcServerOptions = {},
-): RpcServer {
+): Promise<RpcServer> {
   let now = start
   const clock: ServerClock = { now: () => now, schedule: options.schedule ?? WALL_CLOCK.schedule }
-  const lobby = new Lobby({
-    matches: persistence.region.matches,
-    rooms: persistence.region.rooms,
-    log: () => {},
-    clock,
-    ...(options.openMeeting === 'lobby' ? { rosters: persistence.region.rosters } : {}),
-    ...options.lobby,
-  })
   const armed: (number | null)[] = []
-  const schedule = new Schedule({ now: () => now, arm: (at) => armed.push(at) })
-  const directory = regionDirectory({ owners: persistence.region.squads })
-  const journeys = new Journeys({
-    directory,
-    squads: persistence.region.squads,
-    accounts: persistence.accounts.accounts,
-    encounters: persistence.region.encounters,
-    schedule,
+  const match = await createMatchServer({
     clock,
-    openEncounter: options.openEncounter,
-    openMeeting: options.openMeeting === 'lobby' ? (meeting) => lobby.openMeeting(meeting) : options.openMeeting,
-    playerEncounters: options.playerEncounters,
-    mintTrip: options.mintTrip,
-    tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
-  })
-  const sessions = new Sessions({
-    lobby,
     accounts: persistence.accounts.accounts,
     region: persistence.region,
-    journeys,
-    handover: new HandoverCoordinator({ clock, directory, squads: persistence.region.squads }),
-    clock,
+    // Not a timer: the test's `wake` is the alarm going off.
+    alarm: { arm: (at) => void armed.push(at) },
+    placeOf: () => null,
+    party: LOCAL_RELYING_PARTY,
+    playerEncounters: options.playerEncounters,
     log: () => {},
+    lobby: options.lobby,
+    journeys: {
+      mintTrip: options.mintTrip,
+      // Explicitly undefined unless the test gave one: nothing is rolled or met by default, as on a host with no lobby.
+      openEncounter: options.openEncounter,
+      ...(options.openMeeting === 'lobby' ? {} : { openMeeting: options.openMeeting }),
+    },
   })
-
   const window = (place: LatLng | null = null): Window => {
     const [page, socket] = loopback()
-    sessions.attach(socket, { place })
+    match.sessions.attach(socket, { place })
     const pending = new Map<number, (answer: Answer) => void>()
     const pushes: JsonRpcNotification[] = []
     let lastId = 0
@@ -140,8 +122,8 @@ export function rpcServer(
   }
 
   return {
-    lobby,
-    journeys,
+    lobby: match.lobby,
+    journeys: match.journeys,
     armed,
     get now() {
       return now
@@ -149,7 +131,7 @@ export function rpcServer(
     set now(at: number) {
       now = at
     },
-    wake: () => schedule.fire(),
+    wake: () => match.alarm(),
     window,
   }
 }

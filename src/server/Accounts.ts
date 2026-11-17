@@ -25,7 +25,7 @@ import {
  * The account store is the directory's: it knows a player, their passkeys and
  * their sessions, and nothing of where their squad is or what is in their
  * roster — that is a region's (`RegionStore.enlist`), made right after
- * registration by whoever served it. This is what keeps a region's database
+ * registration by whoever served it, and by any later sign-in that finds it missing. This is what keeps a region's database
  * free of the accounts', and why a region that has never seen a player can
  * still sign one in: it asks here (`AccountsPort`).
  */

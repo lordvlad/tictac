@@ -11,7 +11,7 @@ import type { Seated, ServerIntent } from '../src/wire/Lobby'
 import type { Player } from '../src/wire/Rpc'
 import { loopback } from '../src/wire/Transport'
 import type { EncounterContact } from '../src/server/EncounterPort'
-import { Lobby } from '../src/server/Lobby'
+import type { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
 import type { Client, RefereeVerdict } from '../src/server/Room'
 import { MatchHost } from '../src/sim/MatchHost'
@@ -19,7 +19,7 @@ import { Policy } from '../src/sim/Policy'
 import { MY_VERSION } from '../src/version'
 import { freshPersistence } from './support/db'
 import { handClock, type HandClock } from './support/handServer'
-import { connect, type Connection } from './support/lobby'
+import { connect, hostLobby, type Connection } from './support/lobby'
 
 /**
  * A fight on the road is a room the server opens itself (`ITEM-048`): already
@@ -115,13 +115,9 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
   const state = { mapSeed: 1, lobby: undefined as unknown as Lobby }
 
   const serve = async (): Promise<Lobby> => {
-    const lobby = new Lobby({
-      matches: persistence.region.matches,
-      rooms: persistence.region.rooms,
-      rosters: persistence.region.rosters,
-      log: (message) => logs.push(message),
-      graceMs: GRACE,
-      clock: {
+    const lobby = await hostLobby(
+      persistence,
+      {
         now: () => START + clock.now,
         schedule: (fn, ms) => {
           if (!manual) return clock.schedule(fn, ms)
@@ -132,11 +128,17 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
           }
         },
       },
-      mapSeed: () => state.mapSeed,
-      onVerdict: (verdict) => verdicts.push(verdict),
-      onEncounterTaken: (roomId) => taken.push(roomId),
-    })
-    await lobby.restore()
+      {
+        log: (message) => logs.push(message),
+        graceMs: GRACE,
+        lobby: {
+          rosters: persistence.region.rosters,
+          mapSeed: () => state.mapSeed,
+          onVerdict: (verdict) => verdicts.push(verdict),
+          onEncounterTaken: (roomId) => taken.push(roomId),
+        },
+      },
+    )
     state.lobby = lobby
     return lobby
   }

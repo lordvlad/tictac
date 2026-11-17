@@ -2,9 +2,11 @@ import type { LatLng } from '../core/Travel'
 import type { AccountsPort } from './AccountsPort'
 import type { RelyingParty } from './AccountStore'
 import type { ServerClock } from './Clock'
+import type { Crossings } from './Crossings'
+import type { RegionPeers } from './Handover'
 import type { Journeys } from './Journeys'
 import type { Lobby } from './Lobby'
-import { createMatchServer, type AlarmPort } from './MatchServer'
+import { createMatchServer, type AlarmPort, type MatchServerPorts } from './MatchServer'
 import type { RegionStore } from './RegionStore'
 import type { RegionDirectory, RegionPartition } from './Owner'
 import type { Sessions } from './Session'
@@ -38,6 +40,7 @@ export interface GameServer {
   url: string
   lobby: Lobby
   journeys: Journeys
+  crossings: Crossings
   directory: RegionDirectory
   sessions: Sessions
   stop(): Promise<void>
@@ -68,6 +71,10 @@ export interface GameServerOptions {
   playerEncounters?: () => boolean
   /** The partition table this host routes places by; the deployed one (`REGIONS`) unless set. */
   regions?: readonly RegionPartition[]
+  /** The other regions, as this host reaches them (`MatchServerPorts.peers`); none unless set. */
+  peers?: RegionPeers
+  /** What a test replaces of the journeys the factory builds (`MatchServerPorts.journeys`). Hosts leave it unset. */
+  journeys?: MatchServerPorts['journeys']
   /**
    * Where the connection that opened a request came from. Cloudflare says so
    * on every request (`request.cf`); a Bun process behind no such proxy cannot,
@@ -105,6 +112,8 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
     placeOf: options.placeOf ?? (() => null),
     party: options.party,
     regions: options.regions,
+    peers: options.peers,
+    journeys: options.journeys,
     playerEncounters: options.playerEncounters,
     graceMs: options.graceMs,
     tiles: options.tiles,
@@ -140,6 +149,7 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
     url: String(server.url),
     lobby: match.lobby,
     journeys: match.journeys,
+    crossings: match.crossings,
     directory: match.directory,
     sessions: match.sessions,
     stop: async () => {

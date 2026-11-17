@@ -32,7 +32,7 @@ describe.each(DATABASE_URLS)('The record of a contact on %s', (url) => {
     for (let i = 0; i < count; i++) {
       const id = `p${i}`
       await persistence.accounts.db.query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${`Player ${i}`}, ${new Date(0).toISOString()})`
-      named.push({ id, squadId: (await persistence.region.squads.place(id, null)).id })
+      named.push({ id, squadId: (await persistence.region.enlist(id, null)).id })
     }
     return named
   }
@@ -132,11 +132,11 @@ interface Boot {
  * dies on that fight as well (`deaths` of 2 or 3, not 1) and opens a second
  * room. That was the flake; a test that is not about aliens has none to roll.
  */
-function boot(
+async function boot(
   persistence: Persistence,
   clock: HandClock,
   options: { dies: boolean; mintTrip?: () => string; aliens?: boolean },
-): Boot {
+): Promise<Boot> {
   const state = { deaths: 0, aliens: options.aliens ?? true } as Boot
   const dying = async <T>(open: Promise<T>): Promise<T> => {
     const opened = await open
@@ -144,7 +144,7 @@ function boot(
     state.deaths++
     throw new Error('the process died after the room opened')
   }
-  state.server = rpcServer(persistence, undefined, {
+  state.server = await rpcServer(persistence, undefined, {
     openEncounter: state.aliens ? (contact) => dying(state.server.lobby.openEncounter(contact)) : undefined,
     openMeeting: (meeting) => dying(state.server.lobby.openMeeting(meeting)),
     schedule: (fn, ms) => clock.schedule(fn, ms),
@@ -158,9 +158,7 @@ function boot(
 async function restart(persistence: Persistence, clock: HandClock, old: Boot): Promise<Boot> {
   await old.server.lobby.idle()
   await old.server.lobby.dispose()
-  const next = boot(persistence, clock, { dies: false, aliens: old.aliens })
-  await next.server.lobby.restore()
-  await next.server.journeys.restore()
+  const next = await boot(persistence, clock, { dies: false, aliens: old.aliens })
   return next
 }
 
@@ -208,7 +206,7 @@ describe('A server that dies between opening the room and recording the contact'
     const persistence = await freshPersistence(':memory:')
     const clock = handClock()
     const trip = { current: '' }
-    const first = boot(persistence, clock, { dies: true, mintTrip: () => trip.current })
+    const first = await boot(persistence, clock, { dies: true, mintTrip: () => trip.current })
     const { playerId, start } = await sendIntoAliens(first.server, trip)
 
     first.server.now = start + 90 * MIN
@@ -249,7 +247,7 @@ describe('A server that dies between opening the room and recording the contact'
       region: await regionStoreOverDb(diesAfterTheMatchRow(persistence.region.db), WALL_CLOCK, persistence.accounts.accounts),
       close: async () => {},
     }
-    const first = boot(dying, clock, { dies: true, mintTrip: () => trip.current })
+    const first = await boot(dying, clock, { dies: true, mintTrip: () => trip.current })
     const { playerId, start } = await sendIntoAliens(first.server, trip)
 
     first.server.now = start + 90 * MIN
@@ -282,7 +280,7 @@ describe('A server that dies between opening the room and recording the contact'
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
     const persistence = await freshPersistence(':memory:')
     const clock = handClock()
-    const first = boot(persistence, clock, { dies: true, aliens: false })
+    const first = await boot(persistence, clock, { dies: true, aliens: false })
     const ada = await registerAt(first.server, persistence, 'Ada', ORIGIN)
     const bo = await registerAt(first.server, persistence, 'Bo', north(ORIGIN, 20))
     const middle = north(ORIGIN, 10)

@@ -51,6 +51,8 @@ export const REGIONS: readonly RegionPartition[] = [{ id: SINGLETON_REGION, dura
 export interface RegionMap {
   /** The Durable Object that owns a world coordinate. A point outside every box goes to the first partition. */
   ownerOfPlace(place: LatLng): string
+  /** Whether `region` is the name of a Durable Object this table routes places to: what a crossing may be ordered to. */
+  isRegion(region: string): boolean
 }
 
 /** What a region directory reads a squad's committed keeper from: the squads this region's store holds. */
@@ -72,6 +74,7 @@ export function regionMap(partitions: readonly RegionPartition[]): RegionMap {
   const fallback = table[0]
   if (!fallback) throw new Error('a region map needs at least one partition')
   return {
+    isRegion: (region) => table.some((part) => part.durableObjectName === region),
     ownerOfPlace({ lat, lng }) {
       for (const part of table) {
         if (!part.bounds) return part.durableObjectName

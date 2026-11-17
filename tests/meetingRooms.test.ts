@@ -11,7 +11,7 @@ import type { RecordedEvent, RecordingHeader } from '../src/wire/Recording'
 import type { EncounterEntry } from '../src/wire/Encounter'
 import { RPC_ERRORS, type Player } from '../src/wire/Rpc'
 import type { MeetingContact, MeetingOpened } from '../src/server/EncounterPort'
-import { Lobby } from '../src/server/Lobby'
+import type { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
 import type { RefereeVerdict } from '../src/server/Room'
 import { MatchHost } from '../src/sim/MatchHost'
@@ -19,7 +19,7 @@ import { Policy } from '../src/sim/Policy'
 import { type StandingOrder } from '../src/wire/Rpc'
 import { freshPersistence } from './support/db'
 import { handClock, type HandClock } from './support/handServer'
-import { connect, type Connection } from './support/lobby'
+import { connect, hostLobby, type Connection } from './support/lobby'
 import { registerAt, rpcServer } from './support/rpcServer'
 
 /**
@@ -114,13 +114,9 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
   const state = { mapSeed: 1, lobby: undefined as unknown as Lobby }
 
   const serve = async (): Promise<Lobby> => {
-    const lobby = new Lobby({
-      matches: persistence.region.matches,
-      rooms: persistence.region.rooms,
-      rosters: persistence.region.rosters,
-      log: (message) => logs.push(message),
-      graceMs: GRACE,
-      clock: {
+    const lobby = await hostLobby(
+      persistence,
+      {
         now: () => START + clock.now,
         schedule: (fn, ms) => {
           if (!manual) return clock.schedule(fn, ms)
@@ -131,11 +127,17 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
           }
         },
       },
-      mapSeed: () => state.mapSeed,
-      onVerdict: (verdict) => verdicts.push(verdict),
-      onEncounterTaken: (roomId, playerId) => taken.push(`${roomId}|${playerId}`),
-    })
-    await lobby.restore()
+      {
+        log: (message) => logs.push(message),
+        graceMs: GRACE,
+        lobby: {
+          rosters: persistence.region.rosters,
+          mapSeed: () => state.mapSeed,
+          onVerdict: (verdict) => verdicts.push(verdict),
+          onEncounterTaken: (roomId, playerId) => taken.push(`${roomId}|${playerId}`),
+        },
+      },
+    )
     state.lobby = lobby
     return lobby
   }
@@ -788,7 +790,7 @@ describe('two squads on the road, end to end', () => {
     const persistence = await freshPersistence(':memory:')
     const clock = handClock()
     const marks: Promise<void>[] = []
-    const server = rpcServer(persistence, undefined, {
+    const server = await rpcServer(persistence, undefined, {
       openMeeting: 'lobby',
       schedule: (fn, ms) => clock.schedule(fn, ms),
       lobby: {

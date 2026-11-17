@@ -88,7 +88,7 @@ async function world({ on = true, answer = OPENED }: { on?: boolean; answer?: Me
     calls.push({ meeting, routes })
     return state.answer
   }
-  const server = rpcServer(persistence, undefined, { openMeeting: open, playerEncounters: () => state.on })
+  const server = await rpcServer(persistence, undefined, { openMeeting: open, playerEncounters: () => state.on })
 
   const ada = await registerAt(server, persistence, 'Ada', ORIGIN)
   const bo = await registerAt(server, persistence, 'Bo', north(ORIGIN, 20))
@@ -232,7 +232,7 @@ describe('Two squads whose routes cross', () => {
     // test picks so the answer is always the same.
     const persistence = await freshPersistence(':memory:')
     const calls: MeetingContact[] = []
-    const server = rpcServer(persistence, undefined, {
+    const server = await rpcServer(persistence, undefined, {
       openMeeting: async (meeting) => {
         calls.push(meeting)
         return OPENED
@@ -252,7 +252,7 @@ describe('Two squads whose routes cross', () => {
           VALUES (${`squad-${id}`}, ${id}, ${JSON.stringify([resting])}, 0, 0, ${'2026-01-01T00:00:00Z'})`
         if (suffix === 'mover') movers.add(`squad-${id}`)
       }
-      await server.journeys.order(`${i}-mover`, null, { kind: 'goHere', to: spot, pace: 'normal' })
+      await server.journeys.order(`${i}-mover`, { kind: 'goHere', to: spot, pace: 'normal' })
     }
     await server.wake()
     server.now += 12 * HOUR

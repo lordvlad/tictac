@@ -30,7 +30,7 @@ tags: ["combat", "ballistics", "rules", "los", "cover"]
 ## 1. Line of Sight (LOS) & Visibility
 
 Grid visibility is computed purely in 2D/3D integer coordinates using high-speed DDA ray marching (`src/core/Visibility.ts` and `src/core/Occlusion.ts`):
-- **Zero Raycasting in Core**: Physics raycasting is not used for gameplay checks; raycasters are restricted to pointer input picking in `InteractionController.ts`.
+- **Zero Raycasting in Core**: Physics raycasting is not used for gameplay checks; raycasters are restricted to pointer input picking in `src/client/Input.ts`.
 - **Wall Occlusion**: Solid wall components block vision unless destroyed or low-profile.
 
 ---

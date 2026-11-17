@@ -427,6 +427,27 @@ export class Lobby {
     window.transport.send({ jsonrpc: '2.0', method, params: { ...params } })
   }
 
+  /** Whether `playerId` has a window open on this server: somebody a push reaches. */
+  hasWindow(playerId: string): boolean {
+    const window = this.windows.get(playerId)
+    return window !== undefined && !window.gone
+  }
+
+  /**
+   * Whether `playerId` holds a seat in a room that is not over. A match never
+   * spans two servers, so a squad whose player is seated cannot be handed to
+   * another region (`Crossings`).
+   */
+  holdsSeat(playerId: string): boolean {
+    return this.seatOf(playerId) !== null
+  }
+
+  /** End `playerId`'s window's session (`end`), if they have one: the way a handover tells the window it moved. */
+  endWindow(playerId: string, ended: SessionEnded): void {
+    const window = this.windows.get(playerId)
+    if (window && !window.gone) this.end(window, ended)
+  }
+
   /** The lobby as `player` (or nobody) sees it: open rooms newest first, and their own seat. */
   view(player: Player | null): LobbyView {
     return { rooms: this.listings(), you: this.youOf(player) }

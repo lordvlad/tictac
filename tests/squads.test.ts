@@ -2,7 +2,9 @@ import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Rng } from '../src/core/rng'
 import { distanceKm, type LatLng } from '../src/core/Travel'
+import { Batch, type Db } from '../src/server/db/Db'
 import { DEFAULT_ANCHOR, drawAround, Squads, START_RADIUS_KM, START_SEPARATION_KM } from '../src/server/Squads'
+import type { Squad } from '../src/wire/Rpc'
 import { DATABASE_URLS, freshPersistence } from './support/db'
 
 /**
@@ -50,13 +52,25 @@ describe('A start is drawn uniformly over the disc', () => {
   })
 })
 
+/**
+ * The placement `RegionStore.enlist` makes, without the roster beside it: these
+ * tests give `Squads` their own random and log, which the store's does not take.
+ */
+async function place(squads: Squads, db: Db, playerId: string, anchor: LatLng | null): Promise<Squad> {
+  return squads.placing(anchor, async (placement) => {
+    const batch = new Batch()
+    squads.placeInto(batch, playerId, placement)
+    await db.transaction(batch)
+    return placement.squad
+  })
+}
+
 describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
   /** `count` players, each given a squad around `anchor` by `squads`. */
-  async function placed(squads: Squads, count: number, anchor: LatLng | null) {
+  async function placed(squads: Squads, db: Db, count: number, anchor: LatLng | null) {
     const starts: LatLng[] = []
     for (let i = 0; i < count; i++) {
-      const id = `p${i}`
-      const squad = await squads.place(id, anchor)
+      const squad = await place(squads, db, `p${i}`, anchor)
       starts.push(squad.waypoints[0]!)
     }
     return starts
@@ -64,7 +78,7 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
 
   test('three hundred players from one anchor: all within the disc, none within a kilometre of another', async () => {
     const persistence = await freshPersistence(url)
-    const starts = await placed(persistence.region.squads, 300, null)
+    const starts = await placed(persistence.region.squads, persistence.region.db, 300, null)
 
     for (const start of starts) expect(distanceKm(DEFAULT_ANCHOR, start)).toBeLessThanOrEqual(START_RADIUS_KM + 1e-6)
     let closest = Infinity
@@ -82,7 +96,7 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
     // Every draw lands on the same spot, so the second player can never be
     // a kilometre clear of the first.
     const stuck = new Squads(persistence.region.db, { now: () => 0, schedule: WALL_CLOCK.schedule }, () => 0.5, (line) => lines.push(line))
-    const starts = await placed(stuck, 2, null)
+    const starts = await placed(stuck, persistence.region.db, 2, null)
 
     expect(starts[1]).toEqual(starts[0])
     expect(lines).toHaveLength(1)
@@ -111,7 +125,7 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
     const lines: string[] = []
     const squads = new Squads(persistence.region.db, { now: () => 0, schedule: WALL_CLOCK.schedule }, random, (line) => lines.push(line))
     const ids = Array.from({ length: SPOTS }, (_, i) => `p${i}`)
-    const placed = await Promise.all(ids.map((id) => squads.ensure(id, null)))
+    const placed = await Promise.all(ids.map((id) => place(squads, persistence.region.db, id, null)))
 
     const starts = placed.map((squad) => squad.waypoints[0]!)
     for (let i = 0; i < starts.length; i++) {

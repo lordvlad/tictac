@@ -63,9 +63,13 @@ directory's Durable Object (`accountsOverRpc` / `serveAccounts`, refusals includ
 `AuthError` crosses as data and is thrown again as the same class). Nothing on the port can be a
 transaction with a region's own writes, so **registration is two steps**: `Accounts.register`
 makes the player, their credential and a session in one commit; `RegionStore.enlist` then gives
-them a roster and a squad in one commit of the region that served the connection. A registration
-that dies between the two leaves an account with nothing in the region, which the first
-`squad/get` there repairs for the squad (`Squads.ensure`).
+them a roster and a squad in one commit of the region that served the connection. `enlist` is the
+one door by which a player comes to exist in a region, and it is idempotent: it runs on every
+sign-in (`signIn`, `registerVerify`, `loginVerify`) and on `squad/get` and `roster/list`, and
+deals whichever of the roster and the squad the region does not hold. A registration that dies
+between the two steps therefore leaves nothing to repair by hand: the next sign-in finishes it, and
+later ones find both and do nothing. Rows that arrived by handover (`importSquad`) count, so an
+arrived player is not dealt a second roster.
 
 Who hosts what:
 
@@ -573,16 +577,16 @@ waypoint and the columns agree, and the reported location is written down nowher
 **One placement at a time.** The 1 km check is a read of the starts already kept, and a read followed
 by a write is not atomic (§1, *Transactions are batches*): two placements that overlapped would both
 see a clear disc. `Squads.placing` draws and commits under one queue, so each placement's check sees
-every start written before it; `Squads.place` (a player from before squads) and `RegionStore.enlist`
-(the batch with the roster) both go through it. That holds for the one process that writes the table
+every start written before it; `RegionStore.enlist` is the only caller, and does its own
+"has this player a roster or a squad yet?" reads inside the queue too, so it is idempotent. That holds for the one process that writes the table
 — one Durable Object or one Bun server per database — which is the rule here; two Bun servers sharing
 a Postgres would need a constraint the database enforces. `tests/squads.test.ts` places five players
 at once onto five candidate spots.
 
 **Players from before squads.** The squads migration added no rows: a random draw is not something SQL
-should do. `Squads.ensure` places a player who has no squad the first time `squad/get` asks,
-near the asking socket's place, with `ON CONFLICT (player_id) DO NOTHING` so two windows asking
-at once end up with one squad.
+should do. `RegionStore.enlist` places a player who has no squad the first time they sign in, or
+`squad/get` asks, near the asking socket's place, with `ON CONFLICT (player_id) DO NOTHING` so two
+windows asking at once end up with one squad.
 
 ---
 

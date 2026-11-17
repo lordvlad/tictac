@@ -4,11 +4,11 @@ import { Faction } from '../src/config'
 import type { RecordedEvent, RecordingHeader } from '../src/wire/Recording'
 import type { Player } from '../src/wire/Rpc'
 import { openPersistence } from '../src/server/db/BunSqlDb'
-import { Lobby } from '../src/server/Lobby'
+import type { Lobby } from '../src/server/Lobby'
 import { hashSeatKey, type RefereeVerdict } from '../src/server/Room'
 import { MatchHost } from '../src/sim/MatchHost'
 import { MY_VERSION, PROTOCOL_VERSION, type PeerVersion } from '../src/version'
-import { answered, connect, decisive, enlistFor, keyOf, roomOf, seatBoth, type Connection } from './support/lobby'
+import { answered, connect, decisive, enlistFor, hostLobby, keyOf, roomOf, seatBoth, type Connection } from './support/lobby'
 
 /**
  * A server that stops and starts again over the same database — restarted,
@@ -39,15 +39,9 @@ async function deployment() {
   const verdicts: RefereeVerdict[] = []
   const logs: string[] = []
   const serve = async (version: PeerVersion = MY_VERSION): Promise<Lobby> => {
-    const lobby = new Lobby({
-      matches: persistence.region.matches,
-      rooms: persistence.region.rooms,
-      rosters: persistence.region.rosters,
-      onVerdict: (verdict) => verdicts.push(verdict),
-      mapSeed: () => RECORDING.header.seed,
-      log: (message) => logs.push(message),
-      graceMs: 5_000,
-      clock: {
+    return hostLobby(
+      persistence,
+      {
         now: WALL_CLOCK.now,
         schedule: (fn, ms) => {
           const hold = { fn, ms, cancelled: false }
@@ -57,10 +51,17 @@ async function deployment() {
           }
         },
       },
-      version,
-    })
-    await lobby.restore()
-    return lobby
+      {
+        log: (message) => logs.push(message),
+        graceMs: 5_000,
+        lobby: {
+          rosters: persistence.region.rosters,
+          onVerdict: (verdict) => verdicts.push(verdict),
+          mapSeed: () => RECORDING.header.seed,
+          version,
+        },
+      },
+    )
   }
   /** Let every hold still running run out. */
   const expire = (): void => {

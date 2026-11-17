@@ -8,7 +8,7 @@ import type { StandingOrder } from '../wire/Rpc'
 import { SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
 import type { AccountsPort } from './AccountsPort'
 import type { ServerClock } from './Clock'
-import type { HandoverCoordinator } from './Handover'
+import type { Crossings } from './Crossings'
 import { Refusal, type Lobby } from './Lobby'
 import type { RegionStore } from './RegionStore'
 import type { Journeys } from './Journeys'
@@ -52,8 +52,8 @@ export interface SessionsOptions {
   region: Pick<RegionStore, 'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'>
   /** Squads on the move: the orders a window gives. */
   journeys: Journeys
-  /** Handover coordinator for cross-region transfers (RFC-0002). */
-  handover: HandoverCoordinator
+  /** Squads crossing into and out of this region (RFC-0002): `region/arrive` and `region/cancelHandover`. */
+  crossings: Pick<Crossings, 'arrive' | 'cancel'>
   /** The host's one clock: what travel runs by (`clock/now`). */
   clock: ServerClock
   /** Called for anything worth a line in a server log. */
@@ -95,7 +95,7 @@ export class Sessions {
   private readonly accounts: AccountsPort
   private readonly region: SessionsOptions['region']
   private readonly journeys: Journeys
-  readonly handover: HandoverCoordinator
+  private readonly crossings: SessionsOptions['crossings']
   private readonly clock: ServerClock
   private readonly log: (message: string) => void
 
@@ -105,7 +105,7 @@ export class Sessions {
     this.region = options.region
     this.journeys = options.journeys
     this.clock = options.clock
-    this.handover = options.handover
+    this.crossings = options.crossings
     this.log = options.log ?? ((message) => console.info(`[session] ${message}`))
   }
 
@@ -232,8 +232,7 @@ export class Sessions {
         publicKeyAlgorithm: number(params, 'publicKeyAlgorithm'),
       })
       // The account is the directory's; the roster and the squad are this
-      // region's, made here because this is where the connection came from.
-      await this.region.enlist(minted.player.id, session.place)
+      // region's, made by `adopt` because this is where the connection came from.
       reply(await this.adopt(session, minted))
     },
     'tictac/api/account/loginOptions': async (_session, _params, reply) => {
@@ -253,6 +252,9 @@ export class Sessions {
       const token = text(params, 'token')
       const player = await this.accounts.playerFor(token)
       if (!player) throw new Refusal(RPC_ERRORS.signInFirst, EXPIRED)
+      // Whoever's enlist failed after they registered is healed here, on the
+      // first sign-in that finds the region holding nothing of theirs.
+      await this.region.enlist(player.id, session.place)
       this.lobby.bind(session.client, player)
       session.account = { token, player }
       reply({ player })
@@ -268,25 +270,27 @@ export class Sessions {
       reply({ player: session.account?.player ?? null })
     },
     'tictac/api/roster/list': async (session, _params, reply) => {
-      const members = await this.region.rosters.active(signedIn(session).player.id)
+      const { player } = signedIn(session)
+      await this.region.enlist(player.id, session.place)
+      const members = await this.region.rosters.active(player.id)
       reply({ roster: members.map(entry) })
     },
     'tictac/api/roster/recruit': async (session, _params, reply) => {
       reply({ member: entry(await this.region.rosters.recruit(signedIn(session).player.id)) })
     },
     'tictac/api/squad/get': async (session, _params, reply) => {
-      reply({ squad: await this.region.squads.ensure(signedIn(session).player.id, session.place) })
+      reply({ squad: await this.region.enlist(signedIn(session).player.id, session.place) })
     },
     'tictac/api/clock/now': (_session, _params, reply) => {
       reply({ now: this.clock.now() })
     },
     'tictac/api/squad/order': async (session, params, reply) => {
       const player = signedIn(session).player
-      reply({ squad: await this.journeys.order(player.id, session.place, orderOf(params.order)) })
+      reply({ squad: await this.journeys.order(player.id, orderOf(params.order)) })
     },
     'tictac/api/squad/standing': async (session, params, reply) => {
       const player = signedIn(session).player
-      reply({ squad: await this.journeys.standing(player.id, session.place, standingOf(params.order)) })
+      reply({ squad: await this.journeys.standing(player.id, standingOf(params.order)) })
     },
     'tictac/api/encounter/feed': async (session, _params, reply) => {
       reply({ entries: await this.region.encounters.feed(signedIn(session).player.id, ENCOUNTER.feedLimit) })
@@ -315,18 +319,13 @@ export class Sessions {
       this.lobby.leave(session.client)
       reply(null)
     },
-    'tictac/api/region/arrive': (session, params, reply) => {
-      const handoverId = text(params, 'handoverId')
-      const token = text(params, 'token')
-      const squadId = text(params, 'squadId')
-      const prepared = this.handover.arrive(handoverId, token, squadId)
-      reply({ committed: true, targetRegion: prepared.targetRegion })
+    'tictac/api/region/arrive': async (session, params, reply) => {
+      const { player } = signedIn(session)
+      reply(await this.crossings.arrive(player.id, text(params, 'handoverId'), text(params, 'token'), text(params, 'squadId')))
     },
-    'tictac/api/region/cancelHandover': (_session, params, reply) => {
-      const handoverId = text(params, 'handoverId')
-      const reason = text(params, 'reason')
-      this.handover.cancel(handoverId, reason)
-      reply({ cancelled: true })
+    'tictac/api/region/cancelHandover': async (session, params, reply) => {
+      const { player } = signedIn(session)
+      reply(await this.crossings.cancel(player.id, text(params, 'handoverId'), text(params, 'reason')))
     },
   }
 
@@ -336,6 +335,10 @@ export class Sessions {
    * than left behind with nobody holding its token.
    */
   private async adopt(session: Session, minted: SignedIn): Promise<SignedIn> {
+    // Registration spans two stores, so a player may have an account and no
+    // roster here; the first thing a session is bound to does the region's
+    // half, and does it again for one that has it already without harm.
+    await this.region.enlist(minted.player.id, session.place)
     try {
       this.lobby.bind(session.client, minted.player)
     } catch (error) {
@@ -425,6 +428,11 @@ function orderOf(value: unknown): SquadOrder {
     case 'goHereFirst':
     case 'goHereNext':
       return { kind: order.kind, to: placeIn(order.to) }
+    case 'crossBorder':
+      if (!usable(order.destinationRegion)) {
+        throw new Refusal(RPC_ERRORS.invalidParams, 'That order does not say which region to cross into.')
+      }
+      return { kind: 'crossBorder', to: placeIn(order.to), destinationRegion: order.destinationRegion }
     case 'stop':
       return { kind: 'stop' }
     default:

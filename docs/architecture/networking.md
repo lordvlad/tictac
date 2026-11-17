@@ -245,14 +245,14 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   stays pure, and the file I/O lives in `scripts/balance.ts`.
 - **Playback**: `startPlayback` in `src/main.ts` builds a match with no
   `NetworkManager`, equips both sides from the header, sets
-  `InteractionController.spectating` (reveals the whole field, takes input off
+  `MatchSession.spectating` (reveals the whole field, takes input off
   the units) and feeds commands to `applyRecordedCommand`, which is
   `CommandSystem.apply(command, 'record')` — the same door as the player's own
   clicks and a peer's messages, so a replay exercises the path a live match
   takes.
 - **What the rules make a broken unit do** (`rules` origin, ITEM-014) is not in any file:
   playback applies the handover and the rules run the unit again. `Playback` waits on
-  `InteractionController.busy` — walking, or the applier's queue not yet empty — before the next
+  `MatchSession.busy` — walking, or the applier's queue not yet empty — before the next
   event, and a restored frame clears the queue, which was about the moment being left.
 - **Stepping back** is not replay: no command is invertible. `Playback` keeps a `Moment`
   (`src/sim/Rewind.ts` holds the types) at every event boundary and puts one back with
@@ -677,12 +677,12 @@ What `main.tsx` does with the seat (`takeSeat`):
   moment the match starts so a re-issue after a restart is the one used). The loadout
   backdrop alone uses `entropy()` while Blue waits, since nothing depends on it.
 - **A seat in a match being played** (`resume`, or `redirected`) — the match is rebuilt from
-  the log's header and replayed with `InteractionController.catchUp`, which applies each logged
+  the log's header and replayed with `Presenter.catchUp`, which applies each logged
   intent the way a replay does and steps time in fixed ticks until its walk and reactions have
   finished: the world a headless `MatchHost` reaches, from the same dice. Then it is simply the
   match, on the same side, with the same controls. `catchUp` logs how long it took to the
   console; a short log (four intents) took 33 ms in Chromium.
-- **A spectator** — the same rebuild with no network handed to the controller, every field
+- **A spectator** — the same rebuild with no network handed to the session, every field
   revealed and the HUD hidden, exactly like a recording; live intents are applied as they
   arrive, one after the previous one has finished walking. A `SpectatorBar`
   (`src/hud/SpectatorBar.tsx`) says whose turn it is, who won once the last intent has played
@@ -743,11 +743,16 @@ listeners, being the connection's, need nothing. Anything going wrong before tha
 refusing, its socket closing, its ending the session, no answer by the offer's expiry — closes the
 second socket and sends `region/cancelHandover` on the first: the window never left the source.
 The source going first (a drop, `retry`, `never`) abandons the handover. One offer is taken at a
-time; a second is cancelled.
+time; a second is cancelled. When the source gives up on the crossing for good (five failed
+attempts) it pushes `region/handoverFailed` (`squadId`, `targetRegion`, `reason`), which the
+connection hands to `onHandover` as `{ kind: 'failed' }`; the window never left it. `region/arrive`
+and `region/cancelHandover` need a sign-in and the handover's own player (`signInFirst`, `notYours`,
+`gone`, `conflict`); `arrive` answers the target's own region and `cancelHandover` whether a retry
+is scheduled (`retry`).
 
 Everything else the manager holds — mode, side, opening, deployed squad, held commands, the
 world it is bound to — survives the new socket. While reconnecting `isMyTurn` is false and
-nothing is put on the wire, so the controller takes no input for the seat; `main.tsx`'s
+nothing is put on the wire, so the session takes no input for the seat; `main.tsx`'s
 `ScreenController` shows a click-through line (`ReconnectingNotice`: *Connection lost —
 reconnecting… (attempt N)*) over whatever is on screen and removes it on `onReconnected`.
 
@@ -765,7 +770,7 @@ What happens next depends on the phase it is seated back into:
   handed to `onMessage` like any relay and `onResync({ kind: 'caughtUp', missed })` fires. If not
   — the server never got something this window applied, typically an intent sent into a socket
   that was already gone — `onResync({ kind: 'rebuild', log })`: `main.tsx` disposes the scene
-  (controller, HUD, camera rig, bodies, terrain; its update loop stops on a flag, since
+  (session, presenter, input, HUD, camera rig, bodies, terrain; its update loop stops on a flag, since
   `Game.onUpdate` has no unregister) and rebuilds it from the log exactly as a window taking the
   match over does, with the camera where it was. A seat that was still on its loadout screen when
   the match began without it takes the other side's squad from the log's header.

@@ -90,9 +90,9 @@ export class Rosters {
   }
 
   /**
-   * Give a player a squad, at slots `0..n-1`, in one transaction of its own.
-   * Registration does not use this: it queues {@link enlistInto} onto the
-   * batch that creates the player, so an account with no squad cannot exist.
+   * Give a player a squad, at slots `0..n-1`, in one transaction of its own:
+   * a fixed squad for a test or a tool. The server's own way to a roster is
+   * `RegionStore.enlist`, which rolls it and places the squad beside it.
    */
   async enlist(playerId: string, sheets: readonly CharacterSheet[]): Promise<void> {
     const batch = new Batch()
@@ -115,6 +115,12 @@ export class Rosters {
                   VALUES (${crypto.randomUUID()}, ${playerId}, ${slot}, ${stored}, ${'active'}, ${0},
                           ${maxHpOf(sheet)}, ${emptyDeeds}, ${createdAt}, ${null})`
     }
+  }
+
+  /** Whether the region holds any character of the player's, dead or alive: what tells an enlisted player from one whose enlist never landed, and from one whose rows arrived by handover. */
+  async has(playerId: string): Promise<boolean> {
+    const rows = await this.db.query<{ one: number }>`SELECT 1 AS one FROM roster WHERE player_id = ${playerId} LIMIT 1`
+    return rows.length > 0
   }
 
   /** The living squad, in slot order. */

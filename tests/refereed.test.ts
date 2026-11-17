@@ -20,7 +20,7 @@ import { Lobby } from '../src/server/Lobby'
 import type { RegionStore } from '../src/server/RegionStore'
 import type { RefereeVerdict, Room } from '../src/server/Room'
 import type { Journeys } from '../src/server/Journeys'
-import type { HandoverCoordinator } from '../src/server/Handover'
+import type { Crossings } from '../src/server/Crossings'
 import type { AccountsPort } from '../src/server/AccountsPort'
 import { Sessions } from '../src/server/Session'
 import { STOCK_PLAN } from '../src/sim/Balance'
@@ -73,13 +73,14 @@ async function lobbyOnASocket(seed = 1) {
     new Sessions({
       lobby: over,
       accounts,
-      region: { rosters: {}, squads: {}, encounters: {}, matches: store } as unknown as Pick<
+      // These windows sign in with an id-token and hold no rosters: enlisting is nothing here.
+      region: { rosters: {}, squads: {}, encounters: {}, matches: store, enlist: async () => ({ id: 'squad', waypoints: [], standing: 'stand' }) } as unknown as Pick<
         RegionStore,
         'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'
       >,
       // Nothing here travels.
       journeys: {} as Journeys,
-      handover: {} as HandoverCoordinator,
+      crossings: {} as Crossings,
       clock: WALL_CLOCK,
       log: () => {},
     })

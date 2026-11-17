@@ -24,7 +24,7 @@ The codebase is strictly layered into decoupled tiers to allow headless executio
 graph TD
     subgraph Presentation ["Presentation & IO Layer (Browser Only)"]
         UI[HUD & DOM UI]
-        Input[InteractionController & Pointer Picking]
+        Input[Input - canvas events to intents]
         Render[Three.js / MavonEngine / SoldierViews]
     end
 
@@ -66,12 +66,13 @@ graph TD
 | `src/entities/` | Entities | `Soldier` (the wrapper over a unit's components), `Squads` (who is on the field) and `applyUnitLoadout`. | **Yes** |
 | `src/wire/` | Wire Contract | `NetworkMessage`, `Rpc`, `JsonRpc`, `Lobby`, `Encounter`, `Transport`, the `Recording` format, `Base64Url`. Shared by the client, `sim` and `src/server`. | **Yes** (imports only `core` and `rules`) |
 | `src/sim/` | Simulation | Headless matches: `MatchHost` (the ECS match, driven by intents), `SimMatch` (the sweep's policy), `Replay`, `Balance`, `Recorder`, `TurnManager`, the `Rewind` types, `digestWorld`. | **Yes** |
-| `src/game/` | Client Orchestration | `NetworkManager`, `ServerConnection`, `InteractionController`, movement/shooting planners, `Battlefield`, `Playback`. | **No** |
+| `src/game/` | Client Orchestration | `MatchSession` (HUD and pointer intents to commands through the one door, the turn gate, state out as view models) and the `MatchView` port it is shown through; `NetworkManager`, `ServerConnection`, `Playback`. Imports nothing from `render`, `hud` or `camera`, so a session is built and driven with no DOM and no WebGL (`tests/matchSession.test.ts`). | **Yes** (no scene) |
+| `src/client/` | Client Presentation | `Presenter` (implements `MatchView`: HUD, fog, overlays, effects, camera), `Input` (listeners to `HudIntent`/`PointerIntent`), movement/shooting/grenade planners, `FogOfWar`, `WallXray`, `Battlefield`. | **No** |
 | `src/render/`| Presentation | Three.js meshes, animations, tracers, particles, material cloning, ground tiles. | **No** (Requires WebGL) |
 | `src/hud/` | Presentation | React (TSX) HUD overlays, menus, loadout screen, portraits, debug panels. | **No** (Requires DOM) |
 | `src/camera/`| Presentation | `OrbitRig`, camera inputs, ground raycaster picking. | **No** (Requires Canvas/DOM) |
 
-Imports run downward only — `core` < `rules` < `ecs` < `entities` < `wire` < `sim` < `server` / `game` (the clients, with `render`, `camera`, `hud`) — and `tests/layers.test.ts` fails on a new edge that breaks the order. `wire` sits below `sim` because the simulation is written in the wire's terms (`NetworkMessage`, `Recording`).
+Imports run downward only — `core` < `rules` < `ecs` < `entities` < `wire` < `sim` < `server` / `game` (the clients, with `render`, `camera`, `hud`) < `client` (which joins `game` to them: it is the only layer that sees both) — and `tests/layers.test.ts` fails on a new edge that breaks the order. `wire` sits below `sim` because the simulation is written in the wire's terms (`NetworkMessage`, `Recording`).
 
 ---
 

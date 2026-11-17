@@ -236,8 +236,13 @@ export interface RpcApi {
   'tictac/api/room/leave': { params: Record<string, never>; result: null }
   /**
    * Arrive at the destination Durable Object during a two-phase region handover (RFC-0002).
-   * Confirms the client has opened its second socket on the target DO, validating
-   * the handover ticket and committing authority transfer.
+   * Signed-in, and only for the player the handover was prepared for. The
+   * target checks the ticket, commits the keeper to itself and has the source
+   * confirm before it answers, so `committed` is the squad being the target's
+   * for good; `targetRegion` is the region that now keeps it, as the target's
+   * directory names it. Refused as `notYours` for another player's handover or
+   * a wrong ticket, `gone` for one it does not know, `conflict` for one that
+   * lapsed or that the source would not confirm.
    */
   'tictac/api/region/arrive': {
     params: { handoverId: string; token: string; squadId: string }
@@ -245,11 +250,15 @@ export interface RpcApi {
   }
   /**
    * Explicitly cancel an in-flight handover from the client side if the secondary
-   * connection fails or is aborted.
+   * connection fails or is aborted. Signed-in, and only the handover's own
+   * player (`notYours` otherwise; `gone` for an id the server does not know,
+   * `conflict` for one already confirmed). `retry` is whether the source has
+   * scheduled another attempt: false once its attempts are spent and the
+   * squad rests at the checkpoint.
    */
   'tictac/api/region/cancelHandover': {
     params: { handoverId: string; reason: string }
-    result: { cancelled: boolean }
+    result: { cancelled: boolean; retry: boolean }
   }
 }
 
@@ -300,6 +309,19 @@ export interface RpcPushes {
     targetUrl: string
     token: string
     expiresAt: number
+  }
+  /**
+   * Pushed by the source when it has given up on a squad's crossing: every
+   * attempt failed (`HANDOVER_MAX_ATTEMPTS`), and the squad rests at the
+   * checkpoint, still this server's, until the player sends it across again.
+   * `squad/changed` follows with the squad as it stands; this says why.
+   * Attempts that will be retried are not announced: the window sees the
+   * offer come again.
+   */
+  'tictac/api/region/handoverFailed': {
+    squadId: string
+    targetRegion: string
+    reason: string
   }
 }
 

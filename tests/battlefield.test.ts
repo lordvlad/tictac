@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { Scene } from 'three'
 import { generateMap } from '../src/core/MapGenerator'
 import type { EngineContext } from '../src/engine'
-import { Battlefield } from '../src/game/Battlefield'
+import { Battlefield } from '../src/client/Battlefield'
 import { installCanvasStub } from './support/dom'
 
 installCanvasStub()

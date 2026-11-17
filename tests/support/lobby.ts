@@ -1,4 +1,5 @@
-import { WALL_CLOCK } from '../../src/server/Clock'
+import { LOCAL_RELYING_PARTY } from '../../src/server/AccountStore'
+import type { ServerClock } from '../../src/server/Clock'
 import { Faction } from '../../src/config'
 import { maxHpOf, sanitizeSheet, type CharacterSheet } from '../../src/core/Characters'
 import { RpcMethods, type JsonRpcFrame, type JsonRpcNotification } from '../../src/wire/JsonRpc'
@@ -10,11 +11,8 @@ import type { Player, RpcMethod, RpcParams, RpcResult, SessionEnded } from '../.
 import { loopback } from '../../src/wire/Transport'
 import type { Lobby } from '../../src/server/Lobby'
 import type { Persistence } from '../../src/server/Persistence'
-import type { Journeys } from '../../src/server/Journeys'
 import type { AccountsPort } from '../../src/server/AccountsPort'
-import type { HandoverCoordinator } from '../../src/server/Handover'
-import type { RegionStore } from '../../src/server/RegionStore'
-import { Sessions } from '../../src/server/Session'
+import { createMatchServer, type MatchServer, type MatchServerPorts } from '../../src/server/MatchServer'
 import { STOCK_PLAN } from '../../src/sim/Balance'
 import { SimMatch } from '../../src/sim/SimMatch'
 import { MY_VERSION, PROTOCOL_VERSION, type PeerVersion } from '../../src/version'
@@ -60,37 +58,57 @@ export interface Connection {
 }
 
 /**
- * The session layer over each lobby, as a host builds one: every socket a
- * test connects goes through it. Players sign in with a token that is simply
- * their id — the accounts behind `Sessions` are what `tests/session.test.ts`
- * is about, not these.
+ * The match server over each lobby, as a host builds it
+ * (`createMatchServer`): every socket a test connects goes through its
+ * sessions. Players sign in with a token that is simply their id — the
+ * accounts behind the sessions are what `tests/session.test.ts` is about,
+ * not these.
  */
 interface Layer {
-  sessions: Sessions
+  server: MatchServer
   /** Players whose id is a token the layer's accounts honour. */
   known: Map<string, Player>
 }
 
 const layers = new WeakMap<Lobby, Layer>()
 
-function layerOf(lobby: Lobby): Layer {
-  let layer = layers.get(lobby)
-  if (!layer) {
-    const known = new Map<string, Player>()
-    const accounts = { playerFor: async (token: string) => known.get(token) ?? null }
-    const sessions = new Sessions({
-      lobby,
-      accounts: accounts as unknown as AccountsPort,
-      region: { rosters: {}, squads: {} } as unknown as Pick<RegionStore, 'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'>,
-      // Nothing here travels.
-      journeys: {} as Journeys,
-      handover: {} as HandoverCoordinator,
-      clock: WALL_CLOCK,
-      log: () => {},
-    })
-    layer = { sessions, known }
-    layers.set(lobby, layer)
+/**
+ * A lobby on `persistence`, served the way a host serves one: built, restored
+ * and wired to its sessions by `createMatchServer`, on `clock`. `options.lobby`
+ * is what the test replaces of the lobby's own — a seed, a version, who hears
+ * a verdict, the rosters; `graceMs` and `log` are the host's.
+ */
+export async function hostLobby(
+  persistence: Persistence,
+  clock: ServerClock,
+  options: Pick<MatchServerPorts, 'graceMs' | 'log' | 'lobby'> = {},
+): Promise<Lobby> {
+  const known = new Map<string, Player>()
+  const accounts = {
+    playerFor: async (token: string) => known.get(token) ?? null,
+    player: async (id: string) => known.get(id) ?? null,
   }
+  const server = await createMatchServer({
+    clock,
+    accounts: accounts as unknown as AccountsPort,
+    region: persistence.region,
+    // Nothing here travels.
+    alarm: { arm: () => {} },
+    placeOf: () => null,
+    party: LOCAL_RELYING_PARTY,
+    log: () => {},
+    ...options,
+    // A lobby here keeps no rosters, so a match's header is not held to anybody's
+    // squad, unless the test hands it `persistence.region.rosters`.
+    lobby: { rosters: undefined, ...options.lobby },
+  })
+  layers.set(server.lobby, { server, known })
+  return server.lobby
+}
+
+function layerOf(lobby: Lobby): Layer {
+  const layer = layers.get(lobby)
+  if (!layer) throw new Error('this lobby was not made by hostLobby, so no sessions stand over it')
   return layer
 }
 
@@ -110,7 +128,7 @@ export async function connect(
   intent: ServerIntent | null,
   { hello = true, version = MY_VERSION }: { hello?: boolean; version?: PeerVersion } = {},
 ): Promise<Connection> {
-  const { sessions, known } = layerOf(lobby)
+  const { server, known } = layerOf(lobby)
   const [mine, theirs] = loopback()
   const received: NetworkMessage[] = []
   const seats: Seated[] = []
@@ -160,7 +178,7 @@ export async function connect(
     pending.clear()
   })
 
-  sessions.attach(theirs, {})
+  server.sessions.attach(theirs, {})
 
   const send = (message: NetworkMessage): void => {
     const params = { ...message } as Record<string, unknown>

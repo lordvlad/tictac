@@ -3,9 +3,8 @@ import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
 import type { Player } from '../src/wire/Rpc'
 import { openPersistence } from '../src/server/db/BunSqlDb'
-import { Lobby } from '../src/server/Lobby'
 import { MY_VERSION } from '../src/version'
-import { answered, connect, decisive, keyOf, roomOf, seatBoth } from './support/lobby'
+import { answered, connect, decisive, hostLobby, keyOf, roomOf, seatBoth } from './support/lobby'
 
 /**
  * The lobby: many rooms on one server, and the two rules that span them — one
@@ -27,14 +26,9 @@ async function harness() {
   const persistence = await openPersistence(WALL_CLOCK)
   /** Every hold the lobby started, and whether it has been called off. */
   const holds: { fn: () => void; ms: number; cancelled: boolean }[] = []
-  const lobby = new Lobby({
-    matches: persistence.region.matches,
-    rooms: persistence.region.rooms,
-    log: () => {},
-    graceMs: 5_000,
-    // Every match is opened from the one recording, whose header names its seed.
-    mapSeed: () => RECORDING.header.seed,
-    clock: {
+  const lobby = await hostLobby(
+    persistence,
+    {
       now: WALL_CLOCK.now,
       schedule: (fn, ms) => {
         const hold = { fn, ms, cancelled: false }
@@ -44,7 +38,9 @@ async function harness() {
         }
       },
     },
-  })
+    // Every match is opened from the one recording, whose header names its seed.
+    { graceMs: 5_000, lobby: { mapSeed: () => RECORDING.header.seed } },
+  )
   /** Let every hold still running run out. */
   const expire = (): void => {
     for (const hold of holds.splice(0)) if (!hold.cancelled) hold.fn()

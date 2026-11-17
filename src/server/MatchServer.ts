@@ -4,13 +4,15 @@ import { BUILD_ID, PROTOCOL_VERSION } from '../version'
 import type { AccountsPort } from './AccountsPort'
 import type { RelyingParty } from './AccountStore'
 import type { ServerClock } from './Clock'
-import { HandoverCoordinator } from './Handover'
-import { Journeys } from './Journeys'
-import { Lobby } from './Lobby'
+import { Crossings } from './Crossings'
+import type { RegionPeers } from './Handover'
+import { Journeys, type JourneysOptions } from './Journeys'
+import { Lobby, type LobbyOptions } from './Lobby'
 import { regionDirectory, type RegionDirectory, type RegionPartition } from './Owner'
 import { relatedOriginsHandler } from './RelatedOrigins'
 import type { RegionStore } from './RegionStore'
 import { Schedule } from './Schedule'
+import { serial } from './Serial'
 import { Sessions } from './Session'
 import type { TileHandler } from './Tiles'
 
@@ -74,6 +76,26 @@ export interface MatchServerPorts {
   graceMs?: number
   /** Map tiles at `/tiles/{z}/{x}/{y}.mvt` (`ITEM-061`); none when unset. On Cloudflare the Worker answers them before a request gets here. */
   tiles?: TileHandler
+  /**
+   * What a test replaces of the lobby the factory builds — a match seed, a
+   * build, who hears a verdict — over its own choices. Hosts leave it unset.
+   * `matches`, `rooms` and `clock` stay the host's: they are what makes it
+   * this server's lobby.
+   */
+  lobby?: Partial<Omit<LobbyOptions, 'matches' | 'rooms' | 'clock'>>
+  /**
+   * What a test replaces of the journeys the factory builds: who opens a fight
+   * when a squad is found or two meet (an explicit `undefined` turns that
+   * off, as on a host with no lobby), and how a trip is named. Hosts leave it unset.
+   */
+  journeys?: Partial<Pick<JourneysOptions, 'openEncounter' | 'openMeeting' | 'mintTrip'>>
+  /**
+   * The other regions, as this host reaches them: DO RPC to the region's
+   * object on Cloudflare, the server itself in a test. Unset on a host with no
+   * other region, which then neither sends squads across a border nor takes
+   * one (RFC-0002 §2).
+   */
+  peers?: RegionPeers
   log?: (message: string) => void
 }
 
@@ -81,7 +103,7 @@ export interface MatchServer {
   lobby: Lobby
   journeys: Journeys
   sessions: Sessions
-  handover: HandoverCoordinator
+  crossings: Crossings
   directory: RegionDirectory
   /** Take a socket the platform has accepted for `request`: everything it says from now on goes to the sessions. */
   accept(transport: Transport, request: Request): void
@@ -123,6 +145,7 @@ export async function createMatchServer(ports: MatchServerPorts): Promise<MatchS
         log(`  ${found.unit ?? ''} ${found.what}: referee ${found.mine}, client ${found.theirs}`)
       }
     },
+    ...ports.lobby,
   })
   // Before a socket is let in: a window reconnecting to its seat the moment
   // this server is up has to find the room already held for it.
@@ -136,7 +159,22 @@ export async function createMatchServer(ports: MatchServerPorts): Promise<MatchS
     (message) => log(`[schedule] ${message}`),
   )
   const directory = regionDirectory({ owners: region.squads, partitions: ports.regions, self: region.self })
-  const journeys = new Journeys({
+  // One queue for everything that writes a squad's route: an order, an arrival, a crossing.
+  const serially = serial()
+  const crossings: Crossings = new Crossings({
+    clock,
+    directory,
+    region,
+    schedule,
+    serially,
+    lobby,
+    peers: ports.peers,
+    adopt: (squadId) => journeys.adopt(squadId),
+    log,
+  })
+  const journeys: Journeys = new Journeys({
+    serially,
+    crossings,
     directory,
     squads: region.squads,
     accounts,
@@ -148,18 +186,18 @@ export async function createMatchServer(ports: MatchServerPorts): Promise<MatchS
     openMeeting: (meeting) => lobby.openMeeting(meeting),
     playerEncounters: ports.playerEncounters,
     log,
+    ...ports.journeys,
   })
   await journeys.restore()
 
-  const handover = new HandoverCoordinator({ clock, directory, squads: region.squads, log })
-  const sessions = new Sessions({ lobby, accounts, region, journeys, handover, clock, log })
+  const sessions = new Sessions({ lobby, accounts, region, journeys, crossings, clock, log })
   const relatedOrigins = relatedOriginsHandler(ports.party)
 
   return {
     lobby,
     journeys,
     sessions,
-    handover,
+    crossings,
     directory,
     accept(transport, request) {
       sessions.attach(transport, { place: ports.placeOf(request) })

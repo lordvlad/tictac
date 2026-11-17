@@ -360,6 +360,18 @@ describe('A region handover', () => {
     return { ...regions, seated, room, lobbies, squads }
   }
 
+  test('hears the source give up on the crossing, and stays where it is', async () => {
+    const { clock, source, connection } = await windowOnSource()
+    const heard: unknown[] = []
+    connection.onHandover((event) => heard.push(event))
+
+    source.last.send(push('tictac/api/region/handoverFailed', { squadId: 'sq1', targetRegion: 'eu', reason: 'The east is closed.' }))
+    await clock.advance(0)
+
+    expect(heard).toEqual([{ kind: 'failed', targetRegion: 'eu', reason: 'The east is closed.' }])
+    expect(source.last.closed).toBe(false)
+  })
+
   test('opens a second socket and arrives on it with the squad from the offer, while the first stays open', async () => {
     const { clock, source, target, connection, squads } = await windowOnSource()
     source.last.send(offer(clock))

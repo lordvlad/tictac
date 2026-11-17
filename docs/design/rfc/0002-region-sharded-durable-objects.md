@@ -13,6 +13,7 @@ appliesTo:
   - "src/server/MatchServer.ts"
   - "src/server/Owner.ts"
   - "src/server/Handover.ts"
+  - "src/server/Crossings.ts"
 relatedDocs:
   - "docs/design/rfc/0001-referee-and-transports.md"
   - "docs/design/gdd/overview.md"
@@ -29,8 +30,10 @@ runs one Durable Object for the whole deployment today, deliberately — see
 What is built: the 2PC coordinator and its client half (`src/server/Handover.ts`,
 `src/game/ServerConnection.ts`), the ownership directory (`src/server/Owner.ts`, §4–§5), the
 per-region store split with the directory's accounts behind `AccountsPort` (§4, `tictac-dwq.5`) and
-the one host factory both hosts call (`src/server/MatchServer.ts`). What is not: the shared world that
-makes a second region worth having (§1), and the DO-to-DO transport for the handover itself. The plan is gated on that world; it is written now because the
+the one host factory both hosts call (`src/server/MatchServer.ts`), and the hand-off itself end to end —
+the order, the offer, the DO-to-DO calls, the commit, the retries (`src/server/Crossings.ts`, `tictac-dwq.2`,
+`.4`). What is not: the shared world that makes a second region worth having (§1); sharding stays off in
+production. The plan is gated on that world; it is written now because the
 shape of the replacement changes what "a match server" is allowed to assume in the meantime — see §5.
 
 ## 1. Why this is not urgent, and why it is written anyway
@@ -97,18 +100,48 @@ going through is an order of its own — the hand-off this section describes.
 **The hand-off is a Two-Phase Commit (2PC) over dual client sockets.** The source Durable Object
 must not purge the client's session, presence, or held entities until arrival at the target Durable
 Object is confirmed. For the duration of the transition, the client keeps two active WebSocket connections:
-1. Source DO initiates a reservation on Target DO (`prepareHandover`) and pushes `tictac/api/region/handoverOffer`
-   (handover id, the squad's id, target url, single-use ticket) to the client.
+0. The crossing begins with an order of its own, `crossBorder { to, destinationRegion }`, which walks the squad to
+   the border checkpoint; its arrival there starts the hand-off (schedule kind `handover`).
+1. Source DO initiates a reservation on Target DO (`prepareHandover`, over DO RPC: `env.MATCH.get(idFromName(region))`)
+   carrying the squad's rows (`RegionStore.exportSquad`), which the target writes as a copy it does not keep
+   (`importSquad`, owner still the source), and pushes `tictac/api/region/handoverOffer`
+   (handover id, the squad's id, target url, single-use ticket, expiry) to the client.
 2. Client opens a second socket to Target DO without closing its primary socket, says hello, signs in with its
    token, and calls `tictac/api/region/arrive` on it.
-3. Target DO verifies the ticket and commits arrival via DO-to-DO confirmation (`confirmArrival`).
-4. Source DO receives arrival confirmation, purges local squad authority, and ends the primary session with
+3. Target DO verifies the ticket for the signed-in player, commits itself as keeper (`squads.setOwner`) and
+   calls `confirmArrival` on the source. `region/arrive` answers only after that, with the target's own region.
+4. Source DO receives arrival confirmation, commits the new keeper, deletes the squad's rows, and ends the primary session with
    `session/ended` `{ reconnect: 'elsewhere', url }`. There is no separate completion push: that is the one word
    the client moves on. It makes the second socket its only one *inside the same `ServerConnection`* —
    lobby subscription and room asked for again on it, squad and encounter listeners untouched — and never
    redials the source.
 5. If Target DO is unreachable, refuses or times out, client sends `region/cancelHandover` on the primary,
-   closes the second socket, and stays on the source, which retains authority.
+   closes the second socket, and stays on the source, which retains authority. The offer also lapses on the
+   clock on both sides (`expiresAt`), so a window that never comes, or a source that never says, leaves
+   nothing behind: the target drops its copy, the source schedules the next attempt at `HANDOVER_RETRY_DELAYS_MS`
+   (2 s, 5 s, 10 s, 30 s) and, after `HANDOVER_MAX_ATTEMPTS` (5) failures, rests the squad at the checkpoint
+   and tells the player (`squad/changed` and a `region/handoverFailed` push with the reason).
+
+On Cloudflare the offer's `targetUrl` is the address the window reached the source through, asking the
+Worker for the target (`?region=<durableObjectName>`, honoured only for a region the partition table routes to,
+`workers/index.ts`); the window keeps it as its address after it moves, so a reconnect lands on the target.
+
+**Decided (`tictac-dwq.2`): a seated player does not cross.** A match never spans two Durable Objects (§6.4), so
+a window's seat in a live room cannot go with it. Rather than let the target refuse `room/enter` afterwards, a
+squad whose player holds a seat in a room that is not over starts no crossing: it waits at the checkpoint and
+looks again every 30 s on the schedule, using up no attempt, until the room is over (a seat still held for its
+grace counts). A player with no window open waits the same way, since an offer is for a window to take. And the
+two-phase commit enforces it at the other end: if the player sits down between the offer and the arrival, the
+source refuses `confirmArrival`, and the target undoes its commit and refuses `region/arrive` (`conflict`). While
+an offer is out the squad takes no order (`conflict`), so the rows the target holds cannot go stale.
+
+**What is in doubt, and what is lost.** A crossing's *intent* is memory (the order, the attempt count, the offer):
+a server that restarts between the order and the arrival forgets it, and the squad rests at the checkpoint for
+the player to send again; a restart with an offer out leaves the target a copy it does not keep, overwritten by
+the next attempt. A source's rows are deleted only after the target has committed, so none of this loses a
+squad. The one in-doubt window is the target committing and the source's reply (or the source itself) not
+answering: the target then keeps its commit and refuses the arrival, and the squad is briefly kept by both until
+the source's next attempt is told so; a refusal, by contrast, is definite, and the target rolls back.
 
 **A partition is redrawn at the game's own natural disconnect windows, proactively rather than
 capacity signal measures — deliberately before the instance is actually struggling, not after —
@@ -236,8 +269,10 @@ in process (`Accounts`) or over DO RPC (`AccountsRpc.ts`, served by the singleto
 `deleteSquad` and `squads.setOwner` (the commit of the keeper, which `HandoverCoordinator.confirm` now
 claims before awaiting, so a cancel cannot slip between the write and the bookkeeping).
 `roster.died_in` is no longer a key to `matches` either: a roster travels, the matches it fought stay.
-Nothing calls the verbs yet (`tictac-dwq.2` does); `tests/regions.test.ts` exercises them and a second
-region serving a player whose account is only the directory's.
+`Crossings` (`tictac-dwq.2`) calls the verbs; `tests/regions.test.ts` exercises them and a second
+region serving a player whose account is only the directory's, `tests/crossings.test.ts` the hand-off
+between two servers on a hand-turned clock, and `tests/handover.test.ts` a real client crossing between
+two Bun servers.
 
 **What transfers at a hand-off, beyond the durable position, is the rest of a squad's live
 session:** the open socket's transport, which faction/side (if any) it is attached to, heading,

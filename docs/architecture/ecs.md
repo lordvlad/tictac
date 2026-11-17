@@ -147,8 +147,8 @@ with it. What `serialize` still serves:
 ### Lifecycle
 
 A system is added with `World.addSystem` and taken out with `World.removeSystem`; whoever
-adds it removes it. `InteractionController` keeps the list of what it registered and
-`dispose` removes exactly that, so a rebuilt match leaves the world with the systems a fresh
+adds it removes it. `MatchSession` keeps the list of what it registered, and `Presenter` removes the
+`RenderSystem` it added, so `dispose` takes out exactly that and a rebuilt match leaves the world with the systems a fresh
 one has. Per-frame ticking belongs to the caller: `FixedStepLoop` (`src/sim/FixedStepLoop.ts`)
 turns engine frames into fixed steps, and `onEachFrame` (`src/engine.ts`) registers it and
 returns the function that unregisters it.

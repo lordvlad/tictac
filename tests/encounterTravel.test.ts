@@ -81,7 +81,7 @@ async function walker(trip: (squadId: string) => string, answer: (persistence: P
   const persistence = await freshPersistence(':memory:')
   const found = answer(persistence)
   let next = ''
-  const server = rpcServer(persistence, undefined, { openEncounter: found.open, mintTrip: () => next })
+  const server = await rpcServer(persistence, undefined, { openEncounter: found.open, mintTrip: () => next })
   const window = server.window()
   await register(window, await softwareAuthenticator())
   const playerId = ((await window.call('tictac/api/account/me')).result.player as { id: string }).id

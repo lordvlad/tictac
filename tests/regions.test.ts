@@ -95,11 +95,12 @@ describe('A second region, whose database holds no account', () => {
     const me = await there.request('tictac/api/account/me', {})
     expect(me.player?.name).toBe('Ada')
     expect(there.player?.name).toBe('Ada')
-    // The squad she is given there is east's to keep, from the first moment.
+    // The roster and squad she is given there are east's to keep, from the first
+    // moment: a region that holds nothing of a signed-in player enlists them.
     const squad = (await there.request('tictac/api/squad/get', {})).squad
     expect(await east.server.directory.ownerOfSquad(squad.id)).toBe('region-east')
     expect(await east.region.squads.of(there.player!.id)).toMatchObject({ id: squad.id })
-    expect(await east.region.rosters.active(there.player!.id)).toEqual([])
+    expect(await east.region.rosters.active(there.player!.id)).toHaveLength(6)
     // And she is her name in east's encounter feed, not an id: asked of the directory.
     expect(await there.request('tictac/api/encounter/feed', {})).toEqual({ entries: [] })
 
@@ -237,6 +238,20 @@ describe('A squad changing region (RegionStore handover verbs)', () => {
     await persistence.close()
   })
 
+  test('enlist is nothing for a player whose roster and squad arrived by handover: they are not dealt a second roster', async () => {
+    const { persistence, region, squad } = await withSquad()
+    const bundle = JSON.parse(JSON.stringify(await region.exportSquad(squad.id))) as SquadBundle
+
+    const east = await openPersistence(WALL_CLOCK, ':memory:', { self: 'region-east' })
+    await east.region.importSquad(bundle)
+    // A window of the arrived player signing in, as it does the moment it lands.
+    expect(await east.region.enlist('ada', { lat: 50, lng: 15 })).toMatchObject({ id: squad.id })
+    expect(await east.region.exportSquad(squad.id)).toEqual(bundle)
+
+    await east.close()
+    await persistence.close()
+  })
+
   test('deleteSquad takes the squad, its roster and its contacts, and leaves the matches the region refereed', async () => {
     const { persistence, region, squad } = await withSquad()
     await region.db.query`INSERT INTO matches (id, header, created_at, seed_label)
@@ -278,7 +293,7 @@ describe('A squad changing region (RegionStore handover verbs)', () => {
     target.prepare({ ...offer, expiresAt: Date.now() + 15_000 })
     await source.initiate(offer)
     await east.region.importSquad((await west.region.exportSquad(squadId))!)
-    target.arrive('h-1', 'ticket', squadId)
+    target.arrive('h-1', 'ticket', squadId, 'ada')
     // Until the source commits, the squad is the source's, in both directories.
     expect(await directoryWest.ownerOfSquad(squadId)).toBe('region-west')
     expect(await directoryEast.ownerOfSquad(squadId)).toBe('region-west')

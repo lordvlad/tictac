@@ -118,16 +118,28 @@ the in-match HUD's parts), compiled by Bun with no extra tooling (`jsx: react-js
   holds a `createRoot`, and re-renders on every call. The overlays the window shows over any
   screen — the start menu, the interrupted-match notice, the flashed line, the reconnecting
   line (`ScreenChrome.tsx`) — are roots owned by `main.tsx`'s `ScreenController`, made once and
-  drawn into or emptied, never built and found again by DOM id. So `InteractionController` and
+  drawn into or emptied, never built and found again by DOM id. So `Presenter`, `Input` and
   `main.tsx` drive the UI as before, and React only decides what in the DOM to change.
 - **One way off a match.** The `ScreenController` holds the current screen's disposer
   (`present`) and the network of the match on it (`holdNetwork`). `leaveMatch()` is every exit —
-  the end screen's *Back to menu* (`HudIntent` `backToMenu`, which `InteractionController` hands
+  the end screen's *Back to menu* (`HudIntent` `backToMenu`, which `MatchSession` hands
   to its `onLeave` callback rather than reloading the page), the interrupted overlay, the
   spectator bar's *Leave*, the replay bar's *Leave*, a peer dropping during the loadout: it puts
-  away the screen (controller, HUD, rig, bodies, terrain, its frame subscription), closes the
+  away the screen (session, presenter, input, HUD, rig, bodies, terrain, its frame subscription), closes the
   network, clears the overlays and `window.tictac`, and draws the menu. The match server's
   connection is the window's, not the match's, and stays.
+- **Input, session and presenter are three things.** `Input` (`src/client/Input.ts`) owns the
+  canvas and key listeners and turns them into a `HudIntent` or a `PointerIntent`
+  (`src/rules/Intent.ts`) — what is under the pointer, never what it means. `MatchSession`
+  (`src/game/MatchSession.ts`) gates the intent by whose turn it is and whether this window is only
+  watching, turns what survives into a `Command` through `CommandSystem`, and hands state out as
+  view models (`session.state`, the `Outcome` of a decided match). It imports nothing from `render`,
+  `hud` or `camera`, so it is built and driven headless (`tests/matchSession.test.ts`). `Presenter`
+  (`src/client/Presenter.ts`) implements the session's `MatchView` port: it draws the HUD from
+  those view models, hooks the systems' events for fog, overlays and effects, and owns the planners
+  (`MovementPlanner`, `ShootPlanner`, `GrenadePlanner`) that the session reaches through
+  `MatchView.aiming`. A body (`SoldierView`) is given a `SoldierModel` built from the unit's
+  components rather than the `Soldier`, and a pick comes back as an entity id.
 - **Visibility is data.** A piece of the HUD that is not showing is not rendered: `HudVisibility`
   (`HudModel.ts`) says whether the panels are hidden (a replay, a watcher) and whether the turn
   cover is up, and `Hud` draws each root from that and from what it was last handed. Nothing

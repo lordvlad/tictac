@@ -96,7 +96,13 @@ export default {
     relatedOrigins ??= relatedOriginsHandler(relyingPartyOf(env))
     const related = relatedOrigins(request)
     if (related) return related
-    const id = env.MATCH.idFromName(regions.ownerOfPlace(placeOf(request.cf) ?? DEFAULT_ANCHOR))
+    // A window sent to another region (an offer's `targetUrl`, `MatchDurableObject.urlOf`)
+    // names it; everyone else goes where Cloudflare placed them. Only a region this
+    // table routes to is honoured: anything else is placed like a stranger.
+    const named = new URL(request.url).searchParams.get('region')
+    const id = env.MATCH.idFromName(
+      named !== null && regions.isRegion(named) ? named : regions.ownerOfPlace(placeOf(request.cf) ?? DEFAULT_ANCHOR),
+    )
     const stub = env.MATCH.get(id)
     return stub.fetch(request)
   },

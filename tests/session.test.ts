@@ -2,9 +2,8 @@ import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
 import { SESSION_REPLACED, type Player } from '../src/wire/Rpc'
-import { Lobby } from '../src/server/Lobby'
 import { MY_VERSION, PROTOCOL_VERSION } from '../src/version'
-import { connect, keyOf, roomOf, seatBoth } from './support/lobby'
+import { connect, hostLobby, keyOf, roomOf, seatBoth } from './support/lobby'
 import { freshPersistence } from './support/db'
 
 /**
@@ -22,7 +21,7 @@ const BO: Player = { id: 'bo', name: 'Bo' }
 
 async function harness() {
   const persistence = await freshPersistence(':memory:')
-  const lobby = new Lobby({ matches: persistence.region.matches, rooms: persistence.region.rooms, log: () => {}, clock: WALL_CLOCK })
+  const lobby = await hostLobby(persistence, WALL_CLOCK)
   return { persistence, lobby }
 }
 

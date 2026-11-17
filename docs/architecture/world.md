@@ -259,7 +259,7 @@ when it fires.
 RFC-0002 §5 calls the Worker's fixed `idFromName('singleton')` debt: a placeholder for a lookup.
 `src/server/Owner.ts` is that lookup, and it holds no state of its own: a host builds a
 `RegionDirectory` from its partition table (`REGIONS`, one region covering the world today) and hands
-it to `Journeys`, `Sessions` (which gives it to its `HandoverCoordinator`) and, as the half that
+it to `Journeys`, `Crossings` (which gives it to its `HandoverCoordinator`) and, as the half that
 needs no database, to the Worker's router (`regionMap(REGIONS)`). Two servers in one process hold
 two directories.
 
@@ -271,8 +271,8 @@ Two questions, two answers:
   the world has borders, where a crossing is handed.
 - **Who keeps this squad?** `ownerOfSquad(id)`: a durable fact, the `squads.owner` column
   (migration 11), read back and `null` for a squad this store does not hold. Every row that existed
-  before the column belongs to `singleton`. It is written once, by `HandoverCoordinator.confirm` through
-  `Squads.setOwner`, and never recomputed from where the squad stands: a position moves every
+  before the column belongs to `singleton`. It is written when a handover commits (`Squads.setOwner`: the
+  target on the window arriving, the source in `HandoverCoordinator.confirm`), and never recomputed from where the squad stands: a position moves every
   millisecond, a keeper changes only when a handover commits. `Journeys` asks it before it acts on
   a squad, refuses a squad another region keeps, and schedules arrivals and meetings only for the
   squads this region keeps. A handover starts only from the region that keeps the squad.
@@ -280,6 +280,27 @@ Two questions, two answers:
 The name `singleton` stays: it is what addresses the existing Durable Object and its storage, and
 renaming it would address a new, empty one. Where each region's data lives, and the account/region
 split of `Persistence` this implies, is [RFC-0002 §4](../design/rfc/0002-region-sharded-durable-objects.md).
+
+### 4a. Crossing a border
+
+A border is crossed by an order of its own: `crossBorder { to, destinationRegion }` walks the squad to the
+checkpoint `to` (set off from rest, or turned from the trip it is on; one already standing there does not
+move), and its arrival there is the schedule's `handover` moment (`Crossings.ts`), set last among that
+squad's moments at the instant so its arrival and checkpoint are handled first. A host with no `peers` port,
+a region the partition table does not route to (`isRegion`) and the region itself are refused. Any other
+order, or a contact that halts the squad short of the checkpoint, withdraws the crossing; a squad whose
+handover is out takes no order at all (`conflict`) until it is settled.
+
+The crossing is the two-phase handover of [RFC-0002 §2](../design/rfc/0002-region-sharded-durable-objects.md):
+the source exports the squad (`RegionStore.exportSquad`) to the target's object (`prepareHandover`, the
+`peers` port: DO RPC on Cloudflare, the other server in a test), pushes `handoverOffer`, and on `region/arrive`
+the target commits itself as keeper and has the source `confirmArrival` — which deletes its rows and ends
+the window's session `elsewhere`. A failure on either side drops the target's copy and schedules the next
+attempt on `HANDOVER_RETRY_DELAYS_MS` (2 s, 5 s, 10 s, 30 s); the fifth failure leaves the squad resting at
+the checkpoint, with `squad/changed` and a `handoverFailed` push saying why. **A squad whose player holds a
+seat in a room that is not over, or who has no window open, does not start a crossing**: it looks again
+every `HANDOVER_RECHECK_MS` (30 s), costing no attempt. All of it runs on the injected clock, so
+`tests/crossings.test.ts` turns it by hand.
 
 ## 5. The client
 

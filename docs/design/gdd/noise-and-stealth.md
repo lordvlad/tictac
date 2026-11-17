@@ -5,7 +5,7 @@ type: "gdd"
 status: "implemented"
 lastReviewed: "2026-09-24"
 appliesTo:
-  - "src/game/FogOfWar.ts"
+  - "src/client/FogOfWar.ts"
   - "src/ecs/components/StanceComponent.ts"
   - "src/ecs/components/SightedComponent.ts"
   - "src/core/Walls.ts"

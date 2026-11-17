@@ -17,7 +17,6 @@ import type { Deployment } from '../src/core/Loadout'
 import { Squads } from '../src/entities/Squads'
 import { TurnManager } from '../src/sim/TurnManager'
 import type { Player } from '../src/wire/Rpc'
-import { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
 import type { RefereeVerdict } from '../src/server/Room'
 import type { MatchSettlement, RosterMember } from '../src/server/Rosters'
@@ -28,6 +27,7 @@ import { DATABASE_URLS, freshPersistence } from './support/db'
 import {
   connect,
   decisive,
+  hostLobby,
   roomOf,
   seatBoth,
   sheetsOf,
@@ -557,14 +557,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     await persistence.region.rosters.enlist('A', blueSheets)
     await persistence.region.rosters.enlist('B', redSheets)
     const verdicts: RefereeVerdict[] = []
-    const lobby = new Lobby({
-      matches: persistence.region.matches,
-      rooms: persistence.region.rooms,
-      rosters: persistence.region.rosters,
-      onVerdict: (verdict) => verdicts.push(verdict),
-      log: () => {},
-      clock: WALL_CLOCK,
-      mapSeed: () => seed,
+    const lobby = await hostLobby(persistence, WALL_CLOCK, {
+      lobby: { rosters: persistence.region.rosters, onVerdict: (verdict) => verdicts.push(verdict), mapSeed: () => seed },
     })
     return { persistence, lobby, verdicts }
   }

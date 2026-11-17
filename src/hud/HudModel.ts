@@ -14,56 +14,16 @@ import { canWatch, watchCost } from '../rules/Overwatch'
 import { TRAITS, woundTraits } from '../core/Traits'
 import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
-import type { PendingThrow } from '../game/GrenadePlanner'
-import type { PendingShot } from '../game/ShootPlanner'
+import type { PendingThrow } from '../client/GrenadePlanner'
+import type { PendingShot } from '../client/ShootPlanner'
 import type { Squads } from '../entities/Squads'
 import type { TurnManager } from '../sim/TurnManager'
 import type { OffscreenPortraits } from '../render/Portraits'
 import type { Attribute } from '../core/Progression'
 import type { Debrief } from '../rules/MatchEnd'
 import { leaversOf, retreatChance, watchersOf } from '../core/Retreat'
-/**
- * Everything the player can ask for by touching the HUD. The HUD emits these;
- * it never carries them out, so game state has exactly one mutator.
- */
-export type HudIntent =
-  | { type: 'selectUnit'; index: number }
-  | { type: 'shoot' }
-  | { type: 'cancelShoot' }
-  | { type: 'selectTarget'; index: number }
-  | { type: 'fireShot'; mode: ShotMode }
-  /** The sidearm blow at the target being aimed at; offered only in reach. */
-  | { type: 'meleeAttack' }
-  /** Start aiming a blow at the best enemy in reach. */
-  | { type: 'strike' }
-  | { type: 'reload' }
-  | { type: 'armGrenade'; kind: GrenadeId }
-  | { type: 'useItem'; itemId: ItemId }
-  | { type: 'confirmItem' }
-  | { type: 'cancelItem' }
-  | { type: 'confirmThrow' }
-  | { type: 'cancelGrenade' }
-  | { type: 'toggleCover' }
-  | { type: 'overwatch' }
-  | { type: 'toggleWaypoints' }
-  | { type: 'endUnitTurn' }
-  | { type: 'requestTurnSwitch' }
-  | { type: 'confirmTurnSwitch' }
-  /** Arm the side's retreat: the next press confirms it (`core/Retreat`). */
-  | { type: 'requestRetreat' }
-  /** Retreat now, with whoever is on the way out. */
-  | { type: 'confirmRetreat' }
-  | { type: 'toggleFreelook' }
-  | { type: 'toggleUnitView' }
-  | { type: 'openDebug' }
-  | { type: 'selectLevel'; level: number }
-  | { type: 'toggleDebugMap' }
-  /** Work the door the selected unit is facing (`core/Doors`). */
-  | { type: 'operateDoor'; verb: DoorVerb }
-  /** The end screen's next page: from the loser's to the winner's, in a local match. */
-  | { type: 'endScreenNext' }
-  /** Leave a finished match for the start menu. */
-  | { type: 'backToMenu' }
+import type { HudIntent } from '../rules/Intent'
+
 /** One button in the selected unit's action panel. */
 export interface HudAction {
   id: string

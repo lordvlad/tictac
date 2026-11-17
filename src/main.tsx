@@ -19,8 +19,10 @@ import { Account } from './game/Account'
 import { consoleHandleAllowed } from './game/DebugAccess'
 import { ServerConnection } from './game/ServerConnection'
 import { AiOpponent } from './game/AiOpponent'
-import { Battlefield } from './game/Battlefield'
-import { InteractionController } from './game/InteractionController'
+import { MatchSession } from './game/MatchSession'
+import { Battlefield } from './client/Battlefield'
+import { Input } from './client/Input'
+import { Presenter } from './client/Presenter'
 import type { Seated } from './wire/Lobby'
 import { winnerOf } from './rules/MatchEnd'
 import { NetworkManager } from './game/NetworkManager'
@@ -47,6 +49,9 @@ import { BUILD_ID } from './version'
 import { OffscreenPortraits } from './render/Portraits'
 import { Tracers } from './render/Tracers'
 import { FixedStepLoop } from './sim/FixedStepLoop'
+import { RenderSystem } from './render/RenderSystem'
+import { SceneCombatFx } from './render/SceneCombatFx'
+import { SquadViews } from './render/SquadViews'
 
 const baseUrl = new URL('./', document.baseURI).href
 
@@ -634,7 +639,7 @@ function buildField(
   return { world, battlefield, squads }
 }
 
-/** A match on screen: the field, the camera, the HUD and the controller that runs it. */
+/** A match on screen: the field, the camera, the HUD, and the session, presenter and input that run it. */
 interface MatchScene extends Field {
   rig: OrbitRig
   portraits: OffscreenPortraits
@@ -642,7 +647,9 @@ interface MatchScene extends Field {
   turnSystem: TurnSystem
   turnManager: TurnManager
   hud: Hud
-  controller: InteractionController
+  session: MatchSession
+  presenter: Presenter
+  input: Input
 }
 
 /**
@@ -677,28 +684,30 @@ function buildMatch(
   const turnSystem = new TurnSystem()
   const turnManager = new TurnManager(world, turnSystem, squads, rig)
 
+  // Bodies before the systems that announce to them: the session's combat
+  // system draws through these.
+  const renderSystem = new RenderSystem()
+  const views = new SquadViews(engine, world, squads, renderSystem)
+
   // Declared before the hud so the hud's handler can reference it.
-  let controller!: InteractionController
+  let session!: MatchSession
   const hud = new Hud((intent) => {
-    controller.handleIntent(intent)
+    session.handleIntent(intent)
   })
-  controller = new InteractionController(
+  session = new MatchSession({
     world,
-    battlefield,
+    grid: battlefield.grid,
     squads,
     turnManager,
-    rig,
-    hud,
-    portraits,
-    seedLabel,
     dice,
-    tracers,
-    engine,
-    () => screens.leaveMatch(),
+    fx: new SceneCombatFx(tracers, views),
+    onLeave: () => screens.leaveMatch(),
     network,
     recordingHeader,
-  )
-  return { ...field, rig, portraits, tracers, turnSystem, turnManager, hud, controller }
+  })
+  const presenter = new Presenter({ session, battlefield, views, renderSystem, rig, hud, portraits, seedLabel, engine })
+  const input = new Input(engine, rig, session, presenter)
+  return { ...field, rig, portraits, tracers, turnSystem, turnManager, hud, session, presenter, input }
 }
 
 /**
@@ -707,7 +716,9 @@ function buildMatch(
  * ticks it (`onEachFrame`) has to take its own frames down as well.
  */
 function disposeScene(scene: MatchScene): void {
-  scene.controller.dispose()
+  scene.input.dispose()
+  scene.presenter.dispose()
+  scene.session.dispose()
   scene.hud.dispose()
   scene.rig.dispose()
   scene.portraits.dispose()
@@ -736,9 +747,9 @@ function restoreCamera(rig: OrbitRig, view: CameraView): void {
  */
 function expose(scene: MatchScene, more: Record<string, unknown>): void {
   if (!consoleHandleAllowed(BUILD_ID)) return
-  const { battlefield, squads, rig, turnManager, hud, controller, tracers } = scene
+  const { battlefield, squads, rig, turnManager, hud, session, presenter, tracers } = scene
   Object.assign(window as unknown as Record<string, unknown>, {
-    tictac: { game: Game.instance(), battlefield, squads, rig, turnManager, hud, controller, tracers, ...more },
+    tictac: { game: Game.instance(), battlefield, squads, rig, turnManager, hud, session, presenter, tracers, ...more },
   })
 }
 
@@ -808,14 +819,14 @@ function resumeMatch(screens: ScreenController, network: NetworkManager, log: Ma
 }
 
 /**
- * Apply a log's intents to a freshly built match, at once (`InteractionController.catchUp`).
+ * Apply a log's intents to a freshly built match, at once (`Presenter.catchUp`).
  *
  * Timed, because how long a window takes to arrive in a long match is
  * something a player feels and nothing else measures.
  */
 function catchUp(scene: MatchScene, log: MatchLog): void {
   const started = performance.now()
-  scene.controller.catchUp(
+  scene.presenter.catchUp(
     log.events.map((event) => event.command),
     SIM.step,
     (step) => scene.tracers.update(step),
@@ -827,13 +838,13 @@ function catchUp(scene: MatchScene, log: MatchLog): void {
 
 /** Hand a built match to the player who commands one of its sides. */
 function playMatch(screens: ScreenController, scene: MatchScene, network: NetworkManager, header: RecordingHeader): void {
-  const { battlefield, squads, rig, tracers, turnManager, hud, controller } = scene
+  const { battlefield, squads, rig, tracers, turnManager, session, presenter } = scene
   const myFaction = network.mode !== 'local' ? network.myFaction : Faction.Blue
 
   // Assigned last thing before play, because it is what releases whatever the
   // other side sent while this one was still being built.
   network.onMessage = (msg) => {
-    controller.handleRemoteNetworkMessage(msg)
+    session.handleRemoteNetworkMessage(msg)
   }
 
   network.onDisconnected = (reason) => screens.showInterrupted(reason)
@@ -862,7 +873,7 @@ function playMatch(screens: ScreenController, scene: MatchScene, network: Networ
 
   const loop = new FixedStepLoop(SIM.step, SIM.maxCatchUp, (step) => {
     tracers.update(step)
-    controller.update(step)
+    presenter.update(step)
   })
   const stopFrames = onEachFrame(Game.instance(), (delta) => {
     loop.advance(delta)
@@ -883,7 +894,7 @@ function playMatch(screens: ScreenController, scene: MatchScene, network: Networ
  *
  * A recording that is still being written: the world is built from the log
  * the way a replay is built from its file — every field revealed, the HUD
- * away, the controller told it is spectating and given no network — and the
+ * away, the session told it is spectating and given no network — and the
  * intents the players send after that are applied the same way, as they
  * arrive. Nothing is ever sent back (`NetworkManager` in `spectate` mode).
  *
@@ -920,11 +931,11 @@ function watchMatch(screens: ScreenController, network: NetworkManager, seat: Se
     const field = buildField(engine, header.seed, header.map, header.squads)
     const built = buildMatch(screens, engine, field, header.seedLabel, new Rng(header.seed), null, null)
     scene = built
-    const { battlefield, squads, rig, tracers, turnManager, hud, controller } = built
-    controller.spectating = true
+    const { battlefield, squads, rig, tracers, turnManager, hud, session, presenter } = built
+    session.spectating = true
     hud.setHidden(true)
     turnManager.autoSelectFirst()
-    controller.recomputeVisibility()
+    presenter.recomputeVisibility()
     catchUp(built, log)
 
     // Held here rather than queued in the rules: a replay applies a command
@@ -939,16 +950,16 @@ function watchMatch(screens: ScreenController, network: NetworkManager, seat: Se
     rig.snapTo(commander ? commander.position : new Vector3(0, 0, 0))
 
     const loop = new FixedStepLoop(SIM.step, SIM.maxCatchUp, (step) => {
-      while (live.length > 0 && !controller.busy) controller.applyRecordedCommand(live.shift()!)
+      while (live.length > 0 && !session.busy) session.applyRecordedCommand(live.shift()!)
       tracers.update(step)
-      controller.update(step)
+      presenter.update(step)
     })
     stopFrames = onEachFrame(Game.instance(), (delta) => {
       loop.advance(delta)
       battlefield.flush()
       // Decided once everything sent has been played out: the last shot's
       // walk and reactions are part of how it ended.
-      const winner = live.length === 0 && !controller.busy ? winnerOf(squads) : null
+      const winner = live.length === 0 && !session.busy ? winnerOf(squads) : null
       bar.render({
         roomId: seat.roomId,
         progress:
@@ -989,7 +1000,7 @@ function watchMatch(screens: ScreenController, network: NetworkManager, seat: Se
  *
  * The same construction a match uses, with three differences: both squads are
  * equipped from the file rather than one from a loadout screen, there is no
- * network (nothing to transmit, nothing to record), and the controller is told
+ * network (nothing to transmit, nothing to record), and the session is told
  * it is spectating — which reveals the whole field and takes the player's
  * hands off the units.
  */
@@ -1002,31 +1013,31 @@ function startPlayback(screens: ScreenController, recording: CombatRecording): v
   // has to put the dice back as well as the world.
   const dice = new Rng(header.seed)
   const scene = buildMatch(screens, engine, field, header.seedLabel, dice, null, null)
-  const { world, battlefield, squads, rig, tracers, turnSystem, turnManager, hud, controller } = scene
-  controller.spectating = true
+  const { world, battlefield, squads, rig, tracers, turnSystem, turnManager, hud, session, presenter } = scene
+  session.spectating = true
   hud.setHidden(true)
   turnManager.autoSelectFirst()
-  controller.recomputeVisibility()
+  presenter.recomputeVisibility()
 
   const rewindable: Rewindable = {
     world,
     unitIds: squads.soldiers.map((soldier) => soldier.entityId),
-    walls: controller.wallSystem,
-    ground: controller.groundSystem,
+    walls: session.wallSystem,
+    ground: session.groundSystem,
     turns: turnSystem,
     dice,
-    movement: controller.movementSystem,
-    commands: controller.commands,
+    movement: session.movementSystem,
+    commands: session.commands,
   }
 
   const playback = new Playback({
     recording,
-    apply: (command) => controller.applyRecordedCommand(command),
-    busy: () => controller.busy,
+    apply: (command) => session.applyRecordedCommand(command),
+    busy: () => session.busy,
     match: rewindable,
     afterRestore: () => {
       turnManager.autoSelectFirst()
-      controller.recomputeVisibility()
+      presenter.recomputeVisibility()
       battlefield.flush()
     },
   })
@@ -1073,7 +1084,7 @@ function startPlayback(screens: ScreenController, recording: CombatRecording): v
     SIM.maxCatchUp,
     (step) => {
       tracers.update(step)
-      controller.update(step)
+      presenter.update(step)
       playback.update(step)
     },
     () => (playback.playing ? playback.speed : 1),

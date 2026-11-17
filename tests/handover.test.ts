@@ -9,10 +9,15 @@ import {
   type SquadOwners,
 } from '../src/server/Owner'
 import { HANDOVER_TIMEOUT_MS, HandoverCoordinator } from '../src/server/Handover'
-import { ServerConnection } from '../src/game/ServerConnection'
+import { RPC_ERRORS } from '../src/wire/Rpc'
+import { Refusal } from '../src/server/Lobby'
 import { startGameServer } from '../src/server/GameServer'
-import { openPersistence } from '../src/server/db/BunSqlDb'
+import { openDb, openPersistence } from '../src/server/db/BunSqlDb'
 import { portsOf, type Persistence } from '../src/server/Persistence'
+import { type RegionStore, regionStoreOverDb } from '../src/server/RegionStore'
+import { heldTokens, ServerConnection } from '../src/game/ServerConnection'
+import { softwareAuthenticator } from './support/authenticator'
+import { inProcessPeers } from './support/peers'
 import { turnedClock } from './support/turnedClock'
 
 const PARTITIONS: RegionPartition[] = [
@@ -35,7 +40,7 @@ function owners(kept: Record<string, string>): SquadOwners & { kept: Record<stri
 
 /** A player with a squad in `persistence`, returning the squad's id. */
 async function squadIn(persistence: Persistence, playerId: string): Promise<string> {
-  return (await persistence.region.squads.place(playerId, null)).id
+  return (await persistence.region.enlist(playerId, null)).id
 }
 
 describe('Region directory (src/server/Owner.ts)', () => {
@@ -52,6 +57,15 @@ describe('Region directory (src/server/Owner.ts)', () => {
     // Munich ~ (48.13, 11.58) -> East
     expect(map.ownerOfPlace({ lat: 48.1351, lng: 11.582 })).toBe('region-east')
     expect(map.ownerOfPlace({ lat: 0, lng: 0 })).toBe('region-west')
+  })
+
+  test('a table knows the regions it routes to, and nothing else', () => {
+    const map = regionMap(PARTITIONS)
+    expect(map.isRegion('region-west')).toBe(true)
+    expect(map.isRegion('region-east')).toBe(true)
+    // The partition's own id is not the name of its object.
+    expect(map.isRegion('west')).toBe(false)
+    expect(map.isRegion('region-mars')).toBe(false)
   })
 
   test('a map with no partitions is refused', () => {
@@ -136,6 +150,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
       handoverId: OFFER.handoverId,
       playerId: OFFER.playerId,
       squadId: OFFER.squadId,
+      sourceRegion: 'region-west',
       targetRegion: 'region-east',
       token: OFFER.token,
       expiresAt: 10_000,
@@ -148,7 +163,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
     expect(source.coordinator.isPending(OFFER.handoverId)).toBe(true)
 
     // 3. Client calls arrive on Target DO (2nd socket)
-    const arrived = target.coordinator.arrive(OFFER.handoverId, OFFER.token, OFFER.squadId)
+    const arrived = target.coordinator.arrive(OFFER.handoverId, OFFER.token, OFFER.squadId, OFFER.playerId)
     expect(arrived.squadId).toBe(OFFER.squadId)
 
     // The squad is still the source's until arrival is confirmed.
@@ -178,6 +193,7 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
         handoverId: 'h-wrong',
         playerId: 'p-1',
         squadId: 'sq-1',
+        sourceRegion: 'region-east',
         targetRegion: 'region-west',
         token: 'tok',
         expiresAt: 10_000,
@@ -191,13 +207,14 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
       handoverId: 'h-1',
       playerId: 'p-1',
       squadId: 'sq-1',
+      sourceRegion: 'region-west',
       targetRegion: 'region-east',
       token: 'valid-token',
       expiresAt: 10_000,
     })
 
-    expect(() => target.arrive('h-1', 'bad-token', 'sq-1')).toThrow(/mismatch/)
-    expect(() => target.arrive('h-1', 'valid-token', 'wrong-squad')).toThrow(/mismatch/)
+    expect(() => target.arrive('h-1', 'bad-token', 'sq-1', 'p-1')).toThrow(/mismatch/)
+    expect(() => target.arrive('h-1', 'valid-token', 'wrong-squad', 'p-1')).toThrow(/mismatch/)
   })
 
   test('cancelled handover prevents confirmation and keeps the squad where it was', async () => {
@@ -285,16 +302,16 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
     const clock = turnedClock(1_000)
     const { coordinator: target } = coordinatorFor('region-east', {}, clock)
     const prepare = (handoverId: string) =>
-      target.prepare({ handoverId, playerId: 'p-1', squadId: 'sq-1', targetRegion: 'region-east', token: 'tok', expiresAt: clock.now() + HANDOVER_TIMEOUT_MS })
+      target.prepare({ handoverId, playerId: 'p-1', squadId: 'sq-1', sourceRegion: 'region-west', targetRegion: 'region-east', token: 'tok', expiresAt: clock.now() + HANDOVER_TIMEOUT_MS })
     prepare('h-late')
 
     clock.advance(HANDOVER_TIMEOUT_MS)
     // Exactly at the expiry the ticket is still good.
-    expect(target.arrive('h-late', 'tok', 'sq-1').squadId).toBe('sq-1')
+    expect(target.arrive('h-late', 'tok', 'sq-1', 'p-1').squadId).toBe('sq-1')
 
     prepare('h-later')
     clock.advance(HANDOVER_TIMEOUT_MS + 1)
-    expect(() => target.arrive('h-later', 'tok', 'sq-1')).toThrow(/expired/)
+    expect(() => target.arrive('h-later', 'tok', 'sq-1', 'p-1')).toThrow(/expired/)
   })
 
   test('an outgoing handover stops being pending once its ttl has run out', async () => {
@@ -308,66 +325,179 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
   })
 })
 
-describe('Dual-Socket Client Handover over Real GameServer', () => {
-  test('client arrives at the target server, and the source commits the new keeper on confirm', async () => {
-    const persistence1 = await openPersistence(WALL_CLOCK, ':memory:', { self: 'region-west' })
-    const persistence2 = await openPersistence(WALL_CLOCK, ':memory:', { self: 'region-east' })
+describe('HandoverCoordinator refusals (tictac-dwq.4)', () => {
+  /** What a call refused with: its code. */
+  function codeOf(call: () => unknown): number | null {
+    try {
+      call()
+    } catch (error) {
+      if (error instanceof Refusal) return error.code
+      throw error
+    }
+    return null
+  }
 
-    const server1 = await startGameServer({
-      ...portsOf(persistence1),
-      clock: WALL_CLOCK,
-      port: 0,
-      log: () => {},
-      regions: PARTITIONS,
-    })
-    const server2 = await startGameServer({
-      ...portsOf(persistence2),
-      clock: WALL_CLOCK,
-      port: 0,
-      log: () => {},
-      regions: PARTITIONS,
-    })
+  const prepared = {
+    handoverId: 'h-1',
+    playerId: 'p-1',
+    squadId: 'sq-1',
+    sourceRegion: 'region-west',
+    targetRegion: 'region-east',
+    token: 'ticket',
+    expiresAt: 10_000,
+  }
 
-    const ws2 = server2.url.replace('http', 'ws')
-    const handoverId = 'ho-real-test'
-    const token = 'tok-secret'
-    const squadId = await squadIn(persistence1, 'p-test')
-    await persistence1.region.squads.setOwner(squadId, 'region-west')
+  test('arriving is refused gone for an unknown handover, notYours for another player, a wrong ticket or squad, conflict once it has lapsed', () => {
+    const clock = turnedClock()
+    const { coordinator } = coordinatorFor('region-east', {}, clock)
+    coordinator.prepare(prepared)
 
-    // Target server2 prepares for the squad's arrival
-    server2.sessions.handover.prepare({
-      handoverId,
-      playerId: 'p-test',
-      squadId,
-      targetRegion: 'region-east',
-      token,
-      expiresAt: Date.now() + 15_000,
-    })
+    expect(codeOf(() => coordinator.arrive('h-nobody', 'ticket', 'sq-1', 'p-1'))).toBe(RPC_ERRORS.gone)
+    expect(codeOf(() => coordinator.arrive('h-1', 'ticket', 'sq-1', 'p-2'))).toBe(RPC_ERRORS.notYours)
+    expect(codeOf(() => coordinator.arrive('h-1', 'stolen', 'sq-1', 'p-1'))).toBe(RPC_ERRORS.notYours)
+    expect(codeOf(() => coordinator.arrive('h-1', 'ticket', 'sq-2', 'p-1'))).toBe(RPC_ERRORS.notYours)
+    clock.advance(10_001)
+    expect(codeOf(() => coordinator.arrive('h-1', 'ticket', 'sq-1', 'p-1'))).toBe(RPC_ERRORS.conflict)
+    // A refused arrival claims nothing: the lapsed ticket is still the region's to withdraw.
+    expect(coordinator.withdraw('h-1')).toEqual(prepared)
+    expect(coordinator.withdraw('h-1')).toBeNull()
+  })
 
-    // The client's second socket arrives at the target.
-    const targetConn = new ServerConnection(ws2)
-    const arriveRes = await targetConn.request('tictac/api/region/arrive', { handoverId, token, squadId })
-    expect(arriveRes.committed).toBe(true)
-    expect(arriveRes.targetRegion).toBe('region-east')
+  test('cancelling a handover this region is not the source of is refused gone', () => {
+    const { coordinator } = coordinatorFor('region-west', { 'sq-1': 'region-west' })
+    expect(codeOf(() => coordinator.cancel('h-nobody', 'never was'))).toBe(RPC_ERRORS.gone)
+  })
+})
 
-    // Confirm on server 1: the squad is the target's from here on.
-    await server1.sessions.handover.initiate({
-      handoverId,
-      playerId: 'p-test',
-      squadId,
-      sourceRegion: 'region-west',
-      targetRegion: 'region-east',
-      targetUrl: ws2,
-      token,
-    })
-    const confirmed = await server1.sessions.handover.confirm(handoverId)
-    expect(confirmed.state).toBe('confirmed')
-    expect(await server1.directory.ownerOfSquad(squadId)).toBe('region-east')
+describe('A window crossing between two real servers', () => {
+  const WEST = 'region-west'
+  const EAST = 'region-east'
 
-    targetConn.close()
-    await server1.stop()
-    await server2.stop()
-    await persistence1.close()
-    await persistence2.close()
+  /** Two servers on two ports, each its own region over its own database, the directory's accounts behind both. */
+  async function twoServers() {
+    const west = await openPersistence(WALL_CLOCK, ':memory:', { self: WEST })
+    const eastRegion = await regionStoreOverDb(await openDb(':memory:'), WALL_CLOCK, west.accounts.accounts, EAST)
+    const peers = inProcessPeers()
+    const start = (region: RegionStore) =>
+      startGameServer({
+        accounts: west.accounts.accounts,
+        region,
+        party: west.accounts.party,
+        regions: PARTITIONS,
+        clock: WALL_CLOCK,
+        port: 0,
+        log: () => {},
+        peers,
+        // Nothing is rolled for on the road: the squad crosses from where it stands.
+        journeys: { openEncounter: undefined, openMeeting: undefined },
+      })
+    const westServer = await start(west.region)
+    const eastServer = await start(eastRegion)
+    const wsOf = (server: { url: string }) => server.url.replace('http', 'ws')
+    peers.add(WEST, { crossings: westServer.crossings, url: wsOf(westServer) })
+    peers.add(EAST, { crossings: eastServer.crossings, url: wsOf(eastServer) })
+    const stops: (() => Promise<void>)[] = []
+    return {
+      west: { server: westServer, region: west.region, url: wsOf(westServer) },
+      east: { server: eastServer, region: eastRegion, url: wsOf(eastServer) },
+      peers,
+      /** A window on the west, registered, with the order to cross from where it stands. */
+      async windowSentAcross() {
+        const connection = new ServerConnection(wsOf(westServer), { tokens: heldTokens(null) })
+        stops.push(async () => connection.close())
+        const key = await softwareAuthenticator()
+        const options = await connection.request('tictac/api/account/registerOptions', { name: 'ada' })
+        const created = await key.create({
+          challengeId: options.challengeId,
+          challenge: (options.publicKey as { challenge: string }).challenge,
+        })
+        connection.signedIn(await connection.request('tictac/api/account/registerVerify', created))
+        const { squad } = await connection.request('tictac/api/squad/get', {})
+        const here = squad.waypoints.at(-1)!
+        return { connection, squadId: squad.id, to: { lat: here.lat, lng: here.lng } }
+      },
+      async stop() {
+        for (const stop of stops) await stop()
+        await westServer.stop()
+        await eastServer.stop().catch(() => {})
+        await eastRegion.close()
+        await west.close()
+      },
+    }
+  }
+
+  test('ends on the target with one socket: the target commits, the source purges only after it confirms', async () => {
+    const world = await twoServers()
+    try {
+      const { connection, squadId, to } = await world.windowSentAcross()
+      const seen: { westRow: boolean; eastKeeper: string | null }[] = []
+      world.peers.through(WEST, (peer) => ({
+        ...peer,
+        confirmArrival: async (handoverId) => {
+          // The target has committed, and the source has not yet let go.
+          seen.push({
+            westRow: (await world.west.region.squads.byId(squadId)) !== null,
+            eastKeeper: await world.east.region.squads.ownerOf(squadId),
+          })
+          return peer.confirmArrival(handoverId)
+        },
+      }))
+      const moved = Promise.withResolvers<void>()
+      const events: string[] = []
+      connection.onHandover((event) => {
+        events.push(event.kind)
+        if (event.kind === 'complete') moved.resolve()
+      })
+
+      const ordered = await connection.request('tictac/api/squad/order', {
+        order: { kind: 'crossBorder', to, destinationRegion: EAST },
+      })
+      expect(ordered.squad.id).toBe(squadId)
+      await moved.promise
+
+      expect(events).toEqual(['offered', 'complete'])
+      expect(seen).toEqual([{ westRow: true, eastKeeper: EAST }])
+      expect(await world.west.region.squads.byId(squadId)).toBeNull()
+      expect(await world.east.server.directory.ownerOfSquad(squadId)).toBe(EAST)
+      // One window, on the target: the source's session was ended, and the second socket is the only one left.
+      expect(world.west.server.lobby.hasWindow((await connection.request('tictac/api/account/me', {})).player!.id)).toBe(false)
+      expect(world.east.server.lobby.hasWindow((await connection.request('tictac/api/account/me', {})).player!.id)).toBe(true)
+      // And everything the window asks is answered by the target now.
+      expect((await connection.request('tictac/api/squad/get', {})).squad.id).toBe(squadId)
+    } finally {
+      await world.stop()
+    }
+  })
+
+  test('a target that is gone when the window comes leaves the squad with the source, which stays authoritative and the window where it was', async () => {
+    const world = await twoServers()
+    try {
+      const { connection, squadId, to } = await world.windowSentAcross()
+      const dropped = Promise.withResolvers<void>()
+      world.peers.through(EAST, (peer) => ({
+        ...peer,
+        // The target answers the prepare and dies before the window gets to it.
+        prepareHandover: async (request) => {
+          const answer = await peer.prepareHandover(request)
+          await world.east.server.stop()
+          return answer
+        },
+        // The source hears from the window that it could not arrive, and tells the target to let go.
+        cancelHandover: async (handoverId) => {
+          dropped.resolve()
+          return peer.cancelHandover(handoverId)
+        },
+      }))
+
+      await connection.request('tictac/api/squad/order', { order: { kind: 'crossBorder', to, destinationRegion: EAST } })
+      await dropped.promise
+
+      expect(await world.west.server.directory.ownerOfSquad(squadId)).toBe(WEST)
+      expect(world.west.server.crossings.inFlight(squadId)).toBe(false)
+      expect((await connection.request('tictac/api/squad/get', {})).squad.id).toBe(squadId)
+      expect(world.west.server.lobby.hasWindow((await connection.request('tictac/api/account/me', {})).player!.id)).toBe(true)
+    } finally {
+      await world.stop()
+    }
   })
 })

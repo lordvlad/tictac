@@ -6,11 +6,11 @@ import {
   addStop,
   type Checkpoint,
   checkpoints,
+  distanceKm,
   type Departure,
   detour,
   type Gait,
   isAtRest,
-  type LatLng,
   plannedArrivals,
   positionAt,
   redirect,
@@ -26,8 +26,10 @@ import type { AccountsPort } from './AccountsPort'
 import { meetingKey, type Encounters } from './Encounters'
 import type { MeetingSide, OpenEncounter, OpenMeeting } from './EncounterPort'
 import { Refusal } from './Lobby'
+import { AT_CHECKPOINT_KM, CROSSING_IN_FLIGHT, type Crossings } from './Crossings'
 import type { RegionDirectory } from './Owner'
 import type { Schedule } from './Schedule'
+import { serial, type Serially } from './Serial'
 import type { Squads } from './Squads'
 
 /**
@@ -64,6 +66,7 @@ const MEETING = 'meeting'
 const ALREADY_MOVING = 'Your squad is already on the move: send it somewhere now, first or next instead.'
 const NOT_MOVING = 'Your squad is not on the move.'
 const NOT_HERE = 'That squad is kept by another match server.'
+const NO_CROSSINGS = 'This server has no other region to send a squad to.'
 
 export interface JourneysOptions {
   squads: Squads
@@ -100,6 +103,16 @@ export interface JourneysOptions {
   playerEncounters?: () => boolean
   /** Called for anything worth a line in a server log. */
   log?: (message: string) => void
+  /**
+   * The queue every writer of a squad's route shares: the host's, when
+   * `Crossings` writes squads too. Its own, unset.
+   */
+  serially?: Serially
+  /**
+   * Where a `crossBorder` order goes: the host's `Crossings`. Unset on a host
+   * that sends no squad anywhere, which refuses the order.
+   */
+  crossings?: Pick<Crossings, 'check' | 'intend' | 'withdraw' | 'inFlight'>
 }
 
 export class Journeys {
@@ -121,7 +134,8 @@ export class Journeys {
    * harmless because a roll is a function of its key and a contact has its row.
    */
   private readonly weighed = new Map<string, { trip: string; index: number }>()
-  private queue: Promise<unknown> = Promise.resolve()
+  private readonly serially: Serially
+  private readonly crossings: Pick<Crossings, 'check' | 'intend' | 'withdraw' | 'inFlight'> | undefined
 
   constructor(options: JourneysOptions) {
     this.squads = options.squads
@@ -136,6 +150,8 @@ export class Journeys {
     this.openMeeting = options.openMeeting
     this.playerEncounters = options.playerEncounters ?? (() => true)
     this.log = options.log ?? ((message) => console.warn(`[journeys] ${message}`))
+    this.serially = options.serially ?? serial()
+    this.crossings = options.crossings
     this.schedule.handle(ARRIVAL, (id, at) => this.serially(() => this.arrive(id, at)))
     this.schedule.handle(CHECKPOINT, (id, at) =>
       this.serially(async () => {
@@ -188,14 +204,33 @@ export class Journeys {
   }
 
   /**
-   * Give `playerId`'s squad `order`. A player from before squads is placed
-   * near `near` first, as `squad/get` would. Refused for a verb that does
-   * not fit where the squad is.
+   * A squad that has become this region's (a handover arrived): schedule what
+   * it has due, and the meetings its route makes with the squads here.
    */
-  order(playerId: string, near: LatLng | null, order: SquadOrder): Promise<Squad> {
+  adopt(squadId: string): Promise<void> {
     return this.serially(async () => {
-      const placed = await this.squads.ensure(playerId, near)
+      const found = await this.found(squadId)
+      if (!found) return
+      this.plan(found.squad)
+      await this.scheduleMeetings(found.squad, this.clock.now())
+    })
+  }
+
+  /**
+   * Give `playerId`'s squad `order`. Their squad is made when they sign in
+   * (`RegionStore.enlist`), not here: a player this region keeps no squad for
+   * has gone to another. Refused for a verb that does not fit where the squad
+   * is.
+   */
+  order(playerId: string, order: SquadOrder): Promise<Squad> {
+    return this.serially(async () => {
+      const placed = await this.heldBy(playerId)
       await this.owned(placed)
+      if (this.crossings?.inFlight(placed.id)) throw new Refusal(RPC_ERRORS.conflict, CROSSING_IN_FLIGHT)
+      if (order.kind === 'crossBorder') {
+        if (!this.crossings) throw new Refusal(RPC_ERRORS.conflict, NO_CROSSINGS)
+        this.crossings.check(order.destinationRegion)
+      }
       const now = this.clock.now()
       // What was due before this order is weighed on the route as it was,
       // not on the one the order is about to make.
@@ -211,6 +246,12 @@ export class Journeys {
         if (ended && this.unweighed(next.id, ended)) next = await this.weigh(player, next, ended)
       }
       this.plan(next)
+      // The crossing is intended after the route is planned, so at the moment the squad arrives its arrival and checkpoints are handled before it crosses.
+      if (order.kind === 'crossBorder') {
+        this.crossings!.intend(playerId, next.id, order.destinationRegion, order.to, plannedArrivals(next.waypoints).at(-1) ?? now)
+      } else {
+        this.crossings?.withdraw(next.id)
+      }
       await this.scheduleMeetings(next, now)
       this.tell(playerId, next)
       return next
@@ -222,15 +263,23 @@ export class Journeys {
    * are away (`ITEM-053`, GDD-WORLD §5.5). Through the same queue as an order,
    * so a meeting being opened reads either the order before or the one after.
    */
-  standing(playerId: string, near: LatLng | null, order: StandingOrder): Promise<Squad> {
+  standing(playerId: string, order: StandingOrder): Promise<Squad> {
     return this.serially(async () => {
-      const placed = await this.squads.ensure(playerId, near)
+      const placed = await this.heldBy(playerId)
       await this.owned(placed)
+      if (this.crossings?.inFlight(placed.id)) throw new Refusal(RPC_ERRORS.conflict, CROSSING_IN_FLIGHT)
       await this.squads.setStanding(placed.id, order)
       const next: Squad = { ...placed, standing: order }
       this.tell(playerId, next)
       return next
     })
+  }
+
+  /** The squad this region holds for `playerId`, or the refusal for one it does not. */
+  private async heldBy(playerId: string): Promise<Squad> {
+    const squad = await this.squads.of(playerId)
+    if (!squad) throw new Refusal(RPC_ERRORS.conflict, NOT_HERE)
+    return squad
   }
 
   private apply(waypoints: readonly Waypoint[], order: SquadOrder, now: number): Waypoint[] | null {
@@ -243,9 +292,13 @@ export class Journeys {
         return detour(waypoints, order.to, now)
       case 'goHereNext':
         return addStop(waypoints, order.to, now)
-      case 'crossBorder':
-        // Routes to the border checkpoint, where travel halts for 2PC handover (RFC-0002 §2 / tictac-dwq)
-        return redirect(waypoints, order.to, onFoot('normal'), now, this.mintTrip())
+      case 'crossBorder': {
+        // The squad walks to the border checkpoint, where it crosses (RFC-0002 §2); one already standing at it has nowhere to walk.
+        const settled = settle(waypoints, now)
+        if (!isAtRest(settled)) return redirect(waypoints, order.to, onFoot('normal'), now, this.mintTrip())
+        if (distanceKm(positionAt(settled, now).position, order.to) <= AT_CHECKPOINT_KM) return [...settled]
+        return setOff(settled, order.to, onFoot('normal'), now, this.mintTrip())
+      }
       case 'stop':
         return stop(waypoints, now)
     }
@@ -535,12 +588,6 @@ export class Journeys {
     const kept: Squad[] = []
     for (const squad of squads) if (await this.keeps(squad)) kept.push(squad)
     return kept
-  }
-
-  private serially<T>(work: () => Promise<T>): Promise<T> {
-    const done = this.queue.then(work)
-    this.queue = done.catch(() => {})
-    return done
   }
 }
 

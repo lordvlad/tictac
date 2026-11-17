@@ -5,7 +5,6 @@ import type {
   EndScreen,
   EndScreenSurvivor,
   HudAction,
-  HudIntent,
   HudItemPanel,
   HudModel,
   HudShotOption,
@@ -16,6 +15,7 @@ import type {
   HudVisibility,
   TileReadout,
 } from './HudModel'
+import type { HudIntent } from '../rules/Intent'
 import { Icon } from './Icon'
 import { uiMount } from './uiMount'
 

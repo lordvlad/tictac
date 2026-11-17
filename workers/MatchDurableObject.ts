@@ -4,6 +4,7 @@ import type { AccountsPort } from '../src/server/AccountsPort'
 import { type AccountsReply, type AccountsRequest, accountsOverRpc, serveAccounts } from '../src/server/AccountsRpc'
 import { LOCAL_RELYING_PARTY, type RelyingParty } from '../src/server/AccountStore'
 import { WALL_CLOCK } from '../src/server/Clock'
+import type { HandoverPeer, PeerAnswer, PrepareRequest } from '../src/server/Handover'
 import { createMatchServer, type MatchServer } from '../src/server/MatchServer'
 import { DIRECTORY_REGION, SINGLETON_REGION } from '../src/server/Owner'
 import { persistenceOverDb } from '../src/server/Persistence'
@@ -57,6 +58,13 @@ export class MatchDurableObject extends DurableObject<Env> {
   private server!: MatchServer
   /** The account store's own accounts: set on the directory only, which answers {@link accounts}. */
   private directoryAccounts: AccountsPort | null = null
+  /**
+   * The origin a window last reached this object through (`fetch`), which is
+   * where an offer sends a window to another region (`peers.urlOf`): the
+   * Worker answers the same host for every region, and routes by the `region`
+   * it is asked for (`index.ts`).
+   */
+  private origin: URL | null = null
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -98,6 +106,10 @@ export class MatchDurableObject extends DurableObject<Env> {
           },
         },
         placeOf: (request) => placeOf(request.cf),
+        peers: {
+          peer: (region) => peerOf(env.MATCH.get(env.MATCH.idFromName(region))),
+          urlOf: (region) => this.urlOf(region),
+        },
         party,
         // Read at every check, so a changed variable is the next check's.
         playerEncounters: () => env.PLAYER_ENCOUNTERS !== 'off',
@@ -115,12 +127,41 @@ export class MatchDurableObject extends DurableObject<Env> {
     return serveAccounts(this.directoryAccounts, request)
   }
 
+  /**
+   * The three calls another region's object makes of this one while a squad
+   * crosses (`HandoverPeer`, `Crossings`): the target prepares, the source
+   * confirms, and either may be told the handover is off. Answers are data
+   * (`PeerAnswer`): an exception loses its class crossing this boundary.
+   */
+  prepareHandover(request: PrepareRequest): Promise<PeerAnswer> {
+    return this.server.crossings.prepareHandover(request)
+  }
+
+  confirmArrival(handoverId: string): Promise<PeerAnswer> {
+    return this.server.crossings.confirmArrival(handoverId)
+  }
+
+  cancelHandover(handoverId: string): Promise<PeerAnswer> {
+    return this.server.crossings.cancelHandover(handoverId)
+  }
+
+  /** Where a window dials to reach `region`: this host, asking the Worker for that region. */
+  private urlOf(region: string): string {
+    if (!this.origin) throw new Error('no window has reached this object, so there is no address to offer for another region')
+    const url = new URL(this.origin)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.pathname = '/'
+    url.search = `?region=${encodeURIComponent(region)}`
+    return url.toString()
+  }
+
   /** The alarm the travel schedule armed: whatever is due runs, and the next moment is armed. */
   override async alarm(): Promise<void> {
     await this.server.alarm()
   }
 
   override async fetch(request: Request): Promise<Response> {
+    this.origin = new URL(request.url)
     const answered = await this.server.http(request)
     if (answered) return answered
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
@@ -146,6 +187,15 @@ export class MatchDurableObject extends DurableObject<Env> {
     })
     this.server.accept(transport, request)
     return new Response(null, { status: 101, webSocket: client })
+  }
+}
+
+/** Another region's object as the peer a crossing talks to: its RPC methods, which `HandoverPeer` names. */
+function peerOf(stub: DurableObjectStub<MatchDurableObject>): HandoverPeer {
+  return {
+    prepareHandover: (request) => stub.prepareHandover(request),
+    confirmArrival: (handoverId) => stub.confirmArrival(handoverId),
+    cancelHandover: (handoverId) => stub.cancelHandover(handoverId),
   }
 }
 

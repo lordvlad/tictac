@@ -102,6 +102,11 @@ const HANDOVER_TIMED_OUT = 'The target server did not take the squad in time.'
 /** What a second offer, while one is being taken, is cancelled for. */
 const HANDOVER_BUSY = 'The window is already taking another handover.'
 
+/** What a window is told of a region handover: the offer, the move onto the target, or the source giving up. */
+export type HandoverEvent =
+  | { kind: 'offered' | 'complete'; targetRegion: string }
+  | { kind: 'failed'; targetRegion: string; reason: string }
+
 /** An error the server answered with: its words, and the code they came under (`RPC_ERRORS`). */
 export class RpcError extends Error {
   constructor(
@@ -266,7 +271,7 @@ export class ServerConnection {
   private lobbyView: LobbyView | null = null
   private readonly listeners = new Set<() => void>()
   private handover: Handover | null = null
-  private readonly handoverListeners = new Set<(event: { kind: 'offered' | 'complete'; targetRegion: string }) => void>()
+  private readonly handoverListeners = new Set<(event: HandoverEvent) => void>()
   private readonly elsewhereListeners = new Set<(url: string) => void>()
   /** Where the next socket is dialled: the url given, until a handover has moved the window. */
   private address: string
@@ -356,9 +361,10 @@ export class ServerConnection {
   /**
    * Listen for region handovers (RFC-0002 / tictac-dwq): offered when the
    * source asks the window to open its second socket, complete when the
-   * window has moved onto it.
+   * window has moved onto it, failed when the source gives up on the crossing
+   * (`region/handoverFailed`) and the squad rests where it is.
    */
-  onHandover(listener: (event: { kind: 'offered' | 'complete'; targetRegion: string }) => void): () => void {
+  onHandover(listener: (event: HandoverEvent) => void): () => void {
     this.handoverListeners.add(listener)
     return () => this.handoverListeners.delete(listener)
   }
@@ -765,6 +771,11 @@ export class ServerConnection {
       case 'tictac/api/region/handoverOffer':
         void this.offered(params as unknown as RpcPushes['tictac/api/region/handoverOffer'])
         return
+      case 'tictac/api/region/handoverFailed': {
+        const { targetRegion, reason } = params as unknown as RpcPushes['tictac/api/region/handoverFailed']
+        for (const listener of this.handoverListeners) listener({ kind: 'failed', targetRegion, reason })
+        return
+      }
     }
 
     const room = this.room

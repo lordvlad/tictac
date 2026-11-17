@@ -232,34 +232,13 @@ export class Squads {
     return run
   }
 
-  /** Queue the insert that gives `playerId` the drawn squad onto `batch`: a no-op if they already have one. */
+  /** Queue the insert that gives `playerId` the drawn squad onto `batch`: a no-op if they already have one. Only `RegionStore.enlist` places a squad. */
   placeInto(batch: Batch, playerId: string, { squad, start, createdAt }: Placement): void {
     batch.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at, owner)
                 VALUES (${squad.id}, ${playerId}, ${JSON.stringify(squad.waypoints)},
                         ${Math.round(start.lat * MICRODEGREES)}, ${Math.round(start.lng * MICRODEGREES)},
                         ${createdAt}, ${this.self})
                 ON CONFLICT (player_id) DO NOTHING`
-  }
-
-  /** Give `playerId` a squad at a drawn start, in a transaction of its own; registration queues {@link placeInto} onto its own instead. */
-  async place(playerId: string, anchor: LatLng | null): Promise<Squad> {
-    const placed = await this.placing(anchor, async (placement) => {
-      const batch = new Batch()
-      this.placeInto(batch, playerId, placement)
-      await this.db.transaction(batch)
-      return placement.squad
-    })
-    // Two windows of a player that had no squad may both get here; the one
-    // that lost the race reads the winner's.
-    return (await this.of(playerId)) ?? placed
-  }
-
-  /**
-   * The player's squad, placed now if they have none — which is every player
-   * registered before squads existed, the first time anything asks.
-   */
-  async ensure(playerId: string, anchor: LatLng | null): Promise<Squad> {
-    return (await this.of(playerId)) ?? this.place(playerId, anchor)
   }
 
   private async drawStart(anchor: LatLng): Promise<LatLng> {

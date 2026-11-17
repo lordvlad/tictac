@@ -2,6 +2,7 @@ import { ROSTER } from '../config'
 import { rollSquadSheets } from '../core/Characters'
 import { Rng } from '../core/rng'
 import type { LatLng } from '../core/Travel'
+import type { Squad } from '../wire/Rpc'
 import type { AccountsPort } from './AccountsPort'
 import type { ServerClock } from './Clock'
 import { Batch, type Db } from './db/Db'
@@ -56,16 +57,30 @@ export interface RegionStore {
   squads: Squads
   encounters: Encounters
   /**
-   * Give a player who has just registered their roster and a squad on the
-   * map, in one transaction: a roster rolled by the server (a client that
-   * dealt its own would deal itself six prodigies), as a full roster and not
-   * a squad — the bench exists so resting anyone is a choice — and a squad
-   * whose start is drawn near `near`, where the connection was placed, and
-   * kept nowhere. The squad's start is drawn inside `Squads.placing`, which
-   * holds every other placement back until this commit is done, so the 1 km
-   * separation holds between players registering at once.
+   * The one door by which a player comes to exist in this region: their
+   * roster and a squad on the map, made in one transaction for whichever of
+   * the two is missing, and the squad returned. A roster rolled by the server
+   * (a client that dealt its own would deal itself six prodigies), as a full
+   * roster and not a squad — the bench exists so resting anyone is a choice —
+   * and a squad whose start is drawn near `near`, where the connection was
+   * placed, and kept nowhere.
+   *
+   * Idempotent, because registration spans two stores and cannot be one
+   * transaction: an account whose enlist failed has no roster here, and the
+   * next sign-in (or `squad/get`, or `roster/list`) runs this again and heals
+   * it. A player who has both does nothing. Rows that arrived by handover
+   * (`importSquad`) count as theirs, so a squad that came with its roster is
+   * never dealt a second one.
+   *
+   * The check and the write both happen inside `Squads.placing`, which holds
+   * every other placement back until this commit is done: two windows of one
+   * player cannot both find nothing and both deal, and the 1 km separation
+   * holds between players arriving at once. A handover import is not behind
+   * that line; one landing between this read and its commit makes the commit
+   * fail on `roster_active_slot` and roll back whole, and the retry finds the
+   * imported rows.
    */
-  enlist(playerId: string, near: LatLng | null): Promise<void>
+  enlist(playerId: string, near: LatLng | null): Promise<Squad>
   /** Everything this region keeps for `squadId`, or null for a squad it does not hold. Reads only. */
   exportSquad(squadId: string): Promise<SquadBundle | null>
   /**
@@ -105,13 +120,20 @@ export async function regionStoreOverDb(
     squads,
     encounters,
     async enlist(playerId, near) {
-      const seed = crypto.getRandomValues(new Uint32Array(1))[0]!
-      const sheets = rollSquadSheets(new Rng(seed), ROSTER.size)
-      await squads.placing(near, async (placement) => {
+      const held = async () => ({ squad: await squads.of(playerId), rostered: await rosters.has(playerId) })
+      const already = await held()
+      if (already.squad && already.rostered) return already.squad
+      return squads.placing(near, async (placement) => {
+        const { squad, rostered } = await held()
+        if (squad && rostered) return squad
         const batch = new Batch()
-        rosters.enlistInto(batch, playerId, sheets)
-        squads.placeInto(batch, playerId, placement)
+        if (!rostered) {
+          const seed = crypto.getRandomValues(new Uint32Array(1))[0]!
+          rosters.enlistInto(batch, playerId, rollSquadSheets(new Rng(seed), ROSTER.size))
+        }
+        if (!squad) squads.placeInto(batch, playerId, placement)
         await db.transaction(batch)
+        return squad ?? placement.squad
       })
     },
     async exportSquad(squadId) {

@@ -19,7 +19,7 @@ import type { WeaponId } from '../core/Arsenal'
 import type { HitMark } from '../core/Combatant'
 import { MeleeId } from '../core/Melee'
 import { soldierColor } from '../entities/palette'
-import type { Soldier } from '../entities/Soldier'
+import type { SoldierModel } from './SoldierModel'
 
 /**
  * Ground speed in m/s that each locomotion clip is authored at, measured from
@@ -108,10 +108,10 @@ const FLASH_COLOR: Record<Exclude<HitMark, 'plain'>, number> = { crit: 0xff1a1a,
 /**
  * The body of a soldier: its mesh, its skeleton and its animation state.
  *
- * A {@link Soldier} is what the unit *is* — hp, points, stance, gear — and this
- * is what it looks like. They were one class, which meant a squad could not
- * exist without a scene to put it in, and "can I shoot that" was a question
- * about a mesh's `visible` flag.
+ * A {@link SoldierModel} is what the unit looks like to the eye — pose, place and kit, read
+ * from its components. The unit itself (`Soldier`) is what it *is*, and this is what it
+ * looks like. They were one class, which meant a squad could not exist without a scene to
+ * put it in, and "can I shoot that" was a question about a mesh's `visible` flag.
  *
  * Strictly a reader. Nothing here decides anything: the stance, the death, the
  * facing and the visibility are all already true of the unit by the time this
@@ -139,7 +139,7 @@ export class SoldierView extends Entity3D {
 
   constructor(
     private readonly engine: EngineContext,
-    readonly unit: Soldier,
+    readonly unit: SoldierModel,
   ) {
     super()
     this.currentYaw = unit.targetYaw
@@ -158,7 +158,7 @@ export class SoldierView extends Entity3D {
 
     if (this.instance) {
       // Apply physical proportions (height, shoulder width, gut/waist, chest, limb girth)
-      applyCharacterProportions(this.instance, this.unit.sheet.appearance)
+      applyCharacterProportions(this.instance, this.unit.appearance)
 
       // Tint per soldier, not per faction: squadmates get neighbouring hues so
       // they can be told apart on the field and in their portraits.
@@ -172,10 +172,11 @@ export class SoldierView extends Entity3D {
         }
       })
 
-      // Tagged with the unit, not with this view: a click is a question about
-      // who was hit, and the answer is a soldier.
+      // Tagged with the unit's entity, not with this view: a click is a question about
+      // who was hit, and the answer is a soldier. Left as an id so the picking layer
+      // finds the rules' own unit rather than anything held here.
       this.instance.userData.type = 'soldier'
-      this.instance.userData.soldier = this.unit
+      this.instance.userData.entityId = this.unit.entityId
 
       this.instance.position.copy(this.smoothed)
       this.instance.rotation.y = this.currentYaw

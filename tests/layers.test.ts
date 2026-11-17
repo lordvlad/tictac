@@ -11,8 +11,9 @@ import { dirname, join, normalize } from 'node:path'
  * Type-only imports count: a hud file that names a game type is the same coupling
  * as one that calls a game function, and an edge nobody can see cannot be ratcheted.
  *
- * `src/rules` (headless game logic), `src/wire` (the contract two sides share) and
- * `src/game` (client orchestration only) are separate layers. The edges that still
+ * `src/rules` (headless game logic), `src/wire` (the contract two sides share),
+ * `src/game` (client orchestration with no scene) and `src/client` (what draws and
+ * listens for it) are separate layers. The edges that still
  * break the DAG are listed in {@link ALLOWED}, each under the ticket that removes
  * it. The list is a ratchet: a new violating edge fails, and so does a listed edge
  * that no longer exists — whoever deletes the import deletes its line. It can only
@@ -29,6 +30,7 @@ type Layer =
   | 'wire'
   | 'server'
   | 'game'
+  | 'client'
   | 'engine'
   | 'render'
   | 'camera'
@@ -55,8 +57,13 @@ const MAY_IMPORT: Record<Layer, readonly Layer[]> = {
   wire: ['leaf', 'core', 'rules'],
   sim: ['leaf', 'core', 'rules', 'ecs', 'entities', 'wire'],
   server: ['leaf', 'core', 'rules', 'ecs', 'entities', 'sim', 'wire'],
-  // Client orchestration: the one layer that wires the match to the screen.
-  game: ['leaf', 'core', 'rules', 'ecs', 'entities', 'sim', 'wire', 'render', 'camera', 'engine'],
+  // Client orchestration with no scene: the session that turns intents into commands, the network, playback.
+  // It knows nothing of render, hud or camera; what draws it implements the view port it declares.
+  game: ['leaf', 'core', 'rules', 'ecs', 'entities', 'sim', 'wire'],
+  // The presentation of a match: the planners, fog and x-ray that draw the scene, and the presenter
+  // and input that join the session (game) to the screen (render, hud, camera). The one layer
+  // that sees both sides, deliberately; nothing may import it except the composition root.
+  client: ['leaf', 'core', 'rules', 'ecs', 'entities', 'sim', 'wire', 'game', 'render', 'camera', 'hud', 'engine'],
   // The engine context (renderer, scene, clock) that client code is handed; it knows nothing of the game.
   engine: ['leaf'],
   render: ['leaf', 'core', 'rules', 'ecs', 'entities', 'engine'],
@@ -92,8 +99,8 @@ const ALLOWED: Record<string, readonly string[]> = {
     'src/hud/HudModel.ts -> src/camera/OrbitRig.ts',
     'src/hud/HudModel.ts -> src/entities/Soldier.ts',
     'src/hud/HudModel.ts -> src/entities/Squads.ts',
-    'src/hud/HudModel.ts -> src/game/GrenadePlanner.ts',
-    'src/hud/HudModel.ts -> src/game/ShootPlanner.ts',
+    'src/hud/HudModel.ts -> src/client/GrenadePlanner.ts',
+    'src/hud/HudModel.ts -> src/client/ShootPlanner.ts',
     'src/hud/HudModel.ts -> src/render/Portraits.ts',
     'src/hud/HudModel.ts -> src/sim/TurnManager.ts',
     'src/hud/LoadoutScreen.tsx -> src/engine.ts',
@@ -104,14 +111,6 @@ const ALLOWED: Record<string, readonly string[]> = {
     'src/hud/menu/ServerPanel.tsx -> src/game/Account.ts',
     'src/hud/menu/ServerPanel.tsx -> src/game/ServerConnection.ts',
     'src/hud/menu/StartMenu.tsx -> src/game/ServerConnection.ts',
-  ],
-  // InteractionController splits into input, presenter and a client-session port.
-  'tictac-uqt.23': [
-    'src/game/InteractionController.ts -> src/hud/DebugMap.tsx',
-    'src/game/InteractionController.ts -> src/hud/DebugPanel.tsx',
-    'src/game/InteractionController.ts -> src/hud/Hud.tsx',
-    'src/game/InteractionController.ts -> src/hud/HudModel.ts',
-    'src/game/InteractionController.ts -> src/hud/download.ts',
   ],
   // The Durable Object takes the same host ports as the Bun server, not core types of its own.
   'tictac-uqt.24': [
