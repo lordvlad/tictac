@@ -30,24 +30,28 @@ export interface Schema {
 
 /**
  * The single list every database written before the split ran, under
- * `schema_migrations`. Nothing is applied from it any more; it is only read,
- * to make sure a database that still carries it is complete (`checkMonolith`)
- * before the two stores adopt its tables as theirs.
+ * `schema_migrations`. It is read to make sure a database that still carries
+ * it is complete (`checkMonolith`) before the two stores adopt its tables as
+ * theirs. Its last two steps were never deployed before the split — production
+ * stopped at 10 — so they carry their statements and the adoption finishes
+ * them; a database that stops earlier still needs an older build first.
  */
 const MONOLITH_LEDGER = 'schema_migrations'
-const MONOLITH_NAMES: readonly string[] = [
-  'match log',
-  'accounts',
-  'rosters',
-  'lasting wounds',
-  'fatigue and medical bay',
-  'rooms',
-  'squads',
-  'encounter rooms',
-  'encounters',
-  'player encounters',
-  'squad owner',
-  'encounter intent',
+const MONOLITH: readonly { name: string; up?: readonly string[] }[] = [
+  { name: 'match log' },
+  { name: 'accounts' },
+  { name: 'rosters' },
+  { name: 'lasting wounds' },
+  { name: 'fatigue and medical bay' },
+  { name: 'rooms' },
+  { name: 'squads' },
+  { name: 'encounter rooms' },
+  { name: 'encounters' },
+  { name: 'player encounters' },
+  // Every squad there was belongs to the one region there was.
+  { name: 'squad owner', up: ["ALTER TABLE squads ADD COLUMN owner TEXT NOT NULL DEFAULT 'singleton'"] },
+  // Every contact written before was written after its outcome, so it is settled.
+  { name: 'encounter intent', up: ['ALTER TABLE encounters ADD COLUMN settled INTEGER NOT NULL DEFAULT 1'] },
 ]
 
 export interface Migration {
@@ -81,7 +85,7 @@ export async function migrate(db: Db, clock: ServerClock, schema: Schema): Promi
     }
   }
 
-  await checkMonolith(db)
+  await checkMonolith(db, clock)
   await db.exec(
     `CREATE TABLE IF NOT EXISTS store_migrations (
        store      TEXT    NOT NULL,
@@ -123,27 +127,37 @@ export async function migrate(db: Db, clock: ServerClock, schema: Schema): Promi
 }
 
 /**
- * Refuse a database written before the stores were split unless it was
- * finished: the stores' first migrations adopt its tables as they are
- * (`CREATE … IF NOT EXISTS`), which is only right for the shape its last
- * migration left. A fresh database has no such ledger and passes.
+ * Bring a database written before the stores were split to the end of its own
+ * list, or refuse it: the stores' first migrations adopt its tables as they
+ * are (`CREATE … IF NOT EXISTS`), which is only right for the shape its last
+ * migration left. The steps this build still carries run each under one commit
+ * with their old ledger row, as the build before the split would have run them.
+ * A fresh database has no such ledger and passes.
  */
-async function checkMonolith(db: Db): Promise<void> {
+async function checkMonolith(db: Db, clock: ServerClock): Promise<void> {
   const found = await db.query<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${MONOLITH_LEDGER}`
   if (found.length === 0) return
   const rows = await db.query<AppliedRow>`SELECT id, name FROM schema_migrations ORDER BY id`
   const names = rows.map((row) => row.name)
-  if (names.length > MONOLITH_NAMES.length) {
+  if (names.length > MONOLITH.length) {
     throw new Error(
       `the database is at migration ${names.length}, but this build only knows migrations up to ` +
-        `${MONOLITH_NAMES.length} of the old single schema: open it with a newer build`,
+        `${MONOLITH.length} of the old single schema: open it with a newer build`,
     )
   }
-  if (names.length < MONOLITH_NAMES.length || names.some((name, index) => name !== MONOLITH_NAMES[index])) {
+  const missing = MONOLITH.slice(names.length)
+  if (names.some((name, index) => name !== MONOLITH[index]!.name) || missing.some((step) => !step.up)) {
     throw new Error(
       `this database was last opened by a build before the account/region split and stops at migration ${names.length} ` +
-        `of ${MONOLITH_NAMES.length}: open it once with the previous build to finish its migrations, then with this one`,
+        `of ${MONOLITH.length}: open it once with the previous build to finish its migrations, then with this one`,
     )
+  }
+  for (const [offset, step] of missing.entries()) {
+    const id = names.length + offset + 1
+    const batch = new Batch()
+    for (const statement of step.up!) batch.exec(statement)
+    batch.query`INSERT INTO schema_migrations (id, name, applied_at) VALUES (${id}, ${step.name}, ${new Date(clock.now()).toISOString()})`
+    await db.transaction(batch)
   }
 }
 

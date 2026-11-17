@@ -143,9 +143,9 @@ describe('A database written before the account/region split,', () => {
   const WHEN = '2026-01-01T00:00:00Z'
 
   /** What the old build's database holds for one player: an account, a roster with a casualty, a squad, a contact, a settled match. */
-  async function seeded(): Promise<Db> {
+  async function seeded(upTo?: number): Promise<Db> {
     const db = await freshDb()
-    await legacyDb(db)
+    await legacyDb(db, upTo)
     await db.query`INSERT INTO players (id, name, created_at) VALUES (${'ada'}, ${'Ada'}, ${WHEN})`
     await db.query`INSERT INTO matches (id, header, created_at, seed_label) VALUES (${'m1'}, ${'{}'}, ${WHEN}, ${'seed'})`
     await db.query`INSERT INTO roster (character_id, player_id, slot, sheet, status, matches, created_at, died_in)
@@ -211,11 +211,27 @@ describe('A database written before the account/region split,', () => {
     await db.close()
   })
 
-  test('one the old build had not finished is refused, with the way out', async () => {
-    const db = await freshDb()
-    await legacyDb(db, 11)
+  test('one the old build stopped at 10, as production did, is finished and adopted', async () => {
+    const db = await seeded(10)
 
-    await expect(persistenceOverDb(db, WALL_CLOCK)).rejects.toThrow(/stops at migration 11 of 12: open it once with the previous build/)
+    const persistence = await persistenceOverDb(db, WALL_CLOCK)
+
+    expect((await db.query<{ name: string }>`SELECT name FROM schema_migrations ORDER BY id`).map((row) => row.name).slice(10)).toEqual([
+      'squad owner',
+      'encounter intent',
+    ])
+    expect(await persistence.region.squads.ownerOf('sq')).toBe('singleton')
+    // The contact was recorded after its fight, so it is settled and in the feed.
+    expect((await persistence.region.encounters.feed('ada', 5)).map((entry) => entry.matchId)).toEqual(['m1'])
+    expect((await persistence.region.rosters.records('ada')).map((row) => row.characterId)).toEqual(['alive', 'fallen'])
+    await db.close()
+  })
+
+  test('one that stops before the steps this build carries is refused, with the way out', async () => {
+    const db = await freshDb()
+    await legacyDb(db, 9)
+
+    await expect(persistenceOverDb(db, WALL_CLOCK)).rejects.toThrow(/stops at migration 9 of 12: open it once with the previous build/)
     await db.close()
   })
 })

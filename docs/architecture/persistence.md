@@ -248,13 +248,15 @@ the table (migration 2 of the region list).
 ### 2.1 Databases from before the split
 
 A database written by the old single-schema build holds both stores' tables, with the ledger
-`schema_migrations` (twelve migrations: `match log` … `encounter intent`). Nothing is applied from
-that list any more, and nothing about it needs doing by hand: opening the database with this build
-is the migration path.
+`schema_migrations` (twelve migrations: `match log` … `encounter intent`). Nothing about it needs
+doing by hand: opening the database with this build is the migration path.
 
-- `migrate` first checks that old ledger is **complete** — exactly the twelve migrations, by name
-  — and refuses a database that is not ("open it once with the previous build"), because the
-  baselines adopt the tables as they are. A newer ledger is refused as the dangerous direction.
+- `migrate` first brings that old ledger to its end. Its last two steps, `squad owner` and
+  `encounter intent`, were written during the split and never deployed before it — production's
+  Durable Object stopped at 10 — so this build still carries their statements and runs each under
+  one commit with its old ledger row. A database that stops before 10 is refused ("open it once
+  with the previous build"), because the baselines adopt the tables as they are; a ledger past 12
+  is refused as the dangerous direction.
 - Both baselines are `CREATE … IF NOT EXISTS`, so the tables, the rows in them, the indexes and the
   append-only triggers are adopted untouched. The account store never needed to change them.
 - The region's second migration then rebuilds the tables that referenced `players`, copying every
