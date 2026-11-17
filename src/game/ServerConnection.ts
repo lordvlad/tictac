@@ -93,6 +93,15 @@ const DROPPED = 'The connection to the match server dropped.'
 /** The window's own decision to leave the server: nobody is shown this. */
 const LEFT = 'This window left the match server.'
 
+/** What a request on the source is told when the window moves to the server the handover went to. */
+const MOVED = 'The session moved to another server.'
+
+/** What a handover whose target did not arrive within its offer is cancelled for. */
+const HANDOVER_TIMED_OUT = 'The target server did not take the squad in time.'
+
+/** What a second offer, while one is being taken, is cancelled for. */
+const HANDOVER_BUSY = 'The window is already taking another handover.'
+
 /** An error the server answered with: its words, and the code they came under (`RPC_ERRORS`). */
 export class RpcError extends Error {
   constructor(
@@ -211,6 +220,26 @@ interface Room {
   socket: Socket | null
 }
 
+/**
+ * A region handover being taken (RFC-0002 §3): the window's second socket, on
+ * the target, while the first stays on the source. It becomes the window's
+ * only socket once the target has taken the squad (`arrived`) *and* the source
+ * has said the session continues there (`sourceEnded`), in whichever order
+ * those are heard — they come over two sockets.
+ */
+interface Handover {
+  id: string
+  targetRegion: string
+  /** Where the second socket is, and so where the window is once it has moved. */
+  url: string
+  socket: Socket
+  /** The target answered `region/arrive`. */
+  arrived: boolean
+  /** The source ended the session with `reconnect: 'elsewhere'`. */
+  sourceEnded: boolean
+  cancelDeadline: () => void
+}
+
 export class ServerConnection {
   private readonly connect: (url: string) => Transport
   private readonly schedule: (fn: () => void, ms: number) => () => void
@@ -236,9 +265,11 @@ export class ServerConnection {
   private readonly encounterListeners = new Set<(started: RpcPushes['tictac/api/encounter/started']) => void>()
   private lobbyView: LobbyView | null = null
   private readonly listeners = new Set<() => void>()
-  private secondaryConnection: ServerConnection | null = null
+  private handover: Handover | null = null
   private readonly handoverListeners = new Set<(event: { kind: 'offered' | 'complete'; targetRegion: string }) => void>()
   private readonly elsewhereListeners = new Set<(url: string) => void>()
+  /** Where the next socket is dialled: the url given, until a handover has moved the window. */
+  private address: string
 
   player: Player | null = null
   /**
@@ -250,7 +281,7 @@ export class ServerConnection {
 
   constructor(
     /** The server's plain url: nothing about who is asking or what for rides in it. */
-    readonly url: string,
+    url: string,
     link: ServerLink = {},
   ) {
     this.connect = link.connect ?? ((target) => new SocketTransport(new WebSocket(target)))
@@ -263,7 +294,13 @@ export class ServerConnection {
     this.giveUpMs = link.giveUpMs ?? RECONNECT_GIVE_UP_MS
     this.clock = link.clock ?? (() => Date.now())
     this.tokens = link.tokens ?? browserTokens(url)
+    this.address = url
     this.dial()
+  }
+
+  /** The server this window is on: where it was told to go, once a handover has moved it. */
+  get url(): string {
+    return this.address
   }
 
   get state(): ConnectionState {
@@ -317,7 +354,9 @@ export class ServerConnection {
   }
 
   /**
-   * Listen for region handovers (RFC-0002 / tictac-dwq).
+   * Listen for region handovers (RFC-0002 / tictac-dwq): offered when the
+   * source asks the window to open its second socket, complete when the
+   * window has moved onto it.
    */
   onHandover(listener: (event: { kind: 'offered' | 'complete'; targetRegion: string }) => void): () => void {
     this.handoverListeners.add(listener)
@@ -326,9 +365,11 @@ export class ServerConnection {
 
   /**
    * Hear that the server ended this session because it continues on another
-   * server (`session/ended` with `reconnect: 'elsewhere'`), at the url given.
-   * Called once, just before this connection closes for good: this connection
-   * never dials the new place itself, whoever listens does.
+   * server (`session/ended` with `reconnect: 'elsewhere'`), at the url given,
+   * when no handover was being taken. Called once, just before this connection
+   * closes for good: this connection never dials the new place itself, whoever
+   * listens does. A handover that was taken has already moved the window, in
+   * place, onto the socket it opened to the target: that is not heard here.
    */
   onElsewhere(listener: (url: string) => void): () => void {
     this.elsewhereListeners.add(listener)
@@ -489,22 +530,15 @@ export class ServerConnection {
 
   /** One socket, and the way back to where the window was on it. */
   private dial(): void {
-    let transport: Transport
+    let socket: Socket
     try {
-      transport = this.connect(this.url)
+      socket = this.openSocket(this.address)
     } catch {
       // A url no socket can be opened to at all.
       this.retry()
       return
     }
-    const socket: Socket = { transport, pending: new Map(), lobby: false, done: false, cancelDeadline: null }
     this.socket = socket
-    transport.onFrame((frame) => this.receive(socket, frame))
-    transport.onClosed(() => {
-      if (socket.done) return
-      this.abandon(socket, DROPPED)
-      this.retry()
-    })
     // Armed before anything is said: a socket that answers its first word at
     // once must find this try's deadline there to cancel.
     socket.cancelDeadline = this.schedule(
@@ -519,6 +553,27 @@ export class ServerConnection {
     )
   }
 
+  /** A socket to `url` with its frames read and its going answered, which is nobody's yet: the caller says whose. */
+  private openSocket(url: string): Socket {
+    const transport = this.connect(url)
+    const socket: Socket = { transport, pending: new Map(), lobby: false, done: false, cancelDeadline: null }
+    transport.onFrame((frame) => this.receive(socket, frame))
+    transport.onClosed(() => this.closed(socket))
+    return socket
+  }
+
+  /** A socket went on its own, or the server closed it without a word. */
+  private closed(socket: Socket): void {
+    if (socket.done) return
+    const handover = this.handover
+    if (handover?.socket === socket) {
+      this.failHandover(handover, DROPPED)
+      return
+    }
+    this.abandon(socket, DROPPED)
+    this.retry()
+  }
+
   /**
    * Put the window back where it was, in the one order that works: the
    * version first, because nothing is answered before it; who it is, because
@@ -530,6 +585,11 @@ export class ServerConnection {
     socket.transport.send({ jsonrpc: '2.0', method: RpcMethods.hello, params: { ...MY_VERSION } })
     const token = this.tokens.get()
     if (token) await this.presentToken(socket, token)
+    await this.resume(socket)
+  }
+
+  /** The lobby and then the room, on a socket that has said hello and signed in: the rest of the way back. */
+  private async resume(socket: Socket): Promise<void> {
     if (this.lobbyListeners.size > 0) {
       try {
         await this.subscribeOn(socket)
@@ -682,6 +742,10 @@ export class ServerConnection {
       else settle({ ok: true, result: frame.result })
       return
     }
+    // A handover's second socket is heard for its answers and for its ending
+    // the session, which is the target turning the window away; anything else
+    // it pushes is not the window's until it is the window's socket.
+    if (socket !== this.socket && frame.method !== 'tictac/api/session/ended') return
     const params = (frame as JsonRpcNotification).params
     switch (frame.method) {
       case 'tictac/api/session/ended':
@@ -698,16 +762,9 @@ export class ServerConnection {
           listener(params as unknown as RpcPushes['tictac/api/encounter/started'])
         }
         return
-      case 'tictac/api/region/handoverOffer': {
-        const offer = params as unknown as RpcPushes['tictac/api/region/handoverOffer']
-        void this.handleHandoverOffer(offer)
+      case 'tictac/api/region/handoverOffer':
+        void this.offered(params as unknown as RpcPushes['tictac/api/region/handoverOffer'])
         return
-      }
-      case 'tictac/api/region/handoverComplete': {
-        const complete = params as unknown as RpcPushes['tictac/api/region/handoverComplete']
-        this.handleHandoverComplete(complete)
-        return
-      }
     }
 
     const room = this.room
@@ -724,66 +781,153 @@ export class ServerConnection {
    * way a connection learns that a close is the server's decision, rather
    * than inferring it from what the window was doing when the socket went.
    *
-   * `never` and `elsewhere` end this connection for good — `elsewhere` after
-   * saying where the session went (`onElsewhere`), which is the hook a region
-   * handover takes the window to the new server by. `retry` is a drop the
-   * server announced: the usual way back, at once. A word this build does not
-   * know is read as `never`, because dialling a server that has said it does
-   * not want this window is the worse mistake.
+   * `never` ends this connection for good. `elsewhere` moves the window onto
+   * the socket a handover opened to the target — in place, so the connection,
+   * its listeners and its room stay and only the socket changes — or, with no
+   * handover being taken, ends the connection after saying where the session
+   * went (`onElsewhere`). `retry` is a drop the server announced: the usual
+   * way back, at once. A word this build does not know is read as `never`,
+   * because dialling a server that has said it does not want this window is
+   * the worse mistake.
    */
   private sessionEnded(socket: Socket, ended: Partial<SessionEnded>): void {
+    const reason = typeof ended.reason === 'string' && ended.reason.length > 0 ? ended.reason : SESSION_ENDED
+    const handover = this.handover
+    if (socket !== this.socket) {
+      // Only a handover's socket is heard from here (`receive`), and the
+      // target ending its session is the handover failing, not the window's.
+      if (handover?.socket === socket) this.failHandover(handover, reason)
+      return
+    }
     if (ended.reconnect === 'retry') {
       this.giveUpOn(socket)
       return
     }
     if (ended.reconnect === 'elsewhere' && typeof ended.url === 'string') {
+      if (handover) {
+        // The squad is the target's now. The window is let go of by the source
+        // for good, so it is not a drop to dial back from: the second socket,
+        // which is already at the target, is the window's once it has arrived.
+        handover.sourceEnded = true
+        this.abandon(socket, MOVED)
+        socket.transport.close()
+        this.moveOver(handover)
+        return
+      }
       for (const listener of this.elsewhereListeners) listener(ended.url)
     }
-    this.terminate(typeof ended.reason === 'string' && ended.reason.length > 0 ? ended.reason : SESSION_ENDED)
+    this.terminate(reason)
   }
 
   /**
-   * Handle two-phase region handover offer (RFC-0002 / tictac-dwq).
-   * Opens a secondary socket to targetUrl without dropping the current primary socket.
+   * Take a region handover offer (RFC-0002 §3) while the source stays the
+   * window's server: open a second socket to the target, say hello, sign in
+   * and `region/arrive` on it. Moving onto it waits for the source's
+   * `session/ended` (`moveOver`). Whatever goes wrong before that leaves the
+   * window where it is, and the source told (`failHandover`).
    */
-  private async handleHandoverOffer(offer: RpcPushes['tictac/api/region/handoverOffer']): Promise<void> {
+  private async offered(offer: RpcPushes['tictac/api/region/handoverOffer']): Promise<void> {
+    if (this.current.kind !== 'open' || !this.socket) return
+    if (this.handover) {
+      this.cancelOnSource(offer.handoverId, HANDOVER_BUSY)
+      return
+    }
     for (const listener of this.handoverListeners) listener({ kind: 'offered', targetRegion: offer.targetRegion })
+    let socket: Socket
     try {
-      const secondary = new ServerConnection(offer.targetUrl, {
-        connect: this.connect,
-        schedule: this.schedule,
-        tokens: this.tokens,
-        giveUpMs: this.giveUpMs,
-      })
-      this.secondaryConnection = secondary
-      // Arrive on target DO over the secondary socket
-      await secondary.request('tictac/api/region/arrive', {
+      socket = this.openSocket(offer.targetUrl)
+    } catch (error) {
+      this.cancelOnSource(offer.handoverId, error instanceof Error ? error.message : String(error))
+      return
+    }
+    // The offer's own expiry bounds the wait: a target that answers after it
+    // would be refused anyway.
+    const handover: Handover = {
+      id: offer.handoverId,
+      targetRegion: offer.targetRegion,
+      url: offer.targetUrl,
+      socket,
+      arrived: false,
+      sourceEnded: false,
+      cancelDeadline: this.schedule(
+        () => this.failHandover(handover, HANDOVER_TIMED_OUT),
+        Math.min(REQUEST_TIMEOUT_MS, offer.expiresAt - this.now()),
+      ),
+    }
+    this.handover = handover
+    try {
+      socket.transport.send({ jsonrpc: '2.0', method: RpcMethods.hello, params: { ...MY_VERSION } })
+      // Not `presentToken`: a refusal here is the handover failing, and must
+      // not forget the token or sign the window out of the source it is on.
+      const token = this.tokens.get()
+      if (token) await this.call(socket, 'tictac/api/account/signIn', { token })
+      const { committed } = await this.call(socket, 'tictac/api/region/arrive', {
         handoverId: offer.handoverId,
         token: offer.token,
-        squadId: this.player?.id ?? '',
+        squadId: offer.squadId,
       })
+      if (!committed) throw new Error('The target server did not take the squad.')
     } catch (error) {
-      // If secondary connection or arrive fails, cancel handover on primary socket
-      if (this.socket && !this.socket.done) {
-        void this.call(this.socket, 'tictac/api/region/cancelHandover', {
-          handoverId: offer.handoverId,
-          reason: error instanceof Error ? error.message : String(error),
-        })
-      }
-      this.secondaryConnection?.close()
-      this.secondaryConnection = null
+      this.failHandover(handover, error instanceof Error ? error.message : String(error))
+      return
     }
+    if (this.handover !== handover) return
+    handover.arrived = true
+    this.moveOver(handover)
   }
 
-  private handleHandoverComplete(complete: RpcPushes['tictac/api/region/handoverComplete']): void {
-    for (const listener of this.handoverListeners) listener({ kind: 'complete', targetRegion: complete.targetRegion })
-    // Primary socket is now cleanly closed as target connection is fully authoritative
-    if (this.socket) {
-      this.socket.transport.close()
-    }
+  /**
+   * Make the handover's socket the window's, once the target has taken the
+   * squad and the source has let the window go: the lobby and the room are
+   * asked for again on it, as after a drop, and everything else —
+   * subscriptions, listeners, the room's channel — carried on as it was.
+   */
+  private moveOver(handover: Handover): void {
+    if (this.handover !== handover || !handover.arrived || !handover.sourceEnded) return
+    this.handover = null
+    handover.cancelDeadline()
+    const socket = handover.socket
+    this.address = handover.url
+    this.socket = socket
+    for (const listener of this.handoverListeners) listener({ kind: 'complete', targetRegion: handover.targetRegion })
+    for (const waiter of this.waiters.splice(0)) waiter.resolve(socket)
+    // Nothing said between now and the seat being given again on the target arrives.
+    if (this.room?.seated) this.room.member.dropped(1)
+    this.resume(socket).catch(() => this.giveUpOn(socket))
+    void this.syncClock(socket)
   }
+
+  /**
+   * The handover did not come off: its socket is closed from this side, the
+   * source is asked to keep the squad, and the window stays where it was.
+   */
+  private failHandover(handover: Handover, reason: string): void {
+    if (this.handover !== handover) return
+    this.dropHandover(handover, reason)
+    this.cancelOnSource(handover.id, reason)
+    // The source had already let go of the window: nothing is left to stay on.
+    if (!this.socket) this.retry()
+  }
+
+  /** Close a handover's socket without a word to anybody: the source it was for is gone. */
+  private dropHandover(handover: Handover, reason: string): void {
+    this.handover = null
+    handover.cancelDeadline()
+    this.abandon(handover.socket, reason)
+    handover.socket.transport.close()
+  }
+
+  /** Tell the source, if the window is still on it, that this offer will not be taken. */
+  private cancelOnSource(handoverId: string, reason: string): void {
+    const source = this.socket
+    if (source && !source.done) this.ask(source, 'tictac/api/region/cancelHandover', { handoverId, reason }, () => {})
+  }
+
   /** Let go of `socket`: nothing it says is read again, and whatever was asked on it is told `reason`. */
   private abandon(socket: Socket, reason: string): void {
+    // The source's own going, after it has said the window moves on, leaves
+    // the handover to finish; any other loss of it ends the handover too.
+    if (this.socket === socket && this.handover && !this.handover.sourceEnded) this.dropHandover(this.handover, reason)
     socket.done = true
     socket.cancelDeadline?.()
     if (this.socket === socket) this.socket = null
@@ -844,6 +988,7 @@ export class ServerConnection {
   /** The end of this connection, for good. */
   private terminate(reason: string): void {
     if (this.current.kind === 'closed') return
+    if (this.handover) this.dropHandover(this.handover, reason)
     this.cancelRetry?.()
     this.cancelGiveUp?.()
     this.cancelRetry = this.cancelGiveUp = null

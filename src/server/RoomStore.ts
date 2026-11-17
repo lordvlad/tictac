@@ -1,9 +1,11 @@
 import type { Faction } from '../config'
+import type { RecordingHeader } from '../wire/Recording'
 import type { SeatControl } from '../wire/Encounter'
 import type { RoomPhase } from '../wire/Lobby'
 import type { StandingOrder } from '../wire/Rpc'
 import type { PeerVersion } from '../version'
-import type { Db } from './db/Db'
+import { Batch, type Db } from './db/Db'
+import type { MatchStore } from './MatchStore'
 
 /**
  * The rooms a lobby holds open, written down so a restarted server can hold
@@ -98,8 +100,28 @@ export class RoomStore {
 
   /** Write a room as it stands now, whether or not it was written before. */
   async save(room: StoredRoom): Promise<void> {
+    const batch = new Batch()
+    this.saveInto(batch, room)
+    await this.db.transaction(batch)
+  }
+
+  /**
+   * Write a room and the match it begins in one transaction, so a crash
+   * leaves both or neither. A match without its room row is a fight no
+   * restart can find (the encounter's row says it opened, `restore` lists
+   * rooms, and this one is not among them). Neither half is ever written
+   * alone (tictac-uqt.29).
+   */
+  async openWithMatch(room: StoredRoom, matches: MatchStore, header: RecordingHeader): Promise<void> {
+    const batch = new Batch()
+    matches.createInto(batch, header, room.id)
+    this.saveInto(batch, room)
+    await this.db.transaction(batch)
+  }
+
+  private saveInto(batch: Batch, room: StoredRoom): void {
     const { blue, red } = room
-    await this.db.query`
+    batch.query`
       INSERT INTO rooms (id, build, protocol, phase, created_at, judged, sides,
                          blue_player_id, blue_name, blue_key_hash, red_player_id, red_name, red_key_hash,
                          encounter, blue_control, red_control, blue_join_by, red_join_by, blue_standing, red_standing)

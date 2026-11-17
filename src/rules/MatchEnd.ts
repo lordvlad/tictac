@@ -1,14 +1,32 @@
 import { Faction } from '../config'
 import { STATUSES } from '../core/Arsenal'
-import type { Grid } from '../core/Grid'
+import type { StatusState } from '../core/Ballistics'
+import type { Grid, Tile } from '../core/Grid'
 import type { CharacterSheet } from '../core/Characters'
 import { copyDeeds, type Deeds, grown, growthFrom, type Growth } from '../core/Progression'
 import { Rng } from '../core/rng'
-import type { Soldier } from '../entities/Soldier'
+
+/**
+ * What the match end reads of a unit. Structural, so the rules do not import
+ * the `Soldier` wrapper that sits above them: whoever holds soldiers hands
+ * them in, and gets the same soldiers back.
+ */
+export interface Contestant {
+  readonly isDead: boolean
+  /** Still on the field: neither killed nor retreated. */
+  readonly onField: boolean
+  /** Retreated off the edge. */
+  readonly withdrawn: boolean
+  readonly hp: number
+  readonly tile: Tile
+  readonly statuses: readonly StatusState[]
+  readonly sheet: CharacterSheet
+  readonly deeds: Deeds
+}
 
 /** Anything that knows who is on which side. */
-interface Sides {
-  readonly byFaction: Record<Faction, readonly Soldier[]>
+interface Sides<U extends Contestant> {
+  readonly byFaction: Record<Faction, readonly U[]>
 }
 
 /**
@@ -18,7 +36,7 @@ interface Sides {
  * with nobody left on either side (a blast that took the last of both) has no
  * winner either.
  */
-export function winnerOf(squads: Sides): Faction | null {
+export function winnerOf(squads: Sides<Contestant>): Faction | null {
   const standing = (faction: Faction) => squads.byFaction[faction].some((unit) => unit.onField)
   const blue = standing(Faction.Blue)
   const red = standing(Faction.Red)
@@ -27,8 +45,8 @@ export function winnerOf(squads: Sides): Faction | null {
 }
 
 /** One survivor and what the match taught them. */
-export interface Debrief {
-  unit: Soldier
+export interface Debrief<U extends Contestant = Contestant> {
+  unit: U
   growth: Growth[]
 }
 
@@ -38,7 +56,7 @@ export interface Debrief {
  * anything travelling. The dead learn nothing, and a side that lost learns
  * nothing either: losing is what permadeath is for (ITEM-004).
  */
-export function debrief(squads: Sides, winner: Faction): Debrief[] {
+export function debrief<U extends Contestant>(squads: Sides<U>, winner: Faction): Debrief<U>[] {
   return squads.byFaction[winner]
     .filter((unit) => !unit.isDead)
     .map((unit) => ({ unit, growth: growthFrom(unit.sheet, unit.deeds) }))
@@ -49,7 +67,7 @@ export function debrief(squads: Sides, winner: Faction): Debrief[] {
  * one exception to "a side that lost learns nothing" (GDD combat §2.8). Empty
  * when the side was wiped out.
  */
-export function escaped(squads: Sides, loser: Faction): Debrief[] {
+export function escaped<U extends Contestant>(squads: Sides<U>, loser: Faction): Debrief<U>[] {
   return squads.byFaction[loser]
     .filter((unit) => unit.withdrawn)
     .map((unit) => ({ unit, growth: growthFrom(unit.sheet, unit.deeds) }))
@@ -70,7 +88,7 @@ const SURVIVOR_STREAM = 0xc2b2ae35
  * and null when it retreated: those who reached the edge got out on their own
  * feet, and whoever was left behind is lost.
  */
-export function carriedOut(squads: Sides, loser: Faction, grid: Grid, seed: number): Soldier | null {
+export function carriedOut<U extends Contestant>(squads: Sides<U>, loser: Faction, grid: Grid, seed: number): U | null {
   const fallen = squads.byFaction[loser]
   if (fallen.length === 0 || fallen.some((unit) => unit.withdrawn)) return null
   const steady = fallen.filter(
@@ -107,13 +125,13 @@ export type UnitFate =
  * then whoever got away comes back grown from what they did (`escaped`), and
  * whoever was left behind is gone.
  */
-export function settlement(
-  squads: Sides,
+export function settlement<U extends Contestant>(
+  squads: Sides<U>,
   winner: Faction,
-  carried: Soldier | null,
+  carried: U | null,
 ): Record<Faction, UnitFate[]> {
   const loser = winner === Faction.Blue ? Faction.Red : Faction.Blue
-  const growthByUnit = new Map<Soldier, Growth[]>()
+  const growthByUnit = new Map<U, Growth[]>()
   for (const { unit, growth } of debrief(squads, winner)) growthByUnit.set(unit, growth)
   for (const { unit, growth } of escaped(squads, loser)) growthByUnit.set(unit, growth)
 

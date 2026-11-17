@@ -30,7 +30,7 @@ fresh squad per match and write nothing anywhere.
 
 ---
 
-## 1. One Database, One Port
+## 1. Two Stores, One Port
 
 Where the database will finally live is open — a Durable Object per match, or
 one central Postgres — so nothing above `src/server/db/Db.ts` knows which engine
@@ -38,29 +38,81 @@ it is speaking to. `Bun.SQL` already speaks SQLite and Postgres through one
 tagged-template interface, so the port is thin: no ORM, no driver, no
 dependency.
 
+What the server keeps is two stores, over two databases (RFC-0002 §4):
+
 ```
-openPersistence(clock, url, party)
-  └── openDb(url) ── dialectOf(url) → 'sqlite' | 'postgres'
-        └── migrate(db, clock)
-              ├── MatchStore   — matches, events
-              ├── RoomStore    — rooms
-              ├── Accounts     — players, credentials, sessions, auth_challenges
-              ├── Rosters      — roster, match_results
-              ├── Squads       — squads
-              └── Encounters   — encounters
+AccountStore  (accountStoreOverDb)        the directory's: who a player is
+  └── migrate(ACCOUNT_SCHEMA)
+        └── Accounts   — players, credentials, sessions, auth_challenges
+
+RegionStore   (regionStoreOverDb)         one region's: what stands in it
+  └── migrate(REGION_SCHEMA)
+        ├── MatchStore   — matches, events
+        ├── RoomStore    — rooms
+        ├── Rosters      — roster, match_results
+        ├── Squads       — squads
+        └── Encounters   — encounters
 ```
+
+A region's tables hold **no reference to the account store's**: a player is a bare id on their
+rows, with no foreign key and no join, because the directory may be a different Durable Object
+with a different database. What turns the id into somebody — signing them in, a name in an
+encounter feed — is asked through `AccountsPort` (`src/server/AccountsPort.ts`): `Accounts` is the
+in-process implementation, and `src/server/AccountsRpc.ts` carries the same calls to the
+directory's Durable Object (`accountsOverRpc` / `serveAccounts`, refusals included — an
+`AuthError` crosses as data and is thrown again as the same class). Nothing on the port can be a
+transaction with a region's own writes, so **registration is two steps**: `Accounts.register`
+makes the player, their credential and a session in one commit; `RegionStore.enlist` then gives
+them a roster and a squad in one commit of the region that served the connection. A registration
+that dies between the two leaves an account with nothing in the region, which the first
+`squad/get` there repairs for the squad (`Squads.ensure`).
+
+Who hosts what:
+
+| Host | AccountStore | RegionStore | `AccountsPort` |
+|---|---|---|---|
+| Bun (`openPersistence`) | in-process, `--db` | in-process, `--region-db` (the same file when unset; a private `:memory:` each) | `Accounts` itself |
+| the singleton Durable Object | in its `ctx.storage.sql` | the same database, `self = 'singleton'` | `Accounts` itself, and **served to other regions** by `MatchDurableObject.accounts` |
+| any other region Durable Object | none | its own `ctx.storage.sql` | `accountsOverRpc` to the singleton |
+
+`Persistence` (`src/server/Persistence.ts`) is only the pair a host that holds both opens
+(`persistenceOverDb`, `portsOf`): a region that is not the directory has a `RegionStore` and no
+`Persistence`. The `RegionStore` knows its own name (`self`), which is the keeper of every squad it
+places (`Squads`) and the region the directory (`Owner.ts`) takes the host to be.
 
 **One store per table.** Every table is named in SQL by exactly one module — `MatchStore`
 (`matches`, `events`), `RoomStore` (`rooms`), `Accounts` (`players`, `credentials`, `sessions`,
 `auth_challenges`), `Rosters` (`roster`, `match_results`), `Squads` (`squads`), `Encounters`
-(`encounters`), `migrate` (`schema_migrations`) — and a store that needs another's data asks it
-(`Encounters` is handed `Rosters.result`, `RoomStore.holdsSeat` and `Accounts.player`; `Journeys`
-resolves a squad's player through `Accounts.player`). `tests/tableOwnership.test.ts` scans
-`src/server` and `workers` and fails when a table appears in the SQL of a second module.
+(`encounters`), `migrate` (`store_migrations`) — and a store that needs another's data asks it
+(`Encounters` is handed `Rosters.result`, `RoomStore.holdsSeat` and `AccountsPort.player`; `Journeys`
+resolves a squad's player through `AccountsPort.player`). `tests/tableOwnership.test.ts` migrates both
+schemas and fails when a table they leave behind appears in the SQL of a second module under
+`src/server` or `workers`.
 
-`Persistence` is the only thing that opens a database. Every store is handed
-one, which is what lets the referee, the HTTP API and the tests share one
+Nothing but a store's `…OverDb` function (or `openPersistence`, which opens the `Db`s for it) opens a
+database. Every store is handed
+one, which is what lets the referee, the sessions and the tests share one
 connection instead of three that can disagree.
+
+### Handover verbs
+
+A squad changing region (RFC-0002 §6) is a few verbs on `RegionStore`, each over the owning stores
+(`Squads`, `Rosters`, `Encounters` each queue their own rows onto one `Batch`):
+
+- `exportSquad(squadId)` — a `SquadBundle`: the squad row, the player's whole roster (the dead are
+  history and travel too) and the squad's encounters, as plain strings and numbers. The matches stay
+  in the region that refereed them, and `roster.died_in` is a bare id for that reason.
+- `importSquad(bundle)` — one transaction in the target; idempotent, so a lost reply can be resent.
+  The bundle's `owner` is kept: who keeps the squad is the handover's to commit, not the import's.
+- `squads.setOwner(squadId, region)` — the commit of the keeper: the 2PC's own step
+  (`HandoverCoordinator.confirm`), which claims the reservation *before* the write is awaited, so a
+  `cancel` that arrives meanwhile is refused instead of landing between the write and the
+  bookkeeping, and gives the claim back if the write fails.
+- `deleteSquad(squadId)` — one transaction: encounters, roster and squad. The source lets go once
+  the target is the keeper.
+
+`tests/regions.test.ts` runs them between two `RegionStore`s, the target with an empty database and
+no account for the player.
 
 ### Transactions are batches
 
@@ -74,7 +126,7 @@ A callback form (`transaction(async (tx) => …)`) cannot be offered: a Durable
 Object's `transactionSync` forbids an `await` inside its closure, and an
 `await` between statements is exactly what such a callback is for. The port
 therefore has no transaction that *reads*. A caller reads what it needs, works
-out every write, and hands over one batch (`Accounts.register`, `Rosters.settle`,
+out every write, and hands over one batch (`Accounts.register`, `RegionStore.enlist`, `Rosters.settle`,
 `MatchStore.appendAll`, `migrate`); a batch cannot decide anything halfway.
 Anything that must be read and written atomically is a single statement
 (a subselect, `INSERT … ON CONFLICT`, a guarded `UPDATE`) or is made
@@ -95,8 +147,8 @@ exercised by `tests/cloudflare.test.ts`).
 ### One clock
 
 Every store takes the host's `ServerClock` (`src/server/Clock.ts`) in its
-constructor — `openPersistence(clock, url, party)` /
-`persistenceOverDb(db, clock, party)` — so timestamps written to rows, session
+constructor — `openPersistence(clock, url, options)` /
+`persistenceOverDb(db, clock, options)` — so timestamps written to rows, session
 and challenge lifetimes, and migration stamps read the same hands as the
 lobby, the journeys and the handover coordinator. `Date.now` appears only in
 the wall-clock factory (`tests/determinism.test.ts` scans `src/server` and
@@ -127,45 +179,74 @@ variable is set, and every persistence test is a `describe.each` over it.
 
 ---
 
-## 2. Forward-Only Migrations
+## 2. Forward-Only Migrations, One List Per Store
 
-`src/server/db/migrate.ts` and `migrations.ts`. There is no `down`: a rollback is
-a second description of the same change, written when it is least likely to be
-tested and run when it is least likely to be understood. A schema that has gone
-somewhere wrong goes somewhere else *next*.
+`src/server/db/migrate.ts`, with one schema per store: `accountMigrations.ts`
+(`ACCOUNT_SCHEMA`) and `regionMigrations.ts` (`REGION_SCHEMA`). There is no `down`: a rollback is
+a second description of the same change, written when it is least likely to be tested and run when
+it is least likely to be understood. A schema that has gone somewhere wrong goes somewhere else
+*next*.
+
+Each store numbers its list `1..n` on its own, and the ledger is one table, `store_migrations
+(store, id, name, applied_at)`, keyed by store — so the two lists may share a database (the
+singleton Durable Object, a development file) without ever seeing each other's rows.
 
 Every process that opens the database migrates it on the way in, which is safe
 because `migrate` is idempotent, and it means there is no deploy step to forget.
-Before it applies anything it refuses three things by name:
+Before it applies anything it refuses four things by name:
 
 | Refusal | Why |
 |---|---|
 | ids not `1..n` in order | a gap or a reorder applies the wrong statements under the right number |
 | a name that disagrees with the database's | a migration is identified by number *and* name, so an edited one is a deliberate break |
 | an applied id past the end of this build's list | **the dangerous direction**: an older build reading a newer schema writes rows the newer build will not recognise |
+| an old-ledger database that stops before its last migration | see "Databases from before the split" below |
 
-Each migration runs as one batch with the `schema_migrations` row that
+Each migration runs as one batch with the `store_migrations` row that
 records it (§1), so a half-applied schema is not reachable — on a Durable Object as much as on Bun. A statement may be a
-plain string or `{ sqlite, postgres }` — used once so far, for the append-only
-trigger, with both halves the *same number of statements* so a database's
-statement count does not depend on where it lives.
+plain string or `{ sqlite, postgres }` (each half a string or a list): the append-only trigger,
+which the engines spell differently, and the removal of a foreign key, which SQLite can only do by
+rebuilding the table and Postgres by dropping the constraint.
 
-Migrations are append-only and never edited once shipped:
+### The account store's list
 
-1. **`match log`** — `matches`, `events`, and the append-only triggers.
-2. **`accounts`** — `players`, `credentials`, `sessions`, `auth_challenges`.
-3. **`rosters`** — `roster`, `match_results`.
-4. **`lasting wounds`** — `roster.hp`, `roster.deeds` (`ITEM-038`). The `deeds` default is a
-   literal: a column DEFAULT is DDL and takes no bound parameter on either engine; the text is
-   exactly what the earlier `JSON.stringify` produced.
-5. **`fatigue and medical bay`** — `roster.fatigue`, `roster.downtime` (`ITEM-039`).
-6. **`rooms`** — `rooms`, the lobby's live rooms (§3).
-7. **`squads`** — `squads`, where each squad is on the world map (§5a).
-8. **`encounter rooms`** — `rooms.encounter`, `blue_control`, `red_control`, `blue_join_by`, `red_join_by`: the rooms the server opens for a fight on the road, and who moves each seat (§3).
-9. **`encounters`** — `encounters`, what found a squad on the road (§5b).
-10. **`player encounters`** — `squads.standing`, `rooms.*_standing`, `encounters.opponent_player_id` (§5b).
-11. **`squad owner`** — `squads.owner`, the region that keeps a squad (§5a).
-12. **`encounter intent`** — `encounters.settled`: a contact is written before its fight is opened (§5b).
+1. **`accounts`** — `players`, `credentials`, `sessions`, `auth_challenges`.
+
+### The region store's list
+
+1. **`region baseline`** — `matches`, `events` (and the append-only triggers), `roster` (with
+   `hp`, `deeds` — `ITEM-038` — `fatigue`, `downtime` — `ITEM-039`), `match_results`, `rooms` (the
+   lobby's live rooms, §3, with the encounter, control, join-window and standing columns), `squads`
+   (with `standing` and `owner`, §5a) and `encounters` (§5b, with `opponent_player_id` and
+   `settled`) — each in its final shape and with **no reference to `players`** (see §2.1). The
+   `deeds` default is a literal: a column DEFAULT is DDL and takes no bound parameter on either
+   engine; the text is exactly what the earlier `JSON.stringify` produced.
+2. **`no player foreign keys`** — takes the `players` keys out of the tables that had them
+   (`roster.player_id`, `roster.died_in`'s key to `matches`, `match_results.blue_player`/`red_player`,
+   `squads.player_id`, `encounters.player_id`). On a database from before the split that is a rebuild
+   of those tables (SQLite) or a dropped constraint (Postgres); on a fresh region database it
+   rebuilds empty tables into the shape they already have.
+
+### 2.1 Databases from before the split
+
+A database written by the old single-schema build holds both stores' tables, with the ledger
+`schema_migrations` (twelve migrations: `match log` … `encounter intent`). Nothing is applied from
+that list any more, and nothing about it needs doing by hand: opening the database with this build
+is the migration path.
+
+- `migrate` first checks that old ledger is **complete** — exactly the twelve migrations, by name
+  — and refuses a database that is not ("open it once with the previous build"), because the
+  baselines adopt the tables as they are. A newer ledger is refused as the dangerous direction.
+- Both baselines are `CREATE … IF NOT EXISTS`, so the tables, the rows in them, the indexes and the
+  append-only triggers are adopted untouched. The account store never needed to change them.
+- The region's second migration then rebuilds the tables that referenced `players`, copying every
+  row (`tests/db.test.ts`, "A database written before the account/region split", runs it over a
+  database the old build's migrations really made, with a roster, a casualty, a squad, a contact and
+  a settled match in it).
+
+`schema_migrations` itself is left in place as the record of what the old build ran. The singleton
+Durable Object is both the directory and the region `singleton`, in the one database it has always had,
+so its existing data stays readable with no step to take.
 
 > This is the *database* schema. The **recorded command and component
 > shapes** are a separate guard — `bun run schema:catalog`, see
@@ -198,7 +279,7 @@ restarted server needs to hold it again (`Lobby.restore`,
 |---|---|
 | `id` | the room's id, which is also its match's id in `matches` |
 | `build`, `protocol` | what the room was opened under; only a page on that build takes a seat back |
-| `phase` | `waiting`, `deploying` or `playing`. A room whose match `matches` holds is playing whatever this says: the match is written first, and a restart can fall between the two writes |
+| `phase` | `waiting`, `deploying` or `playing`. A room whose match `matches` holds is playing whatever this says: a room opened by this build writes its match and the row saying `playing` in one transaction (`RoomStore.openWithMatch`), and a row an older build wrote in two steps may still say otherwise |
 | `created_at` | ISO string; restore order, and so listing order |
 | `judged` | 1, or 0 once a room of another build stopped being judged |
 | `sides` | JSON: the squads the referee verified against the rosters, which is who a settlement credits |
@@ -269,7 +350,7 @@ one: the client spreads the server's options (`rp.id` at registration, `rpId`
 at sign-in) into `navigator.credentials`. Chrome/Edge 128+ and Safari 18 fetch
 the file; Firefox does not yet, so in Firefox a passkey only works on a page on
 the relying party's own site. Both the Worker (`workers/index.ts`, before the
-Durable Object) and `startGameServer` serve it, from the same handler.
+Durable Object, through `createMatchServer`) and `startGameServer` serve it, from the same handler.
 
 ### Over the socket (`src/server/Session.ts`)
 
@@ -480,8 +561,9 @@ durable fact `RegionDirectory.ownerOfSquad` reads ([ARCH-WORLD §4](world.md)).
 | `waypoints` | the waypoint list as JSON (`src/core/Travel.ts`): where it has been and is going. The position now is computed from it and the clock, never stored. |
 | `start_lat_e6`, `start_lng_e6` | the start, in integer millionths of a degree (the port takes TEXT and INTEGER only), indexed so the separation check is a range query |
 
-**The start.** Registration places the squad in the same batch as the player and the
-roster (§1), so no player exists without one. The point is drawn from system randomness, uniform over
+**The start.** Registration places the squad in the same batch as the roster (`RegionStore.enlist`,
+§1), straight after the account is made — in the region that served the connection, with that
+region as its keeper (`owner`). The point is drawn from system randomness, uniform over
 the 50 km disc around where Cloudflare placed the connection (`request.cf`, carried on the socket
 as `Upgrade.place`) or around Stuttgart centre when there is no such place, which on the Bun
 server is always. A draw within 1 km of another start is redrawn, up to 100 times; past that the
@@ -491,13 +573,13 @@ waypoint and the columns agree, and the reported location is written down nowher
 **One placement at a time.** The 1 km check is a read of the starts already kept, and a read followed
 by a write is not atomic (§1, *Transactions are batches*): two placements that overlapped would both
 see a clear disc. `Squads.placing` draws and commits under one queue, so each placement's check sees
-every start written before it; `Squads.place` (a player from before squads) and `Accounts.register`
-(the batch with the player) both go through it. That holds for the one process that writes the table
+every start written before it; `Squads.place` (a player from before squads) and `RegionStore.enlist`
+(the batch with the roster) both go through it. That holds for the one process that writes the table
 — one Durable Object or one Bun server per database — which is the rule here; two Bun servers sharing
 a Postgres would need a constraint the database enforces. `tests/squads.test.ts` places five players
 at once onto five candidate spots.
 
-**Players from before squads.** Migration 7 adds no rows: a random draw is not something SQL
+**Players from before squads.** The squads migration added no rows: a random draw is not something SQL
 should do. `Squads.ensure` places a player who has no squad the first time `squad/get` asks,
 near the asking socket's place, with `ON CONFLICT (player_id) DO NOTHING` so two windows asking
 at once end up with one squad.
@@ -530,9 +612,9 @@ rather than insert), asks the lobby to open the same id, and the lobby answers w
 already holds (`matches.header(roomId)`) instead of opening a second. A meeting begins and settles
 both players' rows in one `Db.transaction`, so it is written for both or neither; one that cannot
 happen is `discard`ed rather than settled. Meetings an older build wrote one side at a time are
-made whole by the next `begin`. A match whose room opened but whose row never landed (the match
-write is queued ahead of the room row) is reported opened and has no live room; the fight is lost,
-not duplicated.
+made whole by the next `begin`. A room's match and its row are written in one `Db.transaction`
+(`RoomStore.openWithMatch`, tictac-uqt.29), so a crash leaves both or neither: a fight is either
+live after the restart or not opened at all, and the lobby then opens it once under the reserved id.
 
 **Fights between players** (`ITEM-053`, migration 10, GDD-WORLD §5.5) are rows of this table too,
 one for each of the two players, so each has the fight in their own feed. `trip` is
@@ -560,17 +642,19 @@ not a match at all, `410`.
 
 ## 6. The Server and the Client
 
-`startGameServer` (`src/server/GameServer.ts`) is one `Bun.serve` with four
-jobs, in order: a WebSocket upgrade (handed to `Sessions`), map tiles when it
-was given a `tiles` handler, the related-origins file (§4), and the status
-document. `scripts/serve-match.ts`
-is a thin CLI over it:
+`startGameServer` (`src/server/GameServer.ts`) is the Bun half of the one match server
+(`createMatchServer`, `src/server/MatchServer.ts`, which `MatchDurableObject` calls too — see
+[ARCH-DEPLOYMENT](deployment.md) §2): one `Bun.serve` with four jobs, in order: a WebSocket upgrade
+(handed to `Sessions` with the request it came on, so `placeOf` can say where it came from), map
+tiles when it was given a `tiles` handler, the related-origins file (§4), and the status document
+at `/status`. Any other path is a 404. `scripts/serve-match.ts` is a thin CLI over it:
 
 ```sh
 bun run serve:match -- --db=sqlite://matches.sqlite --rp-id=localhost --origins=http://localhost:5173
 ```
 
-`--db` defaults to `TICTAC_DB` and then `:memory:`; `--rp-id` and `--origins`
+`--db` defaults to `TICTAC_DB` and then `:memory:`; `--region-db` (`TICTAC_REGION_DB`) gives the
+region store a database of its own and otherwise is `--db` again; `--rp-id` and `--origins`
 default to `localhost` and `http://localhost:5173`. For a GitHub Pages
 deployment the server runs with `--rp-id=lordvlad.github.io
 --origins=https://lordvlad.github.io` behind HTTPS/WSS. The server restores

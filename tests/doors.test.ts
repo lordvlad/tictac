@@ -16,9 +16,9 @@ import { createGlobalRules } from '../src/ecs/globals'
 import { CombatSystem, GroundSystem, ItemSystem, MovementSystem, TurnSystem, WallSystem } from '../src/ecs/systems'
 import { CommandSystem } from '../src/ecs/systems/CommandSystem'
 import { type Command } from '../src/rules/Command'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 import { stockSquads } from './support/squads'
-import { TurnManager } from '../src/rules/TurnManager'
+import { TurnManager } from '../src/sim/TurnManager'
 
 const always = (value: number): Roll => () => value
 

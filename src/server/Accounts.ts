@@ -1,14 +1,9 @@
-import { rollSquadSheets } from '../core/Characters'
-import { ROSTER } from '../config'
-import { Rng } from '../core/rng'
-import type { LatLng } from '../core/Travel'
 import { fromBase64Url, toBase64Url } from '../wire/Base64Url'
 import type { PasskeyAsserted, PasskeyCreated, PasskeyOptions, Player, SignedIn } from '../wire/Rpc'
+import type { AccountsPort } from './AccountsPort'
+import type { RelyingParty } from './AccountStore'
 import type { ServerClock } from './Clock'
 import { Batch, type Db } from './db/Db'
-import type { RelyingParty } from './Persistence'
-import type { Rosters } from './Rosters'
-import type { Squads } from './Squads'
 import {
   ALGORITHMS,
   AuthError,
@@ -27,10 +22,12 @@ import {
  * name they chose and a public key their device holds, and the server never
  * sees a secret it could lose.
  *
- * The one thing an account is *for*, in this game, is owning a roster that is
- * somewhere on the map — so a registration that created a player without a
- * roster or a squad would be a half-made account, and all of it happens in one
- * transaction below.
+ * The account store is the directory's: it knows a player, their passkeys and
+ * their sessions, and nothing of where their squad is or what is in their
+ * roster — that is a region's (`RegionStore.enlist`), made right after
+ * registration by whoever served it. This is what keeps a region's database
+ * free of the accounts', and why a region that has never seen a player can
+ * still sign one in: it asks here (`AccountsPort`).
  */
 
 /** How long a challenge is worth answering. Long enough for a human, short enough to be useless later. */
@@ -64,11 +61,9 @@ interface MintedSession {
   expiresAt: string
 }
 
-export class Accounts {
+export class Accounts implements AccountsPort {
   constructor(
     private readonly db: Db,
-    private readonly rosters: Rosters,
-    private readonly squads: Squads,
     private readonly party: RelyingParty,
     private readonly clock: ServerClock,
   ) {}
@@ -101,13 +96,8 @@ export class Accounts {
     }
   }
 
-  /**
-   * Take a created passkey, and with it make a player, a roster, a squad on
-   * the map and a session. The squad starts near `near` — where the
-   * connection was placed, if it was — which is used for the draw and kept
-   * nowhere (`Squads`).
-   */
-  async register(answer: PasskeyCreated, near: LatLng | null): Promise<SignedIn> {
+  /** Take a created passkey, and with it make a player and a session. */
+  async register(answer: PasskeyCreated): Promise<SignedIn> {
     const challenge = await this.takeChallenge(answer.challengeId, 'register')
     readClientData(fromBase64Url(answer.clientDataJSON), {
       type: 'webauthn.create',
@@ -135,32 +125,19 @@ export class Accounts {
     if (!playerId || !name) throw new AuthError(400, 'that sign-in request is not a registration')
 
     const created = new Date(this.clock.now()).toISOString()
-    // Everything that needs reading is done before the batch: the roster is
-    // rolled by the server, from system randomness (a client that dealt its
-    // own would deal itself six prodigies), as a full roster, not a squad —
-    // the bench exists so resting anyone is a choice.
-    const seed = crypto.getRandomValues(new Uint32Array(1))[0]!
-    const sheets = rollSquadSheets(new Rng(seed), ROSTER.size)
     const session = await this.mintSession(playerId)
 
-    // One commit, so a player never exists without a credential, a squad and a
-    // session — on a Durable Object as much as on Bun. The squad's start is
-    // drawn inside `placing`, which holds every other placement back until
-    // this commit is done, so the 1 km separation holds between players
-    // registering at once.
-    await this.squads.placing(near, async (placement) => {
-      const batch = new Batch()
-      batch.query`INSERT INTO players (id, name, created_at) VALUES (${playerId}, ${name}, ${created})`
-      batch.query`INSERT INTO credentials (id, player_id, public_key, algorithm, sign_count, created_at)
-                  VALUES (${answer.credentialId}, ${playerId}, ${answer.publicKey},
-                          ${answer.publicKeyAlgorithm}, ${authenticator.signCount}, ${created})`
-      this.rosters.enlistInto(batch, playerId, sheets)
-      this.squads.placeInto(batch, playerId, placement)
-      this.queueSession(batch, session)
-      await this.db.transaction(batch)
-    })
-    const token = session.token
-    return { token, player: { id: playerId, name } }
+    // One commit, so a player never exists without a credential and a
+    // session — on a Durable Object as much as on Bun. Their roster and squad
+    // are the region's to make, straight after (`RegionStore.enlist`).
+    const batch = new Batch()
+    batch.query`INSERT INTO players (id, name, created_at) VALUES (${playerId}, ${name}, ${created})`
+    batch.query`INSERT INTO credentials (id, player_id, public_key, algorithm, sign_count, created_at)
+                VALUES (${answer.credentialId}, ${playerId}, ${answer.publicKey},
+                        ${answer.publicKeyAlgorithm}, ${authenticator.signCount}, ${created})`
+    this.queueSession(batch, session)
+    await this.db.transaction(batch)
+    return { token: session.token, player: { id: playerId, name } }
   }
 
   /**

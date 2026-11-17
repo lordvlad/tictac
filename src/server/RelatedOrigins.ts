@@ -1,4 +1,4 @@
-import type { RelyingParty } from './Persistence'
+import type { RelyingParty } from './AccountStore'
 
 /** Where a browser looks, on the relying party id's own host, for the origins it may lend that id to. */
 export const RELATED_ORIGINS_PATH = '/.well-known/webauthn'

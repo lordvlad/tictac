@@ -14,8 +14,8 @@ import { TurnSystem } from '../src/ecs/systems'
 import { carriedOut, settlement, winnerOf, type UnitFate } from '../src/rules/MatchEnd'
 import type { CombatRecording, RecordingHeader } from '../src/wire/Recording'
 import type { Deployment } from '../src/core/Loadout'
-import { Squads } from '../src/rules/Squads'
-import { TurnManager } from '../src/rules/TurnManager'
+import { Squads } from '../src/entities/Squads'
+import { TurnManager } from '../src/sim/TurnManager'
 import type { Player } from '../src/wire/Rpc'
 import { Lobby } from '../src/server/Lobby'
 import type { Persistence } from '../src/server/Persistence'
@@ -119,18 +119,18 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
   async function enlisted(persistence: Persistence) {
     const sheets = (from: number): CharacterSheet[] =>
       Array.from({ length: SQUAD_SIZE }, (_, i) => characterSheet(new Rng(from + i)))
-    await persistence.db
+    await persistence.accounts.db
       .query`INSERT INTO players (id, name, created_at) VALUES (${'A'}, ${'Ada'}, ${'2026-01-01T00:00:00Z'})`
-    await persistence.db
+    await persistence.accounts.db
       .query`INSERT INTO players (id, name, created_at) VALUES (${'B'}, ${'Bo'}, ${'2026-01-01T00:00:00Z'})`
-    await persistence.rosters.enlist('A', sheets(10))
-    await persistence.rosters.enlist('B', sheets(50))
+    await persistence.region.rosters.enlist('A', sheets(10))
+    await persistence.region.rosters.enlist('B', sheets(50))
     // A match row, because a result names one.
-    await persistence.db
+    await persistence.region.db
       .query`INSERT INTO matches (id, header, created_at, seed_label) VALUES (${'m1'}, ${'{}'}, ${'2026-01-02T00:00:00Z'}, ${'m1'})`
     return {
-      a: await persistence.rosters.active('A'),
-      b: await persistence.rosters.active('B'),
+      a: await persistence.region.rosters.active('A'),
+      b: await persistence.region.rosters.active('B'),
     }
   }
 
@@ -152,7 +152,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     const expectedHp = Math.min(maxHp, Math.round(hpAtEnd + HEALING.perMatch * maxHp * (1 + healBonus / 100)))
     const thisMatch: Deeds = { ...noDeeds(), kills: 2, wounds: 40 }
 
-    await persistence.rosters.settle({
+    await persistence.region.rosters.settle({
       matchId: 'm1',
       winner: Faction.Blue,
       sides: {
@@ -179,7 +179,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
       },
     })
 
-    const after = await persistence.rosters.active('A')
+    const after = await persistence.region.rosters.active('A')
     expect(after.map((member) => member.slot)).toEqual([0, 1, 3])
     expect(after[0]!.sheet).toEqual(sanitizeSheet(grownSheet))
     expect(after.every((member) => member.matches === 1)).toBe(true)
@@ -192,7 +192,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     expect(after[0]!.deeds).toEqual(thisMatch)
     // The dead are kept as history, named by the match that killed them, with
     // their final HP and deeds — never negative, even from overkill.
-    const dead = await persistence.db.query<{ character_id: string; died_in: string; hp: number }>`
+    const dead = await persistence.region.db.query<{ character_id: string; died_in: string; hp: number }>`
       SELECT character_id, died_in, hp FROM roster WHERE player_id = ${'A'} AND status = ${'dead'}`
     expect(dead).toHaveLength(1)
     expect(dead[0]!.character_id).toBe(a[2]!.characterId)
@@ -201,7 +201,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
 
     // Losers learn nothing: the carried unit's sheet is exactly as it was, on
     // the HP the rules say — not full health — with this match in their log.
-    const survivors = await persistence.rosters.active('B')
+    const survivors = await persistence.region.rosters.active('B')
     expect(survivors).toHaveLength(1)
     expect(survivors[0]!.sheet).toEqual(b[0]!.sheet)
     expect(survivors[0]!.matches).toBe(1)
@@ -210,10 +210,10 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
 
     // A second match, on the same character: the combat log accumulates
     // rather than being replaced — a merge, not an overwrite.
-    await persistence.db
+    await persistence.region.db
       .query`INSERT INTO matches (id, header, created_at, seed_label) VALUES (${'m2'}, ${'{}'}, ${'2026-01-03T00:00:00Z'}, ${'m2'})`
     const secondMatch: Deeds = { ...noDeeds(), kills: 1, blows: 2 }
-    await persistence.rosters.settle({
+    await persistence.region.rosters.settle({
       matchId: 'm2',
       winner: Faction.Blue,
       sides: {
@@ -225,7 +225,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
         [Faction.Red]: null,
       },
     })
-    const afterTwo = await persistence.rosters.active('A')
+    const afterTwo = await persistence.region.rosters.active('A')
     expect(afterTwo[0]!.deeds).toEqual({
       hits: thisMatch.hits,
       crits: thisMatch.crits,
@@ -253,15 +253,15 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     const trueMax = maxHpOf(tough)
     expect(trueMax).toBe(derive(tough).maxHp + 25)
 
-    await persistence.db
+    await persistence.accounts.db
       .query`INSERT INTO players (id, name, created_at) VALUES (${'J'}, ${'Jug'}, ${'2026-01-01T00:00:00Z'})`
-    await persistence.rosters.enlist('J', [tough])
-    const [enlisted] = await persistence.rosters.active('J')
+    await persistence.region.rosters.enlist('J', [tough])
+    const [enlisted] = await persistence.region.rosters.active('J')
     expect(enlisted!.hp).toBe(trueMax)
 
-    await persistence.db
+    await persistence.region.db
       .query`INSERT INTO matches (id, header, created_at, seed_label) VALUES (${'mj'}, ${'{}'}, ${'2026-01-02T00:00:00Z'}, ${'mj'})`
-    await persistence.rosters.settle({
+    await persistence.region.rosters.settle({
       matchId: 'mj',
       winner: Faction.Blue,
       sides: {
@@ -275,7 +275,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
         [Faction.Red]: null,
       },
     })
-    const [healed] = await persistence.rosters.active('J')
+    const [healed] = await persistence.region.rosters.active('J')
     expect(healed!.hp).toBe(trueMax)
 
     await persistence.close()
@@ -285,7 +285,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     const persistence = await freshPersistence(url)
     const { a } = await enlisted(persistence)
 
-    await persistence.rosters.settle({
+    await persistence.region.rosters.settle({
       matchId: 'm1',
       winner: Faction.Blue,
       sides: {
@@ -303,22 +303,22 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
       },
     })
 
-    const shortHanded = await persistence.rosters.active('A')
+    const shortHanded = await persistence.region.rosters.active('A')
     expect(shortHanded.map((member) => member.slot)).toEqual([1, 2, 3])
 
-    const recruit = await persistence.rosters.recruit('A', new Rng(999))
+    const recruit = await persistence.region.rosters.recruit('A', new Rng(999))
     expect(recruit.slot).toBe(0)
     expect(recruit.matches).toBe(0)
     expect(recruit.hp).toBe(maxHpOf(recruit.sheet))
     expect(recruit.deeds).toEqual(noDeeds())
 
-    const full = await persistence.rosters.active('A')
+    const full = await persistence.region.rosters.active('A')
     expect(full.map((member) => member.slot)).toEqual([0, 1, 2, 3])
     expect(full[0]!.characterId).toBe(recruit.characterId)
 
     // The dead row stays as history: a fresh recruit in the same slot is a
     // different row, not a resurrection.
-    const dead = await persistence.db.query<{ character_id: string; slot: number }>`
+    const dead = await persistence.region.db.query<{ character_id: string; slot: number }>`
       SELECT character_id, slot FROM roster WHERE player_id = ${'A'} AND status = ${'dead'}`
     expect(dead).toHaveLength(1)
     expect(dead[0]!.character_id).toBe(a[0]!.characterId)
@@ -335,9 +335,9 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     const { a } = await enlisted(persistence)
     const benched = a[3]!
     const damagedHp = 1
-    await persistence.db.query`UPDATE roster SET hp = ${damagedHp} WHERE character_id = ${benched.characterId}`
+    await persistence.region.db.query`UPDATE roster SET hp = ${damagedHp} WHERE character_id = ${benched.characterId}`
 
-    await persistence.rosters.settle({
+    await persistence.region.rosters.settle({
       matchId: 'm1',
       winner: Faction.Blue,
       sides: {
@@ -354,7 +354,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
       },
     })
 
-    const after = await persistence.rosters.active('A')
+    const after = await persistence.region.rosters.active('A')
     const rested = after.find((member) => member.characterId === benched.characterId)!
     const { healBonus } = derive(benched.sheet)
     const maxHp = maxHpOf(benched.sheet)
@@ -371,11 +371,11 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     const persistence = await freshPersistence(url)
     const { a } = await enlisted(persistence)
     // a[0] deploys already at the cap; a[3] is benched, mid-recovery.
-    await persistence.db.query`UPDATE roster SET fatigue = ${FATIGUE.max} WHERE character_id = ${a[0]!.characterId}`
-    await persistence.db
+    await persistence.region.db.query`UPDATE roster SET fatigue = ${FATIGUE.max} WHERE character_id = ${a[0]!.characterId}`
+    await persistence.region.db
       .query`UPDATE roster SET fatigue = ${3}, downtime = ${2} WHERE character_id = ${a[3]!.characterId}`
 
-    await persistence.rosters.settle({
+    await persistence.region.rosters.settle({
       matchId: 'm1',
       winner: Faction.Blue,
       sides: {
@@ -391,7 +391,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
       },
     })
 
-    const after = await persistence.rosters.active('A')
+    const after = await persistence.region.rosters.active('A')
     const byId = new Map(after.map((member) => [member.characterId, member]))
     // Deployed at the cap stays at the cap, one step past it.
     expect(byId.get(a[0]!.characterId)!.fatigue).toBe(FATIGUE.max)
@@ -413,7 +413,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     const maxHp = maxHpOf(a[1]!.sheet)
     const concussedHp = Math.floor(WOUNDS.concussed * maxHp)
 
-    await persistence.rosters.settle({
+    await persistence.region.rosters.settle({
       matchId: 'm1',
       winner: Faction.Blue,
       sides: {
@@ -430,7 +430,7 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
       },
     })
 
-    const after = await persistence.rosters.active('A')
+    const after = await persistence.region.rosters.active('A')
     const byId = new Map(after.map((member) => [member.characterId, member]))
     expect(byId.get(a[0]!.characterId)!.downtime).toBe(0)
     expect(byId.get(a[1]!.characterId)!.downtime).toBe(MEDICAL_BAY.concussed)
@@ -444,9 +444,9 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     await enlisted(persistence)
     // `enlisted` deals a squad (SQUAD_SIZE); recruiting tops the roster up to
     // ROSTER.size before the slot really is full.
-    for (let at = SQUAD_SIZE; at < ROSTER.size; at++) await persistence.rosters.recruit('A')
+    for (let at = SQUAD_SIZE; at < ROSTER.size; at++) await persistence.region.rosters.recruit('A')
 
-    await expect(persistence.rosters.recruit('A')).rejects.toThrow(/already full/)
+    await expect(persistence.region.rosters.recruit('A')).rejects.toThrow(/already full/)
 
     await persistence.close()
   })
@@ -487,11 +487,11 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
       },
     }
 
-    await persistence.rosters.settle(result)
-    const once = await persistence.rosters.active('A')
-    await persistence.rosters.settle(result)
+    await persistence.region.rosters.settle(result)
+    const once = await persistence.region.rosters.active('A')
+    await persistence.region.rosters.settle(result)
 
-    expect(await persistence.rosters.active('A')).toEqual(once)
+    expect(await persistence.region.rosters.active('A')).toEqual(once)
     expect(once[0]!.matches).toBe(1)
     await persistence.close()
   })
@@ -515,14 +515,14 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
     }
 
     // died_in references matches(id), so settling without a matches row throws SQLite foreign key error
-    await expect(persistence.rosters.settle(failingResult)).rejects.toThrow()
+    await expect(persistence.region.rosters.settle(failingResult)).rejects.toThrow()
 
     // Because match_results is inserted last, no row exists in match_results
-    const records = await persistence.db.query<{ match_id: string }>`
+    const records = await persistence.region.db.query<{ match_id: string }>`
       SELECT match_id FROM match_results WHERE match_id = ${'failing-match'}`
     expect(records.length).toBe(0)
     // Create the matches row so foreign keys for match_results succeed
-    await persistence.db.query`
+    await persistence.region.db.query`
       INSERT INTO matches (id, header, created_at, seed_label)
       VALUES (${'failing-match'}, ${'{}'}, ${new Date().toISOString()}, ${'test'})`
 
@@ -538,8 +538,8 @@ describe.each(DATABASE_URLS)('Rosters on %s', (url) => {
         [Faction.Red]: null,
       },
     }
-    await persistence.rosters.settle(validResult)
-    const settled = await persistence.db.query<{ match_id: string }>`
+    await persistence.region.rosters.settle(validResult)
+    const settled = await persistence.region.db.query<{ match_id: string }>`
       SELECT match_id FROM match_results WHERE match_id = ${'failing-match'}`
     expect(settled.length).toBe(1)
 
@@ -551,16 +551,16 @@ describe('A refereed match is kept on the rosters it was played with', () => {
   async function playing(url: string, blueSheets: CharacterSheet[], redSheets: CharacterSheet[], seed: number) {
     const persistence = await freshPersistence(url)
     for (const { id, name } of [ADA, BO]) {
-      await persistence.db
+      await persistence.accounts.db
         .query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${name}, ${'2026-01-01T00:00:00Z'})`
     }
-    await persistence.rosters.enlist('A', blueSheets)
-    await persistence.rosters.enlist('B', redSheets)
+    await persistence.region.rosters.enlist('A', blueSheets)
+    await persistence.region.rosters.enlist('B', redSheets)
     const verdicts: RefereeVerdict[] = []
     const lobby = new Lobby({
-      matches: persistence.matches,
-      rooms: persistence.rooms,
-      rosters: persistence.rosters,
+      matches: persistence.region.matches,
+      rooms: persistence.region.rooms,
+      rosters: persistence.region.rosters,
       onVerdict: (verdict) => verdicts.push(verdict),
       log: () => {},
       clock: WALL_CLOCK,
@@ -585,8 +585,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Red]: sheetsOf(recording.header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
     }
     const characterIds = {
-      [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
-      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+      [Faction.Blue]: (await persistence.region.rosters.active('A')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.region.rosters.active('B')).map((member) => member.characterId),
     }
 
     const { blue } = await seatBoth(lobby, ADA, BO)
@@ -621,14 +621,14 @@ describe('A refereed match is kept on the rosters it was played with', () => {
         return []
       })
     const kept = async (playerId: string): Promise<CharacterSheet[]> =>
-      (await persistence.rosters.active(playerId)).map((member: RosterMember) => member.sheet)
+      (await persistence.region.rosters.active(playerId)).map((member: RosterMember) => member.sheet)
 
     expect(await kept('A')).toEqual(expected(Faction.Blue))
     expect(await kept('B')).toEqual(expected(Faction.Red))
     // The losing side keeps exactly the one carried out, and nothing it learned.
     const carriedSlot = fates[loser].findIndex((fate) => fate.kind === 'carried')
     const loserPlayer = loser === Faction.Blue ? 'A' : 'B'
-    const survivors = await persistence.rosters.active(loserPlayer)
+    const survivors = await persistence.region.rosters.active(loserPlayer)
     expect(survivors).toHaveLength(1)
     expect(survivors[0]!.slot).toBe(carriedSlot)
     expect(survivors[0]!.sheet).toEqual(sanitizeSheet(sheetsOf(recording.header, loser)[carriedSlot]!))
@@ -647,7 +647,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
-    const before = await persistence.rosters.active('A')
+    const before = await persistence.region.rosters.active('A')
 
     const { blue } = await seatBoth(lobby, ADA, BO)
     // A real id of A's, a sheet that is not that character's.
@@ -663,7 +663,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     expect(verdicts).toHaveLength(1)
     expect(verdicts[0]!.reason).toMatch(/not the roster/)
     expect(verdicts[0]!.side).toBe(Faction.Blue)
-    expect(await persistence.rosters.active('A')).toEqual(before)
+    expect(await persistence.region.rosters.active('A')).toEqual(before)
 
     await persistence.close()
   })
@@ -681,8 +681,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     )
 
     const characterIds = {
-      [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
-      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+      [Faction.Blue]: (await persistence.region.rosters.active('A')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.region.rosters.active('B')).map((member) => member.characterId),
     }
     const { blue } = await seatBoth(lobby, ADA, BO)
     // No `startingHp` at all — exactly what an old client, or one that
@@ -711,8 +711,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     }
 
     const characterIds = {
-      [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
-      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+      [Faction.Blue]: (await persistence.region.rosters.active('A')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.region.rosters.active('B')).map((member) => member.characterId),
     }
     const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
@@ -746,8 +746,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       [Faction.Red]: sheetsOf(recording.header, Faction.Red).map(() => 0),
     }
     const characterIds = {
-      [Faction.Blue]: (await persistence.rosters.active('A')).map((member) => member.characterId),
-      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+      [Faction.Blue]: (await persistence.region.rosters.active('A')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.region.rosters.active('B')).map((member) => member.characterId),
     }
     const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
@@ -771,10 +771,10 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
-    const enlisted = await persistence.rosters.active('A')
+    const enlisted = await persistence.region.rosters.active('A')
     // A wound the last match left them with, not yet healed off — the exact
     // state the referee refuses to send back out.
-    await persistence.db
+    await persistence.region.db
       .query`UPDATE roster SET downtime = ${1} WHERE character_id = ${enlisted[0]!.characterId}`
 
     const startingHp = {
@@ -783,7 +783,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     }
     const characterIds = {
       [Faction.Blue]: enlisted.map((member) => member.characterId),
-      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.region.rosters.active('B')).map((member) => member.characterId),
     }
     const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
@@ -810,7 +810,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
-    const before = await persistence.rosters.active('A')
+    const before = await persistence.region.rosters.active('A')
 
     const first = await connect(lobby, ADA, { kind: 'open' })
     const roomId = roomOf(first)
@@ -821,8 +821,8 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     expect(first.ended).toEqual([{ reason: expect.stringMatching(/another window/), reconnect: 'never' }])
     expect(second.seats).toEqual([])
     expect(second.of('abort')[0]?.reason).toBe('That match is gone.')
-    expect(await persistence.matches.header(roomId)).toBeNull()
-    expect(await persistence.rosters.active('A')).toEqual(before)
+    expect(await persistence.region.matches.header(roomId)).toBeNull()
+    expect(await persistence.region.rosters.active('A')).toEqual(before)
     expect(verdicts).toEqual([])
 
     await persistence.close()
@@ -836,7 +836,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
-    const before = await persistence.rosters.active('A')
+    const before = await persistence.region.rosters.active('A')
 
     const { blue, roomId } = await seatBoth(lobby, null, null)
     blue.send({ type: 'matchHeader', header: recording.header })
@@ -844,9 +844,9 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     await lobby.idle()
 
     expect(verdicts).toEqual([])
-    expect(await persistence.matches.events(roomId)).toHaveLength(recording.events.length)
-    expect(await persistence.rosters.active('A')).toEqual(before)
-    expect(await persistence.db.query`SELECT match_id FROM match_results`).toEqual([])
+    expect(await persistence.region.matches.events(roomId)).toHaveLength(recording.events.length)
+    expect(await persistence.region.rosters.active('A')).toEqual(before)
+    expect(await persistence.region.db.query`SELECT match_id FROM match_results`).toEqual([])
 
     await persistence.close()
   })
@@ -871,18 +871,18 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       sheetsOf(header, Faction.Red),
       header.seed,
     )
-    const enlisted = await persistence.rosters.active('A')
-    await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE character_id = ${enlisted[1]!.characterId}`
+    const enlisted = await persistence.region.rosters.active('A')
+    await persistence.region.db.query`UPDATE roster SET status = ${'dead'} WHERE character_id = ${enlisted[1]!.characterId}`
 
     // The three living, in slot order — exactly who a client would state.
-    const living = await persistence.rosters.active('A')
+    const living = await persistence.region.rosters.active('A')
     const startingHp = {
       [Faction.Blue]: sheetsOf(header, Faction.Blue).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
       [Faction.Red]: sheetsOf(header, Faction.Red).map((sheet) => maxHpOf(sanitizeSheet(sheet))),
     }
     const characterIds = {
       [Faction.Blue]: living.map((member) => member.characterId),
-      [Faction.Red]: (await persistence.rosters.active('B')).map((member) => member.characterId),
+      [Faction.Red]: (await persistence.region.rosters.active('B')).map((member) => member.characterId),
     }
     const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({
@@ -893,7 +893,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
     await lobby.idle()
 
     expect(verdicts).toEqual([])
-    const played = await persistence.db.query<{ character_id: string; matches: number }>`
+    const played = await persistence.region.db.query<{ character_id: string; matches: number }>`
       SELECT character_id, matches FROM roster WHERE player_id = ${'A'}`
     const matchesOf = (id: string): number => Number(played.find((row) => row.character_id === id)!.matches)
     for (const slot of [0, 2, 3]) expect(matchesOf(enlisted[slot]!.characterId)).toBe(1)
@@ -911,7 +911,7 @@ describe('A refereed match is kept on the rosters it was played with', () => {
       sheetsOf(recording.header, Faction.Red),
       recording.header.seed,
     )
-    await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE player_id = ${'A'}`
+    await persistence.region.db.query`UPDATE roster SET status = ${'dead'} WHERE player_id = ${'A'}`
 
     const { blue } = await seatBoth(lobby, ADA, BO)
     blue.send({

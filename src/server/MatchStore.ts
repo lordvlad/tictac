@@ -87,6 +87,19 @@ export class MatchStore {
    * into columns would restate a shape `parseRecording` already owns.
    */
   async create(header: RecordingHeader, id: string = crypto.randomUUID()): Promise<string> {
+    const batch = new Batch()
+    this.createInto(batch, header, id)
+    await this.db.transaction(batch)
+    return id
+  }
+
+  /**
+   * {@link create}, as a step of a transaction the caller runs: for a write
+   * that must land with another or not at all. The room's opening is the one
+   * (`RoomStore.openWithMatch`), because a match whose room row was lost is a
+   * fight nobody can find again.
+   */
+  createInto(batch: Batch, header: RecordingHeader, id: string): void {
     // The refusal `parseRecording` already makes, for the same reason: a log
     // this build cannot replay is not a store of record, it is a diary.
     if (header.version !== RECORDING_VERSION) {
@@ -95,9 +108,8 @@ export class MatchStore {
           `(this build writes version ${RECORDING_VERSION})`,
       )
     }
-    await this.db.query`INSERT INTO matches (id, header, created_at, seed_label)
-                        VALUES (${id}, ${JSON.stringify(header)}, ${header.createdAt}, ${header.seedLabel})`
-    return id
+    batch.query`INSERT INTO matches (id, header, created_at, seed_label)
+                VALUES (${id}, ${JSON.stringify(header)}, ${header.createdAt}, ${header.seedLabel})`
   }
 
   /**

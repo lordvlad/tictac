@@ -10,12 +10,14 @@ import { RPC_ERRORS } from '../wire/Rpc'
  * Coordinates cross-region handovers between Durable Objects.
  * When a squad crosses a regional boundary:
  * 1. Source DO creates an in-flight handover reservation and calls Target DO (prepare).
- * 2. Source DO pushes `handoverOffer` to client with a temporary ticket.
- * 3. Client connects second socket to Target DO and calls `region/arrive`.
+ * 2. Source DO pushes `handoverOffer` (with the squad's id) to client with a temporary ticket.
+ * 3. Client connects second socket to Target DO and calls `region/arrive`, the first staying open.
  * 4. Target DO confirms arrival to Source DO via `confirmArrival`.
  * 5. Source DO commits the new keeper (`Squads.setOwner`, the durable fact `RegionDirectory.ownerOfSquad`
- *    reads), purges local squad simulation and pushes `handoverComplete` to primary socket.
- * 6. Client cleanly closes primary socket.
+ *    reads), purges local squad simulation and ends the session with `session/ended`
+ *    `{ reconnect: 'elsewhere', url }` on the primary socket.
+ * 6. Client moves onto the second socket in place and lets the primary go without redialling it
+ *    (`ServerConnection.moveOver`).
  *
  * If Target DO fails or client times out, the handover aborts and Source DO remains authoritative,
  * retrying according to `HANDOVER_RETRY_DELAYS_MS` up to `HANDOVER_MAX_ATTEMPTS`.
@@ -157,10 +159,14 @@ export class HandoverCoordinator {
 
   /**
    * Called on Source DO (via DO-to-DO confirmation or arrive completion):
-   * Confirms client arrival on target DO, commits the target as the squad's
-   * keeper, and transitions state to 'confirmed'. The commit is written
-   * before the reservation is dropped, so a failed write leaves it to be
-   * confirmed again.
+   * Confirms client arrival on target DO and commits the target as the
+   * squad's keeper (`Squads.setOwner`) — the 2PC's commit step.
+   *
+   * The reservation is claimed (`confirmed`) before the write is awaited, so
+   * a `cancel` that arrives while the keeper is being written is refused
+   * instead of landing between the write and the bookkeeping and leaving a
+   * committed handover that was also cancelled. A failed write gives the claim
+   * back, leaving the reservation to be confirmed again.
    */
   async confirm(handoverId: string): Promise<HandoverReservation> {
     const reservation = this.outgoing.get(handoverId)
@@ -170,8 +176,16 @@ export class HandoverCoordinator {
     if (reservation.state === 'cancelled') {
       throw new Refusal(RPC_ERRORS.conflict, 'Handover was cancelled.')
     }
-    await this.squads.setOwner(reservation.squadId, reservation.targetRegion)
+    if (reservation.state === 'confirmed') {
+      throw new Refusal(RPC_ERRORS.conflict, 'Handover is already being confirmed.')
+    }
     reservation.state = 'confirmed'
+    try {
+      await this.squads.setOwner(reservation.squadId, reservation.targetRegion)
+    } catch (error) {
+      reservation.state = 'offered'
+      throw error
+    }
     this.outgoing.delete(handoverId)
     this.attemptCount.delete(reservation.squadId)
     this.log(`Handover ${handoverId} confirmed by target DO`)
@@ -180,13 +194,18 @@ export class HandoverCoordinator {
 
   /**
    * Cancel an outgoing or incoming handover, calculating the next backoff delay if retryable.
-   * Returns `{ retryable: boolean, nextDelayMs: number }`.
+   * Returns `{ retryable: boolean, nextDelayMs: number }`. A handover already
+   * being confirmed cannot be cancelled: its keeper is being committed.
    */
   cancel(
     handoverId: string,
     reason: string,
   ): { retryable: boolean; nextDelayMs: number; attempts: number } {
     const out = this.outgoing.get(handoverId)
+    if (out?.state === 'confirmed') {
+      throw new Refusal(RPC_ERRORS.conflict, `Handover ${handoverId} is already confirmed; it cannot be cancelled.`)
+    }
+
     let attempts = 1
     if (out) {
       attempts = out.attempts

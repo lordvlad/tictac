@@ -281,7 +281,7 @@ the window (`NOISE.glass`, 15 m). `MatchHost` now holds wall entities too, so a 
 state there as in a played match. The **stone** is a `GrenadeId` with no damage and no status
 (`harmless`): the throw reveals nobody and catches nobody; it is heard (8 m) where it lands.
 `GrenadeSpec.issued` — two for a stone — is carried by every soldier outside the crate and the
-grenade cap (`applyUnitLoadout`).
+grenade cap (`startingGrenades`, applied by `applyUnitLoadout`).
 
 ### Throws
 A throw is aimed at a tile **and a storey** — the `throwGrenade` command's `targetTile` and

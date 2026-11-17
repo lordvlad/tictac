@@ -1,6 +1,7 @@
 import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Faction } from '../src/config'
+import { GRENADES, GrenadeId } from '../src/core/Arsenal'
 import { rollSquadSheets } from '../src/core/Characters'
 import { Rng } from '../src/core/rng'
 import { isJsonRpcFrame, type JsonRpcFrame } from '../src/wire/JsonRpc'
@@ -16,10 +17,11 @@ import { PROTOCOL_VERSION } from '../src/version'
 import type { Transport } from '../src/wire/Transport'
 import { openPersistence } from '../src/server/db/BunSqlDb'
 import { Lobby } from '../src/server/Lobby'
-import type { Persistence } from '../src/server/Persistence'
+import type { RegionStore } from '../src/server/RegionStore'
 import type { RefereeVerdict, Room } from '../src/server/Room'
 import type { Journeys } from '../src/server/Journeys'
-import { regionDirectory } from '../src/server/Owner'
+import type { HandoverCoordinator } from '../src/server/Handover'
+import type { AccountsPort } from '../src/server/AccountsPort'
 import { Sessions } from '../src/server/Session'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { MatchHost } from '../src/sim/MatchHost'
@@ -48,7 +50,7 @@ import { simulateOverWire, type WireMatchResult } from './support/WireMatch'
  */
 async function lobbyOnASocket(seed = 1) {
   const persistence = await openPersistence(WALL_CLOCK)
-  const store = persistence.matches
+  const store = persistence.region.matches
   const verdicts: RefereeVerdict[] = []
   // What the room issues its seats: a server draws system randomness, and
   // these tests need a seed the headless match they compare against can name.
@@ -56,11 +58,11 @@ async function lobbyOnASocket(seed = 1) {
   const accounts = {
     playerFor: async (token: string): Promise<Player | null> =>
       token.startsWith('id-') ? { id: token, name: token.slice(3) } : null,
-  }
+  } as unknown as AccountsPort
   const newLobby = () =>
     new Lobby({
       matches: store,
-      rooms: persistence.rooms,
+      rooms: persistence.region.rooms,
       log: () => {},
       clock: WALL_CLOCK,
       mapSeed: () => issued,
@@ -70,13 +72,14 @@ async function lobbyOnASocket(seed = 1) {
   const sessionsOver = (over: Lobby) =>
     new Sessions({
       lobby: over,
-      persistence: { accounts, rosters: {}, squads: {}, encounters: {}, matches: store } as unknown as Pick<
-        Persistence,
-        'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'
+      accounts,
+      region: { rosters: {}, squads: {}, encounters: {}, matches: store } as unknown as Pick<
+        RegionStore,
+        'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'
       >,
       // Nothing here travels.
       journeys: {} as Journeys,
-      directory: regionDirectory({ owners: { ownerOf: async () => null } }),
+      handover: {} as HandoverCoordinator,
       clock: WALL_CLOCK,
       log: () => {},
     })
@@ -220,7 +223,13 @@ function nextIntent(manager: NetworkManager): Promise<NetworkMessage> {
  * squads and open the match — everything two players in a lobby do before the
  * first shot.
  */
-async function playing(window: (url: string) => ServerConnection, hostUrl: string, joinerUrl: string, seed: number) {
+async function playing(
+  window: (url: string) => ServerConnection,
+  hostUrl: string,
+  joinerUrl: string,
+  seed: number,
+  headerFor: (seed: number) => RecordingHeader = header,
+) {
   const host = new NetworkManager()
   const joiner = new NetworkManager()
   const opened = await host.enterRoom(window(hostUrl), { kind: 'open' })
@@ -230,11 +239,62 @@ async function playing(window: (url: string) => ServerConnection, hostUrl: strin
   host.send({ type: 'ready', squad: squadOf(Faction.Blue) })
   joiner.send({ type: 'ready', squad: squadOf(Faction.Red) })
   const [seenByHost, seenByJoiner] = await Promise.all([host.waitForPeerReady(), joiner.waitForPeerReady()])
-  host.send({ type: 'matchHeader', header: header(opening.seed) })
+  host.send({ type: 'matchHeader', header: headerFor(opening.seed) })
   return { host, joiner, roomId: opened.roomId, opened, joined, opening, seenByHost, seenByJoiner }
 }
 
 describe('Two clients playing through a match server', () => {
+  test('the grenades a squad states deploy the same pouch on both peers and the referee, the issue made once', async () => {
+    const seed = 555
+    const { lobby, url, window, stop } = await lobbyOnASocket(seed)
+    // The header a window really sends is read back off the soldiers it
+    // deployed (`Squads.deploymentsOf`), not the kit it chose: stones and all.
+    const mine = new MatchHost(header(seed))
+    const stated: RecordingHeader = {
+      ...header(seed),
+      squads: {
+        [Faction.Blue]: mine.squads.deploymentsOf(Faction.Blue),
+        [Faction.Red]: mine.squads.deploymentsOf(Faction.Red),
+      },
+    }
+    const theirs = new MatchHost(stated)
+    const { host, joiner, roomId } = await playing(window, url, url, seed, () => stated)
+    // The header is relayed once the referee has opened its match on it.
+    const opened = Promise.withResolvers<void>()
+    joiner.onMessage = (message) => {
+      if (message.type !== 'matchHeader') return
+      joiner.onMessage = null
+      opened.resolve()
+    }
+    await opened.promise
+    await lobby.idle()
+
+    // Chosen plus issued is what every soldier carries, on each of the three.
+    const chosen = defaultLoadout()
+    for (const [peer, name] of [[mine, 'the host'], [theirs, 'the joiner']] as const) {
+      for (const faction of [Faction.Blue, Faction.Red]) {
+        peer.squads.byFaction[faction].forEach((soldier, i) => {
+          for (const kind of Object.values(GrenadeId)) {
+            expect(soldier.grenades[kind], `${name} ${faction} unit ${i} ${kind}`).toBe(
+              chosen[i]!.grenades[kind] + GRENADES[kind].issued,
+            )
+          }
+        })
+      }
+    }
+
+    // The referee deployed from the stated header too; every unit's component
+    // hashes, the pouch among them, are the peers' to the digit.
+    const referee = lobby.room(roomId)!.digest()!
+    expect(referee.units).toEqual(mine.digest().units)
+    expect(theirs.digest().units).toEqual(mine.digest().units)
+    expect(referee.total).toBe(mine.digest().total)
+
+    host.dispose()
+    joiner.dispose()
+    await stop()
+  })
+
   test('they reach each other over sockets, and the referee keeps the match', async () => {
     const seed = 777
     const { lobby, store, url, window, stop } = await lobbyOnASocket(seed)

@@ -130,7 +130,7 @@ resolves them through the same systems ([ADR-0004](../design/adr/0004-full-knowl
 the old dirty-diff broadcast (`syncDirty`, `onComponentChanged`, `applyRemote`) was deleted
 with it. What `serialize` still serves:
 
-1. **The state digest**: `StateDigest.digestWorld` fingerprints a world from the same
+1. **The state digest**: `digestWorld` (`src/sim/WorldDigest.ts`) fingerprints a world from the same
    serialisations, plus the match dice's position, exchanged at each handover to catch a
    desynchronisation (a die drawn on one side only shows up as a `dice` divergence).
 2. **Rewind (`World.snapshot(entityIds)` / `World.restore(snapshot)`)**: Record and put

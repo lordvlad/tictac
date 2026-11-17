@@ -3,7 +3,7 @@ import type { Grid } from '../core/Grid'
 import { computeFactionVisibility, createVisibilityMap, VisState } from '../core/Visibility'
 import type { Blocks } from '../render/Blocks'
 import type { Ground } from '../render/Ground'
-import type { Squads } from '../rules/Squads'
+import type { Squads } from '../entities/Squads'
 
 /**
  * Fog of war: what the active faction can see, and everything that follows from

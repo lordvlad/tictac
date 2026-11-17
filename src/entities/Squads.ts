@@ -1,10 +1,10 @@
 import { FACTION_INFO, Faction, SQUAD_SIZE } from '../config'
-import { AmmoId, GRENADES, GrenadeId, WeaponId } from '../core/Arsenal'
+import { AmmoId, WeaponId } from '../core/Arsenal'
 import type { Grid, Tile } from '../core/Grid'
 import { characterSheet } from '../core/Characters'
 import { Rng } from '../core/rng'
-import { Soldier } from '../entities/Soldier'
-import { applyUnitLoadout } from './Loadout'
+import { applyUnitLoadout } from './Kit'
+import { Soldier } from './Soldier'
 import type { SquadLoadout, Deployment } from '../core/Loadout'
 import type { World } from '../ecs/World'
 
@@ -87,21 +87,16 @@ export class Squads {
    * debug panel and the loadout screen both write kit straight onto a unit, so
    * what a squad *has* is the only thing worth writing down.
    *
-   * A loadout is what was *packed*, and the grenades every soldier is issued
-   * regardless (`GrenadeSpec.issued`, the stones) are added on top when one is
-   * applied (`applyUnitLoadout`). So they come off again here, or a loadout
-   * read back and applied once more would issue them twice — which is what a
-   * refereed match did: the header stated each soldier's stones as packed, the
-   * referee issued them again, and the first digest at the first handover
-   * disagreed on every unit's pouch and aborted the match.
+   * Grenades are reported as carried, stones and all. The loadout rules
+   * (`startingGrenades`) treat what a loadout states as the pouch and make up
+   * only what is short of what everybody is issued, so a loadout read back and
+   * applied again deploys the same pouch rather than issuing the stones twice.
    */
   loadoutOf(faction: Faction): SquadLoadout {
     return this.byFaction[faction].map((soldier) => ({
       weaponId: soldier.weaponId,
       ammoId: soldier.ammoId,
-      grenades: Object.fromEntries(
-        Object.values(GrenadeId).map((kind) => [kind, Math.max(0, soldier.grenades[kind] - GRENADES[kind].issued)]),
-      ) as Record<GrenadeId, number>,
+      grenades: { ...soldier.grenades },
       items: { ...soldier.items },
       // Every unit carries a clone of the weapon template with its own rail,
       // so this array is already exactly what is fitted to this gun. Copied,

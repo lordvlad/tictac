@@ -16,9 +16,9 @@ import { CommandSystem } from '../src/ecs/systems/CommandSystem'
 import type { Soldier } from '../src/entities/Soldier'
 import { ailmentCost, applyStatus, executeShot } from '../src/rules/Combat'
 import { carriedOut } from '../src/rules/MatchEnd'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 import { stockSquads } from './support/squads'
-import { TurnManager } from '../src/rules/TurnManager'
+import { TurnManager } from '../src/sim/TurnManager'
 import { headlessSoldier } from './support/soldier'
 
 const always = (value: number): Roll => () => value

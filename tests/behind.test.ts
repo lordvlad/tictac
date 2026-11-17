@@ -13,7 +13,7 @@ import { World } from '../src/ecs/World'
 import { createGlobalRules } from '../src/ecs/globals'
 import { MovementSystem } from '../src/ecs/systems/MovementSystem'
 import { executeMelee, shotBreakdown } from '../src/rules/Combat'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 import { stockSquads } from './support/squads'
 
 /** A person-shaped nobody: every modifier at zero, standard kit. */

@@ -116,9 +116,9 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
 
   const serve = async (): Promise<Lobby> => {
     const lobby = new Lobby({
-      matches: persistence.matches,
-      rooms: persistence.rooms,
-      rosters: persistence.rosters,
+      matches: persistence.region.matches,
+      rooms: persistence.region.rooms,
+      rosters: persistence.region.rosters,
       log: (message) => logs.push(message),
       graceMs: GRACE,
       clock: {
@@ -172,16 +172,16 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
       await state.lobby.idle()
     },
     async enlist(player, size = SQUAD_SIZE, seed = 5) {
-      await persistence.db
+      await persistence.accounts.db
         .query`INSERT INTO players (id, name, created_at) VALUES (${player.id}, ${player.name}, ${'2026-01-01T00:00:00Z'})`
-      await persistence.rosters.enlist(player.id, rollSquadSheets(new Rng(seed), size))
+      await persistence.region.rosters.enlist(player.id, rollSquadSheets(new Rng(seed), size))
     },
     async roster(player) {
-      return persistence.db.query<RosterRow>`SELECT character_id, slot, status, sheet, matches, hp, deeds, downtime, died_in
+      return persistence.region.db.query<RosterRow>`SELECT character_id, slot, status, sheet, matches, hp, deeds, downtime, died_in
            FROM roster WHERE player_id = ${player.id} ORDER BY slot, created_at`
     },
     async fought(roomId) {
-      const match = await persistence.matches.match(roomId)
+      const match = await persistence.region.matches.match(roomId)
       if (!match) throw new Error(`no match ${roomId}`)
       const host = new MatchHost(match.header)
       for (const event of match.events) {
@@ -303,14 +303,14 @@ describe('a fight found for a player who is not there', () => {
     expect(new Set(stored.events.map((event) => event.faction))).toEqual(new Set([Faction.Blue, Faction.Red]))
     expect(stored.winner).not.toBeNull()
 
-    expect(await w.persistence.db.query`SELECT winner, blue_player, red_player FROM match_results WHERE match_id = ${fight.roomId}`)
+    expect(await w.persistence.region.db.query`SELECT winner, blue_player, red_player FROM match_results WHERE match_id = ${fight.roomId}`)
       .toEqual([{ winner: stored.winner!, blue_player: ADA.id, red_player: null }])
     await expectRosterSettled(w, ADA, fight.roomId)
     // The aliens are not anybody's: no row for them anywhere.
-    expect(await w.persistence.db.query`SELECT character_id FROM roster`).toHaveLength(before.length)
+    expect(await w.persistence.region.db.query`SELECT character_id FROM roster`).toHaveLength(before.length)
     // The room is gone from the server and the store; the match is not.
     expect(w.lobby.room(fight.roomId)).toBeUndefined()
-    expect(await w.persistence.rooms.live()).toEqual([])
+    expect(await w.persistence.region.rooms.live()).toEqual([])
   })
 
   test('grows the survivors of a won fight, because the AI that played for them is no excuse', async () => {
@@ -556,10 +556,10 @@ describe('a fight and a server that restarts', () => {
     const { roomId } = await opened(w, contactFor(ADA))
     // Stopped a few moves in, before anybody has won.
     await w.stop()
-    expect(await w.persistence.db.query`SELECT blue_control, red_control, encounter FROM rooms`).toEqual([
+    expect(await w.persistence.region.db.query`SELECT blue_control, red_control, encounter FROM rooms`).toEqual([
       { blue_control: 'ai', red_control: 'ai', encounter: 1 },
     ])
-    expect(await w.persistence.db.query`SELECT match_id FROM match_results`).toEqual([])
+    expect(await w.persistence.region.db.query`SELECT match_id FROM match_results`).toEqual([])
 
     const second = await w.serve()
     expect(second.room(roomId)?.encounter ?? true).toBe(true)
@@ -624,7 +624,7 @@ describe('a fight that is passed by', () => {
 
     expect(await w.lobby.openEncounter(contactFor(ADA))).toEqual({ opened: false, passedFor: 'busy' })
     expect(w.lobby.view(null).rooms).toHaveLength(1)
-    expect(await w.persistence.rooms.live()).toHaveLength(1)
+    expect(await w.persistence.region.rooms.live()).toHaveLength(1)
   })
 
   test('a player in a fight is busy for the next, until it is settled', async () => {
@@ -637,7 +637,7 @@ describe('a fight that is passed by', () => {
     expect(await w.lobby.openEncounter(again)).toEqual({ opened: false, passedFor: 'busy' })
     await ada.request('tictac/api/room/enter', { intent: { kind: 'resume', roomId } })
     expect(await w.lobby.openEncounter(again)).toEqual({ opened: false, passedFor: 'busy' })
-    expect(await w.persistence.rooms.live()).toHaveLength(1)
+    expect(await w.persistence.region.rooms.live()).toHaveLength(1)
 
     // Once it is settled they are free again — to whoever is still fit.
     ada.close()
@@ -650,24 +650,25 @@ describe('a fight that is passed by', () => {
   test('a squad with nobody fit is passed by', async () => {
     const w = await world()
     await w.enlist(ADA)
-    await w.persistence.db.query`UPDATE roster SET downtime = 1 WHERE player_id = ${ADA.id}`
+    await w.persistence.region.db.query`UPDATE roster SET downtime = 1 WHERE player_id = ${ADA.id}`
 
     expect(await w.lobby.openEncounter(contactFor(ADA))).toEqual({ opened: false, passedFor: 'nobodyFit' })
-    expect(await w.persistence.rooms.live()).toEqual([])
+    expect(await w.persistence.region.rooms.live()).toEqual([])
   })
 
   test('the party is the first four fit members by slot, and the aliens come in the size the contact rolled, within one to four', async () => {
     const w = await world()
     await w.enlist(ADA, SQUAD_SIZE)
-    await w.persistence.rosters.recruit(ADA.id)
-    await w.persistence.rosters.recruit(ADA.id)
+    await w.persistence.region.rosters.recruit(ADA.id)
+    await w.persistence.region.rosters.recruit(ADA.id)
     const roster = await w.roster(ADA)
     expect(roster.map((row) => row.slot)).toEqual([0, 1, 2, 3, 4, 5])
     // Slots 0 and 3 are in the medical bay: the party is 1, 2, 4, 5.
-    await w.persistence.db.query`UPDATE roster SET downtime = 2 WHERE player_id = ${ADA.id} AND (slot = 0 OR slot = 3)`
+    await w.persistence.region.db.query`UPDATE roster SET downtime = 2 WHERE player_id = ${ADA.id} AND (slot = 0 OR slot = 3)`
 
     const bigger = await opened(w, contactFor(ADA, { sizeOffset: 1 }))
-    const header = (await w.persistence.matches.header(bigger.roomId))!
+    await w.lobby.idle() // the match is written, with its room's row, behind the answer
+    const header = (await w.persistence.region.matches.header(bigger.roomId))!
     expect(header.squads[Faction.Blue].map((d) => d.characterId)).toEqual([1, 2, 4, 5].map((slot) => roster[slot]!.character_id))
     // Clamped: four and one more is four.
     expect(bigger.aliens).toBe(SQUAD_SIZE)
@@ -684,10 +685,11 @@ describe('a fight that is passed by', () => {
     ] as const) {
       const w = await world()
       await w.enlist(ADA)
-      await w.persistence.db.query`UPDATE roster SET downtime = 1 WHERE player_id = ${ADA.id} AND slot >= ${fit}`
+      await w.persistence.region.db.query`UPDATE roster SET downtime = 1 WHERE player_id = ${ADA.id} AND slot >= ${fit}`
       const fight = await opened(w, contactFor(ADA, { sizeOffset: offset }))
       sizes.push(fight.aliens)
-      const header = (await w.persistence.matches.header(fight.roomId))!
+      await w.lobby.idle()
+      const header = (await w.persistence.region.matches.header(fight.roomId))!
       expect(header.squads[Faction.Blue]).toHaveLength(fit)
       await w.stop()
     }

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { Grid, Side } from '../src/core/Grid'
 import { WallKind } from '../src/core/Walls'
-import type { Squads } from '../src/rules/Squads'
+import type { Squads } from '../src/entities/Squads'
 import { DebugMap } from '../src/hud/DebugMap'
 
 describe('DebugMap panel', () => {

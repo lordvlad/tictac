@@ -115,9 +115,9 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
 
   const serve = async (): Promise<Lobby> => {
     const lobby = new Lobby({
-      matches: persistence.matches,
-      rooms: persistence.rooms,
-      rosters: persistence.rosters,
+      matches: persistence.region.matches,
+      rooms: persistence.region.rooms,
+      rosters: persistence.region.rosters,
       log: (message) => logs.push(message),
       graceMs: GRACE,
       clock: {
@@ -171,16 +171,16 @@ async function world({ manual = false }: { manual?: boolean } = {}): Promise<Wor
       await state.lobby.idle()
     },
     async enlist(player, size = SQUAD_SIZE, seed = 5) {
-      await persistence.db
+      await persistence.accounts.db
         .query`INSERT INTO players (id, name, created_at) VALUES (${player.id}, ${player.name}, ${'2026-01-01T00:00:00Z'})`
-      await persistence.rosters.enlist(player.id, rollSquadSheets(new Rng(seed), size))
+      await persistence.region.rosters.enlist(player.id, rollSquadSheets(new Rng(seed), size))
     },
     async roster(player) {
-      return persistence.db.query<RosterRow>`SELECT character_id, slot, status, sheet, matches, hp, deeds, downtime, died_in
+      return persistence.region.db.query<RosterRow>`SELECT character_id, slot, status, sheet, matches, hp, deeds, downtime, died_in
            FROM roster WHERE player_id = ${player.id} ORDER BY slot, created_at`
     },
     async fought(roomId) {
-      const match = await persistence.matches.match(roomId)
+      const match = await persistence.region.matches.match(roomId)
       if (!match) throw new Error(`no match ${roomId}`)
       const host = new MatchHost(match.header)
       for (const event of match.events) {
@@ -296,7 +296,7 @@ describe('a meeting of two players who are both away', () => {
     expect(new Set(stored.events.map((event) => event.faction))).toEqual(new Set([Faction.Blue, Faction.Red]))
     expect(stored.winner).not.toBeNull()
 
-    expect(await w.persistence.db.query`SELECT winner, blue_player, red_player FROM match_results WHERE match_id = ${fight.roomId}`)
+    expect(await w.persistence.region.db.query`SELECT winner, blue_player, red_player FROM match_results WHERE match_id = ${fight.roomId}`)
       .toEqual([{ winner: stored.winner!, blue_player: ADA.id, red_player: BO.id }])
     await expectBothSettled(w, fight.roomId)
     // Nothing is taken from either and nothing changes hands: the same
@@ -304,10 +304,10 @@ describe('a meeting of two players who are both away', () => {
     const after = { ada: await w.roster(ADA), bo: await w.roster(BO) }
     expect(after.ada.map((row) => row.character_id)).toEqual(before.ada.map((row) => row.character_id))
     expect(after.bo.map((row) => row.character_id)).toEqual(before.bo.map((row) => row.character_id))
-    expect(await w.persistence.db.query`SELECT character_id FROM roster`).toHaveLength(2 * SQUAD_SIZE)
+    expect(await w.persistence.region.db.query`SELECT character_id FROM roster`).toHaveLength(2 * SQUAD_SIZE)
     // Gone from the server and the store; the match is not.
     expect(w.lobby.room(fight.roomId)).toBeUndefined()
-    expect(await w.persistence.rooms.live()).toEqual([])
+    expect(await w.persistence.region.rooms.live()).toEqual([])
     expect(w.logs.filter((line) => line.includes('aborting'))).toEqual([])
   })
 
@@ -603,7 +603,7 @@ describe('a meeting that does not happen', () => {
 
       expect(await w.lobby.openMeeting(meeting(ADA, BO))).toEqual({ opened: false, passedFor: 'busy' } satisfies MeetingOpened)
       expect(w.lobby.view(null).rooms).toHaveLength(1)
-      expect(await w.persistence.rooms.live()).toHaveLength(1)
+      expect(await w.persistence.region.rooms.live()).toHaveLength(1)
       // The other player is not seated anywhere for it.
       expect(w.lobby.view(busy === ADA ? BO : ADA).you).toBeNull()
     }
@@ -619,12 +619,12 @@ describe('a meeting that does not happen', () => {
     // Ada is in it; Bo, offline, is in it too: neither can be met by Cy.
     expect(await w.lobby.openMeeting(meeting(CY, BO, {}, { at: START + 1 }))).toEqual({ opened: false, passedFor: 'busy' })
     expect(await w.lobby.openMeeting(meeting(ADA, CY, {}, { at: START + 1 }))).toEqual({ opened: false, passedFor: 'busy' })
-    expect(await w.persistence.rooms.live()).toHaveLength(1)
+    expect(await w.persistence.region.rooms.live()).toHaveLength(1)
 
     // Let it play out (Ada's window lapses): they are free for the next.
     await w.clock.advance(ENCOUNTER.joinWindowMs)
     await w.finish()
-    expect(await w.persistence.rooms.live()).toEqual([])
+    expect(await w.persistence.region.rooms.live()).toEqual([])
     expect(w.lobby.room(first.roomId)).toBeUndefined()
     const next = await w.lobby.openMeeting(meeting(ADA, CY, {}, { at: START + 2 }))
     expect(next.opened || next.passedFor === 'nobodyFit').toBe(true)
@@ -636,25 +636,26 @@ describe('a meeting that does not happen', () => {
   ] as const)('is passed by when %s has nobody fit to field, and no room is opened', async (_side, empty) => {
     const w = await world()
     await twoPlayers(w)
-    await w.persistence.db.query`UPDATE roster SET downtime = 1 WHERE player_id = ${empty.id}`
+    await w.persistence.region.db.query`UPDATE roster SET downtime = 1 WHERE player_id = ${empty.id}`
 
     expect(await w.lobby.openMeeting(meeting(ADA, BO))).toEqual({ opened: false, passedFor: 'nobodyFit' })
-    expect(await w.persistence.rooms.live()).toEqual([])
-    expect(await w.persistence.db.query`SELECT id FROM matches`).toEqual([])
+    expect(await w.persistence.region.rooms.live()).toEqual([])
+    expect(await w.persistence.region.db.query`SELECT id FROM matches`).toEqual([])
   })
 
   test('fields the first four fit members of each roster by slot', async () => {
     const w = await world()
     await twoPlayers(w)
-    await w.persistence.rosters.recruit(BO.id)
-    await w.persistence.rosters.recruit(BO.id)
+    await w.persistence.region.rosters.recruit(BO.id)
+    await w.persistence.region.rosters.recruit(BO.id)
     const roster = await w.roster(BO)
     expect(roster).toHaveLength(SQUAD_SIZE + 2)
     // Slots 0 and 3 are in the medical bay: Bo's party is 1, 2, 4, 5.
-    await w.persistence.db.query`UPDATE roster SET downtime = 2 WHERE player_id = ${BO.id} AND (slot = 0 OR slot = 3)`
+    await w.persistence.region.db.query`UPDATE roster SET downtime = 2 WHERE player_id = ${BO.id} AND (slot = 0 OR slot = 3)`
 
     const fight = await opened(w, meeting(ADA, BO))
-    const header = (await w.persistence.matches.header(fight.roomId))!
+    await w.lobby.idle() // the match is written, with its room's row, behind the answer
+    const header = (await w.persistence.region.matches.header(fight.roomId))!
     expect(header.squads[Faction.Red].map((d) => d.characterId)).toEqual([1, 2, 4, 5].map((slot) => roster[slot]!.character_id))
     expect(header.squads[Faction.Blue]).toHaveLength(SQUAD_SIZE)
     await w.finish()
@@ -670,7 +671,7 @@ describe('a meeting and a server that restarts', () => {
     const { roomId, blueJoinBy } = await opened(w, meeting(ADA, BO, { blue: 'cautious', red: 'evade' }))
     await w.stop()
 
-    expect(await w.persistence.db.query`SELECT blue_control, red_control, blue_standing, red_standing, encounter FROM rooms`).toEqual([
+    expect(await w.persistence.region.db.query`SELECT blue_control, red_control, blue_standing, red_standing, encounter FROM rooms`).toEqual([
       { blue_control: 'reserved', red_control: 'ai', blue_standing: 'cautious', red_standing: 'evade', encounter: 1 },
     ])
 
@@ -793,7 +794,7 @@ describe('two squads on the road, end to end', () => {
       lobby: {
         mapSeed: () => 3,
         graceMs: GRACE,
-        onEncounterTaken: (roomId, playerId) => marks.push(persistence.encounters.markTaken(roomId, playerId)),
+        onEncounterTaken: (roomId, playerId) => marks.push(persistence.region.encounters.markTaken(roomId, playerId)),
       },
     })
     const ada = await registerAt(server, persistence, 'Ada', ORIGIN)
@@ -803,7 +804,7 @@ describe('two squads on the road, end to end', () => {
       const sent = await who.window.call('tictac/api/squad/order', { order: { kind: 'goHere', to: middle, pace: 'normal' } })
       expect(sent.code).toBeNull()
     }
-    const squads = await Promise.all([ada, bo].map((who) => persistence.squads.of(who.id)))
+    const squads = await Promise.all([ada, bo].map((who) => persistence.region.squads.of(who.id)))
     const found = firstContact(squads[0]!.waypoints, squads[1]!.waypoints, server.now, ENCOUNTER.meetingRangeKm)!
     expect(found).not.toBeNull()
     const feed = async (who: typeof ada) => (await who.window.call('tictac/api/encounter/feed')).result.entries as EncounterEntry[]
@@ -824,7 +825,7 @@ describe('two squads on the road, end to end', () => {
     await r.server.lobby.idle()
 
     // Both are online: both are told, by name, and both have the window.
-    const rooms = await r.persistence.rooms.live()
+    const rooms = await r.persistence.region.rooms.live()
     expect(rooms).toHaveLength(1)
     const roomId = rooms[0]!.id
     const joinBy = r.found.at + ENCOUNTER.joinWindowMs
@@ -840,7 +841,7 @@ describe('two squads on the road, end to end', () => {
     // Neither comes: the window passes and the AI plays both, to a result.
     await r.clock.advance(ENCOUNTER.joinWindowMs)
     await r.finish()
-    const [result] = await r.persistence.db.query<{ winner: number; blue_player: string; red_player: string }>`
+    const [result] = await r.persistence.region.db.query<{ winner: number; blue_player: string; red_player: string }>`
       SELECT winner, blue_player, red_player FROM match_results WHERE match_id = ${roomId}`
     expect([result!.blue_player, result!.red_player].sort()).toEqual([r.ada.id, r.bo.id].sort())
     const winner = result!.winner === Faction.Blue ? result!.blue_player : result!.red_player
@@ -863,10 +864,10 @@ describe('two squads on the road, end to end', () => {
     expect((await stranger.window.call('tictac/api/match/recording', { matchId: roomId })).code).toBe(RPC_ERRORS.notYours)
 
     // Both rosters were settled: every deployed member of both has the match.
-    expect(await r.persistence.db.query`SELECT character_id FROM roster WHERE matches = 1`).toHaveLength(2 * SQUAD_SIZE)
+    expect(await r.persistence.region.db.query`SELECT character_id FROM roster WHERE matches = 1`).toHaveLength(2 * SQUAD_SIZE)
     // And both squads stood where they met, which is where the fight was.
     for (const who of [r.ada, r.bo]) {
-      const squad = (await r.persistence.squads.of(who.id))!
+      const squad = (await r.persistence.region.squads.of(who.id))!
       expect(squad.waypoints.at(-1)).toMatchObject({ kind: 'past', arrival: r.found.at, departed: null })
     }
   }, 60_000)
@@ -876,7 +877,7 @@ describe('two squads on the road, end to end', () => {
     r.server.now = r.found.at
     await r.server.wake()
     await r.server.lobby.idle()
-    const roomId = (await r.persistence.rooms.live())[0]!.id
+    const roomId = (await r.persistence.region.rooms.live())[0]!.id
 
     const taken = await r.ada.window.call('tictac/api/room/enter', { intent: { kind: 'resume', roomId } })
     expect(taken.code).toBeNull()

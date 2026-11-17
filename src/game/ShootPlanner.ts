@@ -15,7 +15,7 @@ import { MELEE, type MeleeId } from '../core/Melee'
 import { fromBehind } from '../core/Facing'
 import { canMelee, canShoot, shotApCost, shotBreakdown, type ShotResult } from '../rules/Combat'
 import type { ShotOdds } from '../core/Ballistics'
-import type { Squads } from '../rules/Squads'
+import type { Squads } from '../entities/Squads'
 import type { EngineContext } from '../engine'
 
 const LOS_CLEAR = 0x79d98b

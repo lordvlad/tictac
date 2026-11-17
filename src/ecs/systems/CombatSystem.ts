@@ -7,7 +7,6 @@ import { statusStacks } from '../../core/Ballistics'
 import type { Tile } from '../../core/Grid'
 import type { Grid } from '../../core/Grid'
 import type { Soldier } from '../../entities/Soldier'
-import type { Squads } from '../../rules/Squads'
 import { canWatch, reactToArrival, watchCost } from '../../rules/Overwatch'
 import { NO_FX, type CombatFx } from '../../core/Combatant'
 import { MELEE } from '../../core/Melee'
@@ -28,6 +27,12 @@ import { executeMelee,
   type ShotResult,
   throwGrenade,
 } from '../../rules/Combat'
+
+/** The units on the field, and the one an entity belongs to: all combat asks of whoever holds the squads. */
+export interface Fielded {
+  readonly soldiers: readonly Soldier[]
+  byEntityId(entityId: number): Soldier | undefined
+}
 
 /** Rounds of a shot that went past: what suppresses, and what shakes. */
 function misses(result: ShotResult): number {
@@ -55,7 +60,7 @@ function unseen(by: Soldier, target: Soldier): boolean {
 export class CombatSystem extends System {
   constructor(
     readonly grid: Grid,
-    private readonly squads: Squads,
+    private readonly squads: Fielded,
     private readonly fx: CombatFx = NO_FX,
     /**
      * The match's dice. Required, not defaulted: a default is how a match ends

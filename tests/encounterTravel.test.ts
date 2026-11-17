@@ -54,7 +54,7 @@ function contacts(persistence: Persistence, answer: EncounterOpened): Contacts {
   return {
     calls,
     open: async (contact) => {
-      const squad = await persistence.squads.of(contact.player.id)
+      const squad = await persistence.region.squads.of(contact.player.id)
       calls.push({ contact, route: squad!.waypoints })
       return answer
     },
@@ -246,10 +246,10 @@ async function restarted(persistence: Persistence, now: number, open: OpenEncoun
   const armed: (number | null)[] = []
   const schedule = new Schedule({ now: () => now, arm: (at) => armed.push(at) })
   const journeys = new Journeys({
-    directory: regionDirectory({ owners: persistence.squads }),
-    squads: persistence.squads,
-    accounts: persistence.accounts,
-    encounters: persistence.encounters,
+    directory: regionDirectory({ owners: persistence.region.squads }),
+    squads: persistence.region.squads,
+    accounts: persistence.accounts.accounts,
+    encounters: persistence.region.encounters,
     schedule,
     clock: { now: () => now, schedule: WALL_CLOCK.schedule },
     tell: () => {},
@@ -287,7 +287,7 @@ describe('A server that restarts', () => {
     const trip = (sent.waypoints.find((waypoint) => waypoint.kind === 'past' && waypoint.departed) as PastWaypoint).departed!.trip
     const start = w.server.now
     // The server went down after the room opened and the row was written, before the squad was saved.
-    await seedContact(w.persistence.encounters, {
+    await seedContact(w.persistence.region.encounters, {
       squadId: w.squadId,
       playerId: w.playerId,
       trip,
@@ -304,7 +304,7 @@ describe('A server that restarts', () => {
     await schedule.fire()
 
     expect(second.calls).toHaveLength(0)
-    const halted = (await w.persistence.squads.of(w.playerId))!
+    const halted = (await w.persistence.region.squads.of(w.playerId))!
     expect(restingAt(halted)).toMatchObject({ arrival: start + HOUR, departed: null })
   })
 })
@@ -321,8 +321,8 @@ const header = (): RecordingHeader => ({
 
 /** A match with a result row naming `blue` and `red` (a player id or null), won by `winner`. */
 async function settledMatch(persistence: Persistence, id: string, winner: Faction, blue: string | null, red: string | null) {
-  await persistence.matches.create(header(), id)
-  await persistence.db.query`INSERT INTO match_results (match_id, winner, blue_player, red_player, settled_at)
+  await persistence.region.matches.create(header(), id)
+  await persistence.region.db.query`INSERT INTO match_results (match_id, winner, blue_player, red_player, settled_at)
                              VALUES (${id}, ${winner}, ${blue}, ${red}, ${new Date(0).toISOString()})`
 }
 
@@ -332,14 +332,14 @@ describe('The return feed', () => {
     const { persistence, playerId, squadId, home } = w
     const place = north(home, 1)
     const row = (checkpoint: number, at: number, roomId: string | null, passedFor: 'busy' | null) =>
-      seedContact(persistence.encounters, { squadId, playerId, trip: 't', checkpoint, at, place, aliens: roomId ? 2 : 0, roomId, passedFor })
+      seedContact(persistence.region.encounters, { squadId, playerId, trip: 't', checkpoint, at, place, aliens: roomId ? 2 : 0, roomId, passedFor })
     await row(0, 1_000, null, 'busy')
     await row(1, 2_000, 'in-progress', null)
     await row(2, 3_000, 'won', null)
     await row(3, 4_000, 'lost', null)
     await settledMatch(persistence, 'won', Faction.Blue, playerId, null)
     await settledMatch(persistence, 'lost', Faction.Red, playerId, null)
-    await persistence.encounters.markTaken('won', playerId)
+    await persistence.region.encounters.markTaken('won', playerId)
 
     const entries = await w.feed()
     expect(entries.map((entry) => entry.result)).toEqual(['lost', 'won', 'inProgress', 'passedBy'])
@@ -348,7 +348,7 @@ describe('The return feed', () => {
     expect(entries.map((entry) => entry.matchId)).toEqual(['lost', 'won', 'in-progress', null])
     expect(entries[3]).toMatchObject({ passedFor: 'busy', aliens: 0 })
     expect(entries[0]!.place.lat).toBeCloseTo(place.lat, 6)
-    expect(await persistence.encounters.feed(playerId, 2)).toHaveLength(2)
+    expect(await persistence.region.encounters.feed(playerId, 2)).toHaveLength(2)
     expect(ENCOUNTER.feedLimit).toBeGreaterThanOrEqual(entries.length)
   })
 
@@ -356,7 +356,7 @@ describe('The return feed', () => {
     // The row is written before the room is opened (`Encounters.begin`), so
     // a window that beats the end of the work around the fight still finds it.
     const w = await walker(() => 'unused', (persistence) => contacts(persistence, PASSED))
-    const { encounters } = w.persistence
+    const { encounters } = w.persistence.region
     const handling = await encounters.begin([
       { squadId: w.squadId, playerId: w.playerId, trip: 't', checkpoint: 0, at: 1, place: w.home },
     ])
@@ -367,13 +367,13 @@ describe('The return feed', () => {
 
   test('a contact still being carried out is not in the feed', async () => {
     const w = await walker(() => 'unused', (persistence) => contacts(persistence, PASSED))
-    await w.persistence.encounters.begin([{ squadId: w.squadId, playerId: w.playerId, trip: 't', checkpoint: 0, at: 1, place: w.home }])
+    await w.persistence.region.encounters.begin([{ squadId: w.squadId, playerId: w.playerId, trip: 't', checkpoint: 0, at: 1, place: w.home }])
     expect(await w.feed()).toEqual([])
   })
 
   test('shows a player only their own, and only to a signed-in window', async () => {
     const w = await walker(() => 'unused', (persistence) => contacts(persistence, PASSED))
-    await seedContact(w.persistence.encounters, {
+    await seedContact(w.persistence.region.encounters, {
       squadId: w.squadId, playerId: w.playerId, trip: 't', checkpoint: 0, at: 1, place: w.home, aliens: 0, roomId: null, passedFor: 'nobodyFit',
     })
     const other = w.server.window()
@@ -393,16 +393,16 @@ describe('A recording', () => {
     const otherId = ((await other.call('tictac/api/account/me')).result.player as { id: string }).id
 
     await settledMatch(persistence, 'settled', Faction.Blue, playerId, otherId)
-    await persistence.matches.append('settled', {
+    await persistence.region.matches.append('settled', {
       turn: 1,
       faction: Faction.Blue,
       command: { type: 'endTurn' } as never,
     })
-    await persistence.matches.create(header(), 'running')
-    await seedContact(persistence.encounters, {
+    await persistence.region.matches.create(header(), 'running')
+    await seedContact(persistence.region.encounters, {
       squadId: w.squadId, playerId, trip: 't', checkpoint: 0, at: 1, place: w.home, aliens: 2, roomId: 'running', passedFor: null,
     })
-    await persistence.matches.create(header(), 'strangers')
+    await persistence.region.matches.create(header(), 'strangers')
 
     const settled = await w.window.call('tictac/api/match/recording', { matchId: 'settled' })
     expect(settled.code).toBeNull()

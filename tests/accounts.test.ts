@@ -67,7 +67,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
 
     // Killed outright, the way `Rosters.settle` marks a dead row — there is
     // no request for that, so the test reaches for the row directly.
-    await persistence.db.query`UPDATE roster SET status = ${'dead'} WHERE character_id = ${fallen.characterId}`
+    await persistence.region.db.query`UPDATE roster SET status = ${'dead'} WHERE character_id = ${fallen.characterId}`
 
     const recruited = await window.call('tictac/api/roster/recruit')
     expect(recruited.code).toBeNull()
@@ -252,7 +252,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
 
     // What is written down is the drawn start and nothing else: no column
     // holds where the connection was.
-    const rows = await persistence.db.query<Record<string, unknown>>`SELECT * FROM squads`
+    const rows = await persistence.region.db.query<Record<string, unknown>>`SELECT * FROM squads`
     // `standing` is the player's own setting (`squad/standing`), not a place;
     // `owner` is the region keeping the squad (RFC-0002 §4), not where it came from.
     expect(Object.keys(rows[0]!).sort()).toEqual([
@@ -295,7 +295,7 @@ describe.each(DATABASE_URLS)('Passkey accounts on %s', (url) => {
     const lyon: LatLng = { lat: 45.764, lng: 4.8357 }
     const token = await register(windowOn(persistence), await softwareAuthenticator())
     // As every account registered before migration 7 is: a player with no row.
-    await persistence.db.query`DELETE FROM squads`
+    await persistence.region.db.query`DELETE FROM squads`
 
     const window = windowOn(persistence, lyon)
     await window.call('tictac/api/account/signIn', { token })

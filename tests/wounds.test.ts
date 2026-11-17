@@ -6,7 +6,7 @@ import { TraitId, resolveTraits, woundTraits } from '../src/core/Traits'
 import { World } from '../src/ecs/World'
 import { TraitsComponent } from '../src/ecs/components'
 import { calculateHitChance } from '../src/rules/Combat'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 import { stepCostFor, moveBudget } from '../src/rules/Movement'
 import { headlessSoldier } from './support/soldier'
 

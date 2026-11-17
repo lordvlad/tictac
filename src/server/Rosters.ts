@@ -35,6 +35,24 @@ export interface RosterMember {
   downtime: number
 }
 
+/** A roster row as it is stored, which is what travels in a handover (`SquadBundle`). */
+export interface RosterRecord {
+  characterId: string
+  playerId: string
+  slot: number
+  /** The sheet as the JSON text the column holds. */
+  sheet: string
+  status: string
+  matches: number
+  createdAt: string
+  diedIn: string | null
+  hp: number
+  /** The service record as the JSON text the column holds. */
+  deeds: string
+  fatigue: number
+  downtime: number
+}
+
 /** One side of a settled match: who played it, with which characters, and how each fared. */
 export interface SideResult {
   playerId: string
@@ -116,6 +134,59 @@ export class Rosters {
       fatigue: Number(row.fatigue),
       downtime: Number(row.downtime),
     }))
+  }
+
+  /** Every character this player has had, living and dead, as stored: what a handover carries with their squad (`RegionStore.exportSquad`). */
+  async records(playerId: string): Promise<RosterRecord[]> {
+    const rows = await this.db.query<{
+      character_id: string
+      player_id: string
+      slot: number
+      sheet: string
+      status: string
+      matches: number
+      created_at: string
+      died_in: string | null
+      hp: number
+      deeds: string
+      fatigue: number
+      downtime: number
+    }>`SELECT character_id, player_id, slot, sheet, status, matches, created_at, died_in, hp, deeds, fatigue, downtime
+         FROM roster WHERE player_id = ${playerId} ORDER BY created_at, character_id`
+    return rows.map((row) => ({
+      characterId: row.character_id,
+      playerId: row.player_id,
+      slot: Number(row.slot),
+      sheet: row.sheet,
+      status: row.status,
+      matches: Number(row.matches),
+      createdAt: row.created_at,
+      diedIn: row.died_in,
+      hp: Number(row.hp),
+      deeds: row.deeds,
+      fatigue: Number(row.fatigue),
+      downtime: Number(row.downtime),
+    }))
+  }
+
+  /** Queue characters that came from another region onto `batch`, as they were; a character already here is brought up to date, so a retried handover is harmless. */
+  importInto(batch: Batch, records: readonly RosterRecord[]): void {
+    for (const record of records) {
+      batch.query`INSERT INTO roster
+                    (character_id, player_id, slot, sheet, status, matches, created_at, died_in, hp, deeds, fatigue, downtime)
+                  VALUES (${record.characterId}, ${record.playerId}, ${record.slot}, ${record.sheet}, ${record.status},
+                          ${record.matches}, ${record.createdAt}, ${record.diedIn}, ${record.hp}, ${record.deeds},
+                          ${record.fatigue}, ${record.downtime})
+                  ON CONFLICT (character_id) DO UPDATE SET
+                    slot = excluded.slot, sheet = excluded.sheet, status = excluded.status, matches = excluded.matches,
+                    died_in = excluded.died_in, hp = excluded.hp, deeds = excluded.deeds,
+                    fatigue = excluded.fatigue, downtime = excluded.downtime`
+    }
+  }
+
+  /** Queue the deletion of a player's whole roster, history included: they, and their squad, have gone to another region. */
+  removeInto(batch: Batch, playerId: string): void {
+    batch.query`DELETE FROM roster WHERE player_id = ${playerId}`
   }
 
   /**

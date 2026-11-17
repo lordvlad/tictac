@@ -11,7 +11,7 @@ appliesTo:
   - "src/game/ServerConnection.ts"
   - "src/wire/Lobby.ts"
   - "src/wire/Recording.ts"
-  - "src/rules/Squads.ts"
+  - "src/entities/Squads.ts"
   - "src/server/Session.ts"
   - "src/server/Lobby.ts"
   - "src/server/Room.ts"
@@ -165,7 +165,8 @@ With no outcomes on the wire, nothing about an attack can arrive *wrong* — but
 two peers can still drift apart, and nothing about a single action would reveal
 it. The check is therefore about state rather than about messages:
 
-- **A state digest at every handover** (`src/rules/StateDigest.ts`). Soldiers are
+- **A state digest at every handover** (`src/rules/StateDigest.ts` holds its shape and comparison,
+  `src/sim/WorldDigest.ts` takes it from a world). Soldiers are
   hashed per component, so a mismatch names the unit and the component;
   everything else folds into one number for terrain and one for the rule tables,
   because there are hundreds of wall entities and a hash per wall per turn would
@@ -254,7 +255,7 @@ broker: `src/sim/Replay.ts` and `bun run replay <file>`.
   `InteractionController.busy` — walking, or the applier's queue not yet empty — before the next
   event, and a restored frame clears the queue, which was about the moment being left.
 - **Stepping back** is not replay: no command is invertible. `Playback` keeps a `Moment`
-  (`src/rules/Rewind.ts` holds the types) at every event boundary and puts one back with
+  (`src/sim/Rewind.ts` holds the types) at every event boundary and puts one back with
   `restoreMoment`, which is private to `src/game/Playback.ts`: a rewind presents a recording and
   is never a move in live play. A
   moment is four things, and playing on from a restored one reaches the match the file
@@ -315,7 +316,7 @@ concern (whether the same header replays the same map) with its own refusal in
 
 ## 8. Refereed Matches: Rooms on One Server
 
-A match server (`src/server/GameServer.ts` behind `Bun.serve`, or the one Durable Object in
+A match server (`createMatchServer`, `src/server/MatchServer.ts`, behind `Bun.serve` in `src/server/GameServer.ts` or the one Durable Object in
 `docs/architecture/deployment.md` §2) is a **lobby of rooms** (`src/server/Lobby.ts`). A room
 (`src/server/Room.ts`) is one match: a Blue seat (whoever opened it), a Red seat (whoever
 joined it) and any number of spectators, plus the referee's own recomputation of the match —
@@ -382,10 +383,11 @@ Three pushes are sent unasked:
   sent before **every** close the server starts, and the only thing that tells a window the
   close is final. `reconnect` is `never` (the version gate; a window its player has replaced,
   with `SESSION_REPLACED` as the reason), `retry` (the server is stopping: dial back like after
-  a drop) or `elsewhere` (the session continues at `url`: the connection ends and
-  `ServerConnection.onElsewhere` hears where, which is the hook a region handover takes the
-  window across by). A word a build does not know is read as `never`. `Lobby.end` is the one
-  door on the server; `ServerConnection.sessionEnded` the one on the window.
+  a drop) or `elsewhere` (the session continues at `url`). With a region handover being taken
+  (below) `elsewhere` is what moves the window onto its second socket; with none, the connection
+  ends and `ServerConnection.onElsewhere` hears where. A word a build does not know is read as
+  `never`. `Lobby.end` is the one door on the server; `ServerConnection.sessionEnded` the one on
+  the window.
 - **`tictac/api/squad/changed`**: `{ squad }`, to the player's window whenever its squad's route
   changes — an order, or an arrival recorded by the travel schedule ([ARCH-WORLD](world.md)).
 
@@ -547,7 +549,7 @@ A room is written down at every transition a restart depends on (`RoomStore`,
 [ARCH-PERSISTENCE §3](persistence.md)), through the same ordered write chain as its match log:
 opened, joined, started (after its match is created in `MatchStore`), squads verified, judging
 stopped (below); its row is deleted when the room ends. `Lobby.restore()` — run by
-`startGameServer` before it opens its port, and by the Durable Object inside
+`createMatchServer` (`src/server/MatchServer.ts`) before a socket is let in — on Bun before it opens its port, on the Durable Object inside
 `blockConcurrencyWhile` — takes every live room up again: every seat with no socket in it, held
 for a fresh grace period; a `playing` room's `MatchHost` refought from the stored header and
 events, which also become the log a socket is handed. One match per player, and `you` in the
@@ -692,8 +694,11 @@ that check on the very first handover of *every* refereed match, and are fixed w
 
 - `Squads.loadoutOf` read each pouch back with the stones every soldier is issued
   (`GrenadeSpec.issued`), and applying that loadout issued them again — so the header deployed
-  every soldier with twice the stones the players had. A loadout is what was *packed*; the
-  issued grenades come off when it is read back.
+  every soldier with twice the stones the players had. The issue is now made in one place,
+  `startingGrenades` (`src/rules/Loadout.ts`): a loadout states the pouch, a kind everybody is
+  issued is raised to the issue, and `loadoutOf` reports the pouch as carried, so a loadout read
+  back off a soldier deploys the same pouch on both peers and the referee
+  (`tests/refereed.test.ts`).
 - Fog (`SightedComponent.seen`) was serialised with the unit, so it travelled and was
   digested as if it were a fact about the unit rather than one window's view of it, and the
   referee — which draws no fog — disagreed about every hidden enemy. `seen` is no longer in
@@ -717,10 +722,28 @@ it (a `401` forgets the token, any other refusal keeps it with the reason); `lob
 anybody is listening; `room/enter` with `rejoin()` if it was seated, whose answer is followed by
 the match itself. A refusal on that last step ends the room, not the try: the server is there
 and has said the window stands in its lobby. `session/ended` ends the connection: `never` and
-`elsewhere` for good (`elsewhere` first telling `onElsewhere` where), `retry` as a drop the
-server announced. A `Seated` in another room or seat is reported as a lost match. The connector and the
-timers are injectable (`ServerLink`), which is how `tests/serverConnection.test.ts` and
-`tests/network.test.ts` walk the schedule without waiting for it.
+`elsewhere` for good (`elsewhere` with no handover being taken first telling `onElsewhere` where),
+`retry` as a drop the server announced. A `Seated` in another room or seat is reported as a lost
+match. The connector and the timers are injectable (`ServerLink`), which is how
+`tests/serverConnection.test.ts` and `tests/network.test.ts` walk the schedule without waiting for it.
+
+#### Region handover, in place
+
+A `tictac/api/region/handoverOffer` push (`handoverId`, `squadId`, `targetUrl`, a ticket, and
+`expiresAt` on the server's clock) makes the connection dial the target as a **second socket
+inside the same `ServerConnection`** while the first stays open: `hello`, `signIn` with the stored
+token (not `presentToken`: a refusal here fails the handover and must not forget the token the
+source still honours), then `region/arrive`. Only the first socket's pushes are heard meanwhile.
+The window moves when it has both heard the target's answer and the source's `session/ended`
+`elsewhere`, in whichever order they come (`moveOver`): the source is abandoned without the retry
+path and closed, the second socket becomes the window's, `url` becomes the target's, requests
+asked in between wait for it, and the lobby and (if seated) the room are asked for again on it as
+after a drop — the manager is told `dropped` until its `Seated` comes — while squad and encounter
+listeners, being the connection's, need nothing. Anything going wrong before that — the target
+refusing, its socket closing, its ending the session, no answer by the offer's expiry — closes the
+second socket and sends `region/cancelHandover` on the first: the window never left the source.
+The source going first (a drop, `retry`, `never`) abandons the handover. One offer is taken at a
+time; a second is cancelled.
 
 Everything else the manager holds — mode, side, opening, deployed squad, held commands, the
 world it is bound to — survives the new socket. While reconnecting `isMyTurn` is false and

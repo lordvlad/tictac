@@ -1,16 +1,15 @@
-import type { Migration } from './migrate'
+import { Batch, type Db } from '../../src/server/db/Db'
+import type { Migration } from '../../src/server/db/migrate'
 
 /**
- * Every schema change this build knows, in the order they happened.
+ * The schema a database written before the account/region split holds: the
+ * single list of twelve migrations the old build ran, frozen as it was, under
+ * its own ledger `schema_migrations`.
  *
- * Append only, and never edit one that has shipped: a migration is identified
- * by its number *and* its name, and `migrate` refuses a database whose record
- * of migration 2 disagrees with this file's. Renaming one is therefore a
- * deliberate breaking change, not a tidy-up.
- *
- * The tables here fall into five groups: the intent log a referee keeps, the
- * accounts a player signs in with, the roster those accounts own, the rooms a
- * lobby holds open across a restart, and where each squad is on the map.
+ * It is a fixture, not code a build runs: the stores' own migrations adopt
+ * whatever this leaves behind (`ACCOUNT_SCHEMA`, `REGION_SCHEMA`), and the
+ * tests that prove it need a database that really is in that shape — foreign
+ * keys to `players` and all.
  */
 
 /**
@@ -35,7 +34,7 @@ CREATE TRIGGER events_append_only
   BEFORE UPDATE OR DELETE ON events
   FOR EACH ROW EXECUTE FUNCTION events_append_only()`
 
-export const MIGRATIONS: readonly Migration[] = [
+const LEGACY_MIGRATIONS: readonly Migration[] = [
   {
     id: 1,
     name: 'match log',
@@ -334,3 +333,21 @@ export const MIGRATIONS: readonly Migration[] = [
     ],
   },
 ]
+
+/**
+ * A database as the old build left it: every one of its twelve migrations
+ * applied, and `schema_migrations` saying so. Not migrated by this build.
+ * `upTo` stops early, for a database a build before migration 12 left.
+ */
+export async function legacyDb(db: Db, upTo = LEGACY_MIGRATIONS.length): Promise<void> {
+  await db.exec('CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)')
+  for (const migration of LEGACY_MIGRATIONS.slice(0, upTo)) {
+    const batch = new Batch()
+    for (const statement of migration.up) {
+      const chosen = typeof statement === 'string' ? statement : statement[db.dialect]
+      for (const text of typeof chosen === 'string' ? [chosen] : chosen) batch.exec(text)
+    }
+    batch.query`INSERT INTO schema_migrations (id, name, applied_at) VALUES (${migration.id}, ${migration.name}, ${'2026-01-01T00:00:00Z'})`
+    await db.transaction(batch)
+  }
+}

@@ -9,7 +9,7 @@ import { matchDice, Rng } from '../src/core/rng'
 import { createGlobalRules } from '../src/ecs/globals'
 import { World } from '../src/ecs/World'
 import { canWatch, reactToArrival, watchCost } from '../src/rules/Overwatch'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 import { stockSquads } from './support/squads'
 import { settleTurn } from '../src/rules/Turn'
 

@@ -1,6 +1,5 @@
 import type { ServerClock } from '../Clock'
 import { Batch, type Db } from './Db'
-import { MIGRATIONS } from './migrations'
 
 /**
  * Forward-only migrations.
@@ -12,21 +11,57 @@ import { MIGRATIONS } from './migrations'
  * next, and the log of what was applied stays true either way.
  *
  * Nothing here is clever enough to need a dependency. A migration is a numbered
- * list of statements, `schema_migrations` says which numbers a database has
- * seen, and the two are checked against each other every time a database is
+ * list of statements, `store_migrations` says which numbers a store has seen,
+ * and the two are checked against each other every time a database is
  * opened — including the check that matters most, which is a database written
  * by a *newer* build than the one now opening it.
+ *
+ * **One ledger, one list per store.** The account store and a region's store
+ * migrate independently (RFC-0002 §4) but may share one database — the
+ * singleton Durable Object, a development file — so the ledger is keyed by
+ * store: each list is numbered 1..n on its own and never sees the other's rows.
  */
+
+/** One store's schema: the name its ledger rows are kept under, and its migrations in order. */
+export interface Schema {
+  readonly store: string
+  readonly migrations: readonly Migration[]
+}
+
+/**
+ * The single list every database written before the split ran, under
+ * `schema_migrations`. Nothing is applied from it any more; it is only read,
+ * to make sure a database that still carries it is complete (`checkMonolith`)
+ * before the two stores adopt its tables as theirs.
+ */
+const MONOLITH_LEDGER = 'schema_migrations'
+const MONOLITH_NAMES: readonly string[] = [
+  'match log',
+  'accounts',
+  'rosters',
+  'lasting wounds',
+  'fatigue and medical bay',
+  'rooms',
+  'squads',
+  'encounter rooms',
+  'encounters',
+  'player encounters',
+  'squad owner',
+  'encounter intent',
+]
 
 /**
  * One statement, either identical on both engines or spelled per engine.
  *
- * The per-engine form exists for exactly one thing so far — an append-only
+ * The per-engine form exists for what the engines cannot share: an append-only
  * trigger, which SQLite writes as `RAISE(ABORT, …)` and Postgres as a plpgsql
- * function — and both halves must be the *same number of statements*, so a
- * database's statement count does not depend on where it lives.
+ * function, and a table's removal of a foreign key, which SQLite can only do
+ * by rebuilding the table and Postgres by dropping the constraint. A
+ * single-statement half is a string; a half that needs several is a list.
  */
-export type Statement = string | { readonly sqlite: string; readonly postgres: string }
+export type Statement =
+  | string
+  | { readonly sqlite: string | readonly string[]; readonly postgres: string | readonly string[] }
 
 export interface Migration {
   readonly id: number
@@ -40,17 +75,14 @@ interface AppliedRow {
 }
 
 /**
- * Bring `db` up to the end of `migrations`, and say what was applied now.
+ * Bring `db` up to the end of `schema`'s migrations, and say what was applied now.
  *
  * Two processes migrating one Postgres database at the same moment are not
- * handled: the `schema_migrations` primary key makes the loser fail, which is
+ * handled: the `store_migrations` primary key makes the loser fail, which is
  * loud and recoverable, unlike two half-applied schemas.
  */
-export async function migrate(
-  db: Db,
-  clock: ServerClock,
-  migrations: readonly Migration[] = MIGRATIONS,
-): Promise<number[]> {
+export async function migrate(db: Db, clock: ServerClock, schema: Schema): Promise<number[]> {
+  const { store, migrations } = schema
   for (const [index, migration] of migrations.entries()) {
     // The build's own list, checked before the database is touched: a gap or a
     // reorder here would apply the wrong statements under the right number.
@@ -61,10 +93,17 @@ export async function migrate(
     }
   }
 
+  await checkMonolith(db)
   await db.exec(
-    'CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)',
+    `CREATE TABLE IF NOT EXISTS store_migrations (
+       store      TEXT    NOT NULL,
+       id         INTEGER NOT NULL,
+       name       TEXT    NOT NULL,
+       applied_at TEXT    NOT NULL,
+       PRIMARY KEY (store, id)
+     )`,
   )
-  const applied = await db.query<AppliedRow>`SELECT id, name FROM schema_migrations ORDER BY id`
+  const applied = await db.query<AppliedRow>`SELECT id, name FROM store_migrations WHERE store = ${store} ORDER BY id`
 
   for (const row of applied) {
     const id = Number(row.id)
@@ -73,7 +112,7 @@ export async function migrate(
       // read columns that have moved and write rows the newer build will not
       // recognise, so it is refused by name instead.
       throw new Error(
-        `the database is at migration ${id}, but this build only knows migrations up to ` +
+        `the ${store} database is at migration ${id}, but this build only knows migrations up to ` +
           `${migrations.length}: open it with a newer build`,
       )
     }
@@ -89,10 +128,40 @@ export async function migrate(
   const ran: number[] = []
   for (const migration of migrations) {
     if (done.has(migration.id)) continue
-    await apply(db, migration, new Date(clock.now()).toISOString())
+    await apply(db, store, migration, new Date(clock.now()).toISOString())
     ran.push(migration.id)
   }
   return ran
+}
+
+/**
+ * Refuse a database written before the stores were split unless it was
+ * finished: the stores' first migrations adopt its tables as they are
+ * (`CREATE … IF NOT EXISTS`), which is only right for the shape its last
+ * migration left. A fresh database has no such ledger and passes.
+ */
+async function checkMonolith(db: Db): Promise<void> {
+  const found =
+    db.dialect === 'sqlite'
+      ? await db.query<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${MONOLITH_LEDGER}`
+      : await db.query<{ name: string }>`
+          SELECT table_name AS name FROM information_schema.tables
+           WHERE table_name = ${MONOLITH_LEDGER} AND table_schema = current_schema()`
+  if (found.length === 0) return
+  const rows = await db.query<AppliedRow>`SELECT id, name FROM schema_migrations ORDER BY id`
+  const names = rows.map((row) => row.name)
+  if (names.length > MONOLITH_NAMES.length) {
+    throw new Error(
+      `the database is at migration ${names.length}, but this build only knows migrations up to ` +
+        `${MONOLITH_NAMES.length} of the old single schema: open it with a newer build`,
+    )
+  }
+  if (names.length < MONOLITH_NAMES.length || names.some((name, index) => name !== MONOLITH_NAMES[index])) {
+    throw new Error(
+      `this database was last opened by a build before the account/region split and stops at migration ${names.length} ` +
+        `of ${MONOLITH_NAMES.length}: open it once with the previous build to finish its migrations, then with this one`,
+    )
+  }
 }
 
 /**
@@ -102,13 +171,14 @@ export async function migrate(
  * so the bookkeeping and the change are the same transaction. (SQLite runs DDL
  * transactionally, which is the whole reason this is possible at all.)
  */
-async function apply(db: Db, migration: Migration, appliedAt: string): Promise<void> {
+async function apply(db: Db, store: string, migration: Migration, appliedAt: string): Promise<void> {
   const batch = new Batch()
   for (const statement of migration.up) {
-    batch.exec(typeof statement === 'string' ? statement : statement[db.dialect])
+    const chosen = typeof statement === 'string' ? statement : statement[db.dialect]
+    for (const text of typeof chosen === 'string' ? [chosen] : chosen) batch.exec(text)
   }
-  batch.query`INSERT INTO schema_migrations (id, name, applied_at)
-              VALUES (${migration.id}, ${migration.name}, ${appliedAt})`
+  batch.query`INSERT INTO store_migrations (store, id, name, applied_at)
+              VALUES (${store}, ${migration.id}, ${migration.name}, ${appliedAt})`
   try {
     await db.transaction(batch)
   } catch (error) {

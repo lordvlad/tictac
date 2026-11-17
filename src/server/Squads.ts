@@ -3,6 +3,7 @@ import type { Squad } from '../wire/Rpc'
 import type { StandingOrder } from '../wire/Rpc'
 import type { ServerClock } from './Clock'
 import { Batch, type Db } from './db/Db'
+import { SINGLETON_REGION } from './Owner'
 
 /**
  * Where a player's squad is on the world map (GDD-WORLD §2, §4).
@@ -86,6 +87,19 @@ export interface Placement {
   readonly createdAt: string
 }
 
+/** A squad row as it is stored, which is what travels in a handover (`SquadBundle`): plain strings and numbers, so it crosses a Durable Object boundary as it is. */
+export interface SquadRecord {
+  id: string
+  playerId: string
+  /** The route, as the JSON text the column holds. */
+  waypoints: string
+  startLatE6: number
+  startLngE6: number
+  createdAt: string
+  standing: string
+  owner: string
+}
+
 export class Squads {
   /** The placement in flight, which the next waits for (`placing`). */
   private placements: Promise<unknown> = Promise.resolve()
@@ -95,6 +109,8 @@ export class Squads {
     private readonly clock: ServerClock,
     private readonly random: () => number = systemRandom,
     private readonly log: (line: string) => void = (line) => console.warn(line),
+    /** The region this store belongs to: who keeps a squad placed here (`owner`). */
+    private readonly self: string = SINGLETON_REGION,
   ) {}
 
   /** The player's squad, or null for one who has none yet. */
@@ -141,6 +157,50 @@ export class Squads {
     await this.db.query`UPDATE squads SET owner = ${region} WHERE id = ${squadId}`
   }
 
+  /** The row as stored, for a handover to carry to another region (`RegionStore.exportSquad`); null for a squad this store does not hold. */
+  async record(squadId: string): Promise<SquadRecord | null> {
+    const rows = await this.db.query<{
+      id: string
+      player_id: string
+      waypoints: string
+      start_lat_e6: number
+      start_lng_e6: number
+      created_at: string
+      standing: string
+      owner: string
+    }>`SELECT id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at, standing, owner FROM squads WHERE id = ${squadId}`
+    const row = rows[0]
+    if (!row) return null
+    return {
+      id: row.id,
+      playerId: row.player_id,
+      waypoints: row.waypoints,
+      startLatE6: Number(row.start_lat_e6),
+      startLngE6: Number(row.start_lng_e6),
+      createdAt: row.created_at,
+      standing: row.standing,
+      owner: row.owner,
+    }
+  }
+
+  /**
+   * Queue a squad that came from another region onto `batch`, as it was
+   * (`owner` included: who keeps it is the handover's to commit, not the
+   * import's). A second import of the same squad — a retried handover —
+   * brings its route, order and keeper up to date instead of failing.
+   */
+  importInto(batch: Batch, record: SquadRecord): void {
+    batch.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at, standing, owner)
+                VALUES (${record.id}, ${record.playerId}, ${record.waypoints}, ${record.startLatE6},
+                        ${record.startLngE6}, ${record.createdAt}, ${record.standing}, ${record.owner})
+                ON CONFLICT (id) DO UPDATE SET waypoints = excluded.waypoints, standing = excluded.standing, owner = excluded.owner`
+  }
+
+  /** Queue the deletion of a squad that has gone to another region. Its encounters go first (`Encounters.removeInto`): they point at it. */
+  removeInto(batch: Batch, squadId: string): void {
+    batch.query`DELETE FROM squads WHERE id = ${squadId}`
+  }
+
   /**
    * Draw a start around `anchor` (or `DEFAULT_ANCHOR`) and hand it, with the
    * squad that stands on it, to `commit`, which writes it — and nobody else
@@ -174,10 +234,10 @@ export class Squads {
 
   /** Queue the insert that gives `playerId` the drawn squad onto `batch`: a no-op if they already have one. */
   placeInto(batch: Batch, playerId: string, { squad, start, createdAt }: Placement): void {
-    batch.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at)
+    batch.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at, owner)
                 VALUES (${squad.id}, ${playerId}, ${JSON.stringify(squad.waypoints)},
                         ${Math.round(start.lat * MICRODEGREES)}, ${Math.round(start.lng * MICRODEGREES)},
-                        ${createdAt})
+                        ${createdAt}, ${this.self})
                 ON CONFLICT (player_id) DO NOTHING`
   }
 

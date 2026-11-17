@@ -16,8 +16,8 @@ import type { OrbitRig } from '../camera/OrbitRig'
 import type { Soldier } from '../entities/Soldier'
 import type { PendingThrow } from '../game/GrenadePlanner'
 import type { PendingShot } from '../game/ShootPlanner'
-import type { Squads } from '../rules/Squads'
-import type { TurnManager } from '../rules/TurnManager'
+import type { Squads } from '../entities/Squads'
+import type { TurnManager } from '../sim/TurnManager'
 import type { OffscreenPortraits } from '../render/Portraits'
 import type { Attribute } from '../core/Progression'
 import type { Debrief } from '../rules/MatchEnd'
@@ -912,14 +912,14 @@ const ATTRIBUTE_NAME: Record<Attribute, string> = {
 export function endScreens(
   winner: Faction,
   viewer: Faction | null,
-  debriefs: readonly Debrief[],
-  escapees: readonly Debrief[],
+  debriefs: readonly Debrief<Soldier>[],
+  escapees: readonly Debrief<Soldier>[],
   carried: Soldier | null,
   portraits: Pick<OffscreenPortraits, 'getPortrait'>,
 ): EndScreen[] {
   const loser = winner === Faction.Blue ? Faction.Red : Faction.Blue
   const done: HudIntent = { type: 'backToMenu' }
-  const survivorOf = ({ unit, growth }: Debrief): EndScreenSurvivor => ({
+  const survivorOf = ({ unit, growth }: Debrief<Soldier>): EndScreenSurvivor => ({
     name: unit.name,
     portrait: portraits.getPortrait(unit.faction, unit.squadIndex),
     lines: growth.map((change) => ({

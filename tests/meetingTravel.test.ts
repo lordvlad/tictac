@@ -84,7 +84,7 @@ async function world({ on = true, answer = OPENED }: { on?: boolean; answer?: Me
   const state = { answer, on }
   const open: OpenMeeting = async (meeting) => {
     const routes: Call['routes'] = {}
-    for (const side of [meeting.blue, meeting.red]) routes[side.squadId] = (await persistence.squads.of(side.player.id))!.waypoints
+    for (const side of [meeting.blue, meeting.red]) routes[side.squadId] = (await persistence.region.squads.of(side.player.id))!.waypoints
     calls.push({ meeting, routes })
     return state.answer
   }
@@ -95,7 +95,7 @@ async function world({ on = true, answer = OPENED }: { on?: boolean; answer?: Me
 
   const order = async (who: Walker, body: Record<string, unknown>) =>
     (await who.window.call('tictac/api/squad/order', { order: body })).result.squad as Squad
-  const squad = async (who: Walker) => (await persistence.squads.of(who.id))!
+  const squad = async (who: Walker) => (await persistence.region.squads.of(who.id))!
 
   return {
     persistence,
@@ -246,9 +246,9 @@ describe('Two squads whose routes cross', () => {
         ['waiter', spot],
       ] as const) {
         const id = `${i}-${suffix}`
-        await persistence.db.query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${id}, ${'2026-01-01T00:00:00Z'})`
+        await persistence.accounts.db.query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${id}, ${'2026-01-01T00:00:00Z'})`
         const resting: PastWaypoint = { kind: 'past', ...at, arrival: server.now, departed: null }
-        await persistence.db.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at)
+        await persistence.region.db.query`INSERT INTO squads (id, player_id, waypoints, start_lat_e6, start_lng_e6, created_at)
           VALUES (${`squad-${id}`}, ${id}, ${JSON.stringify([resting])}, 0, 0, ${'2026-01-01T00:00:00Z'})`
         if (suffix === 'mover') movers.add(`squad-${id}`)
       }
@@ -442,10 +442,10 @@ async function restarted(persistence: Persistence, clock: { now: number }, open:
   const armed: (number | null)[] = []
   const schedule = new Schedule({ now: () => clock.now, arm: (at) => armed.push(at) })
   const journeys = new Journeys({
-    directory: regionDirectory({ owners: persistence.squads }),
-    squads: persistence.squads,
-    accounts: persistence.accounts,
-    encounters: persistence.encounters,
+    directory: regionDirectory({ owners: persistence.region.squads }),
+    squads: persistence.region.squads,
+    accounts: persistence.accounts.accounts,
+    encounters: persistence.region.encounters,
     schedule,
     clock: { now: () => clock.now, schedule: WALL_CLOCK.schedule },
     tell: () => {},
@@ -508,7 +508,7 @@ describe('A server that restarts', () => {
       [w.ada, w.bo],
       [w.bo, w.ada],
     ] as const) {
-      await seedContact(w.persistence.encounters, {
+      await seedContact(w.persistence.region.encounters, {
         squadId: who.squadId,
         playerId: who.id,
         trip: `${pair}@${planned.at}`,

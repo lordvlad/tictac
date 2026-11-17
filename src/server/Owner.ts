@@ -22,6 +22,14 @@ import type { LatLng } from '../core/Travel'
 /** The one region every deployment has today, and the owner every squad row defaults to (migration 11). */
 export const SINGLETON_REGION = 'singleton'
 
+/**
+ * The Durable Object that holds the account store and answers every region's
+ * `AccountsPort` (RFC-0002 §4): the singleton, which is also the one region
+ * there is today. A region Durable Object with any other name reaches
+ * accounts by RPC to this one.
+ */
+export const DIRECTORY_REGION = SINGLETON_REGION
+
 export interface RegionPartition {
   /** Canonical region ID, e.g. "region-west" or "region-east". */
   id: string

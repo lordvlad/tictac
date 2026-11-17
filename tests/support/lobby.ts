@@ -11,7 +11,9 @@ import { loopback } from '../../src/wire/Transport'
 import type { Lobby } from '../../src/server/Lobby'
 import type { Persistence } from '../../src/server/Persistence'
 import type { Journeys } from '../../src/server/Journeys'
-import { regionDirectory } from '../../src/server/Owner'
+import type { AccountsPort } from '../../src/server/AccountsPort'
+import type { HandoverCoordinator } from '../../src/server/Handover'
+import type { RegionStore } from '../../src/server/RegionStore'
 import { Sessions } from '../../src/server/Session'
 import { STOCK_PLAN } from '../../src/sim/Balance'
 import { SimMatch } from '../../src/sim/SimMatch'
@@ -78,10 +80,11 @@ function layerOf(lobby: Lobby): Layer {
     const accounts = { playerFor: async (token: string) => known.get(token) ?? null }
     const sessions = new Sessions({
       lobby,
-      persistence: { accounts, rosters: {}, squads: {} } as unknown as Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>,
+      accounts: accounts as unknown as AccountsPort,
+      region: { rosters: {}, squads: {} } as unknown as Pick<RegionStore, 'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'>,
       // Nothing here travels.
       journeys: {} as Journeys,
-      directory: regionDirectory({ owners: { ownerOf: async () => null } }),
+      handover: {} as HandoverCoordinator,
       clock: WALL_CLOCK,
       log: () => {},
     })
@@ -323,12 +326,12 @@ export async function enlistFor(
   red: Player,
 ): Promise<RecordingHeader> {
   for (const { id, name } of [blue, red]) {
-    await persistence.db
+    await persistence.accounts.db
       .query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${name}, ${'2026-01-01T00:00:00Z'})`
   }
-  await persistence.rosters.enlist(blue.id, sheetsOf(header, Faction.Blue))
-  await persistence.rosters.enlist(red.id, sheetsOf(header, Faction.Red))
-  const ids = async (player: Player) => (await persistence.rosters.active(player.id)).map((m) => m.characterId)
+  await persistence.region.rosters.enlist(blue.id, sheetsOf(header, Faction.Blue))
+  await persistence.region.rosters.enlist(red.id, sheetsOf(header, Faction.Red))
+  const ids = async (player: Player) => (await persistence.region.rosters.active(player.id)).map((m) => m.characterId)
   const hp = (faction: Faction) => sheetsOf(header, faction).map((sheet) => maxHpOf(sanitizeSheet(sheet)))
   return withStartingHp(
     withCharacterIds(header, { [Faction.Blue]: await ids(blue), [Faction.Red]: await ids(red) }),

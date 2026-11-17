@@ -111,9 +111,9 @@ describe.each(adapters)('Db.transaction on %s', (_name, open) => {
       { id: 1, name: 'first', up: ['CREATE TABLE alpha (id TEXT PRIMARY KEY)'] },
       { id: 2, name: 'second', up: ['CREATE TABLE beta (id TEXT PRIMARY KEY)', 'CREATE TABLE beta (this is not sql)'] },
     ]
-    await expect(migrate(db, WALL_CLOCK, list)).rejects.toThrow(/migration 2 \(second\) failed/)
+    await expect(migrate(db, WALL_CLOCK, { store: 'test', migrations: list })).rejects.toThrow(/migration 2 \(second\) failed/)
     await expect(db.query`SELECT id FROM beta`).rejects.toThrow()
-    expect((await db.query<{ id: number }>`SELECT id FROM schema_migrations ORDER BY id`).map((row) => Number(row.id))).toEqual([1])
+    expect((await db.query<{ id: number }>`SELECT id FROM store_migrations WHERE store = 'test' ORDER BY id`).map((row) => Number(row.id))).toEqual([1])
     await db.close()
   })
 

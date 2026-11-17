@@ -10,6 +10,9 @@ export class InventoryComponent extends Component {
   }
 
   constructor(
+    // A unit nobody equipped starts with what everybody is issued. A loadout
+    // never adds to this: `startingGrenades` raises the pouch it states to the
+    // issue, so the two cannot stack.
     public grenades: Record<GrenadeId, number> = {
       [GrenadeId.Frag]: 1,
       [GrenadeId.Flash]: 1,

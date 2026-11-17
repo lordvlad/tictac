@@ -4,6 +4,7 @@ import { loopback } from '../../src/wire/Transport'
 import { WALL_CLOCK, type ServerClock } from '../../src/server/Clock'
 import type { OpenEncounter, OpenMeeting } from '../../src/server/EncounterPort'
 import { Journeys } from '../../src/server/Journeys'
+import { HandoverCoordinator } from '../../src/server/Handover'
 import { regionDirectory } from '../../src/server/Owner'
 import { Lobby, type LobbyOptions } from '../../src/server/Lobby'
 import type { Persistence } from '../../src/server/Persistence'
@@ -75,21 +76,21 @@ export function rpcServer(
   let now = start
   const clock: ServerClock = { now: () => now, schedule: options.schedule ?? WALL_CLOCK.schedule }
   const lobby = new Lobby({
-    matches: persistence.matches,
-    rooms: persistence.rooms,
+    matches: persistence.region.matches,
+    rooms: persistence.region.rooms,
     log: () => {},
     clock,
-    ...(options.openMeeting === 'lobby' ? { rosters: persistence.rosters } : {}),
+    ...(options.openMeeting === 'lobby' ? { rosters: persistence.region.rosters } : {}),
     ...options.lobby,
   })
   const armed: (number | null)[] = []
   const schedule = new Schedule({ now: () => now, arm: (at) => armed.push(at) })
-  const directory = regionDirectory({ owners: persistence.squads })
+  const directory = regionDirectory({ owners: persistence.region.squads })
   const journeys = new Journeys({
     directory,
-    squads: persistence.squads,
-    accounts: persistence.accounts,
-    encounters: persistence.encounters,
+    squads: persistence.region.squads,
+    accounts: persistence.accounts.accounts,
+    encounters: persistence.region.encounters,
     schedule,
     clock,
     openEncounter: options.openEncounter,
@@ -98,7 +99,15 @@ export function rpcServer(
     mintTrip: options.mintTrip,
     tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
   })
-  const sessions = new Sessions({ lobby, persistence, journeys, directory, clock, log: () => {} })
+  const sessions = new Sessions({
+    lobby,
+    accounts: persistence.accounts.accounts,
+    region: persistence.region,
+    journeys,
+    handover: new HandoverCoordinator({ clock, directory, squads: persistence.region.squads }),
+    clock,
+    log: () => {},
+  })
 
   const window = (place: LatLng | null = null): Window => {
     const [page, socket] = loopback()
@@ -172,6 +181,6 @@ export async function registerAt(
   const id = ((await window.call('tictac/api/account/me')).result.player as { id: string }).id
   const squad = (await window.call('tictac/api/squad/get')).result.squad as { id: string }
   const resting: PastWaypoint = { kind: 'past', ...at, arrival: server.now, departed: null }
-  await persistence.db.query`UPDATE squads SET waypoints = ${JSON.stringify([resting])} WHERE id = ${squad.id}`
+  await persistence.region.db.query`UPDATE squads SET waypoints = ${JSON.stringify([resting])} WHERE id = ${squad.id}`
   return { name, window, id, squadId: squad.id }
 }

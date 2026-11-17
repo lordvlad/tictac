@@ -83,10 +83,11 @@ bun run build
 | Path | Description |
 | --- | --- |
 | `src/core/` | Pure math, Grid DDA, Line of Sight, Pathfinding, Ballistics, Combat formulas. |
-| `src/rules/` | Headless game rules the systems execute: `Combat`, `Overwatch`, `Movement`, `Breakdown`, `TurnManager`, `Squads`, `MatchEnd`, `StateDigest`, `Rewind` types, the `Command` language and the loadout pool rules. |
+| `src/rules/` | Headless game rules the systems execute: `Combat`, `Overwatch`, `Movement`, `Breakdown`, `Turn`, `MatchEnd`, the `StateDigest` shape and comparison, the `Command` language and the loadout pool rules. |
 | `src/ecs/` | ECS `World`, components, systems, snapshot/restore. |
+| `src/entities/` | `Soldier` (the wrapper over a unit's components), `Squads` (the units on the field) and `applyUnitLoadout` (`Kit`). |
 | `src/wire/` | The contract two sides share: `NetworkMessage`, `Rpc`, `JsonRpc`, `Lobby`, `Encounter`, `Transport`, the `Recording` format, `Base64Url`. Headless; imports only `core` and `rules`. |
-| `src/sim/` | Headless match simulation engine (`SimUnit`, `SimMatch`, `Balance`). |
+| `src/sim/` | Headless match simulation engine (`SimUnit`, `SimMatch`, `Balance`), plus what drives a match's turns and moments: `TurnManager`, the `Rewind` types and `digestWorld`. |
 | `src/game/` | Client orchestration only: `NetworkManager`, `ServerConnection`, `InteractionController`, the planners, `Battlefield`, `Playback`. |
 | `src/render/` | Three.js meshes, animations, tracers, visual FX, materials. |
 | `src/hud/` | DOM HUD overlays, loadout screen, portraits, debug panels. |

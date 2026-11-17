@@ -11,7 +11,7 @@ import {
   addItem,
   canAddItem,
   itemsCarried,
-  applyUnitLoadout,
+  startingGrenades,
   canEquipSidearm,
   canEquipWeapon,
   canFitAttachment,
@@ -20,6 +20,7 @@ import {
   fitAttachment,
   remaining,
 } from '../src/rules/Loadout'
+import { applyUnitLoadout } from '../src/entities/Kit'
 import { defaultLoadout } from '../src/core/Loadout'
 import { unitLoadoutFrom } from '../src/wire/Recording'
 import type { Soldier } from '../src/entities/Soldier'
@@ -389,8 +390,23 @@ describe('Weapon rails', () => {
   })
 })
 
+describe('The starting grenade issue', () => {
+  const none = { [GrenadeId.Frag]: 0, [GrenadeId.Flash]: 0, [GrenadeId.Smoke]: 0, [GrenadeId.Stone]: 0, [GrenadeId.Incendiary]: 0 }
+
+  test('raises a kind everybody is issued to the issue and leaves every other kind as stated', () => {
+    const pouch = startingGrenades({ ...defaultLoadout()[0]!, grenades: { ...none, [GrenadeId.Smoke]: 2 } })
+    expect(pouch).toEqual({ ...none, [GrenadeId.Smoke]: 2, [GrenadeId.Stone]: GRENADES[GrenadeId.Stone].issued })
+  })
+
+  test('a pouch read back from a deployed soldier states the same pouch again', () => {
+    const stated = { ...defaultLoadout()[0]!, grenades: { ...none, [GrenadeId.Frag]: 1 } }
+    const once = startingGrenades(stated)
+    expect(startingGrenades({ ...stated, grenades: once })).toEqual(once)
+  })
+})
+
 describe('Stamping a loadout onto a soldier', () => {
-  test('kinds the player left out are zeroed, and what everybody is issued is added', () => {
+  test('kinds the player left out are zeroed, and what everybody is issued is made up', () => {
     const soldier = stubSoldier()
 
     applyUnitLoadout(soldier, {

@@ -22,7 +22,7 @@ const BO: Player = { id: 'bo', name: 'Bo' }
 
 async function harness() {
   const persistence = await freshPersistence(':memory:')
-  const lobby = new Lobby({ matches: persistence.matches, rooms: persistence.rooms, log: () => {}, clock: WALL_CLOCK })
+  const lobby = new Lobby({ matches: persistence.region.matches, rooms: persistence.region.rooms, log: () => {}, clock: WALL_CLOCK })
   return { persistence, lobby }
 }
 

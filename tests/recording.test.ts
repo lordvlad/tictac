@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Faction, SQUAD_SIZE } from '../src/config'
-import { AmmoId, GrenadeId, ShotMode, WeaponId } from '../src/core/Arsenal'
+import { AmmoId, GRENADES, GrenadeId, ShotMode, WeaponId } from '../src/core/Arsenal'
 import { NO_FX } from '../src/core/Combatant'
 import { characterSheet, rollSquadSheets } from '../src/core/Characters'
 import { Grid } from '../src/core/Grid'
@@ -11,7 +11,7 @@ import { fireWeapon } from '../src/rules/Combat'
 import { deploymentStateFrom, parseRecording, RECORDING_VERSION } from '../src/wire/Recording'
 import { Recorder } from '../src/sim/Recorder'
 import { defaultLoadout } from '../src/core/Loadout'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { SimMatch } from '../src/sim/SimMatch'
 import type { CombatRecording } from '../src/wire/Recording'
@@ -367,11 +367,12 @@ describe('A squad reads back what it was told to deploy', () => {
   })
 
   test('the grenades a squad states rebuild the same pouch, issued stones included once', () => {
-    // Regression: `loadoutOf` read each pouch back *with* the stones every
-    // soldier is issued, and applying that loadout issued them again — so
-    // the header a host sends a referee deployed every soldier with twice the
-    // stones, and the first digest at the first handover disagreed on every
-    // unit's inventory and aborted the match.
+    // Regression: a loadout read back off a soldier carries the stones every
+    // soldier is issued, and applying it issued them again — so the header a
+    // host sends a referee deployed every soldier with twice the stones, and
+    // the first digest at the first handover disagreed on every unit's
+    // inventory and aborted the match. `loadoutOf` now reports the pouch as
+    // carried and the loadout rules issue exactly once.
     const spawns = { [Faction.Blue]: [{ x: 1, y: 1 }], [Faction.Red]: [{ x: 10, y: 10 }] }
     const sheet = characterSheet(new Rng(1))
     const packed = { ...defaultLoadout(1)[0]!, grenades: { ...defaultLoadout(1)[0]!.grenades, [GrenadeId.Frag]: 2 } }
@@ -381,6 +382,6 @@ describe('A squad reads back what it was told to deploy', () => {
     const rebuilt = new Squads(new World(), new Grid(16), spawns, { [Faction.Blue]: stated })
 
     expect(rebuilt.byFaction[Faction.Blue][0]!.grenades).toEqual(original.byFaction[Faction.Blue][0]!.grenades)
-    expect(stated[0]!.loadout!.grenades[GrenadeId.Stone]).toBe(0)
+    expect(stated[0]!.loadout!.grenades[GrenadeId.Stone]).toBe(GRENADES[GrenadeId.Stone].issued)
   })
 })

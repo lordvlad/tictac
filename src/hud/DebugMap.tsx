@@ -5,7 +5,7 @@ import { Faction } from '../config'
 import type { Grid, Tile } from '../core/Grid'
 import { Block, Side, StairDirection } from '../core/Grid'
 import { WallKind } from '../core/Walls'
-import type { Squads } from '../rules/Squads'
+import type { Squads } from '../entities/Squads'
 
 const TILE_PX = 11
 const WALL_PX = 3

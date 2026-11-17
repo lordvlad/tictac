@@ -1,10 +1,6 @@
 import { SQL } from 'bun'
-import {
-  LOCAL_RELYING_PARTY,
-  persistenceOverDb,
-  type Persistence,
-  type RelyingParty,
-} from '../Persistence'
+import type { RelyingParty } from '../AccountStore'
+import { persistenceOverDb, type Persistence } from '../Persistence'
 import type { ServerClock } from '../Clock'
 import { dialectOf, type Batch, type Db, type Dialect, type SqlValue } from './Db'
 
@@ -20,13 +16,39 @@ import { dialectOf, type Batch, type Db, type Dialect, type SqlValue } from './D
  * actually opens a `Bun.SQL` connection.
  */
 
+export interface OpenPersistenceOptions {
+  /** The passkeys' relying party; `LOCAL_RELYING_PARTY` unless set. */
+  party?: RelyingParty
+  /**
+   * The region's own database. Unset, it is the same file or server as the
+   * accounts' — which is what a single database written before the split is —
+   * except for `:memory:`, which is private to its connection, so there each
+   * store gets one of its own.
+   */
+  regionUrl?: string
+  /** The region this is, as an owner column names it; the singleton unless set. */
+  self?: string
+}
+
+/**
+ * Both stores of the Bun host, in this process. `url` is the account store's
+ * database. A `:memory:` default is what a test runs against, and the reason a
+ * join between the two stores' tables fails there instead of passing by
+ * accident; a test that wants both in one database opens a `Db` itself and
+ * hands it to `persistenceOverDb`.
+ */
 export async function openPersistence(
   clock: ServerClock,
   url = ':memory:',
-  party: RelyingParty = LOCAL_RELYING_PARTY,
+  options: OpenPersistenceOptions = {},
 ): Promise<Persistence> {
   const db = await openDb(url)
-  return persistenceOverDb(db, clock, party)
+  const regionUrl = options.regionUrl ?? (url === ':memory:' ? ':memory:' : undefined)
+  return persistenceOverDb(db, clock, {
+    party: options.party,
+    self: options.self,
+    regionDb: regionUrl === undefined ? undefined : await openDb(regionUrl),
+  })
 }
 
 /** Open a database. It is not migrated here — see `migrate`. */

@@ -5,7 +5,7 @@ import { Grid, Side, type Tile } from '../src/core/Grid'
 import { WallKind } from '../src/core/Walls'
 import { MovementPlanner } from '../src/game/MovementPlanner'
 import type { Soldier } from '../src/entities/Soldier'
-import type { Squads } from '../src/rules/Squads'
+import type { Squads } from '../src/entities/Squads'
 import type { EngineContext } from '../src/engine'
 import { installCanvasStub } from './support/dom'
 

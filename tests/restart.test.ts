@@ -40,9 +40,9 @@ async function deployment() {
   const logs: string[] = []
   const serve = async (version: PeerVersion = MY_VERSION): Promise<Lobby> => {
     const lobby = new Lobby({
-      matches: persistence.matches,
-      rooms: persistence.rooms,
-      rosters: persistence.rosters,
+      matches: persistence.region.matches,
+      rooms: persistence.region.rooms,
+      rosters: persistence.region.rosters,
       onVerdict: (verdict) => verdicts.push(verdict),
       mapSeed: () => RECORDING.header.seed,
       log: (message) => logs.push(message),
@@ -96,7 +96,7 @@ describe('A restart loses no room', () => {
     playing.blue.send({ type: 'matchHeader', header: RECORDING.header })
     for (const event of RECORDING.events.slice(0, HALF)) playing.blue.send(event.command)
     await first.idle()
-    const accepted = await persistence.matches.events(playing.roomId)
+    const accepted = await persistence.region.matches.events(playing.roomId)
 
     await first.dispose()
     // To a window this is a dropped connection, not the end of anything.
@@ -104,7 +104,7 @@ describe('A restart loses no room', () => {
     expect(before.every((socket) => socket.closed)).toBe(true)
     expect(before.flatMap((socket) => socket.of('abort'))).toEqual([])
     // What survived it is the hash of every key, never a key.
-    const rows = JSON.stringify(await persistence.db.query`SELECT * FROM rooms`)
+    const rows = JSON.stringify(await persistence.region.db.query`SELECT * FROM rooms`)
     for (const socket of before) {
       expect(rows).not.toContain(keyOf(socket))
       expect(rows).toContain(await hashSeatKey(keyOf(socket)))
@@ -168,8 +168,8 @@ describe('A restart loses no room', () => {
     expect(second.room(playing.roomId)!.over).toBe(true)
     expect([playingBlue!, playingRed!].flatMap((socket) => socket.of('abort'))).toEqual([])
     expect(second.view(null).rooms.map((room) => room.id)).not.toContain(playing.roomId)
-    expect(await persistence.matches.events(playing.roomId)).toHaveLength(RECORDING.events.length)
-    expect((await persistence.rooms.live()).map((room) => room.id)).not.toContain(playing.roomId)
+    expect(await persistence.region.matches.events(playing.roomId)).toHaveLength(RECORDING.events.length)
+    expect((await persistence.region.rooms.live()).map((room) => room.id)).not.toContain(playing.roomId)
   })
 
   test('a seat nobody takes back after a restart ends its room once the grace runs out', async () => {
@@ -199,7 +199,7 @@ describe('A restart loses no room', () => {
     expect((await reconnect(second, blue)).of('abort')[0]?.reason).toBe('That match is gone.')
     expect((await reconnect(second, waiting)).of('abort')[0]?.reason).toBe('That match is gone.')
     await second.idle()
-    expect(await persistence.rooms.live()).toEqual([])
+    expect(await persistence.region.rooms.live()).toEqual([])
     // A player walking out is nobody's foul.
     expect(verdicts).toEqual([])
   })
@@ -262,14 +262,14 @@ describe('A rolling update', () => {
     expect(verdicts).toEqual([])
     expect([ada, bo].flatMap((socket) => socket.of('abort'))).toEqual([])
     // …and settles it onto both rosters, as if nothing had been deployed.
-    expect(await persistence.db.query`SELECT match_id FROM match_results`).toEqual([{ match_id: roomId }])
-    expect(await persistence.rooms.live()).toEqual([])
+    expect(await persistence.region.db.query`SELECT match_id FROM match_results`).toEqual([{ match_id: roomId }])
+    expect(await persistence.region.rooms.live()).toEqual([])
   })
 
   test('a room of the previous build that disagrees with the new rules is witnessed, not aborted', async () => {
     const { persistence, verdicts, logs, serve } = await deployment()
     const header = await enlistFor(persistence, RECORDING.header, ADA, BO)
-    const rostersBefore = [await persistence.rosters.active('A'), await persistence.rosters.active('B')]
+    const rostersBefore = [await persistence.region.rosters.active('A'), await persistence.region.rosters.active('B')]
     const old = await serve(OLD)
     const { blue, red, roomId } = await seatBoth(old, ADA, BO, { version: OLD })
     blue.send({ type: 'matchHeader', header })
@@ -308,12 +308,12 @@ describe('A rolling update', () => {
     for (const event of rest) ada2.send(event.command)
     await again.idle()
     expect(bo2.received.slice(-rest.length).map((m) => m.type)).toEqual(rest.map((e) => e.command.type))
-    expect(await persistence.matches.events(roomId)).toHaveLength(RECORDING.events.length)
+    expect(await persistence.region.matches.events(roomId)).toHaveLength(RECORDING.events.length)
     expect([ada2, bo2].flatMap((socket) => socket.of('abort'))).toEqual([])
     // …but keeps nobody's squad: an unwatched match keeps nothing either.
     expect(again.room(roomId)!.over).toBe(true)
-    expect(await persistence.db.query`SELECT match_id FROM match_results`).toEqual([])
-    expect([await persistence.rosters.active('A'), await persistence.rosters.active('B')]).toEqual(rostersBefore)
+    expect(await persistence.region.db.query`SELECT match_id FROM match_results`).toEqual([])
+    expect([await persistence.region.rosters.active('A'), await persistence.region.rosters.active('B')]).toEqual(rostersBefore)
     expect(verdicts).toEqual([])
   })
 

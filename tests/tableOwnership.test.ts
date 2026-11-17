@@ -1,4 +1,9 @@
 import { describe, expect, test } from 'bun:test'
+import { WALL_CLOCK } from '../src/server/Clock'
+import { ACCOUNT_SCHEMA } from '../src/server/db/accountMigrations'
+import { migrate } from '../src/server/db/migrate'
+import { REGION_SCHEMA } from '../src/server/db/regionMigrations'
+import { freshDb } from './support/db'
 
 /**
  * One store per table (tictac-uqt.11): every table is named in SQL by exactly
@@ -6,12 +11,12 @@ import { describe, expect, test } from 'bun:test'
  * Schema changes to a table then break one file, loudly, instead of a join in
  * a neighbour silently.
  *
- * The schema itself (`db/migrations.ts`) names every table by definition and is
- * not a reader; `db/migrate.ts` is the one module of its own table,
- * `schema_migrations`.
+ * The schemas themselves (`db/accountMigrations.ts`, `db/regionMigrations.ts`)
+ * name every table by definition and are not readers; `db/migrate.ts` is the
+ * one module of its own tables, `store_migrations` and the old single ledger.
  */
 
-const SCHEMA = 'src/server/db/migrations.ts'
+const SCHEMAS = ['src/server/db/accountMigrations.ts', 'src/server/db/regionMigrations.ts']
 const ROOTS = ['src/server/**/*.ts', 'workers/**/*.ts']
 
 /** The source with its comments blanked: prose that says "FROM rooms" is not SQL. */
@@ -23,15 +28,25 @@ async function sourcesOf(): Promise<Map<string, string>> {
   const sources = new Map<string, string>()
   for (const root of ROOTS) {
     for await (const path of new Bun.Glob(root).scan('.')) {
-      if (path !== SCHEMA) sources.set(path, withoutComments(await Bun.file(path).text()))
+      if (!SCHEMAS.includes(path)) sources.set(path, withoutComments(await Bun.file(path).text()))
     }
   }
   return sources
 }
 
 describe('Every table is read and written by exactly one module', async () => {
-  const schema = await Bun.file(SCHEMA).text()
-  const tables = [...new Set([...schema.matchAll(/CREATE TABLE (\w+)/g)].map((match) => match[1]!))]
+  // The tables the migrations leave behind in a real database, not the ones
+  // their text names: a rebuild's scratch tables are created and dropped, and
+  // a table may be spelled by a template.
+  const db = await freshDb(':memory:')
+  await migrate(db, WALL_CLOCK, ACCOUNT_SCHEMA)
+  await migrate(db, WALL_CLOCK, REGION_SCHEMA)
+  const tables = (
+    await db.query<{ name: string }>`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'store_migrations'
+       ORDER BY name`
+  ).map((row) => row.name)
+  await db.close()
   const sources = await sourcesOf()
 
   /** The modules whose SQL reads or writes `table`. */

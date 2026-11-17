@@ -4,6 +4,7 @@
  * Usage:
  *   bun scripts/serve-match.ts
  *   bun scripts/serve-match.ts --db=sqlite://matches.sqlite --rp-id=localhost --origins=http://localhost:5173
+ *   bun scripts/serve-match.ts --db=sqlite://accounts.sqlite --region-db=sqlite://region.sqlite
  *   bun scripts/serve-match.ts --tiles=out/tiles/planet-z8-20261007.pmtiles
  *   bun scripts/serve-match.ts --player-encounters=off
  *
@@ -16,6 +17,10 @@
  * when the server starts, so restarting it over a file (`--db=sqlite://…`) or
  * a Postgres costs no match in progress: every window reconnects to its seat.
  * The default, `:memory:`, has nothing to take up.
+ *
+ * The process holds both stores (`Persistence`): the accounts (`--db`) and the
+ * region's (`--region-db`, which is `--db` again unless given — the one file a
+ * database written before the split is, adopted as it is).
  *
  * `--tiles` serves `/tiles/{z}/{x}/{y}.mvt` from a local PMTiles archive, as
  * the Worker does from R2 (`scripts/build-planet-tiles.ts` makes one); without
@@ -36,7 +41,8 @@
 import { WALL_CLOCK } from '../src/server/Clock'
 import { startGameServer } from '../src/server/GameServer'
 import { openPersistence } from '../src/server/db/BunSqlDb'
-import type { RelyingParty } from '../src/server/Persistence'
+import { portsOf } from '../src/server/Persistence'
+import type { RelyingParty } from '../src/server/AccountStore'
 import { blobSource, tileHandler } from '../src/server/Tiles'
 import { BUILD_ID, PROTOCOL_VERSION } from '../src/version'
 
@@ -45,6 +51,7 @@ const arg = (name: string): string | undefined =>
 
 const port = Number(arg('port') ?? 5174)
 const databaseUrl = arg('db') ?? process.env.TICTAC_DB ?? ':memory:'
+const regionDatabaseUrl = arg('region-db') ?? process.env.TICTAC_REGION_DB
 const party: RelyingParty = {
   id: arg('rp-id') ?? 'localhost',
   origins: (arg('origins') ?? 'http://localhost:5173').split(',').map((origin) => origin.trim()),
@@ -64,11 +71,11 @@ if (playerEncounters !== 'on' && playerEncounters !== 'off') {
 }
 
 // One clock for the database's stores and the server on top of them.
-const persistence = await openPersistence(WALL_CLOCK, databaseUrl, party)
-const server = await startGameServer({ persistence, clock: WALL_CLOCK, port, tiles, playerEncounters: () => playerEncounters === 'on' })
+const persistence = await openPersistence(WALL_CLOCK, databaseUrl, { party, regionUrl: regionDatabaseUrl })
+const server = await startGameServer({ ...portsOf(persistence), clock: WALL_CLOCK, port, tiles, playerEncounters: () => playerEncounters === 'on' })
 
 console.info(`[referee] watching on ${server.url} — build ${BUILD_ID}, protocol ${PROTOCOL_VERSION}`)
-console.info(`[referee] database: ${databaseUrl}`)
+console.info(`[referee] database: ${databaseUrl}${regionDatabaseUrl ? ` (region: ${regionDatabaseUrl})` : ''}`)
 console.info(`[referee] passkeys for ${party.id}, from ${party.origins.join(', ')}`)
 console.info(`[referee] map tiles: ${tilesPath ?? 'none (--tiles=<archive.pmtiles>)'}`)
 console.info(`[referee] player encounters: ${playerEncounters}`)

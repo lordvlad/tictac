@@ -210,12 +210,12 @@ describe('A server that restarts', () => {
     const later = due + 2 * HOUR
     const armed: (number | null)[] = []
     const schedule = new Schedule({ now: () => later, arm: (at) => armed.push(at) })
-    const restarted = new Journeys({ directory: regionDirectory({ owners: persistence.squads }), squads: persistence.squads, accounts: persistence.accounts, encounters: persistence.encounters, schedule, clock: { now: () => later, schedule: WALL_CLOCK.schedule }, tell: () => {} })
+    const restarted = new Journeys({ directory: regionDirectory({ owners: persistence.region.squads }), squads: persistence.region.squads, accounts: persistence.accounts.accounts, encounters: persistence.region.encounters, schedule, clock: { now: () => later, schedule: WALL_CLOCK.schedule }, tell: () => {} })
     await restarted.restore()
     expect(armed.at(-1)).toBe(due)
 
     await schedule.fire()
-    const settled = (await persistence.squads.byId(sent.id))!.squad
+    const settled = (await persistence.region.squads.byId(sent.id))!.squad
     expect(restingAt(settled)).toMatchObject({ arrival: due, departed: null })
     expect(armed.at(-1)).not.toBeNull()
     expect(armed.at(-1)! - later).toBeLessThanOrEqual(MAX_SLEEP_MS)
@@ -229,7 +229,7 @@ describe('A squad another region keeps', () => {
     const sent = (await order({ kind: 'goHere', to: north(home, 2), pace: 'normal' })).squad
 
     // A handover committed: the squad is the east's now, wherever it stands.
-    await persistence.squads.setOwner(sent.id, 'region-east')
+    await persistence.region.squads.setOwner(sent.id, 'region-east')
     const refused = await order({ kind: 'stop' })
     expect(refused.code).toBe(RPC_ERRORS.conflict)
     expect(refused.message).toMatch(/another match server/)
@@ -238,10 +238,10 @@ describe('A squad another region keeps', () => {
     const schedule = new Schedule({ now: () => server.now, arm: (at) => armed.push(at) })
     const over = (self: string) =>
       new Journeys({
-        directory: regionDirectory({ owners: persistence.squads, self }),
-        squads: persistence.squads,
-        accounts: persistence.accounts,
-        encounters: persistence.encounters,
+        directory: regionDirectory({ owners: persistence.region.squads, self }),
+        squads: persistence.region.squads,
+        accounts: persistence.accounts.accounts,
+        encounters: persistence.region.encounters,
         schedule,
         clock: { now: () => server.now, schedule: WALL_CLOCK.schedule },
         tell: () => {},

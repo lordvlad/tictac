@@ -61,10 +61,11 @@ graph TD
 | Directory | Layer | Purpose & Responsibilities | Headless Safe? |
 | --- | --- | --- | --- |
 | `src/core/` | Core Rules | Pure math, Grid DDA, Line of Sight, Pathfinding, Ballistics, Combat formulas, RNG. | **Yes** (100% pure) |
-| `src/rules/` | Game Rules | `Combat`, `Overwatch`, `Movement`, `Breakdown`, `TurnManager`, `Squads`, `MatchEnd`, `StateDigest`, `Rewind` types, the `Command` language, loadout pool rules. | **Yes** (below `ecs`; `tests/layers.test.ts` lists the few edges that still reach up) |
-| `src/ecs/` | State & Systems | ECS `World`, component classes, system update loops, snapshot/restore for rewind. | **Yes** (Pure data) |
+| `src/rules/` | Game Rules | `Combat`, `Overwatch`, `Movement`, `Breakdown`, `Turn`, `MatchEnd` (over any unit with the fields it reads), the `StateDigest` shape and comparison, the `Command` language, loadout pool rules (`startingGrenades` issues the starting grenades). | **Yes** (below `ecs`; nothing in it reaches up) |
+| `src/ecs/` | State & Systems | ECS `World`, component classes, system update loops (squads and turns reach them through narrow ports), snapshot/restore for rewind. | **Yes** (Pure data) |
+| `src/entities/` | Entities | `Soldier` (the wrapper over a unit's components), `Squads` (who is on the field) and `applyUnitLoadout`. | **Yes** |
 | `src/wire/` | Wire Contract | `NetworkMessage`, `Rpc`, `JsonRpc`, `Lobby`, `Encounter`, `Transport`, the `Recording` format, `Base64Url`. Shared by the client, `sim` and `src/server`. | **Yes** (imports only `core` and `rules`) |
-| `src/sim/` | Simulation | Headless matches: `MatchHost` (the ECS match, driven by intents), `SimMatch` (the sweep's policy), `Replay`, `Balance`, `Recorder`. | **Yes** |
+| `src/sim/` | Simulation | Headless matches: `MatchHost` (the ECS match, driven by intents), `SimMatch` (the sweep's policy), `Replay`, `Balance`, `Recorder`, `TurnManager`, the `Rewind` types, `digestWorld`. | **Yes** |
 | `src/game/` | Client Orchestration | `NetworkManager`, `ServerConnection`, `InteractionController`, movement/shooting planners, `Battlefield`, `Playback`. | **No** |
 | `src/render/`| Presentation | Three.js meshes, animations, tracers, particles, material cloning, ground tiles. | **No** (Requires WebGL) |
 | `src/hud/` | Presentation | React (TSX) HUD overlays, menus, loadout screen, portraits, debug panels. | **No** (Requires DOM) |

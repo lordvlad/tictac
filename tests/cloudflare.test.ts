@@ -243,6 +243,17 @@ describe('The planted Cloudflare deployment', () => {
     expect(body.toLowerCase()).toContain('tictac')
   })
 
+  test('the status document answers at /status, as it does on the Bun server', async () => {
+    // One route on both hosts (`createMatchServer`'s `http`): the question a
+    // client asks before it commits to a match is the same wherever it is hosted.
+    const status = (await (await fetch(`${BASE}/status`)).json()) as Record<string, unknown>
+    expect(status.referee).toBe('tictac')
+    expect(status.protocol).toBe(PROTOCOL_VERSION)
+    expect(status.build).toBe(bundled)
+    // The object's database outlives a run (`wrangler dev` keeps its state), so what is in it is not ours to say.
+    expect(Array.isArray(status.recent)).toBe(true)
+  })
+
   test('the relying party host lends its passkeys to every configured origin', async () => {
     // Answered by the Worker itself, from its vars: a browser on another site
     // fetches this before it will use a passkey bound to this host.

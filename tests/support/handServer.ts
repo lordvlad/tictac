@@ -71,6 +71,8 @@ export interface HandSocket {
   refuse(id: number, code: number, message: string): void
   /** The server's end going away, as a crash or a network does. */
   drop(): void
+  /** Whether the window has closed its end, or the server's has gone. */
+  readonly closed: boolean
 }
 
 /**
@@ -103,6 +105,7 @@ export function handServer(clock: HandClock): HandServer {
     tellTime: (socket, request) => socket.reply(request.id as number, { now: clock.now }),
     connect: (url: string): Transport => {
       const [ours, theirs] = loopback()
+      let closed = false
       const socket: HandSocket = {
         url: new URL(url),
         at: clock.now,
@@ -110,11 +113,20 @@ export function handServer(clock: HandClock): HandServer {
         get methods() {
           return socket.heard.map((frame) => ('method' in frame ? frame.method : '<response>'))
         },
+        get closed() {
+          return closed
+        },
         send: (frame) => theirs.send(frame),
         reply: (id, result) => theirs.send({ jsonrpc: '2.0', id, result }),
         refuse: (id, code, message) => theirs.send({ jsonrpc: '2.0', id, error: { code, message } }),
-        drop: () => theirs.close(),
+        drop: () => {
+          closed = true
+          theirs.close()
+        },
       }
+      theirs.onClosed(() => {
+        closed = true
+      })
       theirs.onFrame((frame) => {
         if ('method' in frame && frame.method === 'tictac/api/clock/now') {
           server.tellTime(socket, frame as JsonRpcRequest)

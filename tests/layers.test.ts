@@ -77,24 +77,6 @@ const LEAVES: Record<string, true> = { 'src/config.ts': true, 'src/version.ts': 
 
 /** Removing an edge removes its line. Keys are tickets; values are `from -> to`. */
 const ALLOWED: Record<string, readonly string[]> = {
-  // `rules` was extracted as specified, but six of its modules assemble or restore a
-  // World, or hold the Soldier wrapper, so they still import the layers above it.
-  'tictac-uqt.30': [
-    'src/rules/Loadout.ts -> src/entities/Soldier.ts',
-    'src/rules/MatchEnd.ts -> src/entities/Soldier.ts',
-    'src/rules/Rewind.ts -> src/ecs/World.ts',
-    'src/rules/Rewind.ts -> src/ecs/systems/CommandSystem.ts',
-    'src/rules/Rewind.ts -> src/ecs/systems/GroundSystem.ts',
-    'src/rules/Rewind.ts -> src/ecs/systems/MovementSystem.ts',
-    'src/rules/Rewind.ts -> src/ecs/systems/TurnSystem.ts',
-    'src/rules/Rewind.ts -> src/ecs/systems/WallSystem.ts',
-    'src/rules/Squads.ts -> src/ecs/World.ts',
-    'src/rules/Squads.ts -> src/entities/Soldier.ts',
-    'src/rules/StateDigest.ts -> src/ecs/World.ts',
-    'src/rules/TurnManager.ts -> src/ecs/World.ts',
-    'src/rules/TurnManager.ts -> src/ecs/systems/TurnSystem.ts',
-    'src/rules/TurnManager.ts -> src/entities/Soldier.ts',
-  ],
   // Systems operate on components, not on the Soldier wrapper that sits above them.
   'tictac-uqt.22': [
     'src/ecs/systems/CombatSystem.ts -> src/entities/Soldier.ts',
@@ -103,14 +85,17 @@ const ALLOWED: Record<string, readonly string[]> = {
   ],
   // The HUD reads view models only; ServerConnection, planners and the scene are injected, never imported.
   'tictac-uqt.25': [
+    'src/hud/DebugMap.tsx -> src/entities/Squads.ts',
     'src/hud/DebugPanel.tsx -> src/entities/Soldier.ts',
     'src/hud/EncounterFeed.tsx -> src/game/ServerConnection.ts',
     'src/hud/EncounterPrompt.tsx -> src/game/ServerConnection.ts',
     'src/hud/HudModel.ts -> src/camera/OrbitRig.ts',
     'src/hud/HudModel.ts -> src/entities/Soldier.ts',
+    'src/hud/HudModel.ts -> src/entities/Squads.ts',
     'src/hud/HudModel.ts -> src/game/GrenadePlanner.ts',
     'src/hud/HudModel.ts -> src/game/ShootPlanner.ts',
     'src/hud/HudModel.ts -> src/render/Portraits.ts',
+    'src/hud/HudModel.ts -> src/sim/TurnManager.ts',
     'src/hud/LoadoutScreen.tsx -> src/engine.ts',
     'src/hud/LoadoutScreen.tsx -> src/render/LoadoutScene.ts',
     'src/hud/LoadoutScreen.tsx -> src/render/Portraits.ts',

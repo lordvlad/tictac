@@ -76,8 +76,26 @@ export interface EncounterNeighbours {
   results: { result(matchId: string): Promise<{ winner: number; bluePlayer: string | null; redPlayer: string | null } | null> }
   /** Who holds a seat in a live room (`RoomStore.holdsSeat`). */
   rooms: { holdsSeat(roomId: string, playerId: string): Promise<boolean> }
-  /** A player by id (`Accounts.player`). */
+  /** A player by id (`AccountsPort.player`: the directory's, not this region's). */
   players: { player(id: string): Promise<{ name: string } | null> }
+}
+
+/** An encounter row as it is stored, which is what travels in a handover (`SquadBundle`). */
+export interface EncounterRecord {
+  id: string
+  squadId: string
+  playerId: string
+  trip: string
+  checkpoint: number
+  foundAt: number
+  latE6: number
+  lngE6: number
+  aliens: number
+  roomId: string | null
+  passedFor: string | null
+  playedByYou: number
+  opponentPlayerId: string | null
+  settled: number
 }
 
 /** What identifies one meeting of two squads: the pair, as `Journeys` keys it, and the moment they came within range. */
@@ -237,5 +255,61 @@ export class Encounters {
     const rows = await this.db.query<{ one: number }>`
       SELECT 1 AS one FROM encounters WHERE room_id = ${matchId} AND player_id = ${playerId}`
     return rows.length > 0
+  }
+
+  /** Every contact written down for `squadId`, as stored: what a handover carries with the squad (`RegionStore.exportSquad`). */
+  async records(squadId: string): Promise<EncounterRecord[]> {
+    const rows = await this.db.query<{
+      id: string
+      squad_id: string
+      player_id: string
+      trip: string
+      checkpoint: number
+      found_at: number
+      lat_e6: number
+      lng_e6: number
+      aliens: number
+      room_id: string | null
+      passed_for: string | null
+      played_by_you: number
+      opponent_player_id: string | null
+      settled: number
+    }>`SELECT id, squad_id, player_id, trip, checkpoint, found_at, lat_e6, lng_e6, aliens, room_id, passed_for,
+              played_by_you, opponent_player_id, settled
+         FROM encounters WHERE squad_id = ${squadId} ORDER BY found_at, id`
+    return rows.map((row) => ({
+      id: row.id,
+      squadId: row.squad_id,
+      playerId: row.player_id,
+      trip: row.trip,
+      checkpoint: Number(row.checkpoint),
+      foundAt: Number(row.found_at),
+      latE6: Number(row.lat_e6),
+      lngE6: Number(row.lng_e6),
+      aliens: Number(row.aliens),
+      roomId: row.room_id,
+      passedFor: row.passed_for,
+      playedByYou: Number(row.played_by_you),
+      opponentPlayerId: row.opponent_player_id,
+      settled: Number(row.settled),
+    }))
+  }
+
+  /** Queue contacts that came from another region onto `batch`; one already here keeps its row, which is what makes a retried handover harmless. */
+  importInto(batch: Batch, records: readonly EncounterRecord[]): void {
+    for (const record of records) {
+      batch.query`
+        INSERT INTO encounters (id, squad_id, player_id, trip, checkpoint, found_at, lat_e6, lng_e6,
+                                aliens, room_id, passed_for, played_by_you, opponent_player_id, settled)
+        VALUES (${record.id}, ${record.squadId}, ${record.playerId}, ${record.trip}, ${record.checkpoint},
+                ${record.foundAt}, ${record.latE6}, ${record.lngE6}, ${record.aliens}, ${record.roomId},
+                ${record.passedFor}, ${record.playedByYou}, ${record.opponentPlayerId}, ${record.settled})
+        ON CONFLICT (id) DO NOTHING`
+    }
+  }
+
+  /** Queue the deletion of every contact written down for a squad that has gone to another region. */
+  removeInto(batch: Batch, squadId: string): void {
+    batch.query`DELETE FROM encounters WHERE squad_id = ${squadId}`
   }
 }

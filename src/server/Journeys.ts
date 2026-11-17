@@ -22,7 +22,7 @@ import {
 import { RPC_ERRORS, type Player, type Squad, type SquadOrder } from '../wire/Rpc'
 import type { StandingOrder } from '../wire/Rpc'
 import type { ServerClock } from './Clock'
-import type { Accounts } from './Accounts'
+import type { AccountsPort } from './AccountsPort'
 import { meetingKey, type Encounters } from './Encounters'
 import type { MeetingSide, OpenEncounter, OpenMeeting } from './EncounterPort'
 import { Refusal } from './Lobby'
@@ -68,7 +68,7 @@ const NOT_HERE = 'That squad is kept by another match server.'
 export interface JourneysOptions {
   squads: Squads
   /** Who a squad's player is: a squad row knows only their id. */
-  accounts: Pick<Accounts, 'player'>
+  accounts: Pick<AccountsPort, 'player'>
   /** Where a contact is written down, so a checkpoint is handled once (`ITEM-048`). */
   encounters: Encounters
   schedule: Schedule
@@ -105,7 +105,7 @@ export interface JourneysOptions {
 export class Journeys {
   private readonly squads: Squads
   private readonly encounters: Encounters
-  private readonly accounts: Pick<Accounts, 'player'>
+  private readonly accounts: Pick<AccountsPort, 'player'>
   private readonly schedule: Schedule
   private readonly clock: ServerClock
   private readonly tell: (playerId: string, squad: Squad) => void

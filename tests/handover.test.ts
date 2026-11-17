@@ -12,7 +12,7 @@ import { HANDOVER_TIMEOUT_MS, HandoverCoordinator } from '../src/server/Handover
 import { ServerConnection } from '../src/game/ServerConnection'
 import { startGameServer } from '../src/server/GameServer'
 import { openPersistence } from '../src/server/db/BunSqlDb'
-import type { Persistence } from '../src/server/Persistence'
+import { portsOf, type Persistence } from '../src/server/Persistence'
 import { turnedClock } from './support/turnedClock'
 
 const PARTITIONS: RegionPartition[] = [
@@ -35,8 +35,7 @@ function owners(kept: Record<string, string>): SquadOwners & { kept: Record<stri
 
 /** A player with a squad in `persistence`, returning the squad's id. */
 async function squadIn(persistence: Persistence, playerId: string): Promise<string> {
-  await persistence.db.query`INSERT INTO players (id, name, created_at) VALUES (${playerId}, ${playerId}, ${new Date(0).toISOString()})`
-  return (await persistence.squads.place(playerId, null)).id
+  return (await persistence.region.squads.place(playerId, null)).id
 }
 
 describe('Region directory (src/server/Owner.ts)', () => {
@@ -75,27 +74,26 @@ describe('Region directory (src/server/Owner.ts)', () => {
   test('every squad row that exists defaults to the singleton region', async () => {
     const persistence = await openPersistence(WALL_CLOCK)
     const squadId = await squadIn(persistence, 'p-old')
-    const directory = regionDirectory({ owners: persistence.squads })
+    const directory = regionDirectory({ owners: persistence.region.squads })
     expect(await directory.ownerOfSquad(squadId)).toBe(SINGLETON_REGION)
     expect(await directory.ownerOfSquad('no-such-squad')).toBeNull()
 
-    await persistence.squads.setOwner(squadId, 'region-east')
+    await persistence.region.squads.setOwner(squadId, 'region-east')
     expect(await directory.ownerOfSquad(squadId)).toBe('region-east')
     await persistence.close()
   })
 
   test('two servers in one process hold different directories', async () => {
-    const persistence1 = await openPersistence(WALL_CLOCK)
+    const persistence1 = await openPersistence(WALL_CLOCK, ':memory:', { self: 'region-west' })
     const persistence2 = await openPersistence(WALL_CLOCK)
     const server1 = await startGameServer({
-      persistence: persistence1,
+      ...portsOf(persistence1),
       clock: WALL_CLOCK,
       port: 0,
       log: () => {},
       regions: PARTITIONS,
-      self: 'region-west',
     })
-    const server2 = await startGameServer({ persistence: persistence2, clock: WALL_CLOCK, port: 0, log: () => {} })
+    const server2 = await startGameServer({ ...portsOf(persistence2), clock: WALL_CLOCK, port: 0, log: () => {} })
 
     expect(server1.directory.self).toBe('region-west')
     expect(server1.directory.ownerOfPlace({ lat: 48.1351, lng: 11.582 })).toBe('region-east')
@@ -214,6 +212,54 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
     expect(await source.directory.ownerOfSquad('sq-1')).toBe('region-west')
   })
 
+  test('a cancel that arrives while the keeper is being committed is refused, and the commit stands', async () => {
+    const writing = Promise.withResolvers<void>()
+    const written: string[] = []
+    const store = owners({ 'sq-1': 'region-west' })
+    const directory = regionDirectory({ owners: store, partitions: PARTITIONS, self: 'region-west' })
+    const squads = {
+      setOwner: async (squadId: string, owner: string) => {
+        await writing.promise
+        store.kept[squadId] = owner
+        written.push(owner)
+      },
+    }
+    const coordinator = new HandoverCoordinator({ clock: turnedClock(), directory, squads })
+    await coordinator.initiate({ ...OFFER, handoverId: 'h-race', squadId: 'sq-1' })
+
+    const confirming = coordinator.confirm('h-race')
+    // The write is in flight: the cancel lands between it and the bookkeeping.
+    expect(() => coordinator.cancel('h-race', 'the second socket dropped')).toThrow(/already confirmed/)
+    await expect(coordinator.confirm('h-race')).rejects.toThrow(/already being confirmed/)
+    writing.resolve()
+
+    expect((await confirming).state).toBe('confirmed')
+    expect(written).toEqual(['region-east'])
+    expect(await directory.ownerOfSquad('sq-1')).toBe('region-east')
+  })
+
+  test('a commit that fails gives the reservation back, to be confirmed again', async () => {
+    const store = owners({ 'sq-1': 'region-west' })
+    const directory = regionDirectory({ owners: store, partitions: PARTITIONS, self: 'region-west' })
+    let failing = true
+    const squads = {
+      setOwner: async (squadId: string, owner: string) => {
+        if (failing) throw new Error('the write failed')
+        store.kept[squadId] = owner
+      },
+    }
+    const coordinator = new HandoverCoordinator({ clock: turnedClock(), directory, squads })
+    await coordinator.initiate({ ...OFFER, handoverId: 'h-retry', squadId: 'sq-1' })
+
+    await expect(coordinator.confirm('h-retry')).rejects.toThrow(/the write failed/)
+    expect(coordinator.isPending('h-retry')).toBe(true)
+    expect(await directory.ownerOfSquad('sq-1')).toBe('region-west')
+
+    failing = false
+    expect((await coordinator.confirm('h-retry')).state).toBe('confirmed')
+    expect(await directory.ownerOfSquad('sq-1')).toBe('region-east')
+  })
+
   test('exponential backoff advances on consecutive failures and halts at max attempts', async () => {
     const { coordinator: source } = coordinatorFor('region-west', { 'sq-backoff': 'region-west' })
     const squadId = 'sq-backoff'
@@ -264,31 +310,29 @@ describe('HandoverCoordinator 2PC State Machine (src/server/Handover.ts)', () =>
 
 describe('Dual-Socket Client Handover over Real GameServer', () => {
   test('client arrives at the target server, and the source commits the new keeper on confirm', async () => {
-    const persistence1 = await openPersistence(WALL_CLOCK)
-    const persistence2 = await openPersistence(WALL_CLOCK)
+    const persistence1 = await openPersistence(WALL_CLOCK, ':memory:', { self: 'region-west' })
+    const persistence2 = await openPersistence(WALL_CLOCK, ':memory:', { self: 'region-east' })
 
     const server1 = await startGameServer({
-      persistence: persistence1,
+      ...portsOf(persistence1),
       clock: WALL_CLOCK,
       port: 0,
       log: () => {},
       regions: PARTITIONS,
-      self: 'region-west',
     })
     const server2 = await startGameServer({
-      persistence: persistence2,
+      ...portsOf(persistence2),
       clock: WALL_CLOCK,
       port: 0,
       log: () => {},
       regions: PARTITIONS,
-      self: 'region-east',
     })
 
     const ws2 = server2.url.replace('http', 'ws')
     const handoverId = 'ho-real-test'
     const token = 'tok-secret'
     const squadId = await squadIn(persistence1, 'p-test')
-    await persistence1.squads.setOwner(squadId, 'region-west')
+    await persistence1.region.squads.setOwner(squadId, 'region-west')
 
     // Target server2 prepares for the squad's arrival
     server2.sessions.handover.prepare({

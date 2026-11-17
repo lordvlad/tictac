@@ -285,22 +285,21 @@ export interface RpcPushes {
   /**
    * Pushed by the source Durable Object when a squad crossing a border begins
    * the two-phase handover (RFC-0002 / tictac-dwq). Instructs the client to open
-   * a secondary connection to `targetUrl` while keeping the primary connection alive.
+   * a second socket to `targetUrl` while keeping the primary alive, and to
+   * `region/arrive` on it with `handoverId`, `token` and `squadId` — the squad
+   * being handed over, which the target compares with its reservation. Arrival
+   * is answered by the source ending the session (`session/ended` with
+   * `reconnect: 'elsewhere'` and the same `targetUrl`), which is when the window
+   * moves onto the second socket; there is no separate completion push.
+   * `expiresAt` is the server's clock.
    */
   'tictac/api/region/handoverOffer': {
     handoverId: string
+    squadId: string
     targetRegion: string
     targetUrl: string
     token: string
     expiresAt: number
-  }
-  /**
-   * Pushed by the source Durable Object once the destination DO has confirmed arrival
-   * via 2PC DO-to-DO RPC. Signals that the primary socket can now close cleanly.
-   */
-  'tictac/api/region/handoverComplete': {
-    handoverId: string
-    targetRegion: string
   }
 }
 

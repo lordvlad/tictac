@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { Faction } from '../src/config'
 import { RECORDING_VERSION } from '../src/wire/Recording'
 import { openDb, openPersistence } from '../src/server/db/BunSqlDb'
-import { MIGRATIONS } from '../src/server/db/migrations'
+import { REGION_SCHEMA } from '../src/server/db/regionMigrations'
 import type { UnsequencedEvent } from '../src/server/MatchStore'
 import type { StoredRoom } from '../src/server/RoomStore'
 import { STOCK_PLAN } from '../src/sim/Balance'
@@ -64,10 +64,10 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
   describe('A match goes into the store as its intents and comes back out as a match', () => {
     test('the header and every event survive, in order', async () => {
       const store = await freshPersistence(url)
-      const id = await store.matches.create(log.header)
-      await store.matches.appendAll(id, unsequenced(log))
+      const id = await store.region.matches.create(log.header)
+      await store.region.matches.appendAll(id, unsequenced(log))
 
-      const stored = await store.matches.match(id)
+      const stored = await store.region.matches.match(id)
       expect(stored).not.toBeNull()
       expect(stored!.id).toBe(id)
       expect(stored!.header).toEqual(log.header)
@@ -84,10 +84,10 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       // not a store of record, so a skipped event here is a store failure and
       // not a rules finding.
       const store = await freshPersistence(url)
-      const id = await store.matches.create(log.header)
-      await store.matches.appendAll(id, unsequenced(log))
+      const id = await store.region.matches.create(log.header)
+      await store.region.matches.appendAll(id, unsequenced(log))
 
-      const outcome = replay((await store.matches.match(id))!)
+      const outcome = replay((await store.region.matches.match(id))!)
 
       expect(outcome.events).toBe(log.events.length)
       expect(outcome.applied).toBe(outcome.events)
@@ -102,29 +102,29 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
   describe('Rejoin reads the tail', () => {
     test('afterSeq is exclusive and returns exactly what came later', async () => {
       const store = await freshPersistence(url)
-      const id = await store.matches.create(log.header)
-      await store.matches.appendAll(id, unsequenced(log))
+      const id = await store.region.matches.create(log.header)
+      await store.region.matches.appendAll(id, unsequenced(log))
 
-      const all = await store.matches.events(id)
+      const all = await store.region.matches.events(id)
       const lastSeen = all[9]!.seq
-      const tail = await store.matches.events(id, lastSeen)
+      const tail = await store.region.matches.events(id, lastSeen)
 
       expect(tail.length).toBe(all.length - 10)
       expect(tail[0]!.seq).toBe(lastSeen + 1)
       expect(tail).toEqual(all.slice(10))
       // A client that is already current asks for nothing and gets nothing,
       // rather than the last event a second time.
-      expect(await store.matches.events(id, all[all.length - 1]!.seq)).toEqual([])
+      expect(await store.region.matches.events(id, all[all.length - 1]!.seq)).toEqual([])
 
       await store.close()
     })
 
     test('a client that has nothing gets the whole log', async () => {
       const store = await freshPersistence(url)
-      const id = await store.matches.create(log.header)
-      await store.matches.appendAll(id, unsequenced(log))
+      const id = await store.region.matches.create(log.header)
+      await store.region.matches.appendAll(id, unsequenced(log))
 
-      expect(await store.matches.events(id, -1)).toEqual(await store.matches.events(id))
+      expect(await store.region.matches.events(id, -1)).toEqual(await store.region.matches.events(id))
 
       await store.close()
     })
@@ -133,17 +133,17 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
   describe('The store owns the numbering', () => {
     test('appends are numbered densely from zero however they arrive', async () => {
       const store = await freshPersistence(url)
-      const id = await store.matches.create(header('2026-09-18T10:00:00Z', 'dense'))
+      const id = await store.region.matches.create(header('2026-09-18T10:00:00Z', 'dense'))
 
-      expect((await store.matches.append(id, END_TURN)).seq).toBe(0)
-      expect((await store.matches.append(id, END_TURN)).seq).toBe(1)
+      expect((await store.region.matches.append(id, END_TURN)).seq).toBe(0)
+      expect((await store.region.matches.append(id, END_TURN)).seq).toBe(1)
       // The same intent twice is a legal thing for a player to do, and it must
       // not collapse into one row or collide on the key.
-      const pair = await store.matches.appendAll(id, [END_TURN, END_TURN])
+      const pair = await store.region.matches.appendAll(id, [END_TURN, END_TURN])
       expect(pair.map((event) => event.seq)).toEqual([2, 3])
-      expect((await store.matches.append(id, END_TURN)).seq).toBe(4)
+      expect((await store.region.matches.append(id, END_TURN)).seq).toBe(4)
 
-      expect((await store.matches.events(id)).map((event) => event.seq)).toEqual([0, 1, 2, 3, 4])
+      expect((await store.region.matches.events(id)).map((event) => event.seq)).toEqual([0, 1, 2, 3, 4])
 
       await store.close()
     })
@@ -152,12 +152,12 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       // Numbering is per match, because what a rejoining client counts is its own
       // match's intents and nothing else in the store.
       const store = await freshPersistence(url)
-      const first = await store.matches.create(header('2026-09-18T10:00:00Z', 'first'))
-      const second = await store.matches.create(header('2026-09-18T11:00:00Z', 'second'))
+      const first = await store.region.matches.create(header('2026-09-18T10:00:00Z', 'first'))
+      const second = await store.region.matches.create(header('2026-09-18T11:00:00Z', 'second'))
 
-      await store.matches.append(first, END_TURN)
-      expect((await store.matches.append(second, END_TURN)).seq).toBe(0)
-      expect((await store.matches.append(first, END_TURN)).seq).toBe(1)
+      await store.region.matches.append(first, END_TURN)
+      expect((await store.region.matches.append(second, END_TURN)).seq).toBe(0)
+      expect((await store.region.matches.append(first, END_TURN)).seq).toBe(1)
 
       await store.close()
     })
@@ -169,12 +169,12 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       // the log is what tells a foul from a bug in the rules, and one that can be
       // edited proves nothing about either.
       const store = await freshPersistence(url)
-      const id = await store.matches.create(header('2026-09-18T12:00:00Z', 'evidence'))
-      await store.matches.append(id, END_TURN)
+      const id = await store.region.matches.create(header('2026-09-18T12:00:00Z', 'evidence'))
+      await store.region.matches.append(id, END_TURN)
 
-      await expect(store.db.exec('UPDATE events SET turn = 99')).rejects.toThrow(/append-only/)
-      await expect(store.db.exec('DELETE FROM events')).rejects.toThrow(/append-only/)
-      expect(await store.db.query<{ turn: number }>`SELECT turn FROM events`).toEqual([{ turn: 1 }])
+      await expect(store.region.db.exec('UPDATE events SET turn = 99')).rejects.toThrow(/append-only/)
+      await expect(store.region.db.exec('DELETE FROM events')).rejects.toThrow(/append-only/)
+      expect(await store.region.db.query<{ turn: number }>`SELECT turn FROM events`).toEqual([{ turn: 1 }])
 
       await store.close()
     })
@@ -184,9 +184,9 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
     test('reading an unknown id answers nothing rather than throwing', async () => {
       const store = await freshPersistence(url)
 
-      expect(await store.matches.header('nobody')).toBeNull()
-      expect(await store.matches.match('nobody')).toBeNull()
-      expect(await store.matches.events('nobody')).toEqual([])
+      expect(await store.region.matches.header('nobody')).toBeNull()
+      expect(await store.region.matches.match('nobody')).toBeNull()
+      expect(await store.region.matches.events('nobody')).toEqual([])
 
       await store.close()
     })
@@ -196,8 +196,8 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       // has lost an intent.
       const store = await freshPersistence(url)
 
-      await expect(store.matches.append('nobody', END_TURN)).rejects.toThrow(/no match nobody/)
-      await expect(store.matches.appendAll('nobody', [END_TURN])).rejects.toThrow(/no match nobody/)
+      await expect(store.region.matches.append('nobody', END_TURN)).rejects.toThrow(/no match nobody/)
+      await expect(store.region.matches.appendAll('nobody', [END_TURN])).rejects.toThrow(/no match nobody/)
 
       await store.close()
     })
@@ -206,8 +206,8 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
       const store = await freshPersistence(url)
       const stale = { ...header('2026-09-18T10:00:00Z', 'stale'), version: RECORDING_VERSION - 1 }
 
-      await expect(store.matches.create(stale)).rejects.toThrow(/cannot store a version/)
-      expect(await store.matches.recent()).toEqual([])
+      await expect(store.region.matches.create(stale)).rejects.toThrow(/cannot store a version/)
+      expect(await store.region.matches.recent()).toEqual([])
 
       await store.close()
     })
@@ -216,20 +216,20 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
   describe('Listing matches', () => {
     test('recent orders newest first and counts each log', async () => {
       const store = await freshPersistence(url)
-      const older = await store.matches.create(header('2026-09-17T08:00:00Z', 'older'))
-      const newest = await store.matches.create(header('2026-09-18T09:00:00Z', 'newest'))
-      const middle = await store.matches.create(header('2026-09-17T20:00:00Z', 'middle'))
+      const older = await store.region.matches.create(header('2026-09-17T08:00:00Z', 'older'))
+      const newest = await store.region.matches.create(header('2026-09-18T09:00:00Z', 'newest'))
+      const middle = await store.region.matches.create(header('2026-09-17T20:00:00Z', 'middle'))
 
-      await store.matches.append(newest, END_TURN)
-      await store.matches.append(newest, END_TURN)
-      await store.matches.append(middle, END_TURN)
+      await store.region.matches.append(newest, END_TURN)
+      await store.region.matches.append(newest, END_TURN)
+      await store.region.matches.append(middle, END_TURN)
 
-      expect(await store.matches.recent()).toEqual([
+      expect(await store.region.matches.recent()).toEqual([
         { id: newest, createdAt: '2026-09-18T09:00:00Z', seedLabel: 'newest', events: 2 },
         { id: middle, createdAt: '2026-09-17T20:00:00Z', seedLabel: 'middle', events: 1 },
         { id: older, createdAt: '2026-09-17T08:00:00Z', seedLabel: 'older', events: 0 },
       ])
-      expect((await store.matches.recent(2)).map((row) => row.id)).toEqual([newest, middle])
+      expect((await store.region.matches.recent(2)).map((row) => row.id)).toEqual([newest, middle])
 
       await store.close()
     })
@@ -251,8 +251,8 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
     test('a room comes back as it was written, and each transition rewrites its one row', async () => {
       const store = await freshPersistence(url)
       const waiting = room('r1', '2026-09-18T10:00:00.000Z')
-      await store.rooms.save(waiting)
-      expect(await store.rooms.live()).toEqual([waiting])
+      await store.region.rooms.save(waiting)
+      expect(await store.region.rooms.live()).toEqual([waiting])
 
       // Joined by an anonymous player, started, verified, and no longer judged:
       // every field a restore reads moves, and the row is still one row.
@@ -264,8 +264,8 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
         blue: { ...waiting.blue, keyHash: 'rotated' },
         red: { playerId: null, name: null, keyHash: 'hash-of-red', control: 'player', joinBy: null, standing: 'stand' },
       }
-      await store.rooms.save(later)
-      expect(await store.rooms.live()).toEqual([later])
+      await store.region.rooms.save(later)
+      expect(await store.region.rooms.live()).toEqual([later])
 
       await store.close()
     })
@@ -282,26 +282,26 @@ describe.each(DATABASE_URLS)('The match store on %s', (url) => {
         blue: { playerId: 'A', name: 'Ada', keyHash: 'hash-of-blue', control: 'reserved', joinBy, standing: 'cautious' },
         red: { playerId: null, name: null, keyHash: 'hash-of-red', control: 'ai', joinBy: null, standing: 'evade' },
       }
-      await store.rooms.save(fight)
-      expect(await store.rooms.live()).toEqual([fight])
+      await store.region.rooms.save(fight)
+      expect(await store.region.rooms.live()).toEqual([fight])
 
       // Passed to the AI: the same row, rewritten, with no deadline left.
       const passed: StoredRoom = { ...fight, blue: { ...fight.blue, control: 'ai', joinBy: null } }
-      await store.rooms.save(passed)
-      expect(await store.rooms.live()).toEqual([passed])
+      await store.region.rooms.save(passed)
+      expect(await store.region.rooms.live()).toEqual([passed])
 
       await store.close()
     })
 
     test('live rooms come back oldest first, and a room that ended does not come back', async () => {
       const store = await freshPersistence(url)
-      await store.rooms.save(room('newest', '2026-09-18T12:00:00.000Z'))
-      await store.rooms.save(room('oldest', '2026-09-18T10:00:00.000Z'))
-      await store.rooms.save(room('ended', '2026-09-18T11:00:00.000Z'))
+      await store.region.rooms.save(room('newest', '2026-09-18T12:00:00.000Z'))
+      await store.region.rooms.save(room('oldest', '2026-09-18T10:00:00.000Z'))
+      await store.region.rooms.save(room('ended', '2026-09-18T11:00:00.000Z'))
 
-      await store.rooms.end('ended')
+      await store.region.rooms.end('ended')
 
-      expect((await store.rooms.live()).map((stored) => stored.id)).toEqual(['oldest', 'newest'])
+      expect((await store.region.rooms.live()).map((stored) => stored.id)).toEqual(['oldest', 'newest'])
 
       await store.close()
     })
@@ -324,14 +324,14 @@ describe('A match outlives the process that played it', () => {
     const url = `sqlite://${join(dir, 'roundtrip.sqlite')}`
 
     const writing = await openPersistence(WALL_CLOCK, url)
-    const id = await writing.matches.create(log.header)
-    await writing.matches.appendAll(id, unsequenced(log))
+    const id = await writing.region.matches.create(log.header)
+    await writing.region.matches.appendAll(id, unsequenced(log))
     await writing.close()
 
     const reading = await openPersistence(WALL_CLOCK, url)
-    expect(await reading.matches.header(id)).toEqual(log.header)
-    expect(await reading.matches.events(id)).toEqual(log.events)
-    expect(await reading.matches.recent()).toEqual([
+    expect(await reading.region.matches.header(id)).toEqual(log.header)
+    expect(await reading.region.matches.events(id)).toEqual(log.events)
+    expect(await reading.region.matches.recent()).toEqual([
       {
         id,
         createdAt: log.header.createdAt,
@@ -350,12 +350,12 @@ describe('A match outlives the process that played it', () => {
     await (await openPersistence(WALL_CLOCK, url)).close()
 
     const raw = await openDb(url)
-    await raw.query`INSERT INTO schema_migrations (id, name, applied_at)
-                    VALUES (${99}, ${'from the future'}, ${new Date().toISOString()})`
+    await raw.query`INSERT INTO store_migrations (store, id, name, applied_at)
+                    VALUES (${'region'}, ${99}, ${'from the future'}, ${new Date().toISOString()})`
     await raw.close()
 
     await expect(openPersistence(WALL_CLOCK, url)).rejects.toThrow(
-      new RegExp(`at migration 99.*up to ${MIGRATIONS.length}`, 's'),
+      new RegExp(`at migration 99.*up to ${REGION_SCHEMA.migrations.length}`, 's'),
     )
   })
 })

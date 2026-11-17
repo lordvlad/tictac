@@ -8,11 +8,9 @@ import { headingToward } from '../../core/Facing'
 import type { Soldier } from '../../entities/Soldier'
 import type { GrenadeResult, ShotResult } from '../../rules/Combat'
 import type { Command } from '../../rules/Command'
-import type { Squads } from '../../rules/Squads'
-import type { TurnManager } from '../../rules/TurnManager'
 import { System } from '../System'
 import type { World } from '../World'
-import type { CombatSystem } from './CombatSystem'
+import type { CombatSystem, Fielded } from './CombatSystem'
 import type { ItemSystem } from './ItemSystem'
 import type { MovementSystem } from './MovementSystem'
 import type { WallSystem } from './WallSystem'
@@ -30,6 +28,18 @@ import { brokenStep } from '../../rules/Breakdown'
  * spends points or ends the run, so this is a guard against a bug, not a rule.
  */
 const BROKEN_STEPS = 32
+
+/** Who is on the field and on which side: what the applier asks of whoever holds the squads. */
+export interface Muster extends Fielded {
+  readonly byFaction: Record<Faction, readonly Soldier[]>
+}
+
+/** The turn's driver as the applier uses it: whose turn it is, and the two ways to move on. */
+export interface TurnPort {
+  readonly activeFaction: Faction
+  finishSoldierTurn(soldier: Soldier): void
+  startNextTurn(): void
+}
 
 /**
  * Where a command came from.
@@ -135,8 +145,8 @@ export class CommandSystem extends System {
 
   constructor(
     private readonly world: World,
-    private readonly squads: Squads,
-    private readonly turns: TurnManager,
+    private readonly squads: Muster,
+    private readonly turns: TurnPort,
     private readonly movement: MovementSystem,
     private readonly combat: CombatSystem,
     private readonly items: ItemSystem,

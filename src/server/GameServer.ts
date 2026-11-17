@@ -1,24 +1,31 @@
-import { BUILD_ID, PROTOCOL_VERSION } from '../version'
+import type { LatLng } from '../core/Travel'
+import type { AccountsPort } from './AccountsPort'
+import type { RelyingParty } from './AccountStore'
 import type { ServerClock } from './Clock'
-import { Journeys } from './Journeys'
-import { Lobby } from './Lobby'
-import type { Persistence } from './Persistence'
-import { type RegionPartition, regionDirectory, type RegionDirectory } from './Owner'
-import { Schedule } from './Schedule'
-import { Sessions } from './Session'
+import type { Journeys } from './Journeys'
+import type { Lobby } from './Lobby'
+import { createMatchServer, type AlarmPort } from './MatchServer'
+import type { RegionStore } from './RegionStore'
+import type { RegionDirectory, RegionPartition } from './Owner'
+import type { Sessions } from './Session'
 import { socketTransport, type ServerSocket } from './SocketTransport'
-import { relatedOriginsHandler } from './RelatedOrigins'
 import type { TileHandler } from './Tiles'
 
 /**
- * The match server: one lobby of refereed rooms, one database, one port.
+ * The match server on Bun: one lobby of refereed rooms, one port.
+ *
+ * Everything the server is lives in `createMatchServer` (`MatchServer.ts`),
+ * which the Durable Object calls too; this file is what Bun adds — `Bun.serve`
+ * for the sockets and the HTTP, a timer for the alarm, and the two stores
+ * opened in this process.
  *
  * A window holds one WebSocket to it and asks everything over that, as
  * JSON-RPC (`Session.ts`): signing in, the roster, the lobby, taking a seat.
  * The match itself travels over the same socket as notifications,
  * byte-identical to what two peers send each other — which is what lets a
  * referee watch a match it is not part of. HTTP is left with what is static:
- * a status document, the map's tiles, and the passkeys' related origins.
+ * a status document (`/status`), the map's tiles, and the passkeys' related
+ * origins.
  *
  * WebSocket rather than WebRTC on purpose. Bun has no WebRTC, and it is the
  * wrong tool anyway: WebRTC exists for NAT traversal between two clients that
@@ -37,7 +44,12 @@ export interface GameServer {
 }
 
 export interface GameServerOptions {
-  persistence: Persistence
+  /** Who a player is: the directory's accounts, in this process (`portsOf`) or asked of another one (`AccountsPort`). */
+  accounts: AccountsPort
+  /** This region's database. */
+  region: RegionStore
+  /** The passkeys' relying party, which the server also publishes the related origins of. */
+  party: RelyingParty
   port: number
   log?: (message: string) => void
   /** How long a dropped seat is held; the lobby's default unless a test says otherwise. */
@@ -45,7 +57,7 @@ export interface GameServerOptions {
   /** Map tiles at `/tiles/{z}/{x}/{y}.mvt` (`ITEM-061`); none when unset. */
   tiles?: TileHandler
   /**
-   * The host's one clock, the same one `persistence` was opened with: squads
+   * The host's one clock, the same one the stores were opened with: squads
    * travel by it, handovers expire by it, sessions last by it.
    */
   clock: ServerClock
@@ -56,106 +68,64 @@ export interface GameServerOptions {
   playerEncounters?: () => boolean
   /** The partition table this host routes places by; the deployed one (`REGIONS`) unless set. */
   regions?: readonly RegionPartition[]
-  /** The region this host is, as an owner column names it; the singleton unless set. */
-  self?: string
+  /**
+   * Where the connection that opened a request came from. Cloudflare says so
+   * on every request (`request.cf`); a Bun process behind no such proxy cannot,
+   * so by default it does not know — which is what a deployment wants, since a
+   * header a client could set would let it choose where its squad starts.
+   * A test supplies one to run the placement path the Durable Object runs.
+   */
+  placeOf?: (request: Request) => LatLng | null
+}
+
+/** The Durable Object's one alarm, as a timer: the schedule asks for one moment at a time, and each new ask replaces the last. */
+function timerAlarm(clock: ServerClock, log: (message: string) => void): AlarmPort {
+  let cancel: (() => void) | null = null
+  return {
+    arm(at, fire) {
+      cancel?.()
+      cancel =
+        at === null
+          ? null
+          : clock.schedule(() => {
+              fire().catch((error: unknown) => log(`the travel schedule failed: ${String(error)}`))
+            }, Math.max(0, at - clock.now()))
+    },
+  }
 }
 
 export async function startGameServer(options: GameServerOptions): Promise<GameServer> {
-  const { persistence } = options
-  const log = options.log ?? ((message: string) => console.info(`[referee] ${message}`))
   const { clock } = options
-  const lobby = new Lobby({
-    matches: persistence.matches,
-    rooms: persistence.rooms,
-    rosters: persistence.rosters,
-    log,
-    graceMs: options.graceMs,
-    // The same clock the squads travel by: a fight found on the road keeps a
-    // seat for its player until a moment on it.
+  const log = options.log ?? ((message: string) => console.info(`[referee] ${message}`))
+  const match = await createMatchServer({
     clock,
-    onEncounterTaken: (roomId, playerId) => {
-      persistence.encounters.markTaken(roomId, playerId).catch((error: unknown) => log(`could not record that ${roomId} was taken: ${String(error)}`))
-    },
-    onVerdict: (verdict) => {
-      log(`verdict on ${verdict.matchId}: ${verdict.reason}`)
-      for (const found of verdict.found) {
-        log(`  ${found.unit ?? ''} ${found.what}: referee ${found.mine}, client ${found.theirs}`)
-      }
-    },
-  })
-  // Before the port opens: a window reconnecting to its seat the moment this
-  // server is up has to find the room already held for it.
-  await lobby.restore()
-
-  // The Durable Object's one alarm, as a timer: the schedule asks for one
-  // moment at a time, and each new ask replaces the last.
-  let cancelAlarm: (() => void) | null = null
-  const schedule: Schedule = new Schedule(
-    {
-      now: () => clock.now(),
-      arm: (at) => {
-        cancelAlarm?.()
-        cancelAlarm =
-          at === null
-            ? null
-            : clock.schedule(() => {
-                schedule.fire().catch((error: unknown) => log(`the travel schedule failed: ${String(error)}`))
-              }, Math.max(0, at - clock.now()))
-      },
-    },
-    (message) => log(`[schedule] ${message}`),
-  )
-  const directory = regionDirectory({ owners: persistence.squads, partitions: options.regions, self: options.self })
-  const journeys = new Journeys({
-    directory,
-    squads: persistence.squads,
-    accounts: persistence.accounts,
-    encounters: persistence.encounters,
-    schedule,
-    clock,
-    tell: (playerId, squad) => lobby.tell(playerId, 'tictac/api/squad/changed', { squad }),
-    openEncounter: (contact) => lobby.openEncounter(contact),
-    openMeeting: (meeting) => lobby.openMeeting(meeting),
+    accounts: options.accounts,
+    region: options.region,
+    alarm: timerAlarm(clock, log),
+    placeOf: options.placeOf ?? (() => null),
+    party: options.party,
+    regions: options.regions,
     playerEncounters: options.playerEncounters,
+    graceMs: options.graceMs,
+    tiles: options.tiles,
     log,
   })
-  await journeys.restore()
 
-  const sessions = new Sessions({ lobby, persistence, journeys, directory, clock, log })
   const sockets = new WeakMap<object, ServerSocket>()
-  // Parity with the Worker: a `serve:match` on its own domain can have its
-  // client hosted on another site only if it publishes this too.
-  const relatedOrigins = relatedOriginsHandler(persistence.party)
-
-  const server = Bun.serve<{ url: string }, never>({
+  const server = Bun.serve<{ request: Request }, never>({
     port: options.port,
     async fetch(request, server) {
       if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-        if (server.upgrade(request, { data: { url: request.url } })) return undefined
+        if (server.upgrade(request, { data: { request } })) return undefined
         return new Response('expected a websocket upgrade', { status: 400 })
       }
-
-      const tile = await options.tiles?.(request)
-      if (tile) return tile
-      const related = relatedOrigins(request)
-      if (related) return related
-
-      // The one question a client needs answered before it commits to a match:
-      // are we running the same build?
-      return Response.json({
-        referee: 'tictac',
-        protocol: PROTOCOL_VERSION,
-        build: BUILD_ID,
-        rooms: lobby.view(null).rooms.length,
-        recent: await persistence.matches.recent(5),
-      })
+      return (await match.http(request)) ?? new Response('not found', { status: 404 })
     },
     websocket: {
       open(ws) {
         const transport = socketTransport(ws, log)
         sockets.set(ws, transport)
-        sessions.attach(transport, {})
-        log('a client connected')
+        match.accept(transport, ws.data.request)
       },
       message(ws, message) {
         sockets.get(ws)?.deliver(typeof message === 'string' ? message : message.toString())
@@ -168,14 +138,12 @@ export async function startGameServer(options: GameServerOptions): Promise<GameS
 
   return {
     url: String(server.url),
-    lobby,
-    journeys,
-    directory,
-    sessions,
-    /** Stops serving. Rooms still live stay in the database for the next server to restore; the database is the caller's. */
+    lobby: match.lobby,
+    journeys: match.journeys,
+    directory: match.directory,
+    sessions: match.sessions,
     stop: async () => {
-      cancelAlarm?.()
-      await lobby.dispose()
+      await match.dispose()
       await server.stop(true)
     },
   }

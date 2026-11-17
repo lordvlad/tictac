@@ -13,13 +13,14 @@ import {
 } from '../src/ecs/components'
 import { createGlobalRules } from '../src/ecs/globals'
 import { GLOBAL_ENTITY_ID, World } from '../src/ecs/World'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 import { stockSquads } from './support/squads'
-import { compareDigests, digestWorld } from '../src/rules/StateDigest'
+import { compareDigests } from '../src/rules/StateDigest'
 import { STOCK_PLAN } from '../src/sim/Balance'
 import { MatchHost } from '../src/sim/MatchHost'
 import { replay } from '../src/sim/Replay'
 import { SimMatch } from '../src/sim/SimMatch'
+import { digestWorld } from '../src/sim/WorldDigest'
 
 /** Two worlds dealt the same people, as two peers hold them after a handshake. */
 function peer(seed = 5) {

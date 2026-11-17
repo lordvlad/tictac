@@ -2,7 +2,6 @@ import { WALL_CLOCK } from '../src/server/Clock'
 import { describe, expect, test } from 'bun:test'
 import { Rng } from '../src/core/rng'
 import { distanceKm, type LatLng } from '../src/core/Travel'
-import type { Db } from '../src/server/db/Db'
 import { DEFAULT_ANCHOR, drawAround, Squads, START_RADIUS_KM, START_SEPARATION_KM } from '../src/server/Squads'
 import { DATABASE_URLS, freshPersistence } from './support/db'
 
@@ -53,11 +52,10 @@ describe('A start is drawn uniformly over the disc', () => {
 
 describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
   /** `count` players, each given a squad around `anchor` by `squads`. */
-  async function placed(squads: Squads, db: Db, count: number, anchor: LatLng | null) {
+  async function placed(squads: Squads, count: number, anchor: LatLng | null) {
     const starts: LatLng[] = []
     for (let i = 0; i < count; i++) {
       const id = `p${i}`
-      await db.query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${id}, ${new Date(0).toISOString()})`
       const squad = await squads.place(id, anchor)
       starts.push(squad.waypoints[0]!)
     }
@@ -66,7 +64,7 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
 
   test('three hundred players from one anchor: all within the disc, none within a kilometre of another', async () => {
     const persistence = await freshPersistence(url)
-    const starts = await placed(persistence.squads, persistence.db, 300, null)
+    const starts = await placed(persistence.region.squads, 300, null)
 
     for (const start of starts) expect(distanceKm(DEFAULT_ANCHOR, start)).toBeLessThanOrEqual(START_RADIUS_KM + 1e-6)
     let closest = Infinity
@@ -83,8 +81,8 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
     const lines: string[] = []
     // Every draw lands on the same spot, so the second player can never be
     // a kilometre clear of the first.
-    const stuck = new Squads(persistence.db, { now: () => 0, schedule: WALL_CLOCK.schedule }, () => 0.5, (line) => lines.push(line))
-    const starts = await placed(stuck, persistence.db, 2, null)
+    const stuck = new Squads(persistence.region.db, { now: () => 0, schedule: WALL_CLOCK.schedule }, () => 0.5, (line) => lines.push(line))
+    const starts = await placed(stuck, 2, null)
 
     expect(starts[1]).toEqual(starts[0])
     expect(lines).toHaveLength(1)
@@ -111,12 +109,8 @@ describe.each(DATABASE_URLS)('Starts kept apart on %s', (url) => {
       return 0
     }
     const lines: string[] = []
-    const squads = new Squads(persistence.db, { now: () => 0, schedule: WALL_CLOCK.schedule }, random, (line) => lines.push(line))
+    const squads = new Squads(persistence.region.db, { now: () => 0, schedule: WALL_CLOCK.schedule }, random, (line) => lines.push(line))
     const ids = Array.from({ length: SPOTS }, (_, i) => `p${i}`)
-    for (const id of ids) {
-      await persistence.db.query`INSERT INTO players (id, name, created_at) VALUES (${id}, ${id}, ${new Date(0).toISOString()})`
-    }
-
     const placed = await Promise.all(ids.map((id) => squads.ensure(id, null)))
 
     const starts = placed.map((squad) => squad.waypoints[0]!)

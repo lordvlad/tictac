@@ -444,8 +444,9 @@ export class Room {
     })
     this.seats[Faction.Blue] = seat(stored.blue)
     this.seats[Faction.Red] = stored.red && seat(stored.red)
-    // The match is written before the row says it is playing, so a match in
-    // the store is the better witness of the two.
+    // The match and the row that says it is playing are written together
+    // (`start`), but a row from a build that wrote them one at a time may
+    // still say otherwise: the match in the store is the better witness.
     this.phaseNow = match ? 'playing' : stored.phase
     if (this.phaseNow === 'deploying') this.issued = this.options.mapSeed()
     if (match) {
@@ -872,8 +873,9 @@ export class Room {
    * The header and the world are set here and now, because everything that
    * judges a frame needs them immediately; only the writes are queued. The
    * match is written under the room's id, so the room a player was in and the
-   * match they can look up afterwards are the same name — and before the room
-   * says it is playing, so a room that says so always has a match to restore.
+   * match they can look up afterwards are the same name — and in the same
+   * transaction as the row that says the room is playing, so a room that says
+   * so always has a match to restore and a match always has its room.
    */
   private start(header: RecordingHeader): void {
     this.host = new MatchHost(header)
@@ -881,11 +883,15 @@ export class Room {
     this.phaseNow = 'playing'
     this.options.log(`room ${this.id}: watching the match, seed ${header.seedLabel}`)
 
+    // One transaction with the room's row: a crash between two writes would
+    // leave a fight the encounter says opened and no restart can find
+    // (tictac-uqt.29). The squads are checked first so the one row written
+    // says who they were; a foul found there still gets its match written, as
+    // evidence, and the room's `end` is queued behind it.
     this.enqueue(async () => {
-      await this.options.matches.create(header, this.id)
       await this.verifyRosters()
+      await this.options.rooms.openWithMatch(await this.stored(), this.options.matches, header)
     })
-    this.persist()
     for (const spectator of this.spectators) this.send(spectator, this.logSoFar())
   }
 

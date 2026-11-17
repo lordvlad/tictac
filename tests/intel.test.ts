@@ -8,7 +8,7 @@ import { World } from '../src/ecs/World'
 import { SightedComponent, TraitsComponent } from '../src/ecs/components'
 import { TraitId } from '../src/core/Traits'
 import { fireWeapon, throwGrenade } from '../src/rules/Combat'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 import { settleTurn } from '../src/rules/Turn'
 import { matchDice } from '../src/core/rng'
 

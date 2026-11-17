@@ -11,7 +11,7 @@ import { TraitsComponent } from '../src/ecs/components'
 import { NO_FX } from '../src/core/Combatant'
 import { applyStatus, calculateHitChance, fireWeapon } from '../src/rules/Combat'
 import { settleTurn } from '../src/rules/Turn'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 import { Faction as F } from '../src/config'
 import { matchDice } from '../src/core/rng'
 

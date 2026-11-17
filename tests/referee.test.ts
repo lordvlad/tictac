@@ -38,15 +38,15 @@ async function harness(seed = 4242) {
   const persistence = await openPersistence(WALL_CLOCK)
   const verdicts: RefereeVerdict[] = []
   const lobby = new Lobby({
-    matches: persistence.matches,
-    rooms: persistence.rooms,
+    matches: persistence.region.matches,
+    rooms: persistence.region.rooms,
     onVerdict: (v) => verdicts.push(v),
     log: () => {},
     mapSeed: () => recording.header.seed,
     // A dropped seat is held on a clock nothing here ever runs out.
     clock: { now: WALL_CLOCK.now, schedule: () => () => {} },
   })
-  return { recording, store: persistence.matches, persistence, lobby, verdicts }
+  return { recording, store: persistence.region.matches, persistence, lobby, verdicts }
 }
 
 describe('A third recomputation of the same match', () => {

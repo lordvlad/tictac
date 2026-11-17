@@ -5,7 +5,7 @@ import { stepLoudness } from '../core/Noise'
 import { moveBudget } from '../rules/Movement'
 import type { Soldier } from '../entities/Soldier'
 import { PathMarker } from '../render/PathMarker'
-import type { Squads } from '../rules/Squads'
+import type { Squads } from '../entities/Squads'
 import type { EngineContext } from '../engine'
 
 /**

@@ -5,7 +5,6 @@ import { ATTACHMENTS, AttachmentId } from '../core/Attachments'
 import { ItemId } from '../core/Items'
 import { ROLES, RoleId, roleAllowsAttachment, roleAllowsItem, roleAllowsWeapon } from '../core/Roles'
 import type { SquadLoadout, UnitLoadout } from '../core/Loadout'
-import type { Soldier } from '../entities/Soldier'
 
 /**
  * Pre-combat kit: what the squad takes into the match, and what is left in the
@@ -389,30 +388,24 @@ export function unfitAttachment(loadout: SquadLoadout, index: number, id: Attach
 }
 
 /**
- * Stamp a chosen kit onto a soldier.
+ * The pouch a soldier deploys with, from the grenades a loadout states.
  *
- * Every grenade and item kind is written, zeros included: a fresh
- * `InventoryComponent` carries one of each grenade and `ItemsComponent` starts
- * from `STARTING_ITEMS`, so anything left unwritten keeps a default the player
+ * The one place the issue (`GrenadeSpec.issued`, the stones) is applied. What
+ * a loadout states is the pouch: kinds it leaves out are zero, and a kind
+ * everybody is issued is raised to the issue when the loadout states less.
+ * That makes a loadout read back off a deployed soldier, stones included,
+ * rebuild the same pouch — which is how a header reaches the referee and the
+ * peer. Adding the issue on top instead deployed the stones twice on every
+ * side that applied a read-back loadout.
+ *
+ * Every kind is written, zeros included: a fresh `InventoryComponent` carries
+ * one of each grenade, so anything left out would keep a default the player
  * never asked for.
- *
- * Attachments go on last, and only through the soldier: `equip` hands the unit
- * a fresh clone of the weapon template with a bare rail, so nothing fitted
- * before the swap can survive it.
  */
-export function applyUnitLoadout(soldier: Soldier, unit: UnitLoadout): void {
-  soldier.equip(unit.weaponId, unit.ammoId)
-  soldier.role = unit.role
-  // What was packed, plus what everybody has anyway.
+export function startingGrenades(unit: UnitLoadout): Record<GrenadeId, number> {
+  const pouch = {} as Record<GrenadeId, number>
   for (const kind of Object.values(GrenadeId)) {
-    soldier.grenades[kind] = (unit.grenades[kind] ?? 0) + GRENADES[kind].issued
+    pouch[kind] = Math.max(unit.grenades[kind] ?? 0, GRENADES[kind].issued)
   }
-  for (const id of Object.values(ItemId)) soldier.items[id] = unit.items[id] ?? 0
-  // The pouch decides which worn gear is in force, so the traits it grants are
-  // only known once it has been stamped. `equip` and every `fitAttachment`
-  // refold as well, which is why the pouch is written before the rail: each
-  // refold has to see the finished kit.
-  soldier.refreshTraits()
-  for (const id of unit.attachments) soldier.fitAttachment(id)
-  soldier.sidearm = unit.sidearm
+  return pouch
 }

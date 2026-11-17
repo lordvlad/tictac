@@ -4,6 +4,7 @@ import type { JsonRpcFrame, JsonRpcRequest } from '../src/wire/JsonRpc'
 import { RpcMethods } from '../src/wire/JsonRpc'
 import type { LobbyView, Seated } from '../src/wire/Lobby'
 import { RPC_ERRORS, SESSION_REPLACED } from '../src/wire/Rpc'
+import type { Transport } from '../src/wire/Transport'
 import {
   heldTokens,
   NO_ANSWER,
@@ -288,6 +289,268 @@ describe('When the server ends the session', () => {
     await clock.advance(0)
     server.last.send(abort)
     expect(heard).toEqual([abort])
+    expect(connection.state).toEqual({ kind: 'open' })
+  })
+})
+
+describe('A region handover', () => {
+  const SOURCE = 'ws://west.tictac.test/'
+  const TARGET = 'ws://eu.tictac.test/'
+  const ARRIVE = 'tictac/api/region/arrive'
+  const CANCEL = 'tictac/api/region/cancelHandover'
+
+  /** Two servers on one clock, and a window that starts on the first. */
+  interface Regions {
+    clock: HandClock
+    source: HandServer
+    target: HandServer
+    connection: ServerConnection
+  }
+
+  /** A window that is signed in, watching the lobby and the squad, and seated in a room, on the source. */
+  interface SourceWindow extends Regions {
+    seated: { seats: Seated[]; drops: number[] }
+    room: Transport
+    lobbies: unknown[]
+    squads: unknown[]
+  }
+
+  function twoRegions(arrive: (socket: HandSocket, request: JsonRpcRequest) => void): Regions {
+    const clock = handClock()
+    const source = handServer(clock)
+    const target = handServer(clock)
+    source.answer = answering()
+    target.answer = answering({ [ARRIVE]: arrive })
+    const connection = new ServerConnection(SOURCE, {
+      connect: (url) => (new URL(url).host === new URL(TARGET).host ? target : source).connect(url),
+      schedule: clock.schedule,
+      tokens: heldTokens('tok'),
+    })
+    return { clock, source, target, connection }
+  }
+
+  const arrives = (socket: HandSocket, request: JsonRpcRequest) =>
+    socket.reply(request.id as number, { committed: true, targetRegion: 'eu' })
+
+  const offer = (clock: HandClock, expiresIn = 15_000, handoverId = 'ho1') =>
+    push('tictac/api/region/handoverOffer', {
+      handoverId,
+      squadId: 'sq1',
+      targetRegion: 'eu',
+      targetUrl: TARGET,
+      token: 'ticket',
+      expiresAt: clock.now + expiresIn,
+    })
+  const elsewhere = push('tictac/api/session/ended', { reason: 'Moved.', reconnect: 'elsewhere', url: TARGET })
+  const squadPush = (from: string) => push('tictac/api/squad/changed', { squad: from })
+  const lobbyPush = (from: string) => push('tictac/api/lobby/changed', { rooms: [], you: null, from })
+  /** What the window told `socket` about handovers it would not take. */
+  const cancelsHeard = (socket: HandSocket) =>
+    socket.heard.flatMap((frame) => ('method' in frame && frame.method === CANCEL ? [frame.params] : []))
+
+  async function windowOnSource(arrive = arrives): Promise<SourceWindow> {
+    const regions = twoRegions(arrive)
+    const seated = member()
+    const room = regions.connection.enter({ kind: 'open' }, seated)
+    const lobbies: unknown[] = []
+    const squads: unknown[] = []
+    regions.connection.watchLobby((view) => lobbies.push(view))
+    regions.connection.watchSquad((pushed) => squads.push(pushed.squad))
+    await regions.clock.advance(0)
+    return { ...regions, seated, room, lobbies, squads }
+  }
+
+  test('opens a second socket and arrives on it with the squad from the offer, while the first stays open', async () => {
+    const { clock, source, target, connection, squads } = await windowOnSource()
+    source.last.send(offer(clock))
+    await clock.advance(0)
+
+    expect(target.sockets).toHaveLength(1)
+    expect(target.last.methods).toEqual([RpcMethods.hello, 'tictac/api/account/signIn', ARRIVE])
+    expect((target.last.heard[2] as JsonRpcRequest).params).toEqual({ handoverId: 'ho1', token: 'ticket', squadId: 'sq1' })
+    expect(source.last.closed).toBe(false)
+    expect(target.last.closed).toBe(false)
+    expect(connection.state).toEqual({ kind: 'open' })
+
+    // Still the source's window until it says otherwise: only it is heard.
+    target.last.send(squadPush('from the target'))
+    source.last.send(squadPush('from the source'))
+    expect(squads).toEqual(['from the source'])
+    expect(connection.url).toBe(SOURCE)
+  })
+
+  test('after `elsewhere` the target is the only socket, the source is never dialled again, and everything follows it', async () => {
+    const { clock, source, target, connection, seated, room, lobbies, squads } = await windowOnSource()
+    const frames: JsonRpcFrame[] = []
+    room.onFrame((frame) => frames.push(frame))
+    const moves: string[] = []
+    connection.onHandover((event) => moves.push(event.kind))
+    const elsewhereUrls: string[] = []
+    connection.onElsewhere((url) => elsewhereUrls.push(url))
+    source.last.send(offer(clock))
+    await clock.advance(0)
+
+    source.last.send(elsewhere)
+    await clock.advance(0)
+    expect(source.last.closed).toBe(true)
+    expect(target.last.closed).toBe(false)
+    expect(connection.state).toEqual({ kind: 'open' })
+    expect(connection.url).toBe(TARGET)
+    expect(moves).toEqual(['offered', 'complete'])
+    expect(elsewhereUrls).toEqual([])
+
+    // The lobby and the room are asked for again on the target, as after a drop.
+    expect(target.last.methods).toEqual([
+      RpcMethods.hello,
+      'tictac/api/account/signIn',
+      ARRIVE,
+      'tictac/api/lobby/subscribe',
+      'tictac/api/room/enter',
+    ])
+    expect(seated.drops).toEqual([1])
+    expect(seated.seats).toEqual([SEAT, SEAT])
+
+    // What the server pushes now comes from the target...
+    target.last.send(squadPush('from the target'))
+    target.last.send(lobbyPush('target'))
+    target.last.send(push('relayed', { n: 1 }))
+    expect(squads).toEqual(['from the target'])
+    expect(lobbies.at(-1)).toMatchObject({ from: 'target' })
+    expect(frames).toEqual([push('relayed', { n: 1 })])
+    // ...and what the room sends goes to it.
+    room.send(push('mine', { n: 2 }))
+    expect(target.last.heard.at(-1)).toEqual(push('mine', { n: 2 }))
+    expect(source.last.heard.some((frame) => 'method' in frame && frame.method === 'mine')).toBe(false)
+    expect((await connection.request('tictac/api/account/me', {})) === null).toBe(true)
+    expect(target.last.methods.at(-1)).toBe('tictac/api/account/me')
+
+    await clock.advance(60_000)
+    expect(source.sockets).toHaveLength(1)
+    expect(target.sockets).toHaveLength(1)
+  })
+
+  test('the source may end the session before the target has answered: the window waits for the target', async () => {
+    const held: { socket: HandSocket; request: JsonRpcRequest }[] = []
+    const { clock, source, target, connection } = await windowOnSource((socket, request) => held.push({ socket, request }))
+    source.last.send(offer(clock))
+    await clock.advance(0)
+
+    source.last.send(elsewhere)
+    // Neither a drop to dial back from nor a window on the target yet; what is asked now waits.
+    const asked = connection.request('tictac/api/account/me', {})
+    await clock.advance(1000)
+    expect(source.sockets).toHaveLength(1)
+    expect(target.last.methods).toEqual([RpcMethods.hello, 'tictac/api/account/signIn', ARRIVE])
+
+    held[0]!.socket.reply(held[0]!.request.id as number, { committed: true, targetRegion: 'eu' })
+    await clock.advance(0)
+    expect(await asked).toBeNull()
+    expect(connection.url).toBe(TARGET)
+    expect(connection.state).toEqual({ kind: 'open' })
+    expect(target.last.methods).toContain('tictac/api/account/me')
+    await clock.advance(60_000)
+    expect(source.sockets).toHaveLength(1)
+  })
+
+  describe('that fails', () => {
+    /** The window is where it was: on the source, with the target's socket gone and the source told. */
+    async function stayedOnSource(regions: SourceWindow, reason: string): Promise<void> {
+      const { clock, source, target, connection, room, squads } = regions
+      expect(target.last.closed).toBe(true)
+      expect(source.last.closed).toBe(false)
+      expect(cancelsHeard(source.last)).toEqual([{ handoverId: 'ho1', reason }])
+      expect(connection.state).toEqual({ kind: 'open' })
+      expect(connection.url).toBe(SOURCE)
+      source.last.send(squadPush('from the source'))
+      expect(squads).toEqual(['from the source'])
+      room.send(push('mine', { n: 1 }))
+      expect(source.last.heard.at(-1)).toEqual(push('mine', { n: 1 }))
+      await clock.advance(60_000)
+      expect(source.sockets).toHaveLength(1)
+      expect(target.sockets).toHaveLength(1)
+    }
+
+    test('because the target refuses the ticket', async () => {
+      const regions = await windowOnSource()
+      regions.target.answer = answering({
+        [ARRIVE]: (socket, request) => socket.refuse(request.id as number, RPC_ERRORS.gone, 'That handover is over.'),
+      })
+      regions.source.last.send(offer(regions.clock))
+      await regions.clock.advance(0)
+      await stayedOnSource(regions, 'That handover is over.')
+    })
+
+    test('because the target does not answer by the time the window may wait', async () => {
+      const regions = await windowOnSource()
+      regions.target.answer = answering({ [ARRIVE]: () => {} })
+      regions.source.last.send(offer(regions.clock))
+      await regions.clock.advance(REQUEST_TIMEOUT_MS)
+      await stayedOnSource(regions, 'The target server did not take the squad in time.')
+    })
+
+    test('because the offer expires first', async () => {
+      const regions = await windowOnSource()
+      regions.target.answer = answering({ [ARRIVE]: () => {} })
+      regions.source.last.send(offer(regions.clock, 400))
+      await regions.clock.advance(400)
+      await stayedOnSource(regions, 'The target server did not take the squad in time.')
+    })
+
+    test('because the target cannot be reached', async () => {
+      const regions = await windowOnSource()
+      regions.target.down = true
+      regions.source.last.send(offer(regions.clock))
+      await regions.clock.advance(0)
+      await stayedOnSource(regions, 'The connection to the match server dropped.')
+    })
+
+    test('because the target ends the session, which is not the window\'s to end', async () => {
+      const regions = await windowOnSource()
+      regions.target.answer = answering({ [ARRIVE]: () => {} })
+      regions.source.last.send(offer(regions.clock))
+      await regions.clock.advance(0)
+      regions.target.last.send(push('tictac/api/session/ended', { reason: 'Not here.', reconnect: 'never' }))
+      await regions.clock.advance(0)
+      await stayedOnSource(regions, 'Not here.')
+    })
+  })
+
+  test('a second offer while one is being taken is cancelled, and the first goes on', async () => {
+    const { clock, source, target } = await windowOnSource()
+    source.last.send(offer(clock))
+    source.last.send(offer(clock, 15_000, 'ho2'))
+    await clock.advance(0)
+    expect(target.sockets).toHaveLength(1)
+    expect(cancelsHeard(source.last)).toEqual([{ handoverId: 'ho2', reason: 'The window is already taking another handover.' }])
+  })
+
+  test('the source going before it has said anything ends the handover and is dialled back as any drop is', async () => {
+    const { clock, source, target, connection } = await windowOnSource()
+    target.answer = answering({ [ARRIVE]: () => {} })
+    source.last.send(offer(clock))
+    await clock.advance(0)
+
+    source.last.drop()
+    expect(connection.state).toEqual({ kind: 'reconnecting', attempt: 1 })
+    expect(target.last.closed).toBe(true)
+    await clock.advance(250)
+    expect(source.sockets).toHaveLength(2)
+    expect(target.sockets).toHaveLength(1)
+    expect(connection.state).toEqual({ kind: 'open' })
+    expect(connection.url).toBe(SOURCE)
+  })
+
+  test('the target going after the move is a drop, and is dialled again at the target', async () => {
+    const { clock, source, target, connection } = await windowOnSource()
+    source.last.send(offer(clock))
+    await clock.advance(0)
+    source.last.send(elsewhere)
+    await clock.advance(0)
+
+    target.last.drop()
+    await clock.advance(250)
+    expect(source.sockets).toHaveLength(1)
+    expect(target.sockets).toHaveLength(2)
     expect(connection.state).toEqual({ kind: 'open' })
   })
 })

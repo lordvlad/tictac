@@ -12,10 +12,15 @@ appliesTo:
   - "src/version.ts"
   - "workers/**"
   - "src/server/GameServer.ts"
+  - "src/server/MatchServer.ts"
+  - "src/server/AccountsPort.ts"
+  - "src/server/AccountsRpc.ts"
   - "src/server/SocketTransport.ts"
   - "src/server/db/Db.ts"
   - "src/server/db/BunSqlDb.ts"
   - "src/server/Persistence.ts"
+  - "src/server/AccountStore.ts"
+  - "src/server/RegionStore.ts"
   - "src/server/Lobby.ts"
   - "src/server/Session.ts"
   - "src/server/RoomStore.ts"
@@ -76,10 +81,13 @@ workers/index.ts (Worker)
   ├── /.well-known/webauthn  ── answered here from the RELYING_PARTY_* vars (§4)
   └── env.MATCH.idFromName(regions.ownerOfPlace(…))  ── always the same id today ('singleton', REGIONS in src/server/Owner.ts)
         └── workers/MatchDurableObject.ts (the one instance)
-              ├── fetch(): a WebSocket upgrade (→ Sessions → Lobby → a Room),
+              ├── fetch(): createMatchServer's http() (the status document at /status, the
+              │            related origins), a WebSocket upgrade (→ Sessions → Lobby → a Room),
               │            or env.ASSETS.fetch(request)
               ├── alarm(): the travel schedule's one alarm (ARCH-WORLD §3)
-              └── ctx.storage.sql, behind workers/DoSqliteDb.ts (the Db adapter)
+              ├── accounts(): the directory's AccountsPort, for the regions that are not it
+              └── ctx.storage.sql, behind workers/DoSqliteDb.ts (the Db adapter):
+                  the AccountStore and, beside it, this region's RegionStore
 ```
 
 A match server is one lobby of rooms (`src/server/Lobby.ts`, `docs/architecture/networking.md`
@@ -114,7 +122,9 @@ tiles itself (§6), so a map pan neither wakes the Durable Object nor queues beh
 and forwards everything else to the object. `MatchDurableObject.fetch` branches: a `WebSocket`
 upgrade is handed to `Sessions` (§2.3); anything else is handed to `env.ASSETS.fetch(request)`,
 which is bound through from the Worker's own `env` (Durable Object constructors receive the same
-`env` a Worker does). There is no HTTP API: a window asks everything over its socket
+`env` a Worker does), after the match server has had its say (`createMatchServer`'s `http`: the
+status document at `/status`, and the related origins — the same two routes `startGameServer`
+answers, so an HTTP client sees one server whichever host it is on). There is no HTTP API: a window asks everything over its socket
 ([ARCH-NETWORKING §8](networking.md)). This is a deliberate design
 choice for a small deployment with one Worker and one object, not a general pattern —
 Cloudflare's own convention is for the assets layer to answer static requests without ever
@@ -123,16 +133,39 @@ one Durable Object that does both.
 
 ### 2.3 A real referee, not a relay — rooms that survive the instance, and why a socket does not hibernate
 
-`MatchDurableObject` runs the same `Lobby`, `Sessions` and `Persistence` (via
-`persistenceOverDb`) that `startGameServer` runs behind `Bun.serve`. Nothing about any of the
-three was Bun-specific once handed a `Db` (`workers/DoSqliteDb.ts`, §3) and a transport with
-`send`/`close` (`socketTransport`, `src/server/SocketTransport.ts` — split out of
+`MatchDurableObject` and `startGameServer` run **one** match server: `createMatchServer`
+(`src/server/MatchServer.ts`) assembles the `Lobby`, `Sessions`, `Journeys`, `Schedule` and
+`HandoverCoordinator` from one set of ports — the clock, the accounts (`AccountsPort`), the region's
+store, the alarm, `placeOf(request)`, the relying party and the region table — and each host adds
+only what its platform is. They used to assemble their own, which is how they came to differ (a
+clock here, a place there, a status route on one only); now what each host wires is a list of
+adapters, and a test of the Bun host runs the code the Durable Object runs.
+
+| Port | Bun (`startGameServer`) | Durable Object (`MatchDurableObject`) |
+|---|---|---|
+| `region`, `accounts` | `Persistence` over `openDb` (`portsOf`) | `persistenceOverDb` over `ctx.storage.sql` on the directory; `regionStoreOverDb` + `accountsOverRpc` on any other region |
+| `alarm` | a timer on the clock (`timerAlarm`), calling the `fire` it is given | `ctx.storage.setAlarm` / `deleteAlarm`; the runtime delivers it to `alarm()` |
+| `placeOf` | none unless the caller says (a test does) — a header a client could set would let it choose where its squad starts | `request.cf` (`placeOf` in `MatchDurableObject.ts`) |
+| `tiles` | the `--tiles` archive | none: the Worker answers tiles before a request reaches the object |
+| `playerEncounters` | the `--player-encounters` flag | `env.PLAYER_ENCOUNTERS`, read at every check |
+
+Nothing about any of it was Bun-specific once handed a `Db` (`workers/DoSqliteDb.ts`, §3) and a
+transport with `send`/`close` (`socketTransport`, `src/server/SocketTransport.ts` — split out of
 `GameServer.ts` for the same isolation reason as §4's typecheck). A WebSocket upgrade is
-accepted and attached with `Sessions.attach(transport, { url, place })` exactly as
+accepted and attached with `MatchServer.accept(transport, request)` exactly as
 `GameServer.ts`'s `websocket.open` handler does, with nothing checked at the upgrade: who the
-socket is, and what it wants, it says over the socket. `place` is read off `request.cf`, which
-the Worker's `stub.fetch(request)` carries through, so registration can record where a new
-player connected from.
+socket is, and what it wants, it says over the socket. `place` is `placeOf(request)`, so
+registration can place a new player's squad near where they connected from.
+
+**The directory and the regions.** `singleton` is both the directory and the one region (RFC-0002
+§4): its `ctx.storage.sql` holds the `AccountStore` and its own `RegionStore` side by side, the
+database it has always had — the pre-split tables are adopted by the stores' first migrations
+(`ARCH-PERSISTENCE §2.1`), so no step is taken by hand on deploy. It answers every other region's
+`AccountsPort` over DO RPC (`MatchDurableObject.accounts`, one call as data;
+`src/server/AccountsRpc.ts`). A Durable Object with any other name (`ctx.id.name`) builds a
+`RegionStore` only, with `accountsOverRpc` to `env.MATCH.idFromName('singleton')`, and its own name
+as `self`. The Worker's `REGIONS` table has one entry, so no such object is addressed:
+production sharding stays gated.
 
 **Rooms are durable.** Every room writes itself to `ctx.storage.sql` as it changes — opened,
 joined, started, its squads verified, judged or only witnessed, ended — through the same

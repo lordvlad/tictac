@@ -7,6 +7,10 @@ lastReviewed: "2026-11-16"
 appliesTo:
   - "workers/**"
   - "src/server/Persistence.ts"
+  - "src/server/AccountStore.ts"
+  - "src/server/RegionStore.ts"
+  - "src/server/AccountsRpc.ts"
+  - "src/server/MatchServer.ts"
   - "src/server/Owner.ts"
   - "src/server/Handover.ts"
 relatedDocs:
@@ -23,9 +27,10 @@ tags: ["network", "cloudflare", "durable-objects", "scaling", "rfc"]
 runs one Durable Object for the whole deployment today, deliberately — see
 [ARCH-DEPLOYMENT §2.1](../../architecture/deployment.md#21-one-durable-object-not-one-per-match).
 What is built: the 2PC coordinator and its client half (`src/server/Handover.ts`,
-`src/game/ServerConnection.ts`), and the ownership directory (`src/server/Owner.ts`, §4–§5). What
-is not: the shared world that makes a second region worth having (§1), the per-region store split
-(§4), and the DO-to-DO transport. The plan is gated on that world; it is written now because the
+`src/game/ServerConnection.ts`), the ownership directory (`src/server/Owner.ts`, §4–§5), the
+per-region store split with the directory's accounts behind `AccountsPort` (§4, `tictac-dwq.5`) and
+the one host factory both hosts call (`src/server/MatchServer.ts`). What is not: the shared world that
+makes a second region worth having (§1), and the DO-to-DO transport for the handover itself. The plan is gated on that world; it is written now because the
 shape of the replacement changes what "a match server" is allowed to assume in the meantime — see §5.
 
 ## 1. Why this is not urgent, and why it is written anyway
@@ -93,13 +98,17 @@ going through is an order of its own — the hand-off this section describes.
 must not purge the client's session, presence, or held entities until arrival at the target Durable
 Object is confirmed. For the duration of the transition, the client keeps two active WebSocket connections:
 1. Source DO initiates a reservation on Target DO (`prepareHandover`) and pushes `tictac/api/region/handoverOffer`
-   to the client with a single-use ticket.
-2. Client opens a secondary connection to Target DO without closing its primary socket, and calls
-   `tictac/api/region/arrive`.
+   (handover id, the squad's id, target url, single-use ticket) to the client.
+2. Client opens a second socket to Target DO without closing its primary socket, says hello, signs in with its
+   token, and calls `tictac/api/region/arrive` on it.
 3. Target DO verifies the ticket and commits arrival via DO-to-DO confirmation (`confirmArrival`).
-4. Source DO receives arrival confirmation, purges local squad authority, and pushes
-   `tictac/api/region/handoverComplete` to the primary socket, which closes cleanly.
-5. If Target DO is unreachable or times out, client cancels and Source DO retains authority.
+4. Source DO receives arrival confirmation, purges local squad authority, and ends the primary session with
+   `session/ended` `{ reconnect: 'elsewhere', url }`. There is no separate completion push: that is the one word
+   the client moves on. It makes the second socket its only one *inside the same `ServerConnection`* —
+   lobby subscription and room asked for again on it, squad and encounter listeners untouched — and never
+   redials the source.
+5. If Target DO is unreachable, refuses or times out, client sends `region/cancelHandover` on the primary,
+   closes the second socket, and stays on the source, which retains authority.
 
 **A partition is redrawn at the game's own natural disconnect windows, proactively rather than
 capacity signal measures — deliberately before the instance is actually struggling, not after —
@@ -191,8 +200,8 @@ read) would put a network hop under every roster and squad read. Instead:
   return feed of a player whose squad moved, the recording of a match played in another region,
   a player lookup by id or name. Nothing reads another region's tables directly.
 
-**The port split.** `Persistence` (`src/server/Persistence.ts`) is one bag of stores over one
-`Db` today. It splits along the line above into two ports, each over its own `Db`:
+**The port split.** `Persistence` (`src/server/Persistence.ts`) was one bag of stores over one
+`Db`. It splits along the line above into two ports, each over its own `Db`:
 
 - **`AccountStore`**, owned by the directory Durable Object: `Accounts` over `players`,
   `credentials`, `sessions` and `auth_challenges`. Asks: register, sign in, resolve a token to a
@@ -206,8 +215,8 @@ Three consequences the split has to handle, found by reading the migrations:
 
 - **Foreign keys to `players(id)` cannot cross a database.** `squads.player_id`, `roster.player_id`,
   `match_results.blue_player`/`red_player` and `encounters.player_id` become plain ids in the
-  region schema; a player's name is asked of the directory (`Squads.byId` joins `players` today, and
-  `Encounters` names an opponent from it).
+  region schema; a player's name is asked of the directory (`Journeys` resolves a squad's player,
+  and `Encounters` names an opponent, through `AccountsPort.player`).
 - **A player's row is not a squad's.** The unique index `squads_player` and the roster's active-slot
   index are per region, so the directory, not either region, is what says a player has one squad
   anywhere.
@@ -215,9 +224,20 @@ Three consequences the split has to handle, found by reading the migrations:
   different regions.** Settling writes each player's growth to the roster rows of the region
   that keeps them, through that region's own port.
 
-The split is not built yet: today `Persistence` is still one bag over one `Db`, which is correct
-for the single region. Its code split is the prerequisite of the handover tickets
-(`tictac-dwq.2` onward).
+**Built (`tictac-dwq.5`).** The split is in the code: `AccountStore` and `RegionStore`
+(`src/server/AccountStore.ts`, `src/server/RegionStore.ts`) over two `Db`s, with no foreign key or
+join from a region table to `players` — a region's schema is `src/server/db/regionMigrations.ts`,
+the directory's `accountMigrations.ts`, their ledgers kept apart (`store_migrations`) so the
+singleton can keep both in the one database it has always had (existing data is adopted, not
+migrated by hand: ARCH-PERSISTENCE §2.1). Registration is two steps (`Accounts.register`, then
+`RegionStore.enlist` in the serving region). A region reaches the directory through `AccountsPort`,
+in process (`Accounts`) or over DO RPC (`AccountsRpc.ts`, served by the singleton's
+`MatchDurableObject.accounts`). The handover verbs are `RegionStore.exportSquad` / `importSquad` /
+`deleteSquad` and `squads.setOwner` (the commit of the keeper, which `HandoverCoordinator.confirm` now
+claims before awaiting, so a cancel cannot slip between the write and the bookkeeping).
+`roster.died_in` is no longer a key to `matches` either: a roster travels, the matches it fought stay.
+Nothing calls the verbs yet (`tictac-dwq.2` does); `tests/regions.test.ts` exercises them and a second
+region serving a player whose account is only the directory's.
 
 **What transfers at a hand-off, beyond the durable position, is the rest of a squad's live
 session:** the open socket's transport, which faction/side (if any) it is attached to, heading,

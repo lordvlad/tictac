@@ -9,7 +9,7 @@ import { Rng } from '../src/core/rng'
 import { TraitId } from '../src/core/Traits'
 import { CharacterComponent } from '../src/ecs/components'
 import { World } from '../src/ecs/World'
-import { Squads } from '../src/rules/Squads'
+import { Squads } from '../src/entities/Squads'
 
 const spawns = { [Faction.Blue]: [{ x: 4, y: 4 }], [Faction.Red]: [{ x: 4, y: 9 }] }
 

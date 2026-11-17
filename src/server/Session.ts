@@ -6,11 +6,11 @@ import { RPC_ERRORS, type RosterEntry, type RpcMethod, type RpcResult, type Sign
 import type { Transport } from '../wire/Transport'
 import type { StandingOrder } from '../wire/Rpc'
 import { SERVER_VOICES, versionRefusal, type PeerVersion } from '../version'
+import type { AccountsPort } from './AccountsPort'
 import type { ServerClock } from './Clock'
-import { HandoverCoordinator } from './Handover'
+import type { HandoverCoordinator } from './Handover'
 import { Refusal, type Lobby } from './Lobby'
-import type { Persistence } from './Persistence'
-import type { RegionDirectory } from './Owner'
+import type { RegionStore } from './RegionStore'
 import type { Journeys } from './Journeys'
 import type { Client } from './Room'
 import type { RosterMember } from './Rosters'
@@ -46,15 +46,15 @@ export interface Upgrade {
 
 export interface SessionsOptions {
   lobby: Lobby
-  /** The accounts and rosters asked about over a socket. */
-  persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>
+  /** Who a player is: signing in, passkeys, names. The directory's, wherever it lives. */
+  accounts: AccountsPort
+  /** What this region keeps for the players standing in it. */
+  region: Pick<RegionStore, 'rosters' | 'squads' | 'encounters' | 'matches' | 'enlist'>
   /** Squads on the move: the orders a window gives. */
   journeys: Journeys
-  /** Who keeps which squad: what a handover this server starts or receives is checked against. */
-  directory: RegionDirectory
   /** Handover coordinator for cross-region transfers (RFC-0002). */
-  handover?: HandoverCoordinator
-  /** The host's one clock: what travel runs by (`clock/now`), and what a handover's expiry is read against. */
+  handover: HandoverCoordinator
+  /** The host's one clock: what travel runs by (`clock/now`). */
   clock: ServerClock
   /** Called for anything worth a line in a server log. */
   log?: (message: string) => void
@@ -92,7 +92,8 @@ const FAILED = 'the server failed'
 
 export class Sessions {
   private readonly lobby: Lobby
-  private readonly persistence: Pick<Persistence, 'accounts' | 'rosters' | 'squads' | 'encounters' | 'matches'>
+  private readonly accounts: AccountsPort
+  private readonly region: SessionsOptions['region']
   private readonly journeys: Journeys
   readonly handover: HandoverCoordinator
   private readonly clock: ServerClock
@@ -100,17 +101,11 @@ export class Sessions {
 
   constructor(options: SessionsOptions) {
     this.lobby = options.lobby
-    this.persistence = options.persistence
+    this.accounts = options.accounts
+    this.region = options.region
     this.journeys = options.journeys
     this.clock = options.clock
-    this.handover =
-      options.handover ??
-      new HandoverCoordinator({
-        clock: options.clock,
-        directory: options.directory,
-        squads: options.persistence.squads,
-        log: options.log,
-      })
+    this.handover = options.handover
     this.log = options.log ?? ((message) => console.info(`[session] ${message}`))
   }
 
@@ -225,24 +220,27 @@ export class Sessions {
 
   private readonly handlers: { [M in RpcMethod]: Handler<M> } = {
     'tictac/api/account/registerOptions': async (_session, params, reply) => {
-      reply(await this.persistence.accounts.registrationOptions(text(params, 'name')))
+      reply(await this.accounts.registrationOptions(text(params, 'name')))
     },
     'tictac/api/account/registerVerify': async (session, params, reply) => {
-      const minted = await this.persistence.accounts.register({
+      const minted = await this.accounts.register({
         challengeId: text(params, 'challengeId'),
         credentialId: text(params, 'credentialId'),
         clientDataJSON: text(params, 'clientDataJSON'),
         authenticatorData: text(params, 'authenticatorData'),
         publicKey: text(params, 'publicKey'),
         publicKeyAlgorithm: number(params, 'publicKeyAlgorithm'),
-      }, session.place)
+      })
+      // The account is the directory's; the roster and the squad are this
+      // region's, made here because this is where the connection came from.
+      await this.region.enlist(minted.player.id, session.place)
       reply(await this.adopt(session, minted))
     },
     'tictac/api/account/loginOptions': async (_session, _params, reply) => {
-      reply(await this.persistence.accounts.loginOptions())
+      reply(await this.accounts.loginOptions())
     },
     'tictac/api/account/loginVerify': async (session, params, reply) => {
-      const minted = await this.persistence.accounts.login({
+      const minted = await this.accounts.login({
         challengeId: text(params, 'challengeId'),
         credentialId: text(params, 'credentialId'),
         clientDataJSON: text(params, 'clientDataJSON'),
@@ -253,7 +251,7 @@ export class Sessions {
     },
     'tictac/api/account/signIn': async (session, params, reply) => {
       const token = text(params, 'token')
-      const player = await this.persistence.accounts.playerFor(token)
+      const player = await this.accounts.playerFor(token)
       if (!player) throw new Refusal(RPC_ERRORS.signInFirst, EXPIRED)
       this.lobby.bind(session.client, player)
       session.account = { token, player }
@@ -261,7 +259,7 @@ export class Sessions {
     },
     'tictac/api/account/signOut': async (session, _params, reply) => {
       const account = signedIn(session)
-      await this.persistence.accounts.logout(account.token)
+      await this.accounts.logout(account.token)
       session.account = null
       this.lobby.unbind(session.client)
       reply(null)
@@ -270,14 +268,14 @@ export class Sessions {
       reply({ player: session.account?.player ?? null })
     },
     'tictac/api/roster/list': async (session, _params, reply) => {
-      const members = await this.persistence.rosters.active(signedIn(session).player.id)
+      const members = await this.region.rosters.active(signedIn(session).player.id)
       reply({ roster: members.map(entry) })
     },
     'tictac/api/roster/recruit': async (session, _params, reply) => {
-      reply({ member: entry(await this.persistence.rosters.recruit(signedIn(session).player.id)) })
+      reply({ member: entry(await this.region.rosters.recruit(signedIn(session).player.id)) })
     },
     'tictac/api/squad/get': async (session, _params, reply) => {
-      reply({ squad: await this.persistence.squads.ensure(signedIn(session).player.id, session.place) })
+      reply({ squad: await this.region.squads.ensure(signedIn(session).player.id, session.place) })
     },
     'tictac/api/clock/now': (_session, _params, reply) => {
       reply({ now: this.clock.now() })
@@ -291,16 +289,16 @@ export class Sessions {
       reply({ squad: await this.journeys.standing(player.id, session.place, standingOf(params.order)) })
     },
     'tictac/api/encounter/feed': async (session, _params, reply) => {
-      reply({ entries: await this.persistence.encounters.feed(signedIn(session).player.id, ENCOUNTER.feedLimit) })
+      reply({ entries: await this.region.encounters.feed(signedIn(session).player.id, ENCOUNTER.feedLimit) })
     },
     'tictac/api/match/recording': async (session, params, reply) => {
       const player = signedIn(session).player
       const matchId = text(params, 'matchId')
-      const recording = await this.persistence.matches.match(matchId)
+      const recording = await this.region.matches.match(matchId)
       if (!recording) throw new Refusal(RPC_ERRORS.gone, 'There is no such match.')
       // Only a player in the match may watch it back: a fight is somebody's
       // squad's, and its log shows what their characters carried.
-      if (!(await this.persistence.encounters.involved(player.id, matchId))) {
+      if (!(await this.region.encounters.involved(player.id, matchId))) {
         throw new Refusal(RPC_ERRORS.notYours, 'You were not in that match.')
       }
       reply({ recording: { header: recording.header, events: recording.events } })
@@ -341,7 +339,7 @@ export class Sessions {
     try {
       this.lobby.bind(session.client, minted.player)
     } catch (error) {
-      await this.persistence.accounts.logout(minted.token)
+      await this.accounts.logout(minted.token)
       throw error
     }
     session.account = minted

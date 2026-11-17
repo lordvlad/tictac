@@ -28,8 +28,8 @@ async function harness() {
   /** Every hold the lobby started, and whether it has been called off. */
   const holds: { fn: () => void; ms: number; cancelled: boolean }[] = []
   const lobby = new Lobby({
-    matches: persistence.matches,
-    rooms: persistence.rooms,
+    matches: persistence.region.matches,
+    rooms: persistence.region.rooms,
     log: () => {},
     graceMs: 5_000,
     // Every match is opened from the one recording, whose header names its seed.
@@ -107,10 +107,10 @@ describe('The lobby lists what can be joined and what can be watched', () => {
       blue.send({ type: 'matchHeader', header: recording.header })
       for (const event of recording.events) blue.send(event.command)
       await lobby.idle()
-      expect(await persistence.matches.events(roomId)).toHaveLength(recording.events.length)
+      expect(await persistence.region.matches.events(roomId)).toHaveLength(recording.events.length)
       expect(lobby.view(null).rooms).toEqual([])
     }
-    expect(await persistence.matches.recent()).toHaveLength(2)
+    expect(await persistence.region.matches.recent()).toHaveLength(2)
   })
 })
 
@@ -186,7 +186,7 @@ describe('Watching', () => {
     const heard = [blue.received.length, red.received.length]
     early.send(third!.command)
     await lobby.idle()
-    expect(await persistence.matches.events(roomId)).toHaveLength(2)
+    expect(await persistence.region.matches.events(roomId)).toHaveLength(2)
     expect([blue.received.length, red.received.length]).toEqual(heard)
 
     // One who arrives later is handed the log so far, straight after its seat.
@@ -265,7 +265,7 @@ describe('One live window per player', () => {
     window.send(next)
     await lobby.idle()
     expect(red.received.at(-1)?.type).toBe(next.type)
-    expect(await persistence.matches.events(roomId)).toHaveLength(played.length + 1)
+    expect(await persistence.region.matches.events(roomId)).toHaveLength(played.length + 1)
 
     // A new window gets a key of its own, and the one it replaced no longer
     // takes the seat back from under it.
@@ -393,7 +393,7 @@ describe('Leaving', () => {
     expect(red.of('abort')).toEqual([])
     back.send(recording.events[4]!.command)
     await lobby.idle()
-    expect(await persistence.matches.events(roomId)).toHaveLength(5)
+    expect(await persistence.region.matches.events(roomId)).toHaveLength(5)
   })
 
   test('a held seat nobody comes back to ends the match, and frees the player', async () => {
